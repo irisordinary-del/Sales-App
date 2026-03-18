@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Sales App (V76 - Turbo Cache)</title>
+    <title>Sales App (V77 - Fast Login)</title>
     
     <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore-compat.js"></script>
@@ -30,7 +30,6 @@
 
         .app-tab { display: none; height: 100%; width: 100%; overflow-y: auto; padding-bottom: 70px; }
         .app-tab.active { display: block; }
-        
         #tab-route.active { display: flex; flex-direction: column; overflow: hidden; padding-bottom: 60px; }
 
         .bottom-nav { padding-bottom: env(safe-area-inset-bottom); }
@@ -46,18 +45,13 @@
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 11c0 3.517-1.009 6.799-2.753 9.571m-3.44-2.04l.054-.09A13.916 13.916 0 008 11a4 4 0 118 0c0 1.017-.07 2.019-.203 3m-2.118 6.844A21.88 21.88 0 0015.171 17m3.839 1.132c.645-2.266.99-4.659.99-7.132A8 8 0 008 4.07M3 15.364c.64-1.319 1-2.8 1-4.364 0-1.457.39-2.823 1.07-4" /></svg>
             </div>
             <h1 class="text-2xl font-black text-gray-800 mb-1">Sales<span class="text-blue-600">Nav</span></h1>
-            <p class="text-xs text-gray-500 mb-6 font-medium">เข้าสู่ระบบเพื่อดูคิวงานของคุณ</p>
-            
-            <div class="text-left mb-3">
-                <label class="block text-xs font-bold text-gray-700 mb-1">👤 ชื่อผู้ใช้งาน (Username)</label>
-                <input type="text" id="login-user" placeholder="กรอก Username..." class="w-full bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-xl focus:ring-blue-500 focus:border-blue-500 block p-3 outline-none font-bold text-center">
-            </div>
+            <p class="text-xs text-gray-500 mb-6 font-medium">เข้าสู่ระบบด้วยรหัสสายวิ่งของคุณ</p>
             
             <div class="text-left mb-5">
-                <label class="block text-xs font-bold text-gray-700 mb-1">🔑 รหัสผ่าน (Password)</label>
-                <input type="password" id="login-pass" placeholder="กรอก Password..." class="w-full bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-xl focus:ring-blue-500 focus:border-blue-500 block p-3 outline-none font-bold text-center" onkeypress="if(event.key === 'Enter') App.login()">
+                <label class="block text-xs font-bold text-gray-700 mb-1">รหัสสายวิ่ง (เช่น V01, C02)</label>
+                <input type="text" id="login-input" placeholder="กรอกรหัสสาย..." class="w-full bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-xl focus:ring-blue-500 focus:border-blue-500 block p-3 outline-none font-bold uppercase text-center" onkeypress="if(event.key === 'Enter') App.login()">
             </div>
-
+            
             <button id="login-btn" onclick="App.login()" class="w-full text-white bg-blue-600 hover:bg-blue-700 focus:ring-4 focus:ring-blue-300 font-bold rounded-xl text-sm px-5 py-3.5 shadow-lg active:scale-95 transition-transform">เข้าสู่ระบบ 🚀</button>
         </div>
     </div>
@@ -65,22 +59,19 @@
     <div id="loader">
         <div class="spinner"></div>
         <p class="text-blue-600 font-bold text-lg" id="loader-text">กำลังโหลดข้อมูล...</p>
-        <p class="text-xs text-gray-400 mt-2">อาจใช้เวลาสักครู่ในการเข้าสู่ระบบครั้งแรก</p>
     </div>
 
     <header id="main-header" class="bg-white text-gray-900 px-4 py-3 shrink-0 shadow-sm relative z-50 hidden border-b border-gray-200">
         <div class="flex justify-between items-center">
             <div class="flex items-center gap-2">
-                <div class="bg-blue-600 text-white text-xs font-black px-2.5 py-1 rounded-lg shadow-sm flex items-center gap-1">
-                    <span>👤</span> <span id="user-name-label">User</span> (<span id="user-route-label">V00</span>)
+                <div class="bg-blue-600 text-white text-xs font-black px-2.5 py-1 rounded-lg shadow-sm">
+                    สาย: <span id="user-route-label">V00</span>
                 </div>
                 <span id="sync-status" class="text-[10px] bg-emerald-100 px-2 py-0.5 rounded-full text-emerald-600 font-bold flex items-center gap-1">
                     <span class="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></span> ออฟไลน์(แคช)
                 </span>
             </div>
-            <button onclick="App.logout()" class="text-[10px] text-gray-500 font-bold bg-gray-100 px-3 py-1.5 rounded-lg border border-gray-200 active:bg-gray-200">
-                ออกจากระบบ
-            </button>
+            <button onclick="App.logout()" class="text-[10px] text-gray-500 font-bold bg-gray-100 px-3 py-1.5 rounded-lg border border-gray-200 active:bg-gray-200">เปลี่ยนสาย</button>
         </div>
     </header>
 
@@ -88,66 +79,39 @@
         
         <div id="tab-dashboard" class="app-tab p-4 active">
             <h2 class="font-black text-xl text-gray-800 mb-4">ภาพรวมสายวิ่ง 📊</h2>
-            
             <div class="grid grid-cols-2 gap-3 mb-4">
-                <div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
-                    <p class="text-[10px] text-gray-500 font-bold mb-1">ร้านค้าทั้งหมด</p>
-                    <p class="text-3xl font-black text-gray-800" id="dash-total">0</p>
-                </div>
-                <div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
-                    <p class="text-[10px] text-gray-500 font-bold mb-1">VPO สะสม (ลัง)</p>
-                    <p class="text-3xl font-black text-blue-600" id="dash-vpo">0</p>
-                </div>
+                <div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-100"><p class="text-[10px] text-gray-500 font-bold mb-1">ร้านทั้งหมด</p><p class="text-3xl font-black text-gray-800" id="dash-total">0</p></div>
+                <div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-100"><p class="text-[10px] text-gray-500 font-bold mb-1">VPO รวม (ลัง)</p><p class="text-3xl font-black text-blue-600" id="dash-vpo">0</p></div>
             </div>
-
             <div class="bg-gradient-to-r from-emerald-500 to-teal-500 p-5 rounded-2xl shadow-md text-white mb-4 relative overflow-hidden">
                 <div class="relative z-10 flex justify-between items-center">
-                    <div>
-                        <p class="text-xs font-bold opacity-90 mb-1">ร้านที่ Active (มียอดซื้อ)</p>
-                        <p class="text-4xl font-black" id="dash-active">0</p>
-                    </div>
-                    <div class="text-right">
-                        <p class="text-[10px] font-bold opacity-90 mb-1">ไม่ได้ซื้อ (Inactive)</p>
-                        <p class="text-xl font-bold text-emerald-100" id="dash-inactive">0</p>
-                    </div>
+                    <div><p class="text-xs font-bold opacity-90 mb-1">ร้านที่ Active</p><p class="text-4xl font-black" id="dash-active">0</p></div>
+                    <div class="text-right"><p class="text-[10px] font-bold opacity-90 mb-1">Inactive</p><p class="text-xl font-bold text-emerald-100" id="dash-inactive">0</p></div>
                 </div>
-                <svg class="absolute -right-4 -bottom-4 w-32 h-32 opacity-20" fill="currentColor" viewBox="0 0 20 20"><path d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v3h8v-3zM6 8a2 2 0 11-4 0 2 2 0 014 0zM16 18v-3a5.972 5.972 0 00-.75-2.906A3.005 3.005 0 0119 15v3h-3zM4.75 12.094A5.973 5.973 0 004 15v3H1v-3a3 3 0 013.75-2.906z"></path></svg>
             </div>
         </div>
 
         <div id="tab-stores" class="app-tab p-3 relative">
             <div class="sticky top-0 bg-gray-50 pb-3 pt-1 z-10">
                 <h2 class="font-black text-lg text-gray-800 mb-2">รายชื่อร้านค้าทั้งหมด</h2>
-                <div class="relative">
-                    <input type="text" id="search-input" onkeyup="UI.searchStores(this.value)" placeholder="ค้นหา รหัส หรือ ชื่อร้าน..." class="w-full p-3 pl-10 border border-gray-300 rounded-xl text-sm outline-none shadow-sm focus:ring-2 focus:ring-blue-500">
-                    <svg class="w-5 h-5 text-gray-400 absolute left-3 top-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
-                </div>
+                <input type="text" id="search-input" onkeyup="UI.searchStores(this.value)" placeholder="ค้นหา รหัส หรือ ชื่อร้าน..." class="w-full p-3 border border-gray-300 rounded-xl text-sm outline-none shadow-sm focus:ring-2 focus:ring-blue-500">
             </div>
             <div id="all-store-list" class="space-y-2.5 pb-10"></div>
         </div>
 
         <div id="tab-route" class="app-tab">
-            <div class="bg-white p-3 shrink-0 shadow-sm relative z-20 border-b border-gray-200">
-                <label class="text-[10px] text-gray-500 font-bold mb-1 block">📅 เลือกวันเข้าเยี่ยม:</label>
-                <select id="day-select" class="w-full bg-gray-50 text-gray-900 text-sm font-bold outline-none px-3 py-2.5 rounded-xl border border-gray-300 shadow-inner appearance-none text-center"></select>
+            <div class="bg-white p-3 shrink-0 border-b border-gray-200">
+                <select id="day-select" class="w-full bg-gray-50 text-gray-900 text-sm font-bold outline-none px-3 py-2.5 rounded-xl border border-gray-300 text-center appearance-none"></select>
             </div>
-            
-            <div id="map-container" class="h-[35vh] shrink-0 relative z-10 border-b border-gray-300 bg-gray-200 flex items-center justify-center">
-                <button id="btn-load-map" onclick="MapCtrl.initAndDraw()" class="bg-blue-600 text-white px-5 py-2.5 rounded-full font-bold shadow-lg flex items-center gap-2 active:scale-95 transition">
-                    📍 แตะเพื่อเปิดแผนที่
-                </button>
+            <div id="map-container" class="h-[35vh] shrink-0 relative z-10 bg-gray-200 flex items-center justify-center">
+                <button id="btn-load-map" onclick="MapCtrl.initAndDraw()" class="bg-blue-600 text-white px-5 py-2.5 rounded-full font-bold shadow-lg">📍 เปิดแผนที่</button>
                 <div id="map" class="w-full h-full hidden"></div>
-                
                 <button id="btn-fit-map" onclick="MapCtrl.fitBounds()" class="hidden absolute bottom-4 right-4 z-[400] bg-white p-2.5 rounded-full shadow-lg border border-gray-200 text-blue-600 active:scale-95">
                     <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" /></svg>
                 </button>
             </div>
-
             <div class="flex-1 bg-gray-50 overflow-y-auto p-3 relative z-10">
-                <div class="flex justify-between items-center mb-3 px-1">
-                    <h3 class="font-bold text-sm text-gray-800" id="route-title">คิวงาน (0 ร้าน)</h3>
-                    <span class="text-[10px] text-gray-500 font-medium bg-gray-200 px-2 py-1 rounded">ลาก ≡ สลับคิว</span>
-                </div>
+                <div class="flex justify-between items-center mb-3 px-1"><h3 class="font-bold text-sm text-gray-800" id="route-title">คิวงาน</h3><span class="text-[10px] text-gray-500 font-medium bg-gray-200 px-2 py-1 rounded">ลาก ≡ สลับคิว</span></div>
                 <div id="route-store-list" class="space-y-2.5 pb-20"></div>
             </div>
         </div>
@@ -155,68 +119,18 @@
     </div>
 
     <nav id="bottom-nav" class="bottom-nav fixed bottom-0 w-full bg-white border-t border-gray-200 flex justify-around items-center pt-2 pb-3 px-2 z-[1000] hidden shadow-[0_-5px_15px_rgba(0,0,0,0.05)]">
-        <button onclick="UI.switchTab('dashboard')" id="nav-dashboard" class="nav-item active flex flex-col items-center p-2 w-1/3">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mb-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-            <span class="text-[10px] font-bold">ภาพรวม</span>
-        </button>
-        <button onclick="UI.switchTab('stores')" id="nav-stores" class="nav-item flex flex-col items-center p-2 w-1/3">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mb-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
-            <span class="text-[10px] font-bold">รายชื่อร้าน</span>
-        </button>
-        <button onclick="UI.switchTab('route')" id="nav-route" class="nav-item flex flex-col items-center p-2 w-1/3">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mb-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" /></svg>
-            <span class="text-[10px] font-bold">คิวงาน</span>
-        </button>
+        <button onclick="UI.switchTab('dashboard')" id="nav-dashboard" class="nav-item active flex flex-col items-center p-2 w-1/3"><svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mb-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg><span class="text-[10px] font-bold">ภาพรวม</span></button>
+        <button onclick="UI.switchTab('stores')" id="nav-stores" class="nav-item flex flex-col items-center p-2 w-1/3"><svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mb-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg><span class="text-[10px] font-bold">ร้านค้า</span></button>
+        <button onclick="UI.switchTab('route')" id="nav-route" class="nav-item flex flex-col items-center p-2 w-1/3"><svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mb-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" /></svg><span class="text-[10px] font-bold">คิวงาน</span></button>
     </nav>
 
     <div id="store-modal" class="hidden fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-[99999] flex items-center justify-center p-4">
-        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-sm flex flex-col overflow-hidden transform transition-all">
-            <div class="bg-gray-50 p-4 border-b border-gray-200 flex justify-between items-start">
-                <div>
-                    <h2 id="modal-name" class="text-lg font-black text-gray-800 leading-tight">ชื่อร้าน</h2>
-                    <p id="modal-id" class="text-xs text-blue-600 font-mono mt-0.5">ID: 000</p>
-                </div>
-                <button onclick="UI.closeModal()" class="bg-white border border-gray-300 w-8 h-8 rounded-full text-gray-500 font-bold hover:bg-gray-100 flex items-center justify-center active:scale-95">✕</button>
-            </div>
-            
-            <div class="p-5">
-                <div class="flex items-center gap-2 mb-4">
-                    <span class="text-xs font-bold text-gray-500">สถานะ:</span>
-                    <span id="modal-status" class="px-2.5 py-1 rounded-lg text-xs font-bold border">Active</span>
-                </div>
-                
-                <div class="grid grid-cols-2 gap-3 mb-5">
-                    <div class="bg-blue-50 border border-blue-100 p-3 rounded-2xl text-center">
-                        <p class="text-[10px] text-blue-600 font-bold mb-1">VPO สะสม (ลัง)</p>
-                        <p id="modal-vpo" class="text-2xl font-black text-blue-800">0</p>
-                    </div>
-                    <div class="bg-indigo-50 border border-indigo-100 p-3 rounded-2xl text-center">
-                        <p class="text-[10px] text-indigo-600 font-bold mb-1">จำนวนสินค้า (SKU)</p>
-                        <p id="modal-sku" class="text-2xl font-black text-indigo-800">0</p>
-                    </div>
-                </div>
-
-                <div class="bg-gray-50 p-3 rounded-xl border border-gray-100">
-                    <p class="text-[10px] font-bold text-gray-500 mb-1">คิวงานที่จัดไว้:</p>
-                    <p id="modal-days" class="text-sm font-bold text-gray-800">ยังไม่จัดสาย</p>
-                </div>
-            </div>
-            
-            <div class="p-4 bg-gray-50 border-t border-gray-200">
-                <button id="modal-nav-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-bold shadow-md active:scale-95 transition flex justify-center items-center gap-2">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                    นำทางไปร้านนี้
-                </button>
-            </div>
-        </div>
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden"><div class="bg-gray-50 p-4 border-b flex justify-between items-start"><div><h2 id="modal-name" class="text-lg font-black text-gray-800 leading-tight">ชื่อร้าน</h2><p id="modal-id" class="text-xs text-blue-600 font-mono mt-0.5">ID: 000</p></div><button onclick="UI.closeModal()" class="bg-white border border-gray-300 w-8 h-8 rounded-full text-gray-500 font-bold">✕</button></div><div class="p-5"><div class="flex items-center gap-2 mb-4"><span class="text-xs font-bold text-gray-500">สถานะ:</span><span id="modal-status" class="px-2.5 py-1 rounded-lg text-xs font-bold border">Active</span></div><div class="grid grid-cols-2 gap-3 mb-5"><div class="bg-blue-50 border border-blue-100 p-3 rounded-2xl text-center"><p class="text-[10px] text-blue-600 font-bold mb-1">VPO (ลัง)</p><p id="modal-vpo" class="text-2xl font-black text-blue-800">0</p></div><div class="bg-indigo-50 border border-indigo-100 p-3 rounded-2xl text-center"><p class="text-[10px] text-indigo-600 font-bold mb-1">SKU</p><p id="modal-sku" class="text-2xl font-black text-indigo-800">0</p></div></div><div class="bg-gray-50 p-3 rounded-xl border border-gray-100"><p class="text-[10px] font-bold text-gray-500 mb-1">คิวงาน:</p><p id="modal-days" class="text-sm font-bold text-gray-800">ยังไม่จัดสาย</p></div></div><div class="p-4 bg-gray-50 border-t"><button id="modal-nav-btn" class="w-full bg-blue-600 text-white py-3 rounded-xl font-bold shadow-md active:scale-95 transition">🚗 นำทางไปร้านนี้</button></div></div>
     </div>
 
-    <div id="toast" class="fixed top-4 left-1/2 transform -translate-x-1/2 -translate-y-20 opacity-0 bg-gray-900 text-white px-5 py-3 rounded-full shadow-2xl transition-all duration-300 z-[99999] text-sm font-bold flex items-center gap-2 pointer-events-none border border-gray-700"></div>
+    <div id="toast" class="fixed top-4 left-1/2 transform -translate-x-1/2 -translate-y-20 opacity-0 bg-gray-900 text-white px-5 py-3 rounded-full shadow-2xl transition-all duration-300 z-[99999] text-sm font-bold"></div>
 
     <script>
-        // ==========================================
-        // 🔑 FIREBASE CONFIGURATION
-        // ==========================================
         const firebaseConfig = {
             apiKey: "AIzaSyDCYxJf0eHryjVJ8_INoWw_uTN14UMaEWE",
             authDomain: "route-plan-71e2e.firebaseapp.com",
@@ -227,415 +141,111 @@
         };
         firebase.initializeApp(firebaseConfig);
         const db = firebase.firestore();
-        
         const docMain = db.collection('appData').doc('v1_main');
         const docSales = db.collection('appData').doc('v1_sales');
+        const COLORS = ["#ef4444", "#3b82f6", "#22c55e", "#f97316", "#a855f7", "#06b6d4", "#eab308", "#ec4899", "#14b8a6", "#84cc16"];
 
-        const COLORS = ["#ef4444", "#3b82f6", "#22c55e", "#f97316", "#a855f7", "#06b6d4", "#eab308", "#ec4899", "#14b8a6", "#84cc16", "#6366f1", "#f43f5e", "#8b5cf6", "#10b981"];
-
-        let State = {
-            myUsername: "",
-            myRoute: "",
-            allStores: [],      
-            routeStores: [],    
-            sales: {},          
-            currentDay: "",
-            isMainLoaded: false,
-            isSalesLoaded: false
-        };
-
+        let State = { myRoute: "", allStores: [], routeStores: [], sales: {}, currentDay: "", isMainLoaded: false, isSalesLoaded: false };
         let map = null, mapMarkers = [], mapPolyline = null, sortableList = null;
 
-        // ==========================================
-        // 📱 UI & TABS
-        // ==========================================
         const UI = {
-            switchTab: (tabId) => {
-                document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
-                document.getElementById('nav-' + tabId).classList.add('active');
-                
-                document.querySelectorAll('.app-tab').forEach(el => el.classList.remove('active'));
-                document.getElementById('tab-' + tabId).classList.add('active');
-
-                if(tabId === 'route' && map) {
-                    setTimeout(() => { map.invalidateSize(); MapCtrl.fitBounds(); }, 150);
-                }
-            },
-            showToast: (msg) => {
-                const t = document.getElementById('toast');
-                t.innerHTML = `✅ ${msg}`;
-                t.classList.remove('-translate-y-20', 'opacity-0');
-                setTimeout(() => t.classList.add('-translate-y-20', 'opacity-0'), 2500);
-            },
-            searchStores: (val) => {
-                let q = val.toLowerCase().trim();
-                let c = document.getElementById('all-store-list');
-                if(c) {
-                    for(let el of c.children) {
-                        let text = el.getAttribute('data-search') || "";
-                        el.style.display = text.includes(q) ? "" : "none";
-                    }
-                }
-            },
+            switchTab: (tabId) => { document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active')); document.getElementById('nav-' + tabId).classList.add('active'); document.querySelectorAll('.app-tab').forEach(el => el.classList.remove('active')); document.getElementById('tab-' + tabId).classList.add('active'); if(tabId === 'route' && map) { setTimeout(() => { map.invalidateSize(); MapCtrl.fitBounds(); }, 150); } },
+            showToast: (msg) => { const t = document.getElementById('toast'); t.innerHTML = `✅ ${msg}`; t.classList.remove('-translate-y-20', 'opacity-0'); setTimeout(() => t.classList.add('-translate-y-20', 'opacity-0'), 2500); },
+            searchStores: (val) => { let q = val.toLowerCase().trim(); let c = document.getElementById('all-store-list'); if(c) for(let el of c.children) { let text = el.getAttribute('data-search') || ""; el.style.display = text.includes(q) ? "" : "none"; } },
             openModal: (storeId) => {
-                let s = State.allStores.find(x => String(x.id) === String(storeId));
-                if(!s) return;
+                let s = State.allStores.find(x => String(x.id) === String(storeId)); if(!s) return;
                 let kpi = State.sales[s.id];
-                
-                document.getElementById('modal-name').innerText = s.name;
-                document.getElementById('modal-id').innerText = `ID: ${s.id}`;
-                document.getElementById('modal-days').innerText = s.days.length ? s.days.join(', ') : 'ยังไม่จัดคิว';
-                
-                if(kpi && kpi.active) {
-                    document.getElementById('modal-status').innerText = 'Active (มีการซื้อ)';
-                    document.getElementById('modal-status').className = 'px-2.5 py-1 rounded-lg text-xs font-bold border border-emerald-200 bg-emerald-50 text-emerald-700';
-                    document.getElementById('modal-vpo').innerText = kpi.vpo || 0;
-                    document.getElementById('modal-sku').innerText = kpi.skuCount || 0;
-                } else {
-                    document.getElementById('modal-status').innerText = 'Inactive (ไม่มีการซื้อ)';
-                    document.getElementById('modal-status').className = 'px-2.5 py-1 rounded-lg text-xs font-bold border border-gray-200 bg-gray-100 text-gray-500';
-                    document.getElementById('modal-vpo').innerText = '0';
-                    document.getElementById('modal-sku').innerText = '0';
-                }
-
-                let navLink = `https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}&travelmode=driving`;
-                document.getElementById('modal-nav-btn').onclick = () => window.open(navLink, '_blank');
+                document.getElementById('modal-name').innerText = s.name; document.getElementById('modal-id').innerText = `ID: ${s.id}`; document.getElementById('modal-days').innerText = s.days.length ? s.days.join(', ') : 'ยังไม่จัดคิว';
+                if(kpi && kpi.active) { document.getElementById('modal-status').innerText = 'Active (มียอด)'; document.getElementById('modal-status').className = 'px-2.5 py-1 rounded-lg text-xs font-bold border border-emerald-200 bg-emerald-50 text-emerald-700'; document.getElementById('modal-vpo').innerText = kpi.vpo || 0; document.getElementById('modal-sku').innerText = kpi.skuCount || 0; }
+                else { document.getElementById('modal-status').innerText = 'Inactive (ไม่มีคนซื้อ)'; document.getElementById('modal-status').className = 'px-2.5 py-1 rounded-lg text-xs font-bold border border-gray-200 bg-gray-100 text-gray-500'; document.getElementById('modal-vpo').innerText = '0'; document.getElementById('modal-sku').innerText = '0'; }
+                document.getElementById('modal-nav-btn').onclick = () => window.open(`https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}&travelmode=driving`, '_blank');
                 document.getElementById('store-modal').classList.remove('hidden');
             },
-            closeModal: () => {
-                document.getElementById('store-modal').classList.add('hidden');
-            }
+            closeModal: () => document.getElementById('store-modal').classList.add('hidden')
         };
 
-        // ==========================================
-        // 🔐 SECURE AUTH & ⚡ TURBO CACHE
-        // ==========================================
         const App = {
-            checkAuth: () => {
-                let savedUser = localStorage.getItem('sales_user');
-                let savedRoute = localStorage.getItem('sales_route');
-                
-                if (savedUser && savedRoute) { 
-                    State.myUsername = savedUser;
-                    State.myRoute = savedRoute; 
-                    App.showMainApp(); 
-                } else { 
-                    document.getElementById('login-screen').style.display = 'flex'; 
-                }
-            },
-            
-            login: () => {
-                let u = document.getElementById('login-user').value.trim();
-                let p = document.getElementById('login-pass').value.trim();
-                
-                if(!u || !p) return alert('⚠️ กรุณากรอก Username และ Password ให้ครบถ้วน');
-                
-                let btn = document.getElementById('login-btn');
-                let originalText = btn.innerHTML;
-                btn.innerHTML = 'กำลังตรวจสอบ... ⏳';
-                btn.disabled = true;
-
-                docMain.get().then(doc => {
-                    btn.innerHTML = originalText;
-                    btn.disabled = false;
-                    
-                    if(doc.exists) {
-                        let users = doc.data().users || [];
-                        let foundUser = users.find(x => x.username.toLowerCase() === u.toLowerCase() && x.password === p);
-                        
-                        if(foundUser) {
-                            State.myUsername = foundUser.username;
-                            State.myRoute = foundUser.routeCode;
-                            localStorage.setItem('sales_user', State.myUsername);
-                            localStorage.setItem('sales_route', State.myRoute);
-                            App.showMainApp();
-                        } else alert('❌ Username หรือ Password ไม่ถูกต้อง');
-                    } else alert('⚠️ ไม่พบฐานข้อมูลส่วนกลาง');
-                }).catch(err => {
-                    btn.innerHTML = originalText;
-                    btn.disabled = false;
-                    alert('⚠️ เกิดข้อผิดพลาดในการเชื่อมต่ออินเทอร์เน็ต');
-                });
-            },
-            
-            logout: () => {
-                if(confirm("ต้องการออกจากระบบใช่หรือไม่?")) {
-                    localStorage.clear(); // ล้าง Cache ทั้งหมดเมื่อออกจากระบบ
-                    window.location.reload();
-                }
-            },
-            
-            showMainApp: () => {
-                document.getElementById('login-screen').style.display = 'none';
-                document.getElementById('main-header').style.display = 'block';
-                document.getElementById('main-content').style.display = 'block';
-                document.getElementById('bottom-nav').style.display = 'flex';
-                
-                document.getElementById('user-name-label').innerText = State.myUsername;
-                document.getElementById('user-route-label').innerText = State.myRoute;
-                
-                App.loadFromCache(); // ⚡ โหลดของเก่ามาโชว์ก่อนเลย!
-                App.startListening(); // แล้วค่อยไปโหลดของใหม่หลังบ้าน
-            },
-
-            loadFromCache: () => {
-                let cachedStores = localStorage.getItem('cache_stores_' + State.myRoute);
-                let cachedSales = localStorage.getItem('cache_sales');
-                
-                if(cachedStores && cachedSales) {
-                    State.allStores = JSON.parse(cachedStores);
-                    State.sales = JSON.parse(cachedSales);
-                    Processor.run(); // วาดหน้าจอทันที!
-                } else {
-                    document.getElementById('loader').style.display = 'flex'; // ถ้าไม่มี Cache ถึงค่อยโชว์หน้าโหลด
-                }
-            },
-            
+            checkAuth: () => { let saved = localStorage.getItem('sales_route_v77'); if (saved) { State.myRoute = saved; App.showMainApp(); } else document.getElementById('login-screen').style.display = 'flex'; },
+            login: () => { let u = document.getElementById('login-input').value.trim().toUpperCase(); if(!u) return alert('⚠️ กรุณากรอกรหัสสาย'); State.myRoute = u; localStorage.setItem('sales_route_v77', State.myRoute); App.showMainApp(); },
+            logout: () => { if(confirm("ต้องการเปลี่ยนสาย?")) { localStorage.clear(); window.location.reload(); } },
+            showMainApp: () => { document.getElementById('login-screen').style.display = 'none'; document.getElementById('main-header').style.display = 'block'; document.getElementById('main-content').style.display = 'block'; document.getElementById('bottom-nav').style.display = 'flex'; document.getElementById('user-route-label').innerText = State.myRoute; App.loadFromCache(); App.startListening(); },
+            loadFromCache: () => { let cs = localStorage.getItem('cache_stores_' + State.myRoute), ck = localStorage.getItem('cache_sales'); if(cs && ck) { State.allStores = JSON.parse(cs); State.sales = JSON.parse(ck); Processor.run(); } else document.getElementById('loader').style.display = 'flex'; },
             startListening: () => {
                 docMain.onSnapshot(doc => {
-                    if (doc.exists && doc.data().routes && doc.data().routes[State.myRoute]) {
-                        State.allStores = doc.data().routes[State.myRoute];
-                        // 💾 เซฟลง Cache ทันทีที่โหลดเสร็จ
-                        localStorage.setItem('cache_stores_' + State.myRoute, JSON.stringify(State.allStores));
-                    } else {
-                        State.allStores = [];
-                    }
-                    State.isMainLoaded = true;
-                    App.checkAndProcess();
+                    if (doc.exists && doc.data().routes && doc.data().routes[State.myRoute]) { State.allStores = doc.data().routes[State.myRoute]; localStorage.setItem('cache_stores_' + State.myRoute, JSON.stringify(State.allStores)); }
+                    else State.allStores = [];
+                    State.isMainLoaded = true; App.checkAndProcess();
                 });
-
-                docSales.onSnapshot(doc => {
-                    if(doc.exists) {
-                        State.sales = doc.data();
-                        localStorage.setItem('cache_sales', JSON.stringify(State.sales));
-                    } else {
-                        State.sales = {};
-                    }
-                    State.isSalesLoaded = true;
-                    App.checkAndProcess();
-                });
+                docSales.onSnapshot(doc => { if(doc.exists) { State.sales = doc.data(); localStorage.setItem('cache_sales', JSON.stringify(State.sales)); } else State.sales = {}; State.isSalesLoaded = true; App.checkAndProcess(); });
             },
-            
-            checkAndProcess: () => {
-                if(State.isMainLoaded && State.isSalesLoaded) {
-                    document.getElementById('loader').style.display = 'none';
-                    document.getElementById('sync-status').innerHTML = '🟢 อัปเดตล่าสุด';
-                    Processor.run();
-                }
-            }
+            checkAndProcess: () => { if(State.isMainLoaded && State.isSalesLoaded) { document.getElementById('loader').style.display = 'none'; document.getElementById('sync-status').innerHTML = '🟢 อัปเดตล่าสุด'; Processor.run(); } }
         };
 
-        // ==========================================
-        // ⚙️ DATA PROCESSOR
-        // ==========================================
         const Processor = {
-            run: () => {
-                Processor.renderDashboard();
-                Processor.renderAllStores();
-                Processor.setupRouteTab();
-            },
-
+            run: () => { Processor.renderDashboard(); Processor.renderAllStores(); Processor.setupRouteTab(); },
             renderDashboard: () => {
-                let total = State.allStores.length;
-                let activeCnt = 0;
-                let totalVpo = 0;
-
-                State.allStores.forEach(s => {
-                    let kpi = State.sales[s.id];
-                    if(kpi && kpi.active) { activeCnt++; totalVpo += (kpi.vpo || 0); }
-                });
-
-                document.getElementById('dash-total').innerText = total;
-                document.getElementById('dash-active').innerText = activeCnt;
-                document.getElementById('dash-inactive').innerText = total - activeCnt;
-                document.getElementById('dash-vpo').innerText = Math.round(totalVpo).toLocaleString();
+                let t = State.allStores.length, ac = 0, v = 0;
+                State.allStores.forEach(s => { let k = State.sales[s.id]; if(k && k.active) { ac++; v += (k.vpo || 0); } });
+                document.getElementById('dash-total').innerText = t; document.getElementById('dash-active').innerText = ac; document.getElementById('dash-inactive').innerText = t - ac; document.getElementById('dash-vpo').innerText = Math.round(v).toLocaleString();
             },
-
             renderAllStores: () => {
-                // ⚡ ใช้ DocumentFragment ช่วยลดภาระการวาดหน้าจอ (DOM)
-                let fragment = document.createDocumentFragment();
-                
+                let f = document.createDocumentFragment();
                 State.allStores.forEach(s => {
-                    let kpi = State.sales[s.id];
-                    let isActive = kpi && kpi.active;
-                    let badgeClass = isActive ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-500";
-                    let badgeText = isActive ? "Active" : "Inactive";
-                    let searchStr = `${s.id} ${s.name}`.toLowerCase();
-
-                    let div = document.createElement('div');
-                    div.className = "bg-white p-3.5 rounded-2xl border border-gray-100 flex justify-between items-center shadow-[0_2px_10px_rgba(0,0,0,0.02)] active:bg-gray-50 transition cursor-pointer mb-2.5";
-                    div.setAttribute('data-search', searchStr);
-                    div.onclick = () => UI.openModal(s.id);
-                    
-                    div.innerHTML = `
-                        <div class="overflow-hidden pr-2">
-                            <h3 class="font-bold text-gray-800 text-sm truncate">${s.name}</h3>
-                            <p class="text-[11px] text-gray-400 font-mono mt-0.5">ID: ${s.id}</p>
-                        </div>
-                        <div class="shrink-0 flex items-center gap-2">
-                            <span class="${badgeClass} px-2 py-0.5 rounded text-[10px] font-bold">${badgeText}</span>
-                            <svg class="w-4 h-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
-                        </div>`;
-                    
-                    fragment.appendChild(div);
+                    let k = State.sales[s.id], act = k && k.active, bc = act ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-500", bt = act ? "Active" : "Inactive";
+                    let d = document.createElement('div'); d.className = "bg-white p-3.5 rounded-2xl border border-gray-100 flex justify-between items-center shadow-sm transition active:bg-gray-50 mb-2.5";
+                    d.setAttribute('data-search', `${s.id} ${s.name}`.toLowerCase()); d.onclick = () => UI.openModal(s.id);
+                    d.innerHTML = `<div class="overflow-hidden pr-2"><h3 class="font-bold text-gray-800 text-sm truncate">${s.name}</h3><p class="text-[11px] text-gray-400 font-mono mt-0.5">ID: ${s.id}</p></div><div class="shrink-0 flex items-center gap-2"><span class="${bc} px-2 py-0.5 rounded text-[10px] font-bold">${bt}</span><svg class="w-4 h-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7" stroke-width="2"/></svg></div>`;
+                    f.appendChild(d);
                 });
-                
-                let listContainer = document.getElementById('all-store-list');
-                listContainer.innerHTML = ''; 
-                if(State.allStores.length > 0) listContainer.appendChild(fragment);
-                else listContainer.innerHTML = `<p class="text-center text-gray-400 text-sm mt-5">ไม่พบข้อมูลร้านค้าในสายนี้</p>`;
+                let c = document.getElementById('all-store-list'); c.innerHTML = ''; if(State.allStores.length) c.appendChild(f); else c.innerHTML = '<p class="text-center text-gray-400 text-sm mt-5">ไม่พบข้อมูล</p>';
             },
-
             setupRouteTab: () => {
-                let daysSet = new Set();
-                State.allStores.forEach(s => { if(Array.isArray(s.days)) s.days.forEach(d => daysSet.add(d)); });
-                let sortedDays = Array.from(daysSet).sort((a,b) => parseInt(a.replace('Day ','')) - parseInt(b.replace('Day ','')));
-                
-                let elDay = document.getElementById('day-select');
-                
-                if(sortedDays.length === 0) {
-                    elDay.innerHTML = `<option value="">-- ยังไม่มีการจัดคิว --</option>`;
-                    State.currentDay = "";
-                } else {
-                    let html = sortedDays.map(d => `<option value="${d}">${d.replace('Day ', 'คิววันที่ ')}</option>`).join('');
-                    if(elDay.innerHTML !== html) elDay.innerHTML = html;
-
-                    let saved = localStorage.getItem('sales_route_day_' + State.myRoute);
-                    if(saved && sortedDays.includes(saved)) State.currentDay = saved;
-                    else if(!State.currentDay || !sortedDays.includes(State.currentDay)) State.currentDay = sortedDays[0];
-                    
-                    elDay.value = State.currentDay;
-                    localStorage.setItem('sales_route_day_' + State.myRoute, State.currentDay);
-                }
-
+                let ds = new Set(); State.allStores.forEach(s => { if(Array.isArray(s.days)) s.days.forEach(d => ds.add(d)); });
+                let sorted = Array.from(ds).sort((a,b) => parseInt(a.replace('Day ','')) - parseInt(b.replace('Day ','')));
+                let el = document.getElementById('day-select');
+                if(!sorted.length) { el.innerHTML = `<option value="">-- ยังไม่จัดคิว --</option>`; State.currentDay = ""; }
+                else { let h = sorted.map(d => `<option value="${d}">${d.replace('Day ', 'คิววันที่ ')}</option>`).join(''); if(el.innerHTML !== h) el.innerHTML = h; let sv = localStorage.getItem('sales_route_day'); if(sv && sorted.includes(sv)) State.currentDay = sv; else State.currentDay = sorted[0]; el.value = State.currentDay; }
                 Processor.renderRouteStores();
             },
-
             renderRouteStores: () => {
-                if(!State.currentDay) {
-                    State.routeStores = [];
-                } else {
-                    State.routeStores = State.allStores.filter(s => Array.isArray(s.days) && s.days.includes(State.currentDay));
-                    State.routeStores.sort((a, b) => {
-                        let seqA = (a.seqs && a.seqs[State.currentDay]) ? a.seqs[State.currentDay] : 999;
-                        let seqB = (b.seqs && b.seqs[State.currentDay]) ? b.seqs[State.currentDay] : 999;
-                        return seqA - seqB;
-                    });
-                }
-
-                document.getElementById('route-title').innerText = `คิวงาน (${State.routeStores.length} ร้าน)`;
-                let dNum = parseInt(State.currentDay.replace('Day ', '')) || 1;
-                let color = COLORS[(dNum - 1) % COLORS.length];
-
-                let html = State.routeStores.map((store, i) => {
-                    let seq = store.seqs && store.seqs[State.currentDay] ? store.seqs[State.currentDay] : (i+1);
-                    let navLink = `https://www.google.com/maps/dir/?api=1&destination=${store.lat},${store.lng}&travelmode=driving`;
-
-                    return `
-                    <div data-id="${store.id}" class="store-item bg-white p-2 rounded-2xl border border-gray-100 flex items-center gap-2 relative shadow-sm mb-2.5">
-                        <div class="absolute top-0 left-0 w-1.5 h-full rounded-l-2xl" style="background-color: ${color};"></div>
-                        <div class="drag-handle p-2 text-gray-300 hover:text-gray-500 bg-gray-50 rounded-xl ml-1"><svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 8h16M4 16h16" /></svg></div>
-                        <div class="w-9 h-9 rounded-full flex items-center justify-center text-white font-black text-sm shrink-0" style="background-color: ${color};">${seq}</div>
-                        <div class="flex-1 overflow-hidden pr-1 pl-1 cursor-pointer" onclick="UI.openModal('${store.id}')">
-                            <h3 class="font-bold text-gray-800 text-[13px] truncate">${store.name}</h3>
-                            <p class="text-[10px] text-gray-400 font-mono mt-0.5">ID: ${store.id}</p>
-                        </div>
-                        <a href="${navLink}" target="_blank" class="bg-blue-600 text-white p-2.5 rounded-xl shadow-md shrink-0 active:scale-95 transition flex items-center justify-center">
-                            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                        </a>
-                    </div>`;
+                State.routeStores = State.currentDay ? State.allStores.filter(s => Array.isArray(s.days) && s.days.includes(State.currentDay)) : [];
+                State.routeStores.sort((a, b) => (a.seqs?.[State.currentDay] || 999) - (b.seqs?.[State.currentDay] || 999));
+                let dNum = parseInt(State.currentDay.replace('Day ', '')) || 1, color = COLORS[(dNum - 1) % COLORS.length];
+                let h = State.routeStores.map((store, i) => {
+                    let seq = store.seqs?.[State.currentDay] || (i+1);
+                    return `<div data-id="${store.id}" class="store-item bg-white p-2 rounded-2xl border border-gray-100 flex items-center gap-2 relative shadow-sm mb-2.5"><div class="absolute top-0 left-0 w-1.5 h-full rounded-l-2xl" style="background-color:${color}"></div><div class="drag-handle p-2 text-gray-300 ml-1"><svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M4 8h16M4 16h16" stroke-width="2.5"/></svg></div><div class="w-9 h-9 rounded-full flex items-center justify-center text-white font-black text-sm shrink-0" style="background-color:${color}">${seq}</div><div class="flex-1 overflow-hidden pr-1 pl-1 cursor-pointer" onclick="UI.openModal('${store.id}')"><h3 class="font-bold text-gray-800 text-[13px] truncate">${store.name}</h3><p class="text-[10px] text-gray-400">ID: ${store.id}</p></div><a href="https://www.google.com/maps/dir/?api=1&destination=${store.lat},${store.lng}&travelmode=driving" target="_blank" class="bg-blue-600 text-white p-2.5 rounded-xl"><svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" stroke-width="2"/></svg></a></div>`;
                 }).join('');
-
-                let elList = document.getElementById('route-store-list');
-                elList.innerHTML = html || `<p class="text-center text-gray-400 text-sm mt-5">ไม่มีคิวงานในวันนี้</p>`;
-
-                if(sortableList) sortableList.destroy();
-                sortableList = Sortable.create(elList, { handle: '.drag-handle', animation: 250, ghostClass: 'sortable-ghost', delay: 150, delayOnTouchOnly: true, onEnd: Processor.handleDragEnd });
-
+                document.getElementById('route-store-list').innerHTML = h || '<p class="text-center text-gray-400 mt-5">ไม่มีคิว</p>';
+                if(sortableList) sortableList.destroy(); sortableList = Sortable.create(document.getElementById('route-store-list'), { handle: '.drag-handle', animation: 250, onEnd: Processor.handleDragEnd });
                 MapCtrl.drawMap();
             },
-
             handleDragEnd: () => {
-                let items = document.getElementById('route-store-list').querySelectorAll('.store-item');
-                let updatedStores = [...State.allStores];
-                items.forEach((item, index) => {
-                    let id = item.getAttribute('data-id');
-                    let target = updatedStores.find(s => String(s.id) === String(id));
-                    if(target) { if(!target.seqs) target.seqs = {}; target.seqs[State.currentDay] = index + 1; }
-                });
-                
-                // 💾 อัปเดต Cache ของตัวเองก่อนเลยเพื่อให้รู้สึกเร็ว
-                State.allStores = updatedStores;
-                localStorage.setItem('cache_stores_' + State.myRoute, JSON.stringify(State.allStores));
-                
-                docMain.update({ [`routes.${State.myRoute}`]: updatedStores })
-                .then(() => UI.showToast("บันทึกคิวสำเร็จ"))
-                .catch(err => alert("บันทึกคิวบนคลาวด์ไม่สำเร็จ"));
+                let items = document.getElementById('route-store-list').querySelectorAll('.store-item'), updated = [...State.allStores];
+                items.forEach((item, index) => { let id = item.getAttribute('data-id'), target = updated.find(s => String(s.id) === String(id)); if(target) { if(!target.seqs) target.seqs = {}; target.seqs[State.currentDay] = index + 1; } });
+                State.allStores = updated; localStorage.setItem('cache_stores_' + State.myRoute, JSON.stringify(updated));
+                docMain.update({ [`routes.${State.myRoute}`]: updated }).then(() => UI.showToast("บันทึกคิวสำเร็จ")).catch(() => alert("บันทึกล้มเหลว"));
             }
         };
 
-        document.getElementById('day-select').addEventListener('change', (e) => {
-            State.currentDay = e.target.value;
-            localStorage.setItem('sales_route_day_' + State.myRoute, State.currentDay);
-            Processor.renderRouteStores();
-        });
+        document.getElementById('day-select').addEventListener('change', (e) => { State.currentDay = e.target.value; localStorage.setItem('sales_route_day', State.currentDay); Processor.renderRouteStores(); });
 
-        // ==========================================
-        // 🗺️ MAP FUNCTIONS (LAZY LOAD)
-        // ==========================================
         const MapCtrl = {
-            initAndDraw: () => {
-                document.getElementById('btn-load-map').classList.add('hidden');
-                document.getElementById('map').classList.remove('hidden');
-                document.getElementById('btn-fit-map').classList.remove('hidden');
-                
-                if(!map) {
-                    map = L.map('map', { zoomControl: false }).setView([14.4745, 100.1222], 10);
-                    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(map);
-                }
-                
-                setTimeout(() => { map.invalidateSize(); MapCtrl.drawMap(); }, 200);
-            },
-
+            initAndDraw: () => { document.getElementById('btn-load-map').classList.add('hidden'); document.getElementById('map').classList.remove('hidden'); document.getElementById('btn-fit-map').classList.remove('hidden'); if(!map) { map = L.map('map', { zoomControl: false }).setView([14.4745, 100.1222], 10); L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(map); } setTimeout(() => { map.invalidateSize(); MapCtrl.drawMap(); }, 200); },
             drawMap: () => {
-                if(!map) return; // ถ้ายูสเซอร์ยังไม่กดปุ่มเปิดแผนที่ ก็ปล่อยผ่านไปเลย เครื่องจะได้ไม่หน่วง
-                
-                mapMarkers.forEach(m => map.removeLayer(m)); mapMarkers = [];
-                if(mapPolyline) { map.removeLayer(mapPolyline); mapPolyline = null; }
-                if(State.routeStores.length === 0) return;
-
-                let dNum = parseInt(State.currentDay.replace('Day ', '')) || 1;
-                let color = COLORS[(dNum - 1) % COLORS.length];
-                let coords = [];
-
+                if(!map) return; mapMarkers.forEach(m => map.removeLayer(m)); mapMarkers = []; if(mapPolyline) { map.removeLayer(mapPolyline); mapPolyline = null; }
+                if(!State.routeStores.length) return;
+                let dNum = parseInt(State.currentDay.replace('Day ', '')) || 1, color = COLORS[(dNum - 1) % COLORS.length], coords = [];
                 State.routeStores.forEach((store, i) => {
-                    let seq = store.seqs && store.seqs[State.currentDay] ? store.seqs[State.currentDay] : (i+1);
-                    coords.push([store.lat, store.lng]);
-
-                    let iconHtml = `
-                        <svg viewBox="0 0 24 24" width="34" height="46" style="filter: drop-shadow(0px 3px 4px rgba(0,0,0,0.3)); background:none;">
-                            <path d="M12 0C7.5 0 4 3.5 4 8c0 5.25 8 16 8 16s8-10.75 8-16c0-4.42-3.58-8-8-8z" fill="${color}" stroke="#fff" stroke-width="2.5"/>
-                            <circle cx="12" cy="10" r="8.5" fill="#fff" />
-                            <text x="12" y="14.5" font-size="12" font-weight="900" font-family="sans-serif" fill="#000" text-anchor="middle">${seq}</text>
-                        </svg>`;
-
-                    let icon = L.divIcon({ html: iconHtml, className: '', iconSize: [34, 46], iconAnchor: [17, 46], popupAnchor: [0, -46] });
-                    let m = L.marker([store.lat, store.lng], {icon: icon}).addTo(map);
-                    
-                    m.bindPopup(`<div class="text-center pb-1"><b class="text-xs block mb-2">${store.name}</b><button onclick="UI.openModal('${store.id}')" class="bg-gray-100 text-gray-700 text-[10px] border border-gray-300 px-3 py-1.5 rounded-lg font-bold shadow-sm w-full active:bg-gray-200">ดูข้อมูลยอดขาย</button></div>`, {closeButton: false, className: 'custom-popup'});
+                    let seq = store.seqs?.[State.currentDay] || (i+1); coords.push([store.lat, store.lng]);
+                    let iconHtml = `<svg viewBox="0 0 24 24" width="34" height="46"><path d="M12 0C7.5 0 4 3.5 4 8c0 5.25 8 16 8 16s8-10.75 8-16c0-4.42-3.58-8-8-8z" fill="${color}" stroke="#fff" stroke-width="2"/><circle cx="12" cy="10" r="8" fill="#fff" /><text x="12" y="14.5" font-size="12" font-weight="900" fill="#000" text-anchor="middle">${seq}</text></svg>`;
+                    let m = L.marker([store.lat, store.lng], { icon: L.divIcon({ html: iconHtml, className: '', iconSize: [34, 46], iconAnchor: [17, 46] }) }).addTo(map);
+                    m.bindPopup(`<div class="text-center pb-1"><b>${store.name}</b><br><button onclick="UI.openModal('${store.id}')" class="bg-gray-100 px-3 py-1 rounded-lg font-bold text-[10px] mt-2 border">ดูยอดขาย</button></div>`, { closeButton: false });
                     mapMarkers.push(m);
                 });
-
-                if(coords.length > 1) mapPolyline = L.polyline(coords, {color: color, weight: 3, opacity: 0.7, dashArray: '5, 8'}).addTo(map);
+                if(coords.length > 1) mapPolyline = L.polyline(coords, {color, weight:3, opacity:0.7, dashArray:'5, 8'}).addTo(map);
                 setTimeout(() => MapCtrl.fitBounds(), 200);
             },
-
-            fitBounds: () => {
-                if(mapMarkers.length > 0 && map) {
-                    let group = new L.featureGroup(mapMarkers);
-                    map.fitBounds(group.getBounds(), {padding: [30, 30]});
-                }
-            }
+            fitBounds: () => { if(mapMarkers.length && map) { let group = new L.featureGroup(mapMarkers); map.fitBounds(group.getBounds(), {padding: [30, 30]}); } }
         };
 
         document.addEventListener('DOMContentLoaded', App.checkAuth);
