@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Sales App (V75 - Secure Login)</title>
+    <title>Sales App (V76 - Turbo Cache)</title>
     
     <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore-compat.js"></script>
@@ -64,16 +64,19 @@
 
     <div id="loader">
         <div class="spinner"></div>
-        <p class="text-blue-600 font-bold text-lg" id="loader-text">กำลังซิงค์ข้อมูล...</p>
+        <p class="text-blue-600 font-bold text-lg" id="loader-text">กำลังโหลดข้อมูล...</p>
+        <p class="text-xs text-gray-400 mt-2">อาจใช้เวลาสักครู่ในการเข้าสู่ระบบครั้งแรก</p>
     </div>
 
     <header id="main-header" class="bg-white text-gray-900 px-4 py-3 shrink-0 shadow-sm relative z-50 hidden border-b border-gray-200">
         <div class="flex justify-between items-center">
             <div class="flex items-center gap-2">
-                <div class="bg-blue-600 text-white text-xs font-black px-2.5 py-1 rounded-lg shadow-sm flex items-center gap-1" id="display-user">
+                <div class="bg-blue-600 text-white text-xs font-black px-2.5 py-1 rounded-lg shadow-sm flex items-center gap-1">
                     <span>👤</span> <span id="user-name-label">User</span> (<span id="user-route-label">V00</span>)
                 </div>
-                <span id="sync-status" class="text-[10px] bg-emerald-100 px-2 py-0.5 rounded-full text-emerald-600 font-bold">🟢 Online</span>
+                <span id="sync-status" class="text-[10px] bg-emerald-100 px-2 py-0.5 rounded-full text-emerald-600 font-bold flex items-center gap-1">
+                    <span class="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></span> ออฟไลน์(แคช)
+                </span>
             </div>
             <button onclick="App.logout()" class="text-[10px] text-gray-500 font-bold bg-gray-100 px-3 py-1.5 rounded-lg border border-gray-200 active:bg-gray-200">
                 ออกจากระบบ
@@ -129,9 +132,13 @@
                 <select id="day-select" class="w-full bg-gray-50 text-gray-900 text-sm font-bold outline-none px-3 py-2.5 rounded-xl border border-gray-300 shadow-inner appearance-none text-center"></select>
             </div>
             
-            <div id="map-container" class="h-[35vh] shrink-0 relative z-10 border-b border-gray-300">
-                <div id="map" class="w-full h-full bg-gray-200"></div>
-                <button id="btn-fit-map" onclick="MapCtrl.fitBounds()" class="absolute bottom-4 right-4 z-[400] bg-white p-2.5 rounded-full shadow-lg border border-gray-200 text-blue-600 active:scale-95">
+            <div id="map-container" class="h-[35vh] shrink-0 relative z-10 border-b border-gray-300 bg-gray-200 flex items-center justify-center">
+                <button id="btn-load-map" onclick="MapCtrl.initAndDraw()" class="bg-blue-600 text-white px-5 py-2.5 rounded-full font-bold shadow-lg flex items-center gap-2 active:scale-95 transition">
+                    📍 แตะเพื่อเปิดแผนที่
+                </button>
+                <div id="map" class="w-full h-full hidden"></div>
+                
+                <button id="btn-fit-map" onclick="MapCtrl.fitBounds()" class="hidden absolute bottom-4 right-4 z-[400] bg-white p-2.5 rounded-full shadow-lg border border-gray-200 text-blue-600 active:scale-95">
                     <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" /></svg>
                 </button>
             </div>
@@ -273,7 +280,6 @@
             openModal: (storeId) => {
                 let s = State.allStores.find(x => String(x.id) === String(storeId));
                 if(!s) return;
-                
                 let kpi = State.sales[s.id];
                 
                 document.getElementById('modal-name').innerText = s.name;
@@ -294,7 +300,6 @@
 
                 let navLink = `https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}&travelmode=driving`;
                 document.getElementById('modal-nav-btn').onclick = () => window.open(navLink, '_blank');
-                
                 document.getElementById('store-modal').classList.remove('hidden');
             },
             closeModal: () => {
@@ -303,7 +308,7 @@
         };
 
         // ==========================================
-        // 🔐 SECURE AUTHENTICATION
+        // 🔐 SECURE AUTH & ⚡ TURBO CACHE
         // ==========================================
         const App = {
             checkAuth: () => {
@@ -330,32 +335,22 @@
                 btn.innerHTML = 'กำลังตรวจสอบ... ⏳';
                 btn.disabled = true;
 
-                // วิ่งไปเช็คฐานข้อมูลผู้ใช้งานใน Admin
                 docMain.get().then(doc => {
                     btn.innerHTML = originalText;
                     btn.disabled = false;
                     
                     if(doc.exists) {
                         let users = doc.data().users || [];
-                        
-                        // ค้นหาว่ามี User/Pass ที่ตรงกันไหม (ไม่สนใจพิมพ์เล็กพิมพ์ใหญ่สำหรับ User)
                         let foundUser = users.find(x => x.username.toLowerCase() === u.toLowerCase() && x.password === p);
                         
                         if(foundUser) {
-                            // ล็อกอินสำเร็จ!
                             State.myUsername = foundUser.username;
                             State.myRoute = foundUser.routeCode;
-                            
                             localStorage.setItem('sales_user', State.myUsername);
                             localStorage.setItem('sales_route', State.myRoute);
-                            
                             App.showMainApp();
-                        } else {
-                            alert('❌ Username หรือ Password ไม่ถูกต้อง\n(หากลืมรหัสผ่าน กรุณาติดต่อ Admin)');
-                        }
-                    } else {
-                        alert('⚠️ ไม่พบฐานข้อมูลส่วนกลาง');
-                    }
+                        } else alert('❌ Username หรือ Password ไม่ถูกต้อง');
+                    } else alert('⚠️ ไม่พบฐานข้อมูลส่วนกลาง');
                 }).catch(err => {
                     btn.innerHTML = originalText;
                     btn.disabled = false;
@@ -365,8 +360,7 @@
             
             logout: () => {
                 if(confirm("ต้องการออกจากระบบใช่หรือไม่?")) {
-                    localStorage.removeItem('sales_user');
-                    localStorage.removeItem('sales_route');
+                    localStorage.clear(); // ล้าง Cache ทั้งหมดเมื่อออกจากระบบ
                     window.location.reload();
                 }
             },
@@ -377,20 +371,32 @@
                 document.getElementById('main-content').style.display = 'block';
                 document.getElementById('bottom-nav').style.display = 'flex';
                 
-                // อัปเดตป้ายชื่อ
                 document.getElementById('user-name-label').innerText = State.myUsername;
                 document.getElementById('user-route-label').innerText = State.myRoute;
                 
-                MapCtrl.init();
-                App.startListening();
+                App.loadFromCache(); // ⚡ โหลดของเก่ามาโชว์ก่อนเลย!
+                App.startListening(); // แล้วค่อยไปโหลดของใหม่หลังบ้าน
+            },
+
+            loadFromCache: () => {
+                let cachedStores = localStorage.getItem('cache_stores_' + State.myRoute);
+                let cachedSales = localStorage.getItem('cache_sales');
+                
+                if(cachedStores && cachedSales) {
+                    State.allStores = JSON.parse(cachedStores);
+                    State.sales = JSON.parse(cachedSales);
+                    Processor.run(); // วาดหน้าจอทันที!
+                } else {
+                    document.getElementById('loader').style.display = 'flex'; // ถ้าไม่มี Cache ถึงค่อยโชว์หน้าโหลด
+                }
             },
             
             startListening: () => {
-                document.getElementById('loader').style.display = 'flex';
-                
                 docMain.onSnapshot(doc => {
                     if (doc.exists && doc.data().routes && doc.data().routes[State.myRoute]) {
                         State.allStores = doc.data().routes[State.myRoute];
+                        // 💾 เซฟลง Cache ทันทีที่โหลดเสร็จ
+                        localStorage.setItem('cache_stores_' + State.myRoute, JSON.stringify(State.allStores));
                     } else {
                         State.allStores = [];
                     }
@@ -399,7 +405,12 @@
                 });
 
                 docSales.onSnapshot(doc => {
-                    State.sales = doc.exists ? doc.data() : {};
+                    if(doc.exists) {
+                        State.sales = doc.data();
+                        localStorage.setItem('cache_sales', JSON.stringify(State.sales));
+                    } else {
+                        State.sales = {};
+                    }
                     State.isSalesLoaded = true;
                     App.checkAndProcess();
                 });
@@ -408,6 +419,7 @@
             checkAndProcess: () => {
                 if(State.isMainLoaded && State.isSalesLoaded) {
                     document.getElementById('loader').style.display = 'none';
+                    document.getElementById('sync-status').innerHTML = '🟢 อัปเดตล่าสุด';
                     Processor.run();
                 }
             }
@@ -430,10 +442,7 @@
 
                 State.allStores.forEach(s => {
                     let kpi = State.sales[s.id];
-                    if(kpi && kpi.active) {
-                        activeCnt++;
-                        totalVpo += (kpi.vpo || 0);
-                    }
+                    if(kpi && kpi.active) { activeCnt++; totalVpo += (kpi.vpo || 0); }
                 });
 
                 document.getElementById('dash-total').innerText = total;
@@ -443,28 +452,38 @@
             },
 
             renderAllStores: () => {
-                let html = State.allStores.map(s => {
+                // ⚡ ใช้ DocumentFragment ช่วยลดภาระการวาดหน้าจอ (DOM)
+                let fragment = document.createDocumentFragment();
+                
+                State.allStores.forEach(s => {
                     let kpi = State.sales[s.id];
-                    let badge = (kpi && kpi.active) 
-                        ? `<span class="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded text-[10px] font-bold">Active</span>` 
-                        : `<span class="bg-gray-100 text-gray-500 px-2 py-0.5 rounded text-[10px] font-bold">Inactive</span>`;
-                    
+                    let isActive = kpi && kpi.active;
+                    let badgeClass = isActive ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-500";
+                    let badgeText = isActive ? "Active" : "Inactive";
                     let searchStr = `${s.id} ${s.name}`.toLowerCase();
 
-                    return `
-                    <div data-search="${searchStr}" onclick="UI.openModal('${s.id}')" class="bg-white p-3.5 rounded-2xl border border-gray-100 flex justify-between items-center shadow-[0_2px_10px_rgba(0,0,0,0.02)] active:bg-gray-50 transition cursor-pointer">
+                    let div = document.createElement('div');
+                    div.className = "bg-white p-3.5 rounded-2xl border border-gray-100 flex justify-between items-center shadow-[0_2px_10px_rgba(0,0,0,0.02)] active:bg-gray-50 transition cursor-pointer mb-2.5";
+                    div.setAttribute('data-search', searchStr);
+                    div.onclick = () => UI.openModal(s.id);
+                    
+                    div.innerHTML = `
                         <div class="overflow-hidden pr-2">
                             <h3 class="font-bold text-gray-800 text-sm truncate">${s.name}</h3>
                             <p class="text-[11px] text-gray-400 font-mono mt-0.5">ID: ${s.id}</p>
                         </div>
                         <div class="shrink-0 flex items-center gap-2">
-                            ${badge}
+                            <span class="${badgeClass} px-2 py-0.5 rounded text-[10px] font-bold">${badgeText}</span>
                             <svg class="w-4 h-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
-                        </div>
-                    </div>`;
-                }).join('');
+                        </div>`;
+                    
+                    fragment.appendChild(div);
+                });
                 
-                document.getElementById('all-store-list').innerHTML = html || `<p class="text-center text-gray-400 text-sm mt-5">ไม่พบข้อมูลร้านค้าในสายนี้</p>`;
+                let listContainer = document.getElementById('all-store-list');
+                listContainer.innerHTML = ''; 
+                if(State.allStores.length > 0) listContainer.appendChild(fragment);
+                else listContainer.innerHTML = `<p class="text-center text-gray-400 text-sm mt-5">ไม่พบข้อมูลร้านค้าในสายนี้</p>`;
             },
 
             setupRouteTab: () => {
@@ -515,20 +534,12 @@
                     return `
                     <div data-id="${store.id}" class="store-item bg-white p-2 rounded-2xl border border-gray-100 flex items-center gap-2 relative shadow-sm mb-2.5">
                         <div class="absolute top-0 left-0 w-1.5 h-full rounded-l-2xl" style="background-color: ${color};"></div>
-                        
-                        <div class="drag-handle p-2 text-gray-300 hover:text-gray-500 bg-gray-50 rounded-xl ml-1">
-                            <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 8h16M4 16h16" /></svg>
-                        </div>
-
-                        <div class="w-9 h-9 rounded-full flex items-center justify-center text-white font-black text-sm shrink-0" style="background-color: ${color};">
-                            ${seq}
-                        </div>
-                        
+                        <div class="drag-handle p-2 text-gray-300 hover:text-gray-500 bg-gray-50 rounded-xl ml-1"><svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 8h16M4 16h16" /></svg></div>
+                        <div class="w-9 h-9 rounded-full flex items-center justify-center text-white font-black text-sm shrink-0" style="background-color: ${color};">${seq}</div>
                         <div class="flex-1 overflow-hidden pr-1 pl-1 cursor-pointer" onclick="UI.openModal('${store.id}')">
                             <h3 class="font-bold text-gray-800 text-[13px] truncate">${store.name}</h3>
                             <p class="text-[10px] text-gray-400 font-mono mt-0.5">ID: ${store.id}</p>
                         </div>
-                        
                         <a href="${navLink}" target="_blank" class="bg-blue-600 text-white p-2.5 rounded-xl shadow-md shrink-0 active:scale-95 transition flex items-center justify-center">
                             <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                         </a>
@@ -539,13 +550,7 @@
                 elList.innerHTML = html || `<p class="text-center text-gray-400 text-sm mt-5">ไม่มีคิวงานในวันนี้</p>`;
 
                 if(sortableList) sortableList.destroy();
-                sortableList = Sortable.create(elList, {
-                    handle: '.drag-handle',
-                    animation: 250,
-                    ghostClass: 'sortable-ghost',
-                    delay: 150, delayOnTouchOnly: true,
-                    onEnd: Processor.handleDragEnd
-                });
+                sortableList = Sortable.create(elList, { handle: '.drag-handle', animation: 250, ghostClass: 'sortable-ghost', delay: 150, delayOnTouchOnly: true, onEnd: Processor.handleDragEnd });
 
                 MapCtrl.drawMap();
             },
@@ -553,19 +558,19 @@
             handleDragEnd: () => {
                 let items = document.getElementById('route-store-list').querySelectorAll('.store-item');
                 let updatedStores = [...State.allStores];
-                
                 items.forEach((item, index) => {
                     let id = item.getAttribute('data-id');
                     let target = updatedStores.find(s => String(s.id) === String(id));
-                    if(target) {
-                        if(!target.seqs) target.seqs = {};
-                        target.seqs[State.currentDay] = index + 1; 
-                    }
+                    if(target) { if(!target.seqs) target.seqs = {}; target.seqs[State.currentDay] = index + 1; }
                 });
-
+                
+                // 💾 อัปเดต Cache ของตัวเองก่อนเลยเพื่อให้รู้สึกเร็ว
+                State.allStores = updatedStores;
+                localStorage.setItem('cache_stores_' + State.myRoute, JSON.stringify(State.allStores));
+                
                 docMain.update({ [`routes.${State.myRoute}`]: updatedStores })
                 .then(() => UI.showToast("บันทึกคิวสำเร็จ"))
-                .catch(err => alert("บันทึกไม่สำเร็จ"));
+                .catch(err => alert("บันทึกคิวบนคลาวด์ไม่สำเร็จ"));
             }
         };
 
@@ -576,19 +581,27 @@
         });
 
         // ==========================================
-        // 🗺️ MAP FUNCTIONS
+        // 🗺️ MAP FUNCTIONS (LAZY LOAD)
         // ==========================================
         const MapCtrl = {
-            init: () => {
-                if(map) return;
-                map = L.map('map', { zoomControl: false }).setView([14.4745, 100.1222], 10);
-                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(map);
+            initAndDraw: () => {
+                document.getElementById('btn-load-map').classList.add('hidden');
+                document.getElementById('map').classList.remove('hidden');
+                document.getElementById('btn-fit-map').classList.remove('hidden');
+                
+                if(!map) {
+                    map = L.map('map', { zoomControl: false }).setView([14.4745, 100.1222], 10);
+                    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(map);
+                }
+                
+                setTimeout(() => { map.invalidateSize(); MapCtrl.drawMap(); }, 200);
             },
+
             drawMap: () => {
-                if(!map) return;
+                if(!map) return; // ถ้ายูสเซอร์ยังไม่กดปุ่มเปิดแผนที่ ก็ปล่อยผ่านไปเลย เครื่องจะได้ไม่หน่วง
+                
                 mapMarkers.forEach(m => map.removeLayer(m)); mapMarkers = [];
                 if(mapPolyline) { map.removeLayer(mapPolyline); mapPolyline = null; }
-
                 if(State.routeStores.length === 0) return;
 
                 let dNum = parseInt(State.currentDay.replace('Day ', '')) || 1;
@@ -613,11 +626,10 @@
                     mapMarkers.push(m);
                 });
 
-                if(coords.length > 1) {
-                    mapPolyline = L.polyline(coords, {color: color, weight: 3, opacity: 0.7, dashArray: '5, 8'}).addTo(map);
-                }
+                if(coords.length > 1) mapPolyline = L.polyline(coords, {color: color, weight: 3, opacity: 0.7, dashArray: '5, 8'}).addTo(map);
                 setTimeout(() => MapCtrl.fitBounds(), 200);
             },
+
             fitBounds: () => {
                 if(mapMarkers.length > 0 && map) {
                     let group = new L.featureGroup(mapMarkers);
