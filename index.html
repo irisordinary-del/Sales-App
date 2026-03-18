@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Route Planner V72 (Data Merge & KPI)</title>
+    <title>Route Admin V74 (User Management)</title>
     
     <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore-compat.js"></script>
@@ -19,11 +19,10 @@
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-track { background: #f1f1f1; }
         ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
-        .tab-btn { border-bottom: 2px solid transparent; color: #64748b; font-weight: 500; transition: all 0.2s; font-size: 13px; }
+        .tab-btn { border-bottom: 2px solid transparent; color: #64748b; font-weight: 500; transition: all 0.2s; font-size: 12px; }
         .tab-btn.active { border-bottom: 2px solid #2563eb; color: #1e40af; font-weight: 700; }
         .color-dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 5px; box-shadow: 0 1px 2px rgba(0,0,0,0.2); }
         .custom-svg-icon { background: none; border: none; filter: drop-shadow(0px 3px 4px rgba(0,0,0,0.4)); }
-        .leaflet-popup-content-wrapper { border-radius: 12px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1); }
         .f2-badge { background: #ef4444; color: white; padding: 1px 6px; border-radius: 10px; font-size: 9px; font-weight: bold; margin-left: 5px; }
         .draw-cursor { cursor: crosshair !important; }
         #loader { display: none; position: absolute; inset: 0; background: rgba(255,255,255,0.9); z-index: 99999; justify-content: center; align-items: center; flex-direction: column; backdrop-filter: blur(2px); }
@@ -46,17 +45,12 @@
 
     <div class="h-16 bg-gray-900 text-white flex items-center justify-between px-6 shadow-md z-[5000] relative shrink-0 border-b-4 border-indigo-600">
         <div class="flex items-center gap-3">
-            <h1 class="text-xl font-black tracking-wide text-indigo-400 mr-2 hidden sm:block">Route<span class="text-white">Admin</span><span class="text-emerald-400 ml-1 text-sm font-bold">V72</span></h1>
+            <h1 class="text-xl font-black tracking-wide text-indigo-400 mr-2 hidden sm:block">Route<span class="text-white">Admin</span><span class="text-emerald-400 ml-1 text-sm font-bold">V74</span></h1>
             
             <div class="flex items-center bg-gray-800 rounded-lg p-1 border border-gray-700">
-                <span class="text-xs text-gray-400 px-2 hidden md:inline">สายขาย:</span>
+                <span class="text-xs text-gray-400 px-2 hidden md:inline">สายกำลังทำงาน:</span>
                 <select id="routeSelector" onchange="App.switchRoute(this.value)" class="bg-gray-900 text-white border-none text-sm focus:ring-0 outline-none font-bold py-1 px-2 rounded cursor-pointer max-w-[120px] sm:max-w-[200px] truncate"></select>
-                <div class="flex items-center border-l border-gray-700 ml-1 pl-1">
-                    <button onclick="App.renameRoute()" class="text-gray-400 hover:text-white px-2 py-1 transition" title="เปลี่ยนชื่อสาย">✏️</button>
-                    <button onclick="App.deleteRoute()" class="text-gray-400 hover:text-red-400 px-2 py-1 transition" title="ลบสายวิ่ง">🗑️</button>
-                </div>
             </div>
-            <button onclick="App.addRoute()" class="bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-md text-xs font-bold shadow-sm transition">+ เพิ่มสาย</button>
         </div>
         
         <div class="flex items-center gap-3">
@@ -88,9 +82,7 @@
 
             <div id="lassoPanel" class="hidden absolute top-4 right-4 z-[400] bg-white p-4 rounded-2xl shadow-2xl border-2 border-gray-900 flex flex-col gap-3 w-64">
                 <p class="text-sm font-black text-gray-900 text-center">✏️ โหมดวาดพื้นที่</p>
-                <div class="bg-gray-100 p-3 rounded-lg text-xs text-gray-700 leading-relaxed font-medium">
-                    คลิกบนแผนที่อย่างน้อย 3 จุด เพื่อล้อมกรอบเลือกร้านค้า
-                </div>
+                <div class="bg-gray-100 p-3 rounded-lg text-xs text-gray-700 font-medium">คลิกบนแผนที่อย่างน้อย 3 จุด เพื่อล้อมกรอบเลือกร้านค้า</div>
                 <button onclick="Lasso.finish()" class="bg-emerald-500 hover:bg-emerald-600 text-white py-2.5 rounded-xl text-sm font-bold shadow-md transition active:scale-95">✅ ยืนยันการเลือก</button>
                 <button onclick="Lasso.cancel()" class="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 py-2 rounded-xl text-sm font-bold transition active:scale-95">❌ ยกเลิก</button>
             </div>
@@ -103,6 +95,7 @@
                 <button onclick="UI.switchTab('tab2')" id="btn-tab2" class="tab-btn flex-1 py-3 px-1">2. จัดสาย</button>
                 <button onclick="UI.switchTab('tab3')" id="btn-tab3" class="tab-btn flex-1 py-3 px-1">3. แก้ไข</button>
                 <button onclick="UI.switchTab('tab4')" id="btn-tab4" class="tab-btn flex-1 py-3 px-1">4. สรุป</button>
+                <button onclick="UI.switchTab('tab5')" id="btn-tab5" class="tab-btn flex-1 py-3 px-1 text-indigo-600">5. ตั้งค่า</button>
             </div>
 
             <div class="flex-1 overflow-y-auto p-4 bg-gray-50/50">
@@ -128,11 +121,11 @@
                     <div class="bg-white p-4 rounded-2xl border border-emerald-200 shadow-sm relative overflow-hidden">
                         <div class="absolute top-0 right-0 bg-emerald-500 text-white text-[9px] font-black px-2 py-1 rounded-bl-lg">NEW KPI</div>
                         <h3 class="font-bold text-sm text-emerald-800 mb-2 flex items-center gap-2">📊 นำเข้ายอดขาย (Sales Data)</h3>
-                        <p class="text-[10px] text-gray-500 mb-3 leading-tight">อัปโหลดไฟล์ <b class="text-emerald-600">Sellout (.csv/.xlsx)</b> เพื่อติดป้าย Active, VPO และ SKU ให้กับร้านค้าอัตโนมัติ</p>
+                        <p class="text-[10px] text-gray-500 mb-3 leading-tight">อัปโหลดไฟล์ยอดขาย เพื่อประมวลผลให้เซลส์ดูผ่านแอป</p>
                         
                         <div onclick="document.getElementById('salesUpload').click()" class="border-2 border-dashed border-emerald-300 bg-emerald-50 rounded-xl p-4 text-center cursor-pointer hover:bg-emerald-100 transition">
                             <p class="text-xl mb-1">📈</p>
-                            <p class="text-xs text-emerald-800 font-bold">อัปโหลดไฟล์ยอดขาย (ระบบจะคำนวณอัตโนมัติ)</p>
+                            <p class="text-xs text-emerald-800 font-bold">อัปโหลดไฟล์ยอดขาย Sellout</p>
                         </div>
                         <input type="file" id="salesUpload" accept=".xlsx, .xls, .csv" class="hidden">
                         <button onclick="SalesData.clearKPI()" class="w-full mt-2 text-[10px] text-gray-400 hover:text-red-500 font-bold text-right transition">✕ ล้างข้อมูล KPI ออกจากระบบ</button>
@@ -184,6 +177,37 @@
                     <div class="bg-emerald-50 p-3 rounded-xl border border-emerald-100 text-xs text-emerald-800 font-medium">คลิกที่กล่องวันที่ เพื่อ <b>จำลองและวาดเส้นทางถนนจริง</b></div>
                     <div id="list-summary" class="grid grid-cols-2 gap-3 mt-2 pb-10"></div>
                 </div>
+
+                <div id="tab5" class="hidden space-y-5 pb-10">
+                    
+                    <div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-200">
+                        <h3 class="font-bold text-gray-800 mb-3 flex items-center gap-2">🚚 จัดการสายวิ่ง (Routes)</h3>
+                        <div class="flex gap-2 mb-3">
+                            <input type="text" id="new-route-name" placeholder="ชื่อสายใหม่ (เช่น V02)" class="flex-1 p-2 border border-gray-300 rounded-lg text-sm outline-none focus:border-indigo-500 uppercase">
+                            <button onclick="RouteMgr.add()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-sm transition">+ เพิ่ม</button>
+                        </div>
+                        <div id="setting-route-list" class="space-y-2 max-h-48 overflow-y-auto pr-1"></div>
+                    </div>
+
+                    <div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-200">
+                        <h3 class="font-bold text-gray-800 mb-3 flex items-center gap-2">👤 ระบบล็อกอินผู้ใช้งาน (Users)</h3>
+                        
+                        <div class="bg-gray-50 p-3 rounded-xl border border-gray-200 mb-4">
+                            <p class="text-xs font-bold text-gray-600 mb-2">เพิ่มเซลส์ใหม่เข้าระบบ:</p>
+                            <div class="grid grid-cols-2 gap-2 mb-2">
+                                <input type="text" id="new-user-name" placeholder="Username (ตั้งเอง)" class="p-2 border border-gray-300 rounded-lg text-sm outline-none focus:border-blue-500">
+                                <input type="text" id="new-user-pass" placeholder="Password (ตั้งเอง)" class="p-2 border border-gray-300 rounded-lg text-sm outline-none focus:border-blue-500">
+                            </div>
+                            <div class="flex gap-2">
+                                <select id="new-user-route" class="flex-1 p-2 border border-gray-300 rounded-lg text-sm font-bold outline-none cursor-pointer bg-white"></select>
+                                <button onclick="UserMgr.add()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-sm transition">บันทึก</button>
+                            </div>
+                        </div>
+
+                        <div id="setting-user-list" class="space-y-2 max-h-60 overflow-y-auto pr-1"></div>
+                    </div>
+                </div>
+
             </div>
             
             <div class="w-full bg-gray-200 h-1.5"><div id="progress-bar" class="bg-emerald-500 h-1.5 w-0 transition-all duration-500"></div></div>
@@ -233,28 +257,27 @@
         };
         const DAY_COLORS = Config.getDays();
 
-        // 🧠 State สำหรับเก็บข้อมูลแยก 2 กล่อง
+        // 🧠 State Data
         const State = {
-            db: { routes: {}, cycleDays: 24, backups: {} }, // กล่องที่ 1 (พิกัด & คิว)
-            sales: {}, // กล่องที่ 2 (KPI: VPO, SKU) { "4020001235": { vpo: 15, sku: 5, active: true } }
+            db: { routes: {}, cycleDays: 24, users: [] }, // เพิ่ม users เข้ามาในฐานข้อมูล
+            sales: {}, 
             localActiveRoute: null,
             stores: [], activeRoadDay: null, openDayModal: null
         };
 
         const App = {
             dbRef: cloudDB.collection('appData').doc('v1_main'),
-            salesRef: cloudDB.collection('appData').doc('v1_sales'), // ฐานข้อมูล KPI ใหม่
+            salesRef: cloudDB.collection('appData').doc('v1_sales'),
 
             init: () => {
                 MapCtrl.init();
                 UI.showLoader("กำลังเชื่อมต่อฐานข้อมูล...", "");
                 
-                // ดึงข้อมูลพิกัด (v1_main)
                 App.dbRef.onSnapshot((doc) => {
                     let dataFromServer = doc.exists ? doc.data() : {};
-                    State.db.routes = dataFromServer.routes || {"สายที่ 1": []};
-                    State.db.backups = dataFromServer.backups || {};
+                    State.db.routes = dataFromServer.routes || {"V01": []};
                     State.db.cycleDays = dataFromServer.cycleDays || 24;
+                    State.db.users = dataFromServer.users || []; // โหลดข้อมูล Users
 
                     let sortedKeys = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b, 'th', {numeric: true}));
                     if (!State.localActiveRoute || !State.db.routes[State.localActiveRoute]) {
@@ -265,7 +288,6 @@
                     State.stores = State.db.routes[State.localActiveRoute] || [];
                     App.updateStatusUI("✅ ข้อมูลตรงกับคลาวด์", "emerald");
                     
-                    // ดึงข้อมูลยอดขาย (v1_sales) ควบคู่ไปด้วย
                     App.fetchSalesData();
 
                 }, (error) => {
@@ -276,13 +298,11 @@
 
             fetchSalesData: () => {
                 App.salesRef.get().then(doc => {
-                    if(doc.exists) { State.sales = doc.data(); } 
-                    else { State.sales = {}; }
+                    if(doc.exists) { State.sales = doc.data(); } else { State.sales = {}; }
                     App.sync();
                     UI.hideLoader();
                     setTimeout(() => MapCtrl.fitToStores(), 300);
                 }).catch(err => {
-                    console.log("Error fetching sales data", err);
                     App.sync(); UI.hideLoader();
                 });
             },
@@ -295,11 +315,12 @@
 
             saveDB: () => {
                 State.db.routes[State.localActiveRoute] = State.stores;
+                State.db.users = State.db.users || []; // ป้องกันค่า null
                 App.updateStatusUI("⏳ กำลังบันทึก...", "yellow");
 
                 App.dbRef.set(State.db).then(() => {
                     App.updateStatusUI("✅ บันทึกสำเร็จ", "emerald");
-                    UI.showSaveToast("บันทึกคิวงานและเส้นทางเรียบร้อย"); 
+                    UI.showSaveToast("บันทึกข้อมูลเรียบร้อย"); 
                 }).catch(err => {
                     App.updateStatusUI("❌ บันทึกล้มเหลว", "red");
                 });
@@ -325,19 +346,65 @@
                 State.stores = State.db.routes[name] || []; 
                 App.sync(); MapCtrl.fitToStores(); 
             },
-            addRoute: () => { let n = prompt("ชื่อสายใหม่:"); if(n && n.trim()) { State.db.routes[n.trim()] = []; State.localActiveRoute = n.trim(); State.stores = []; App.sync(); App.saveDB(); MapCtrl.fitToStores(); } },
-            renameRoute: () => { let n = prompt("ชื่อใหม่:", State.localActiveRoute); if(n && n.trim()) { State.db.routes[n.trim()] = State.db.routes[State.localActiveRoute]; delete State.db.routes[State.localActiveRoute]; State.localActiveRoute = n.trim(); App.sync(); App.saveDB(); } },
-            deleteRoute: () => { if(Object.keys(State.db.routes).length > 1 && confirm("ยืนยันลบสายนี้?")) { delete State.db.routes[State.localActiveRoute]; let sortedKeys = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b, 'th', {numeric: true})); State.localActiveRoute = sortedKeys[0]; State.stores = State.db.routes[State.localActiveRoute]; App.sync(); App.saveDB(); MapCtrl.fitToStores(); } else if(Object.keys(State.db.routes).length === 1) alert("ห้ามลบสายสุดท้ายครับ"); },
             clearStores: () => { if(confirm("ล้างข้อมูลร้านค้าทั้งหมดในสายนี้?")) { State.stores = []; App.sync(); App.saveDB(); } }
         };
 
         // ==========================================
-        // 📊 KPI DATA MERGE (ระบบย่อยยอดขาย)
+        // 🛠️ MANAGER: ROUTES & USERS (การจัดการระบบ)
+        // ==========================================
+        const RouteMgr = {
+            add: () => {
+                let n = document.getElementById('new-route-name').value.trim().toUpperCase();
+                if(!n) return alert("กรุณาใส่ชื่อสาย");
+                if(State.db.routes[n]) return alert("ชื่อสายนี้มีอยู่แล้วครับ");
+                State.db.routes[n] = [];
+                document.getElementById('new-route-name').value = '';
+                App.sync(); App.saveDB();
+            },
+            delete: (n) => {
+                if(Object.keys(State.db.routes).length <= 1) return alert("ไม่สามารถลบสายสุดท้ายได้ครับ");
+                if(confirm(`⚠️ ยืนยันการลบสาย "${n}"\nร้านค้าที่อยู่ในสายนี้จะหายไปทั้งหมด!`)) {
+                    delete State.db.routes[n];
+                    if(State.localActiveRoute === n) {
+                        State.localActiveRoute = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b, 'th', {numeric: true}))[0];
+                    }
+                    App.sync(); App.saveDB();
+                }
+            }
+        };
+
+        const UserMgr = {
+            add: () => {
+                let u = document.getElementById('new-user-name').value.trim();
+                let p = document.getElementById('new-user-pass').value.trim();
+                let r = document.getElementById('new-user-route').value;
+                
+                if(!u || !p || !r) return alert("กรุณากรอก Username, Password และเลือกสายวิ่งให้ครบถ้วน");
+                
+                if(!State.db.users) State.db.users = [];
+                if(State.db.users.find(x => x.username.toLowerCase() === u.toLowerCase())) {
+                    return alert("Username นี้มีคนใช้งานแล้ว กรุณาเปลี่ยนใหม่");
+                }
+                
+                State.db.users.push({ username: u, password: p, routeCode: r });
+                document.getElementById('new-user-name').value = '';
+                document.getElementById('new-user-pass').value = '';
+                App.sync(); App.saveDB();
+            },
+            delete: (idx) => {
+                if(confirm("ยืนยันการลบผู้ใช้งานนี้?")) {
+                    State.db.users.splice(idx, 1);
+                    App.sync(); App.saveDB();
+                }
+            }
+        };
+
+        // ==========================================
+        // 📊 KPI DATA MERGE
         // ==========================================
         const SalesData = {
             processExcel: (file) => {
                 UI.showLoader("กำลังวิเคราะห์ยอดขาย...", "อ่านไฟล์แสนบรรทัด (ใช้เวลาประมาณ 2-5 วินาที)");
-                
                 const reader = new FileReader();
                 reader.onload = function(e) {
                     try {
@@ -345,26 +412,20 @@
                         const workbook = XLSX.read(data, {type: 'array'});
                         const json = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], {header: 1, defval: ""}); 
                         
-                        if (json.length < 2) { throw new Error("ไฟล์ว่างเปล่า"); }
+                        if (json.length < 2) throw new Error("ไฟล์ว่างเปล่า");
                         
                         let headers = json[0].map(h => String(h).toLowerCase().trim());
                         let idCol = -1, skuCol = -1, qtyCol = -1;
 
-                        // 🔍 หา Index ของคอลัมน์สำคัญจากไฟล์คุณ
                         headers.forEach((h, i) => {
                             if(h.includes('customer code') || h.includes('รหัสลูกค้า')) idCol = i;
                             if(h.includes('so product code') || h.includes('รหัสสินค้า') || h.includes('so product name')) skuCol = i;
                             if(h.includes('so total  qty ea') || h.includes('so total qty ea') || h.includes('qty ea') || h.includes('จำนวน')) qtyCol = i;
                         });
 
-                        if(idCol === -1 || qtyCol === -1) {
-                            throw new Error("หาคอลัมน์ 'Customer Code' หรือ 'SO Total QTY EA' ไม่พบ กรุณาตรวจสอบไฟล์อีกครั้ง");
-                        }
+                        if(idCol === -1 || qtyCol === -1) throw new Error("หาคอลัมน์ 'Customer Code' หรือ 'SO Total QTY EA' ไม่พบ");
 
                         let newSalesKPI = {};
-                        let rowCount = 0;
-
-                        // ⚙️ Pivot & Aggregate (บีบอัดแสนบรรทัด)
                         for (let i = 1; i < json.length; i++) {
                             let row = json[i];
                             if(!row || row.length === 0) continue;
@@ -374,69 +435,48 @@
                             
                             let qty = parseFloat(String(row[qtyCol]).replace(/[^0-9.-]/g, ''));
                             if(isNaN(qty)) qty = 0;
-                            
                             let sku = skuCol !== -1 ? String(row[skuCol]).trim() : "Unknown";
                             
-                            rowCount++;
-
-                            if(!newSalesKPI[storeId]) {
-                                newSalesKPI[storeId] = { vpo: 0, skus: new Set(), active: false };
-                            }
-                            
+                            if(!newSalesKPI[storeId]) newSalesKPI[storeId] = { vpo: 0, skus: new Set(), active: false };
                             newSalesKPI[storeId].vpo += qty;
                             if(sku) newSalesKPI[storeId].skus.add(sku);
                             if(newSalesKPI[storeId].vpo > 0) newSalesKPI[storeId].active = true;
                         }
 
-                        // แปลง Set เป็น Number เพื่อประหยัดพื้นที่คลาวด์
                         Object.keys(newSalesKPI).forEach(id => {
                             newSalesKPI[id].skuCount = newSalesKPI[id].skus.size;
-                            delete newSalesKPI[id].skus; // ลบ Set ทิ้ง
-                            
-                            // ปัดเศษ VPO
+                            delete newSalesKPI[id].skus;
                             newSalesKPI[id].vpo = Math.round(newSalesKPI[id].vpo * 100) / 100;
                         });
 
-                        // 💾 บันทึกขึ้นคลาวด์ กล่อง v1_sales
-                        UI.showLoader("กำลังอัปเดต KPI ขึ้นระบบ...", `พบยอดขายของร้านค้า ${Object.keys(newSalesKPI).length} แห่ง`);
-                        
+                        UI.showLoader("กำลังอัปเดต KPI ขึ้นระบบ...", "ประมวลผลเสร็จสิ้น");
                         App.salesRef.set(newSalesKPI).then(() => {
-                            State.sales = newSalesKPI;
-                            App.sync();
-                            UI.hideLoader();
-                            alert(`✅ อัปเดตยอดขายสำเร็จ!\nอ่านข้อมูล ${rowCount.toLocaleString()} บรรทัด\nสกัดข้อมูลร้าน Active ได้ ${Object.keys(newSalesKPI).length} ร้าน`);
-                        }).catch(err => {
-                            UI.hideLoader(); alert("อัปโหลดไม่สำเร็จ: " + err.message);
-                        });
+                            State.sales = newSalesKPI; App.sync(); UI.hideLoader();
+                            alert(`✅ อัปเดตยอดขายสำเร็จ! สกัดข้อมูลร้าน Active ได้ ${Object.keys(newSalesKPI).length} ร้าน`);
+                        }).catch(err => { UI.hideLoader(); alert("อัปโหลดไม่สำเร็จ"); });
 
-                    } catch(error) { 
-                        UI.hideLoader(); alert("เกิดข้อผิดพลาด: " + error.message); 
-                    }
+                    } catch(error) { UI.hideLoader(); alert("ขัดข้อง: " + error.message); }
                     document.getElementById('salesUpload').value = ''; 
                 };
                 reader.readAsArrayBuffer(file);
             },
-            
             clearKPI: () => {
-                if(confirm("ยืนยันการลบข้อมูล KPI ยอดขายทั้งหมดออกจากระบบ? (แผนที่จะไม่โดนลบ)")) {
-                    App.salesRef.set({}).then(() => {
-                        State.sales = {}; App.sync(); UI.showSaveToast("ล้าง KPI เรียบร้อย");
-                    });
+                if(confirm("ลบข้อมูลยอดขายทั้งหมด? (แผนที่จะไม่โดนลบ)")) {
+                    App.salesRef.set({}).then(() => { State.sales = {}; App.sync(); UI.showSaveToast("ล้าง KPI เรียบร้อย"); });
                 }
             }
         };
 
         document.getElementById('salesUpload').addEventListener('change', function(e) {
-            const file = e.target.files[0]; 
-            if (file) SalesData.processExcel(file);
+            if (e.target.files[0]) SalesData.processExcel(e.target.files[0]);
         });
 
         // ==========================================
-        // 🗺️ MASTER DATA UPLOAD (พิกัด)
+        // 🗺️ MASTER DATA UPLOAD
         // ==========================================
         document.getElementById('fileUpload').addEventListener('change', function(e) {
             const file = e.target.files[0]; if (!file) return;
-            if (State.stores.length > 0 && !confirm(`ข้อมูลเดิมของ "${State.localActiveRoute}" จะถูกแทนที่\nยืนยันการอัปโหลด?`)) { this.value = ''; return; }
+            if (State.stores.length > 0 && !confirm(`ข้อมูลเดิมของ "${State.localActiveRoute}" จะถูกแทนที่\nยืนยันอัปโหลด?`)) { this.value = ''; return; }
 
             const reader = new FileReader();
             reader.onload = function(e) {
@@ -446,8 +486,7 @@
                     const json = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], {header: 1, defval: ""}); 
                     
                     if (json.length < 2) return alert("ไฟล์ว่างเปล่า");
-                    let headers = json[0];
-                    let idCol=-1, nameCol=-1, latCol=-1, lngCol=-1, freqCol=-1, dayCol=-1, seqCol=-1;
+                    let headers = json[0], idCol=-1, nameCol=-1, latCol=-1, lngCol=-1, freqCol=-1, dayCol=-1, seqCol=-1;
                     
                     for(let i=0; i<headers.length; i++) {
                         let h = String(headers[i]).toLowerCase();
@@ -455,15 +494,14 @@
                         else if(h.includes('ชื่อ') || h.includes('name')) nameCol = i;
                         else if(h.includes('lat') || h.includes('ละติจูด')) latCol = i;
                         else if(h.includes('lng') || h.includes('lon') || h.includes('ลองจิจูด')) lngCol = i;
-                        else if(h.includes('freq') || h.includes('ความถี่') || h.includes('รอบ') || h.includes('f2')) freqCol = i;
+                        else if(h.includes('freq') || h.includes('ความถี่') || h.includes('f2')) freqCol = i;
                         else if(h.includes('สายวิ่ง') || h.includes('day')) dayCol = i;
                         else if(h.includes('คิว') || h.includes('seq')) seqCol = i;
                     }
 
                     let storeMap = {}; 
                     for (let i = 1; i < json.length; i++) {
-                        let row = json[i];
-                        if (!row || row.length === 0) continue; 
+                        let row = json[i]; if (!row || row.length === 0) continue; 
                         let idStr = row[idCol] ? String(row[idCol]).trim() : `S_${i}`;
                         if(!idStr) continue; 
                         
@@ -493,11 +531,9 @@
                     }
                     
                     let finalArray = Object.values(storeMap);
-                    if(finalArray.length === 0) return alert("ไม่พบพิกัด (Lat, Lng)");
+                    if(finalArray.length === 0) return alert("ไม่พบพิกัด");
                     
-                    State.stores = finalArray;
-                    App.sync(); App.saveDB();
-                    MapCtrl.fitToStores(); 
+                    State.stores = finalArray; App.sync(); App.saveDB(); MapCtrl.fitToStores(); 
 
                 } catch(err) { alert("ขัดข้อง: " + err.message); }
                 document.getElementById('fileUpload').value = ''; 
@@ -580,15 +616,12 @@
                     let svgH = isR ? 44 : (isAssigned ? 36 : 44);
                     if (isR) zIdx = 1500;
 
-                    // 🌟 ดึงข้อมูล KPI มาติดบนป้าย
-                    let kpi = State.sales[store.id];
-                    let kpiStar = (kpi && kpi.active) ? `<circle cx="20" cy="5" r="5" fill="#10b981" stroke="#fff" stroke-width="1.5"/>` : '';
-
+                    // 🛑 เอาหมวกสีเขียว (kpiStar) ออกจากป้ายหมุดตามที่ผู้ใช้งานขอ
                     let iconTxt = isR && seq ? `<circle cx="12" cy="10" r="8" fill="#fff" /><text x="12" y="14" font-size="11" font-weight="900" fill="#000" text-anchor="middle">${seq}</text>` : 
                                  (isAssigned ? `<text x="12" y="12" font-size="10" font-family="sans-serif" font-weight="bold" fill="#fff" text-anchor="middle">${String(pDay).replace('Day ','')}</text>` : 
                                  `<circle cx="12" cy="9" r="3.5" fill="#fff" />`);
 
-                    let icon = L.divIcon({ html: `<svg viewBox="0 0 24 24" width="${svgW}" height="${svgH}" style="filter: drop-shadow(0px 3px 4px rgba(0,0,0,0.3)); overflow:visible;"><path d="M12 0C7.5 0 4 3.5 4 8c0 5.25 8 16 8 16s8-10.75 8-16c0-4.42-3.58-8-8-8z" fill="${fill}" stroke="${border}" stroke-width="${stroke}"/>${iconTxt}${kpiStar}</svg>`, className: 'custom-svg-icon', iconSize: [svgW, svgH], iconAnchor: [svgW/2, svgH], popupAnchor: [0, -svgH] });
+                    let icon = L.divIcon({ html: `<svg viewBox="0 0 24 24" width="${svgW}" height="${svgH}" style="filter: drop-shadow(0px 3px 4px rgba(0,0,0,0.3)); overflow:visible;"><path d="M12 0C7.5 0 4 3.5 4 8c0 5.25 8 16 8 16s8-10.75 8-16c0-4.42-3.58-8-8-8z" fill="${fill}" stroke="${border}" stroke-width="${stroke}"/>${iconTxt}</svg>`, className: 'custom-svg-icon', iconSize: [svgW, svgH], iconAnchor: [svgW/2, svgH], popupAnchor: [0, -svgH] });
 
                     if (!MapCtrl.markers[store.id]) {
                         MapCtrl.markers[store.id] = L.marker([store.lat, store.lng]).addTo(MapCtrl.map);
@@ -601,17 +634,16 @@
                     m.setIcon(icon); m.setZIndexOffset(zIdx);
                     
                     let badge = store.freq === 2 ? `<span class="f2-badge">F2</span>` : '';
-                    let kpiHtml = kpi ? (kpi.active ? `<div class="bg-emerald-50 text-emerald-700 px-2 py-1.5 rounded-lg text-[10px] font-bold mt-2 border border-emerald-100 flex justify-between"><span>📦 ${kpi.vpo} ลัง</span><span>🏷️ ${kpi.skuCount} SKU</span></div>` : `<div class="bg-gray-100 text-gray-500 px-2 py-1 rounded-lg text-[10px] font-bold mt-2 text-center border border-gray-200">❌ Inactive (ไม่มีประวัติสั่งซื้อ)</div>`) : '';
 
                     if (isAssigned) {
                         let dTxt = store.days.join(' & ');
                         let drop = dayOpts.replace(`value="${pDay}"`, `value="${pDay}" selected`);
-                        let html = `<div class="text-sm min-w-[170px]"><b class="text-[14px] text-gray-800 block leading-tight mb-0.5">${store.name} ${badge}</b><span class="text-gray-400 text-[10px] font-mono block mb-2">ID: ${store.id}</span><div class="inline-block px-2 py-1 rounded text-white text-[11px] font-bold w-full text-center" style="background:${fill};">📅 ${dTxt}</div>${kpiHtml}<div class="mt-2 pt-2 border-t border-gray-100"><span class="text-[10px] text-gray-500 font-bold mb-1 block">แก้ไขสายวิ่ง:</span><select onchange="StoreMgr.changeDay('${store.id}', this.value)" class="w-full text-xs p-1.5 border border-gray-200 rounded-lg bg-gray-50 focus:outline-none">${drop}<option disabled>---</option><option value="remove" class="text-red-500 font-bold">❌ ยกเลิกจัดสาย</option></select></div></div>`;
+                        let html = `<div class="text-sm min-w-[170px]"><b class="text-[14px] text-gray-800 block leading-tight mb-0.5">${store.name} ${badge}</b><span class="text-gray-400 text-[10px] font-mono block mb-2">ID: ${store.id}</span><div class="inline-block px-2 py-1 rounded text-white text-[11px] font-bold w-full text-center" style="background:${fill};">📅 ${dTxt}</div><div class="mt-2 pt-2 border-t border-gray-100"><span class="text-[10px] text-gray-500 font-bold mb-1 block">แก้ไขสายวิ่ง:</span><select onchange="StoreMgr.changeDay('${store.id}', this.value)" class="w-full text-xs p-1.5 border border-gray-200 rounded-lg bg-gray-50 focus:outline-none">${drop}<option disabled>---</option><option value="remove" class="text-red-500 font-bold">❌ ยกเลิกจัดสาย</option></select></div></div>`;
                         if (!m.getPopup()) m.bindPopup(html, {autoPan: false, className: 'custom-popup'}); else m.setPopupContent(html);
                     } else {
                         if (m.getPopup()) m.unbindPopup();
-                        if (!m.getTooltip()) m.bindTooltip(`<b>${store.name}</b> ${badge}<br><span class="text-[10px] font-mono text-gray-400">${store.id}</span>${kpiHtml}`, {direction: 'top', offset: [0, -svgH]}); 
-                        else m.setTooltipContent(`<b>${store.name}</b> ${badge}<br><span class="text-[10px] font-mono text-gray-400">${store.id}</span>${kpiHtml}`);
+                        if (!m.getTooltip()) m.bindTooltip(`<b>${store.name}</b> ${badge}<br><span class="text-[10px] font-mono text-gray-400">${store.id}</span>`, {direction: 'top', offset: [0, -svgH]}); 
+                        else m.setTooltipContent(`<b>${store.name}</b> ${badge}<br><span class="text-[10px] font-mono text-gray-400">${store.id}</span>`);
                     }
                 });
             }
@@ -707,7 +739,6 @@
                 State.stores.forEach(s => {
                     let b = s.freq===2?`<span class="f2-badge">F2</span>`:'';
                     
-                    // 🌟 สร้าง Tag KPI เล็กๆ ในการ์ด
                     let kpi = State.sales[s.id];
                     let kpiBadge = kpi ? (kpi.active ? `<span class="bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded text-[9px] font-bold">✅ ${kpi.vpo} ลัง | ${kpi.skuCount} SKU</span>` : `<span class="bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded text-[9px] font-bold">❌ Inactive</span>`) : '';
 
@@ -732,8 +763,40 @@
                 document.getElementById('stat-total').innerText = tot; document.getElementById('stat-done').innerText = aCnt; document.getElementById('stat-pending').innerText = wait;
                 document.getElementById('progress-bar').style.width = tot ? `${Math.round(((tot-wait)/tot)*100)}%` : '0%';
                 
+                // 🌟 Render Route & User Manager
+                UI.renderSettings();
+
                 MapCtrl.renderMarkers(); MapCtrl.drawLines();
             },
+
+            renderSettings: () => {
+                // รายชื่อสายวิ่ง
+                let rHtml = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b, 'th', {numeric: true})).map(r => `
+                    <div class="flex justify-between items-center bg-gray-50 p-2.5 rounded-xl border border-gray-100 shadow-sm">
+                        <span class="font-bold text-sm text-gray-800">${r} <span class="text-[10px] text-gray-400 font-normal">(${State.db.routes[r].length} ร้าน)</span></span>
+                        <button onclick="RouteMgr.delete('${r}')" class="text-red-500 hover:bg-red-100 px-2 py-1 rounded text-xs font-bold transition">ลบ</button>
+                    </div>
+                `).join('');
+                document.getElementById('setting-route-list').innerHTML = rHtml;
+
+                // Select ให้ผูกรหัสสายกับ User
+                let opts = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b, 'th', {numeric: true})).map(r => `<option value="${r}">สาย ${r}</option>`).join('');
+                let selRoute = document.getElementById('new-user-route');
+                if(selRoute) selRoute.innerHTML = opts;
+
+                // รายชื่อผู้ใช้งาน
+                let uHtml = (State.db.users || []).map((u, i) => `
+                    <div class="flex justify-between items-center bg-gray-50 p-3 rounded-xl border border-gray-100 shadow-sm">
+                        <div>
+                            <p class="font-bold text-sm text-gray-800">👤 ${u.username}</p>
+                            <p class="text-[10px] text-gray-500 font-mono mt-0.5">รหัสผ่าน: <span class="text-gray-800 bg-white px-1 border rounded">${u.password}</span> | วิ่งสาย: <span class="text-indigo-600 font-black">${u.routeCode}</span></p>
+                        </div>
+                        <button onclick="UserMgr.delete(${i})" class="text-red-500 hover:bg-red-100 px-2 py-1 rounded text-xs font-bold transition">ลบ</button>
+                    </div>
+                `).join('');
+                document.getElementById('setting-user-list').innerHTML = uHtml || '<p class="text-xs text-gray-400 text-center py-2">ยังไม่มีผู้ใช้งานในระบบ</p>';
+            },
+
             showDayModal: (d) => {
                 State.openDayModal = d; document.getElementById('modalTitle').innerHTML = `<span class="w-4 h-4 rounded-full inline-block shadow-sm" style="background:${DAY_COLORS[d].hex}"></span> ${DAY_COLORS[d].name}`;
                 let h = State.stores.filter(s=>s.days.includes(d)).sort((a,b)=>(a.seqs[d]||999)-(b.seqs[d]||999)).map(x=>{
@@ -760,7 +823,6 @@
                 if(isNaN(k) || k<2 || k%2!==0) return alert("จำนวนวันต้องเป็นเลขคู่");
                 if(State.stores.some(s=>s.days.length) && !lock && !confirm("ยืนยันล้างข้อมูลสายเดิม?")) return;
                 
-                App.createBackup("ก่อนสั่ง AI คำนวณใหม่");
                 UI.showLoader("AI กำลังวิเคราะห์พื้นที่...", "และจับกลุ่มร้านค้าที่อยู่ใกล้กัน");
                 setTimeout(() => AI.calc(k, lock, limit, mxD), 100);
             },
@@ -836,7 +898,6 @@
                 let u=[...s].sort((a,b)=>StoreMgr.getDistSq(a,{lat:lt,lng:ln})-StoreMgr.getDistSq(b,{lat:lt,lng:ln})), r=[u.shift()];
                 while(u.length){ let c=r[r.length-1], idx=0, min=Infinity; for(let i=0; i<u.length; i++){let d=StoreMgr.getDistSq(c,u[i]); if(d<min){min=d;idx=i;}} r.push(u.splice(idx,1)[0]); }
                 
-                App.createBackup("วาดถนนและจัดคิวใหม่ด้วย OSRM");
                 r.forEach((x,i) => x.seqs[d] = i+1); App.saveDB();
                 
                 UI.showLoader("กำลังวาดเส้นทางถนน...", "เชื่อมต่อ GPS");
