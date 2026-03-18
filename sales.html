@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Sales App (V73 - Clean Map & KPI Modal)</title>
+    <title>Sales App (V75 - Secure Login)</title>
     
     <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore-compat.js"></script>
@@ -31,7 +31,6 @@
         .app-tab { display: none; height: 100%; width: 100%; overflow-y: auto; padding-bottom: 70px; }
         .app-tab.active { display: block; }
         
-        /* แท็บ 3 จะใช้ Flex เพื่อแบ่งครึ่งบน(แผนที่) ครึ่งล่าง(รายชื่อ) */
         #tab-route.active { display: flex; flex-direction: column; overflow: hidden; padding-bottom: 60px; }
 
         .bottom-nav { padding-bottom: env(safe-area-inset-bottom); }
@@ -44,16 +43,22 @@
     <div id="login-screen">
         <div class="bg-white p-8 rounded-3xl shadow-2xl w-full max-w-sm text-center">
             <div class="w-16 h-16 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 11c0 3.517-1.009 6.799-2.753 9.571m-3.44-2.04l.054-.09A13.916 13.916 0 008 11a4 4 0 118 0c0 1.017-.07 2.019-.203 3m-2.118 6.844A21.88 21.88 0 0015.171 17m3.839 1.132c.645-2.266.99-4.659.99-7.132A8 8 0 008 4.07M3 15.364c.64-1.319 1-2.8 1-4.364 0-1.457.39-2.823 1.07-4" /></svg>
             </div>
             <h1 class="text-2xl font-black text-gray-800 mb-1">Sales<span class="text-blue-600">Nav</span></h1>
             <p class="text-xs text-gray-500 mb-6 font-medium">เข้าสู่ระบบเพื่อดูคิวงานของคุณ</p>
             
-            <div class="text-left mb-4">
-                <label class="block text-xs font-bold text-gray-700 mb-1">รหัสสายวิ่ง (เช่น V01, C02)</label>
-                <input type="text" id="login-input" placeholder="กรอกรหัสสาย..." class="w-full bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-xl focus:ring-blue-500 focus:border-blue-500 block p-3 outline-none font-bold uppercase text-center" onkeypress="if(event.key === 'Enter') App.login()">
+            <div class="text-left mb-3">
+                <label class="block text-xs font-bold text-gray-700 mb-1">👤 ชื่อผู้ใช้งาน (Username)</label>
+                <input type="text" id="login-user" placeholder="กรอก Username..." class="w-full bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-xl focus:ring-blue-500 focus:border-blue-500 block p-3 outline-none font-bold text-center">
             </div>
-            <button onclick="App.login()" class="w-full text-white bg-blue-600 hover:bg-blue-700 focus:ring-4 focus:ring-blue-300 font-bold rounded-xl text-sm px-5 py-3.5 shadow-lg active:scale-95 transition-transform">เข้าสู่ระบบ 🚀</button>
+            
+            <div class="text-left mb-5">
+                <label class="block text-xs font-bold text-gray-700 mb-1">🔑 รหัสผ่าน (Password)</label>
+                <input type="password" id="login-pass" placeholder="กรอก Password..." class="w-full bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-xl focus:ring-blue-500 focus:border-blue-500 block p-3 outline-none font-bold text-center" onkeypress="if(event.key === 'Enter') App.login()">
+            </div>
+
+            <button id="login-btn" onclick="App.login()" class="w-full text-white bg-blue-600 hover:bg-blue-700 focus:ring-4 focus:ring-blue-300 font-bold rounded-xl text-sm px-5 py-3.5 shadow-lg active:scale-95 transition-transform">เข้าสู่ระบบ 🚀</button>
         </div>
     </div>
 
@@ -65,7 +70,9 @@
     <header id="main-header" class="bg-white text-gray-900 px-4 py-3 shrink-0 shadow-sm relative z-50 hidden border-b border-gray-200">
         <div class="flex justify-between items-center">
             <div class="flex items-center gap-2">
-                <div class="bg-blue-600 text-white text-xs font-black px-2.5 py-1 rounded-lg shadow-sm" id="display-route">V00</div>
+                <div class="bg-blue-600 text-white text-xs font-black px-2.5 py-1 rounded-lg shadow-sm flex items-center gap-1" id="display-user">
+                    <span>👤</span> <span id="user-name-label">User</span> (<span id="user-route-label">V00</span>)
+                </div>
                 <span id="sync-status" class="text-[10px] bg-emerald-100 px-2 py-0.5 rounded-full text-emerald-600 font-bold">🟢 Online</span>
             </div>
             <button onclick="App.logout()" class="text-[10px] text-gray-500 font-bold bg-gray-100 px-3 py-1.5 rounded-lg border border-gray-200 active:bg-gray-200">
@@ -113,8 +120,7 @@
                     <svg class="w-5 h-5 text-gray-400 absolute left-3 top-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
                 </div>
             </div>
-            <div id="all-store-list" class="space-y-2.5 pb-10">
-                </div>
+            <div id="all-store-list" class="space-y-2.5 pb-10"></div>
         </div>
 
         <div id="tab-route" class="app-tab">
@@ -135,8 +141,7 @@
                     <h3 class="font-bold text-sm text-gray-800" id="route-title">คิวงาน (0 ร้าน)</h3>
                     <span class="text-[10px] text-gray-500 font-medium bg-gray-200 px-2 py-1 rounded">ลาก ≡ สลับคิว</span>
                 </div>
-                <div id="route-store-list" class="space-y-2.5 pb-20">
-                    </div>
+                <div id="route-store-list" class="space-y-2.5 pb-20"></div>
             </div>
         </div>
 
@@ -222,10 +227,11 @@
         const COLORS = ["#ef4444", "#3b82f6", "#22c55e", "#f97316", "#a855f7", "#06b6d4", "#eab308", "#ec4899", "#14b8a6", "#84cc16", "#6366f1", "#f43f5e", "#8b5cf6", "#10b981"];
 
         let State = {
+            myUsername: "",
             myRoute: "",
-            allStores: [],      // ร้านทั้งหมดในสาย
-            routeStores: [],    // ร้านเฉพาะวันที่เลือกใน Tab 3
-            sales: {},          // ข้อมูล KPI จาก v1_sales
+            allStores: [],      
+            routeStores: [],    
+            sales: {},          
             currentDay: "",
             isMainLoaded: false,
             isSalesLoaded: false
@@ -297,41 +303,91 @@
         };
 
         // ==========================================
-        // 🔐 AUTH & DATA FETCH
+        // 🔐 SECURE AUTHENTICATION
         // ==========================================
         const App = {
             checkAuth: () => {
-                let saved = localStorage.getItem('logged_in_route');
-                if (saved) { State.myRoute = saved; App.showMainApp(); } 
-                else { document.getElementById('login-screen').style.display = 'flex'; }
+                let savedUser = localStorage.getItem('sales_user');
+                let savedRoute = localStorage.getItem('sales_route');
+                
+                if (savedUser && savedRoute) { 
+                    State.myUsername = savedUser;
+                    State.myRoute = savedRoute; 
+                    App.showMainApp(); 
+                } else { 
+                    document.getElementById('login-screen').style.display = 'flex'; 
+                }
             },
+            
             login: () => {
-                let input = document.getElementById('login-input').value.trim().toUpperCase();
-                if(!input) return alert('กรุณากรอกรหัสสาย');
-                State.myRoute = input;
-                localStorage.setItem('logged_in_route', State.myRoute);
-                App.showMainApp();
+                let u = document.getElementById('login-user').value.trim();
+                let p = document.getElementById('login-pass').value.trim();
+                
+                if(!u || !p) return alert('⚠️ กรุณากรอก Username และ Password ให้ครบถ้วน');
+                
+                let btn = document.getElementById('login-btn');
+                let originalText = btn.innerHTML;
+                btn.innerHTML = 'กำลังตรวจสอบ... ⏳';
+                btn.disabled = true;
+
+                // วิ่งไปเช็คฐานข้อมูลผู้ใช้งานใน Admin
+                docMain.get().then(doc => {
+                    btn.innerHTML = originalText;
+                    btn.disabled = false;
+                    
+                    if(doc.exists) {
+                        let users = doc.data().users || [];
+                        
+                        // ค้นหาว่ามี User/Pass ที่ตรงกันไหม (ไม่สนใจพิมพ์เล็กพิมพ์ใหญ่สำหรับ User)
+                        let foundUser = users.find(x => x.username.toLowerCase() === u.toLowerCase() && x.password === p);
+                        
+                        if(foundUser) {
+                            // ล็อกอินสำเร็จ!
+                            State.myUsername = foundUser.username;
+                            State.myRoute = foundUser.routeCode;
+                            
+                            localStorage.setItem('sales_user', State.myUsername);
+                            localStorage.setItem('sales_route', State.myRoute);
+                            
+                            App.showMainApp();
+                        } else {
+                            alert('❌ Username หรือ Password ไม่ถูกต้อง\n(หากลืมรหัสผ่าน กรุณาติดต่อ Admin)');
+                        }
+                    } else {
+                        alert('⚠️ ไม่พบฐานข้อมูลส่วนกลาง');
+                    }
+                }).catch(err => {
+                    btn.innerHTML = originalText;
+                    btn.disabled = false;
+                    alert('⚠️ เกิดข้อผิดพลาดในการเชื่อมต่ออินเทอร์เน็ต');
+                });
             },
+            
             logout: () => {
-                if(confirm("ออกจากระบบ?")) {
-                    localStorage.removeItem('logged_in_route');
+                if(confirm("ต้องการออกจากระบบใช่หรือไม่?")) {
+                    localStorage.removeItem('sales_user');
+                    localStorage.removeItem('sales_route');
                     window.location.reload();
                 }
             },
+            
             showMainApp: () => {
                 document.getElementById('login-screen').style.display = 'none';
                 document.getElementById('main-header').style.display = 'block';
                 document.getElementById('main-content').style.display = 'block';
                 document.getElementById('bottom-nav').style.display = 'flex';
-                document.getElementById('display-route').innerText = State.myRoute;
+                
+                // อัปเดตป้ายชื่อ
+                document.getElementById('user-name-label').innerText = State.myUsername;
+                document.getElementById('user-route-label').innerText = State.myRoute;
                 
                 MapCtrl.init();
                 App.startListening();
             },
+            
             startListening: () => {
                 document.getElementById('loader').style.display = 'flex';
                 
-                // ฟังข้อมูลแผนที่ (Main)
                 docMain.onSnapshot(doc => {
                     if (doc.exists && doc.data().routes && doc.data().routes[State.myRoute]) {
                         State.allStores = doc.data().routes[State.myRoute];
@@ -342,13 +398,13 @@
                     App.checkAndProcess();
                 });
 
-                // ฟังข้อมูล KPI (Sales)
                 docSales.onSnapshot(doc => {
                     State.sales = doc.exists ? doc.data() : {};
                     State.isSalesLoaded = true;
                     App.checkAndProcess();
                 });
             },
+            
             checkAndProcess: () => {
                 if(State.isMainLoaded && State.isSalesLoaded) {
                     document.getElementById('loader').style.display = 'none';
@@ -408,7 +464,7 @@
                     </div>`;
                 }).join('');
                 
-                document.getElementById('all-store-list').innerHTML = html || `<p class="text-center text-gray-400 text-sm mt-5">ไม่พบข้อมูลร้านค้า</p>`;
+                document.getElementById('all-store-list').innerHTML = html || `<p class="text-center text-gray-400 text-sm mt-5">ไม่พบข้อมูลร้านค้าในสายนี้</p>`;
             },
 
             setupRouteTab: () => {
@@ -425,12 +481,12 @@
                     let html = sortedDays.map(d => `<option value="${d}">${d.replace('Day ', 'คิววันที่ ')}</option>`).join('');
                     if(elDay.innerHTML !== html) elDay.innerHTML = html;
 
-                    let saved = localStorage.getItem('sales_route_day');
+                    let saved = localStorage.getItem('sales_route_day_' + State.myRoute);
                     if(saved && sortedDays.includes(saved)) State.currentDay = saved;
                     else if(!State.currentDay || !sortedDays.includes(State.currentDay)) State.currentDay = sortedDays[0];
                     
                     elDay.value = State.currentDay;
-                    localStorage.setItem('sales_route_day', State.currentDay);
+                    localStorage.setItem('sales_route_day_' + State.myRoute, State.currentDay);
                 }
 
                 Processor.renderRouteStores();
@@ -515,7 +571,7 @@
 
         document.getElementById('day-select').addEventListener('change', (e) => {
             State.currentDay = e.target.value;
-            localStorage.setItem('sales_route_day', State.currentDay);
+            localStorage.setItem('sales_route_day_' + State.myRoute, State.currentDay);
             Processor.renderRouteStores();
         });
 
@@ -543,7 +599,6 @@
                     let seq = store.seqs && store.seqs[State.currentDay] ? store.seqs[State.currentDay] : (i+1);
                     coords.push([store.lat, store.lng]);
 
-                    // 🔥 ลบ Tag เขียว/แดง ออก ใช้เข็มหมุดสีพื้นฐานบอกคิวงานเท่านั้น
                     let iconHtml = `
                         <svg viewBox="0 0 24 24" width="34" height="46" style="filter: drop-shadow(0px 3px 4px rgba(0,0,0,0.3)); background:none;">
                             <path d="M12 0C7.5 0 4 3.5 4 8c0 5.25 8 16 8 16s8-10.75 8-16c0-4.42-3.58-8-8-8z" fill="${color}" stroke="#fff" stroke-width="2.5"/>
@@ -554,7 +609,6 @@
                     let icon = L.divIcon({ html: iconHtml, className: '', iconSize: [34, 46], iconAnchor: [17, 46], popupAnchor: [0, -46] });
                     let m = L.marker([store.lat, store.lng], {icon: icon}).addTo(map);
                     
-                    // ป็อปอัปแผนที่มีแค่ชื่อร้าน และปุ่มเปิดดูข้อมูลยอดขาย
                     m.bindPopup(`<div class="text-center pb-1"><b class="text-xs block mb-2">${store.name}</b><button onclick="UI.openModal('${store.id}')" class="bg-gray-100 text-gray-700 text-[10px] border border-gray-300 px-3 py-1.5 rounded-lg font-bold shadow-sm w-full active:bg-gray-200">ดูข้อมูลยอดขาย</button></div>`, {closeButton: false, className: 'custom-popup'});
                     mapMarkers.push(m);
                 });
