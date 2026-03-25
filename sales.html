@@ -3,484 +3,143 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Sales App (V71 - Login & Bottom Nav)</title>
-    
+    <title>Sales App (Full Restoration)</title>
     <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore-compat.js"></script>
-
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-    
     <style>
         body { font-family: 'Prompt', sans-serif; background-color: #f3f4f6; margin: 0; overflow: hidden; }
-        ::-webkit-scrollbar { width: 0px; background: transparent; }
-        
-        /* Loading & Login Screens */
-        #loader { position: fixed; inset: 0; background: rgba(255,255,255,0.98); z-index: 99999; display: none; flex-direction: column; justify-content: center; align-items: center; }
-        .spinner { border: 4px solid #e2e8f0; border-top: 4px solid #3b82f6; border-radius: 50%; width: 45px; height: 45px; animation: spin 1s linear infinite; margin-bottom: 1rem; }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        
-        #login-screen { position: fixed; inset: 0; background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%); z-index: 90000; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 20px; }
-        
-        /* Drag & Drop Styles */
-        .drag-handle { touch-action: none; cursor: grab; }
-        .drag-handle:active { cursor: grabbing; }
-        .sortable-ghost { opacity: 0.3; background-color: #e0e7ff; border: 2px dashed #2563eb; }
-
-        /* Tabs hiding */
         .app-tab { display: none; height: 100%; overflow-y: auto; padding-bottom: 80px; }
         .app-tab.active { display: block; }
-        #tab-map.active { display: flex; flex-direction: column; overflow: hidden; padding-bottom: 0; }
-
-        /* Bottom Nav styling for safe areas (iPhone) */
-        .bottom-nav { padding-bottom: env(safe-area-inset-bottom); }
-        .nav-item { color: #94a3b8; transition: all 0.2s; }
+        #tab-route.active { display: flex; flex-direction: column; }
+        .nav-item { color: #94a3b8; }
         .nav-item.active { color: #2563eb; }
+        #login-screen { position: fixed; inset: 0; background: #1e3a8a; z-index: 90000; display: flex; align-items: center; justify-content: center; padding: 20px; }
     </style>
 </head>
 <body class="flex flex-col h-screen">
 
     <div id="login-screen">
-        <div class="bg-white p-8 rounded-3xl shadow-2xl w-full max-w-sm text-center">
-            <div class="w-16 h-16 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 11c0 3.517-1.009 6.799-2.753 9.571m-3.44-2.04l.054-.09A13.916 13.916 0 008 11a4 4 0 118 0c0 1.017-.07 2.019-.203 3m-2.118 6.844A21.88 21.88 0 0015.171 17m3.839 1.132c.645-2.266.99-4.659.99-7.132A8 8 0 008 4.07M3 15.364c.64-1.319 1-2.8 1-4.364 0-1.457.39-2.823 1.07-4" /></svg>
-            </div>
-            <h1 class="text-2xl font-black text-gray-800 mb-1">Sales<span class="text-blue-600">Nav</span></h1>
-            <p class="text-xs text-gray-500 mb-6 font-medium">เข้าสู่ระบบเพื่อดูคิวงานของคุณ</p>
-            
-            <div class="text-left mb-4">
-                <label class="block text-xs font-bold text-gray-700 mb-1">รหัสสายวิ่ง (เช่น V01, C02)</label>
-                <input type="text" id="login-input" placeholder="กรอกรหัสสายขาย..." class="w-full bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-xl focus:ring-blue-500 focus:border-blue-500 block p-3 outline-none font-bold uppercase text-center" onkeypress="if(event.key === 'Enter') App.login()">
-            </div>
-            
-            <button onclick="App.login()" class="w-full text-white bg-blue-600 hover:bg-blue-700 focus:ring-4 focus:ring-blue-300 font-bold rounded-xl text-sm px-5 py-3.5 shadow-lg transition-all active:scale-95">เข้าสู่ระบบ 🚀</button>
+        <div class="bg-white p-8 rounded-3xl w-full max-w-sm text-center shadow-2xl">
+            <h1 class="text-2xl font-black mb-6 text-blue-600 tracking-tighter">Sales Nav</h1>
+            <input type="text" id="login-input" placeholder="รหัสสายวิ่ง (เช่น V01)" class="w-full p-4 bg-gray-100 rounded-2xl mb-4 text-center font-bold uppercase outline-none border focus:ring-2 focus:ring-blue-500">
+            <button onclick="App.login()" class="w-full bg-blue-600 text-white py-4 rounded-2xl font-black shadow-lg">เข้าสู่ระบบ 🚀</button>
         </div>
     </div>
 
-    <div id="loader">
-        <div class="spinner"></div>
-        <p class="text-blue-600 font-bold text-lg" id="loader-text">กำลังโหลดข้อมูลสาย...</p>
-    </div>
-
-    <header id="main-header" class="bg-white text-gray-900 px-4 py-3 shrink-0 shadow-sm relative z-50 hidden border-b border-gray-200">
-        <div class="flex justify-between items-center mb-3">
-            <div class="flex items-center gap-2">
-                <div class="bg-blue-600 text-white text-xs font-black px-2.5 py-1 rounded-lg shadow-sm" id="display-route">V00</div>
-                <span id="sync-status" class="text-[10px] bg-emerald-100 px-2 py-0.5 rounded-full text-emerald-600 font-bold">🟢 Online</span>
-            </div>
-            <button onclick="App.logout()" class="text-[10px] text-red-500 font-bold bg-red-50 px-3 py-1.5 rounded-lg border border-red-100 active:bg-red-100 flex items-center gap-1">
-                ออกจากระบบ
-            </button>
-        </div>
-        <div>
-            <select id="day-select" class="w-full bg-gray-50 text-gray-900 text-sm font-bold outline-none px-3 py-2 rounded-xl border border-gray-200 shadow-inner cursor-pointer appearance-none text-center"></select>
-        </div>
+    <header id="main-header" class="bg-white p-4 border-b hidden flex justify-between items-center shadow-sm">
+        <div class="bg-blue-600 text-white px-3 py-1 rounded-lg font-black text-sm uppercase tracking-wider">สาย: <span id="route-label"></span></div>
+        <button onclick="App.logout()" class="text-xs font-bold text-gray-400 uppercase tracking-widest">Logout</button>
     </header>
 
-    <div id="main-content" class="flex-1 overflow-hidden relative bg-gray-50 hidden">
-        
-        <div id="tab-dashboard" class="app-tab p-4 active">
-            <h2 class="font-black text-xl text-gray-800 mb-4">ภาพรวมผลงาน 📊</h2>
-            
-            <div class="grid grid-cols-2 gap-3 mb-4">
-                <div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
-                    <p class="text-[10px] text-gray-500 font-bold mb-1">ร้านค้าทั้งหมด (วัน)</p>
-                    <p class="text-3xl font-black text-blue-600" id="dash-total-stores">0</p>
+    <main id="main-content" class="flex-1 hidden">
+        <div id="tab-dash" class="app-tab active p-4 space-y-4">
+            <h2 class="text-xl font-black">ภาพรวมสายวิ่ง 📊</h2>
+            <div class="grid grid-cols-2 gap-3">
+                <div class="bg-white p-6 rounded-3xl shadow-sm border text-center">
+                    <p class="text-[10px] font-bold text-gray-400 uppercase mb-1">ร้านทั้งหมด</p>
+                    <p id="sum-total" class="text-3xl font-black">0</p>
                 </div>
-                <div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
-                    <p class="text-[10px] text-gray-500 font-bold mb-1">VPO รวม (รอข้อมูล)</p>
-                    <p class="text-3xl font-black text-gray-300">-</p>
+                <div class="bg-blue-600 p-6 rounded-3xl shadow-lg text-white text-center">
+                    <p class="text-[10px] font-bold opacity-70 uppercase mb-1">วันนี้ (ร้าน)</p>
+                    <p id="sum-today" class="text-3xl font-black">0</p>
                 </div>
             </div>
+        </div>
 
-            <div class="bg-gradient-to-r from-emerald-400 to-emerald-500 p-5 rounded-2xl shadow-md text-white mb-4 relative overflow-hidden">
-                <div class="relative z-10">
-                    <p class="text-xs font-bold opacity-90 mb-1">สถานะ Active Stores</p>
-                    <p class="text-2xl font-black">รอเชื่อมต่อข้อมูล</p>
-                    <p class="text-xs mt-2 opacity-80">อัปเดตระบบในเฟสถัดไป</p>
-                </div>
-                <svg class="absolute -right-4 -bottom-4 w-32 h-32 opacity-20" fill="currentColor" viewBox="0 0 20 20"><path d="M2 10a8 8 0 018-8v8h8a8 8 0 11-16 0z"></path><path d="M12 2.252A8.014 8.014 0 0117.748 8H12V2.252z"></path></svg>
+        <div id="tab-stores" class="app-tab p-4">
+            <h2 class="text-xl font-black mb-4">รายชื่อร้านทั้งหมด 🏪</h2>
+            <div id="all-stores" class="space-y-3"></div>
+        </div>
+
+        <div id="tab-route" class="app-tab flex flex-col p-0">
+            <div class="p-3 bg-white border-b shadow-sm">
+                <select id="day-select" onchange="App.changeDay(this.value)" class="w-full p-3 bg-gray-50 rounded-xl font-bold text-center appearance-none border"></select>
             </div>
-            
-            <button onclick="App.forceSync()" class="w-full bg-white border border-gray-200 text-gray-700 py-3 rounded-xl font-bold text-sm shadow-sm flex justify-center items-center gap-2 active:bg-gray-50">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
-                รีเฟรชข้อมูลล่าสุด
-            </button>
+            <div id="map" class="h-[30vh] w-full bg-gray-200 shadow-inner"></div>
+            <div id="route-list" class="flex-1 p-4 space-y-3 overflow-y-auto bg-gray-50"></div>
         </div>
+    </main>
 
-        <div id="tab-stores" class="app-tab p-3">
-            <div class="flex justify-between items-end mb-3 px-1">
-                <h2 class="font-black text-lg text-gray-800" id="list-title">รายชื่อคิวงาน</h2>
-                <span class="text-[10px] text-gray-500 font-medium">ลาก ≡ สลับคิว</span>
-            </div>
-            <div id="store-list" class="space-y-2.5 pb-20">
-                </div>
-        </div>
-
-        <div id="tab-map" class="app-tab relative">
-            <div id="map" class="flex-1 w-full bg-gray-200"></div>
-            <button id="btn-fit-map" class="absolute bottom-24 right-4 z-[400] bg-white p-3.5 rounded-full shadow-xl border border-gray-200 text-blue-600 focus:outline-none active:scale-95">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" /></svg>
-            </button>
-        </div>
-
-    </div>
-
-    <nav id="bottom-nav" class="bottom-nav fixed bottom-0 w-full bg-white border-t border-gray-200 flex justify-around items-center pt-2 pb-3 px-2 z-[1000] hidden shadow-[0_-5px_15px_rgba(0,0,0,0.05)]">
-        <button onclick="UI.switchTab('dashboard')" id="nav-dashboard" class="nav-item active flex flex-col items-center p-2 w-1/3">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mb-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-            <span class="text-[10px] font-bold">ผลงาน</span>
-        </button>
-        <button onclick="UI.switchTab('stores')" id="nav-stores" class="nav-item flex flex-col items-center p-2 w-1/3">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mb-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16" /></svg>
-            <span class="text-[10px] font-bold">รายชื่อร้าน</span>
-        </button>
-        <button onclick="UI.switchTab('map')" id="nav-map" class="nav-item flex flex-col items-center p-2 w-1/3">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mb-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" /></svg>
-            <span class="text-[10px] font-bold">แผนที่</span>
-        </button>
+    <nav id="bottom-nav" class="fixed bottom-0 w-full bg-white border-t flex justify-around p-2 pb-6 hidden shadow-[0_-2px_10px_rgba(0,0,0,0.05)]">
+        <button onclick="UI.tab('dash')" id="n-dash" class="nav-item active flex flex-col items-center w-1/3"><span class="text-[10px] font-bold uppercase mt-1">Dashboard</span></button>
+        <button onclick="UI.tab('stores')" id="n-stores" class="nav-item flex flex-col items-center w-1/3"><span class="text-[10px] font-bold uppercase mt-1">Stores</span></button>
+        <button onclick="UI.tab('route')" id="n-route" class="nav-item flex flex-col items-center w-1/3"><span class="text-[10px] font-bold uppercase mt-1">Route</span></button>
     </nav>
 
-    <div id="toast" class="fixed top-4 left-1/2 transform -translate-x-1/2 -translate-y-20 opacity-0 bg-gray-900 text-white px-5 py-3 rounded-full shadow-2xl transition-all duration-300 z-[99999] text-sm font-bold flex items-center gap-2 pointer-events-none border border-gray-700"></div>
-
     <script>
-        // ==========================================
-        // 🔑 FIREBASE CONFIGURATION
-        // ==========================================
-        const firebaseConfig = {
-            apiKey: "AIzaSyDCYxJf0eHryjVJ8_INoWw_uTN14UMaEWE",
-            authDomain: "route-plan-71e2e.firebaseapp.com",
-            projectId: "route-plan-71e2e",
-            storageBucket: "route-plan-71e2e.firebasestorage.app",
-            messagingSenderId: "486778971661",
-            appId: "1:486778971661:web:2ef83fa1eeb09ec6665744"
-        };
+        const firebaseConfig = { apiKey: "AIzaSyDCYxJf0eHryjVJ8_INoWw_uTN14UMaEWE", authDomain: "route-plan-71e2e.firebaseapp.com", projectId: "route-plan-71e2e", storageBucket: "route-plan-71e2e.firebasestorage.app", messagingSenderId: "486778971661", appId: "1:486778971661:web:2ef83fa1eeb09ec6665744" };
         firebase.initializeApp(firebaseConfig);
         const db = firebase.firestore();
-        const docRef = db.collection('appData').doc('v1_main');
 
-        const COLORS = ["#ef4444", "#3b82f6", "#22c55e", "#f97316", "#a855f7", "#06b6d4", "#eab308", "#ec4899", "#14b8a6", "#84cc16", "#6366f1", "#f43f5e", "#8b5cf6", "#10b981", "#d946ef", "#0ea5e9", "#f59e0b", "#991b1b", "#1e40af", "#166534"];
+        let State = { myRoute: "", allStores: [], currentDay: "" };
+        let map = null, mapMarkers = [], sortableList = null;
 
-        let myRoute = "";       // ล็อคสายตาม Login
-        let currentDay = "";    
-        let filteredStores = []; 
-        let unsubscribe = null;
-
-        let map = null, mapMarkers = [], mapPolyline = null, sortableList = null;
-
-        // UI Variables
-        const elLoader = document.getElementById('loader');
-        const elLogin = document.getElementById('login-screen');
-        const elMainHeader = document.getElementById('main-header');
-        const elMainContent = document.getElementById('main-content');
-        const elBottomNav = document.getElementById('bottom-nav');
-        const elDaySelect = document.getElementById('day-select');
-        const elList = document.getElementById('store-list');
-
-        // ==========================================
-        // 📱 UI & TAB MANAGEMENT
-        // ==========================================
-        const UI = {
-            switchTab: (tabId) => {
-                // Update buttons
-                document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
-                document.getElementById('nav-' + tabId).classList.add('active');
-                
-                // Update content screens
-                document.querySelectorAll('.app-tab').forEach(el => el.classList.remove('active'));
-                document.getElementById('tab-' + tabId).classList.add('active');
-
-                // If map tab, trigger map resize
-                if(tabId === 'map' && map) {
-                    setTimeout(() => { map.invalidateSize(); fitMapToPins(); }, 100);
-                }
-            },
-            showToast: (msg, type='success') => {
-                const t = document.getElementById('toast');
-                let icon = type === 'error' ? '❌' : '✅';
-                t.innerHTML = `${icon} ${msg}`;
-                t.classList.remove('-translate-y-20', 'opacity-0');
-                setTimeout(() => t.classList.add('-translate-y-20', 'opacity-0'), 2500);
-            }
-        };
-
-        // ==========================================
-        // 🔐 AUTH & CORE LOGIC
-        // ==========================================
         const App = {
-            checkAuth: () => {
-                let savedRoute = localStorage.getItem('logged_in_route');
-                if (savedRoute) {
-                    myRoute = savedRoute;
-                    App.showMainApp();
-                } else {
-                    elLogin.style.display = 'flex';
-                }
+            login: () => { 
+                let r = document.getElementById('login-input').value.trim().toUpperCase(); 
+                if(r) { State.myRoute = r; localStorage.setItem('route_v1', r); App.start(); } 
             },
-            
-            login: () => {
-                let input = document.getElementById('login-input').value.trim().toUpperCase();
-                if(!input) return UI.showToast('กรุณากรอกรหัสสาย', 'error');
-                
-                myRoute = input;
-                localStorage.setItem('logged_in_route', myRoute);
-                App.showMainApp();
-            },
+            logout: () => { localStorage.clear(); window.location.reload(); },
+            start: () => {
+                let saved = localStorage.getItem('route_v1'); if(!saved) return;
+                State.myRoute = saved;
+                document.getElementById('login-screen').style.display='none';
+                document.getElementById('main-header').classList.remove('hidden');
+                document.getElementById('main-content').classList.remove('hidden');
+                document.getElementById('bottom-nav').classList.remove('hidden');
+                document.getElementById('route-label').innerText = State.myRoute;
 
-            logout: () => {
-                if(confirm("ต้องการออกจากระบบใช่หรือไม่?")) {
-                    localStorage.removeItem('logged_in_route');
-                    localStorage.removeItem('sales_last_day_' + myRoute);
-                    if(unsubscribe) unsubscribe();
-                    window.location.reload();
-                }
-            },
-
-            showMainApp: () => {
-                elLogin.style.display = 'none';
-                elMainHeader.style.display = 'block';
-                elMainContent.style.display = 'block';
-                elBottomNav.style.display = 'flex';
-                document.getElementById('display-route').innerText = myRoute;
-                
-                initMap();
-                App.startListening();
-            },
-
-            forceSync: () => {
-                elLoader.style.display = 'flex';
-                if(unsubscribe) unsubscribe();
-                setTimeout(() => App.startListening(), 500);
-            },
-
-            startListening: () => {
-                elLoader.style.display = 'flex';
-                
-                unsubscribe = docRef.onSnapshot(doc => {
-                    if (!doc.exists) { 
-                        App.handleError("ไม่พบฐานข้อมูลกลาง"); return; 
-                    }
-
-                    let data = doc.data();
-                    if(!data || !data.routes || !data.routes[myRoute]) {
-                        App.handleError(`ไม่พบข้อมูลคิวงานของสาย [${myRoute}]`); return;
-                    }
-
-                    // ได้ข้อมูลสายตัวเองแล้ว
-                    let storesInRoute = data.routes[myRoute];
-                    
-                    document.getElementById('sync-status').innerText = "🟢 อัปเดตล่าสุด";
-                    document.getElementById('sync-status').className = "text-[10px] bg-emerald-100 px-2 py-0.5 rounded-full text-emerald-600 font-bold";
-
-                    processData(storesInRoute);
-                    
-                    setTimeout(() => { elLoader.style.display = 'none'; }, 300);
-
-                }, err => {
-                    document.getElementById('sync-status').innerText = "🔴 ออฟไลน์";
-                    document.getElementById('sync-status').className = "text-[10px] bg-red-100 px-2 py-0.5 rounded-full text-red-600 font-bold";
-                    elLoader.style.display = 'none';
-                    UI.showToast("ขาดการเชื่อมต่ออินเทอร์เน็ต", 'error');
+                db.collection('appData').doc('v1_main').onSnapshot(doc => {
+                    State.allStores = doc.exists && doc.data().routes ? doc.data().routes[State.myRoute] || [] : [];
+                    Processor.run();
                 });
-            },
-
-            handleError: (msg) => {
-                elLoader.style.display = 'none';
-                elList.innerHTML = `<div class="bg-red-50 p-6 rounded-2xl text-center border border-red-100"><p class="text-red-600 font-bold mb-2">⚠️ ${msg}</p><button onclick="App.logout()" class="text-xs text-white bg-red-500 px-4 py-2 rounded-lg font-bold shadow-sm">ลองรหัสสายอื่น</button></div>`;
-                elDaySelect.innerHTML = `<option value="">-- ไม่พบข้อมูล --</option>`;
-                document.getElementById('dash-total-stores').innerText = '0';
-                MapCtrl.clearAll();
             }
         };
 
-        // ==========================================
-        // ⚙️ DATA PROCESSING
-        // ==========================================
-        function processData(storesInRoute) {
-            let daysSet = new Set();
-            storesInRoute.forEach(s => { if(Array.isArray(s.days)) s.days.forEach(d => daysSet.add(d)); });
-            let sortedDays = Array.from(daysSet).sort((a,b) => parseInt(a.replace('Day ','')) - parseInt(b.replace('Day ','')));
+        const UI = {
+            tab: (id) => { 
+                document.querySelectorAll('.app-tab').forEach(t=>t.classList.remove('active')); 
+                document.getElementById('tab-'+id).classList.add('active'); 
+                document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active')); 
+                document.getElementById('n-'+id).classList.add('active'); 
+                if(id==='route' && map) setTimeout(()=>map.invalidateSize(), 200); 
+            }
+        };
 
-            if(sortedDays.length === 0) {
-                elDaySelect.innerHTML = `<option value="">-- ยังไม่มีคิววิ่งงาน --</option>`;
-                elDaySelect.disabled = true; currentDay = "";
-            } else {
-                elDaySelect.disabled = false;
-                let dayHtml = sortedDays.map(d => `<option value="${d}">${d.replace('Day ', 'ประจำวันที่ ')}</option>`).join('');
-                if(elDaySelect.innerHTML !== dayHtml) elDaySelect.innerHTML = dayHtml;
-
-                let savedDay = localStorage.getItem('sales_last_day_' + myRoute);
-                if (savedDay && sortedDays.includes(savedDay)) currentDay = savedDay;
-                else if (!currentDay || !sortedDays.includes(currentDay)) currentDay = sortedDays[0]; 
+        const Processor = {
+            run: () => {
+                document.getElementById('sum-total').innerText = State.allStores.length;
+                document.getElementById('all-stores').innerHTML = State.allStores.map(s => `<div class="bg-white p-4 rounded-2xl border shadow-sm font-bold text-sm">${s.name} <p class="text-[10px] text-gray-400 font-normal">ID: ${s.id}</p></div>`).join('');
                 
-                elDaySelect.value = currentDay;
-                localStorage.setItem('sales_last_day_' + myRoute, currentDay);
+                let ds = new Set(); State.allStores.forEach(s => s.days.forEach(d=>ds.add(d)));
+                let sorted = Array.from(ds).sort();
+                document.getElementById('day-select').innerHTML = sorted.map(d=>`<option value="${d}">${d}</option>`).join('');
+                if(!State.currentDay) State.currentDay = sorted[0];
+                Processor.route();
+            },
+            route: () => {
+                let list = State.allStores.filter(s=>s.days.includes(State.currentDay)).sort((a,b)=>(a.seqs?.[State.currentDay]||99)-(b.seqs?.[State.currentDay]||99));
+                document.getElementById('sum-today').innerText = list.length;
+                document.getElementById('route-list').innerHTML = list.map((s,i) => `<div data-id="${s.id}" class="bg-white p-3 rounded-2xl border shadow-sm flex items-center gap-3"><div class="w-8 h-8 bg-blue-600 text-white rounded-full flex items-center justify-center font-black text-xs">${s.seqs?.[State.currentDay]||i+1}</div><div class="flex-1 font-bold text-sm">${s.name}</div></div>`).join('');
+                MapCtrl.draw(list);
             }
-
-            if(currentDay) {
-                filteredStores = storesInRoute.filter(s => Array.isArray(s.days) && s.days.includes(currentDay));
-                filteredStores.sort((a, b) => {
-                    let seqA = (a.seqs && a.seqs[currentDay]) ? a.seqs[currentDay] : 9999;
-                    let seqB = (b.seqs && b.seqs[currentDay]) ? b.seqs[currentDay] : 9999;
-                    return seqA - seqB;
-                });
-            } else { filteredStores = []; }
-
-            // อัปเดตเลขบน Dashboard
-            document.getElementById('dash-total-stores').innerText = filteredStores.length;
-
-            renderList(storesInRoute); 
-            drawMap();
-        }
-
-        elDaySelect.addEventListener('change', (e) => { 
-            currentDay = e.target.value; 
-            localStorage.setItem('sales_last_day_' + myRoute, currentDay);
-            
-            // ใช้ข้อมูลเดิมที่มีอยู่ใน Firebase มารีรัน ไม่ต้องโหลดใหม่
-            docRef.get().then(doc => {
-                if(doc.exists) processData(doc.data().routes[myRoute] || []);
-            });
-        });
-
-        // ==========================================
-        // 📋 LIST & MAP RENDERING
-        // ==========================================
-        function renderList(fullStoresData) {
-            if(filteredStores.length === 0) {
-                elList.innerHTML = `<div class="bg-white p-6 rounded-xl text-center border border-gray-100 text-gray-400 font-bold text-sm">ไม่มีร้านที่ต้องเข้าเยี่ยม 🎉</div>`;
-                if(sortableList) sortableList.destroy(); return;
-            }
-
-            let dNum = parseInt(currentDay.replace('Day ', '')) || 1;
-            let color = COLORS[(dNum - 1) % COLORS.length];
-
-            let html = filteredStores.map((store, i) => {
-                let seq = store.seqs && store.seqs[currentDay] ? store.seqs[currentDay] : (i+1);
-                let navLink = `https://www.google.com/maps/dir/?api=1&destination=${store.lat},${store.lng}&travelmode=driving`;
-
-                return `
-                <div data-id="${store.id}" class="store-item bg-white p-3 rounded-2xl border border-gray-100 flex items-center gap-3 relative shadow-[0_2px_10px_rgba(0,0,0,0.03)] mb-3">
-                    <div class="absolute top-0 left-0 w-1.5 h-full rounded-l-2xl" style="background-color: ${color};"></div>
-                    
-                    <div class="drag-handle p-2 -ml-1 text-gray-300 hover:text-gray-500 bg-gray-50 rounded-xl">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 8h16M4 16h16" /></svg>
-                    </div>
-
-                    <div class="w-10 h-10 rounded-full flex items-center justify-center text-white font-black text-lg shrink-0 shadow-sm" style="background-color: ${color};">
-                        ${seq}
-                    </div>
-                    
-                    <div class="flex-1 overflow-hidden pr-1 cursor-pointer" onclick="UI.switchTab('map'); focusOnMap(${store.lat}, ${store.lng})">
-                        <h3 class="font-bold text-gray-800 text-[15px] truncate leading-tight">${store.name}</h3>
-                        <p class="text-[11px] text-gray-500 font-mono mt-0.5 text-blue-500">รหัส: ${store.id}</p>
-                    </div>
-                    
-                    <a href="${navLink}" target="_blank" class="bg-blue-600 hover:bg-blue-700 text-white p-3 rounded-xl shadow-md shrink-0 active:scale-95 transition-transform flex flex-col items-center justify-center">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                    </a>
-                </div>`;
-            }).join('');
-
-            elList.innerHTML = html;
-
-            if(sortableList) sortableList.destroy();
-            sortableList = Sortable.create(elList, {
-                handle: '.drag-handle',
-                animation: 250,
-                ghostClass: 'sortable-ghost',
-                delay: 150, delayOnTouchOnly: true,
-                onEnd: () => handleDragEnd(fullStoresData)
-            });
-        }
-
-        function handleDragEnd(fullStoresData) {
-            let items = elList.querySelectorAll('.store-item');
-            
-            items.forEach((item, index) => {
-                let id = item.getAttribute('data-id');
-                let targetStore = fullStoresData.find(s => String(s.id) === String(id));
-                if(targetStore) {
-                    if(!targetStore.seqs) targetStore.seqs = {};
-                    targetStore.seqs[currentDay] = index + 1; 
-                }
-            });
-
-            UI.showToast("⏳ กำลังบันทึกคิว...");
-
-            docRef.update({ [`routes.${myRoute}`]: fullStoresData })
-            .then(() => UI.showToast(`บันทึกคิวใหม่สำเร็จ`))
-            .catch(err => UI.showToast("บันทึกไม่สำเร็จ", "error"));
-        }
-
-        // ==========================================
-        // 🗺️ MAP FUNCTIONS
-        // ==========================================
-        function initMap() {
-            if (map !== null) return; 
-            map = L.map('map', { zoomControl: false }).setView([14.4745, 100.1222], 10);
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(map);
-            document.getElementById('btn-fit-map').addEventListener('click', fitMapToPins);
-        }
+        };
 
         const MapCtrl = {
-            clearAll: () => {
-                mapMarkers.forEach(m => { if(map) map.removeLayer(m); }); mapMarkers = [];
-                if(mapPolyline && map) { map.removeLayer(mapPolyline); mapPolyline = null; }
+            init: () => { if(!map) { map = L.map('map', {zoomControl:false}).setView([14, 100], 10); L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map); } },
+            draw: (list) => {
+                MapCtrl.init(); mapMarkers.forEach(m=>map.removeLayer(m)); mapMarkers=[];
+                list.forEach(s => { let m = L.circleMarker([s.lat, s.lng], {radius:8, color:'#fff', fillColor:'#2563eb', fillOpacity:1}).addTo(map); mapMarkers.push(m); });
+                if(mapMarkers.length) map.fitBounds(new L.featureGroup(mapMarkers).getBounds(), {padding:[20,20]});
             }
         };
 
-        function drawMap() {
-            if(!map) return;
-            MapCtrl.clearAll();
-            if(filteredStores.length === 0) return;
-
-            let dNum = parseInt(currentDay.replace('Day ', '')) || 1;
-            let color = COLORS[(dNum - 1) % COLORS.length];
-            let coords = [];
-
-            filteredStores.forEach((store, i) => {
-                let seq = store.seqs && store.seqs[currentDay] ? store.seqs[currentDay] : (i+1);
-                coords.push([store.lat, store.lng]);
-
-                let iconHtml = `
-                    <svg viewBox="0 0 24 24" width="36" height="48" style="filter: drop-shadow(0px 4px 5px rgba(0,0,0,0.4)); background:none;">
-                        <path d="M12 0C7.5 0 4 3.5 4 8c0 5.25 8 16 8 16s8-10.75 8-16c0-4.42-3.58-8-8-8z" fill="${color}" stroke="#fff" stroke-width="2.5"/>
-                        <circle cx="12" cy="9.5" r="8" fill="#fff" />
-                        <text x="12" y="14" font-size="12" font-weight="900" font-family="sans-serif" fill="#000" text-anchor="middle">${seq}</text>
-                    </svg>`;
-
-                let icon = L.divIcon({ html: iconHtml, className: '', iconSize: [36, 48], iconAnchor: [18, 48], popupAnchor: [0, -48] });
-                let m = L.marker([store.lat, store.lng], {icon: icon}).addTo(map);
-                
-                let navLink = `https://www.google.com/maps/dir/?api=1&destination=${store.lat},${store.lng}&travelmode=driving`;
-                m.bindPopup(`<div class="text-center pb-1"><b class="text-sm block mb-1">${store.name}</b><a href="${navLink}" target="_blank" class="bg-blue-600 text-white text-[10px] px-3 py-1.5 rounded-lg font-bold shadow-sm inline-block mt-1">นำทางไปที่นี่</a></div>`, {closeButton: false});
-                mapMarkers.push(m);
-            });
-
-            if(coords.length > 1) {
-                mapPolyline = L.polyline(coords, {color: color, weight: 4, opacity: 0.7, dashArray: '5, 8'}).addTo(map);
-            }
-        }
-
-        function fitMapToPins() {
-            if(mapMarkers.length > 0 && map) {
-                let group = new L.featureGroup(mapMarkers);
-                map.fitBounds(group.getBounds(), {padding: [40, 40]});
-            }
-        }
-
-        function focusOnMap(lat, lng) {
-            if(map) { 
-                map.setView([lat, lng], 17, { animate: true }); 
-            }
-        }
-
-        // Start checking login state
-        document.addEventListener('DOMContentLoaded', App.checkAuth);
+        if(localStorage.getItem('route_v1')) App.start();
     </script>
 </body>
 </html>
