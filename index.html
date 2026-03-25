@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Route Planner V72 (Data Merge & KPI)</title>
+    <title>Route Admin (Sidebar & Data Management)</title>
     
     <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore-compat.js"></script>
@@ -12,846 +12,522 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    
     <style>
         body { font-family: 'Prompt', sans-serif; background-color: #f8fafc; margin: 0; padding: 0; overflow: hidden; }
         #map { height: 100%; width: 100%; z-index: 1; }
         ::-webkit-scrollbar { width: 6px; }
-        ::-webkit-scrollbar-track { background: #f1f1f1; }
         ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        
         .tab-btn { border-bottom: 2px solid transparent; color: #64748b; font-weight: 500; transition: all 0.2s; font-size: 13px; }
         .tab-btn.active { border-bottom: 2px solid #2563eb; color: #1e40af; font-weight: 700; }
-        .color-dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 5px; box-shadow: 0 1px 2px rgba(0,0,0,0.2); }
-        .custom-svg-icon { background: none; border: none; filter: drop-shadow(0px 3px 4px rgba(0,0,0,0.4)); }
-        .leaflet-popup-content-wrapper { border-radius: 12px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1); }
-        .f2-badge { background: #ef4444; color: white; padding: 1px 6px; border-radius: 10px; font-size: 9px; font-weight: bold; margin-left: 5px; }
+        
+        /* Sidebar Menu Styles */
+        .sidebar-menu { border-left: 4px solid transparent; color: #94a3b8; transition: all 0.2s; }
+        .sidebar-menu:hover { background-color: #1e293b; color: #fff; }
+        .sidebar-menu.active { border-left-color: #6366f1; background-color: #1e293b; color: #fff; font-weight: 700; }
+
         .draw-cursor { cursor: crosshair !important; }
         #loader { display: none; position: absolute; inset: 0; background: rgba(255,255,255,0.9); z-index: 99999; justify-content: center; align-items: center; flex-direction: column; backdrop-filter: blur(2px); }
-        .spinner { border: 4px solid #f3f3f3; border-top: 4px solid #4f46e5; border-radius: 50%; width: 50px; height: 50px; animation: spin 1s linear infinite; margin-bottom: 15px; }
+        .spinner { border: 4px solid #f3f3f3; border-top: 4px solid #4f46e5; border-radius: 50%; width: 50px; height: 50px; animation: spin 1s linear infinite; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
 </head>
-<body class="flex flex-col h-screen relative">
+<body class="flex h-screen relative">
 
-    <div id="loader">
-        <div class="spinner"></div>
-        <p id="loader-text" class="text-indigo-700 font-bold text-lg">กำลังประมวลผล...</p>
-        <p id="loader-subtext" class="text-gray-500 text-sm mt-2 font-medium"></p>
-    </div>
+    <div id="loader"><div class="spinner"></div><p id="loader-text" class="mt-4 font-bold text-indigo-700">กำลังประมวลผล...</p></div>
 
-    <div id="save-toast" class="fixed bottom-8 left-1/2 transform -translate-x-1/2 translate-y-24 opacity-0 bg-gray-900 text-white px-5 py-2.5 rounded-full shadow-2xl transition-all duration-300 z-[9999] text-sm font-bold flex items-center gap-2 pointer-events-none border border-gray-700">
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" /></svg>
-        <span id="toast-msg">เปลี่ยนแปลงข้อมูลเรียบร้อย</span>
-    </div>
-
-    <div class="h-16 bg-gray-900 text-white flex items-center justify-between px-6 shadow-md z-[5000] relative shrink-0 border-b-4 border-indigo-600">
-        <div class="flex items-center gap-3">
-            <h1 class="text-xl font-black tracking-wide text-indigo-400 mr-2 hidden sm:block">Route<span class="text-white">Admin</span><span class="text-emerald-400 ml-1 text-sm font-bold">V72</span></h1>
-            
-            <div class="flex items-center bg-gray-800 rounded-lg p-1 border border-gray-700">
-                <span class="text-xs text-gray-400 px-2 hidden md:inline">สายขาย:</span>
-                <select id="routeSelector" onchange="App.switchRoute(this.value)" class="bg-gray-900 text-white border-none text-sm focus:ring-0 outline-none font-bold py-1 px-2 rounded cursor-pointer max-w-[120px] sm:max-w-[200px] truncate"></select>
-                <div class="flex items-center border-l border-gray-700 ml-1 pl-1">
-                    <button onclick="App.renameRoute()" class="text-gray-400 hover:text-white px-2 py-1 transition" title="เปลี่ยนชื่อสาย">✏️</button>
-                    <button onclick="App.deleteRoute()" class="text-gray-400 hover:text-red-400 px-2 py-1 transition" title="ลบสายวิ่ง">🗑️</button>
-                </div>
-            </div>
-            <button onclick="App.addRoute()" class="bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-md text-xs font-bold shadow-sm transition">+ เพิ่มสาย</button>
+    <aside class="w-48 bg-slate-900 flex flex-col shrink-0 z-[6000] shadow-2xl">
+        <div class="h-16 flex items-center justify-center bg-slate-950 border-b border-slate-800">
+            <h1 class="text-xl font-black text-indigo-400 tracking-wider">R<span class="text-white">Admin</span></h1>
         </div>
-        
-        <div class="flex items-center gap-3">
-            <div id="db-save-status" class="hidden items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-lg border transition-all duration-300"></div>
-            <button onclick="UI.showSummaryModal()" class="bg-gray-800 border border-gray-600 hover:bg-gray-700 px-4 py-1.5 rounded-lg text-sm font-bold shadow-md transition ml-2 flex items-center gap-2">📊 ภาพรวม</button>
-        </div>
-    </div>
-
-    <div class="flex-1 flex overflow-hidden">
-        
-        <div class="w-2/3 relative h-full">
-            <div id="map"></div>
-            
-            <button onclick="MapCtrl.fitToStores()" class="absolute bottom-6 right-6 z-[400] bg-white p-3 rounded-xl shadow-lg border border-gray-200 text-indigo-600 hover:bg-indigo-50 focus:outline-none transition active:scale-95" title="ซูมดูร้านทั้งหมด">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" /></svg>
+        <nav class="flex-1 py-4 space-y-1">
+            <button onclick="Nav.go('planning')" id="nav-planning" class="sidebar-menu active w-full flex items-center px-5 py-3.5 text-sm font-bold">
+                📍 วางแผนคิวงาน
             </button>
+            <button onclick="Nav.go('data')" id="nav-data" class="sidebar-menu w-full flex items-center px-5 py-3.5 text-sm font-bold">
+                📊 จัดการข้อมูล
+            </button>
+        </nav>
+        <div class="p-4 border-t border-slate-800">
+            <div id="db-status" class="text-[9px] font-bold px-2 py-1.5 rounded bg-emerald-900/30 text-emerald-400 border border-emerald-800 text-center uppercase tracking-widest">✅ Online</div>
+        </div>
+    </aside>
 
-            <button id="clearRoadBtn" onclick="MapCtrl.clearRoad()" class="hidden absolute top-4 left-4 z-[400] bg-white text-red-600 font-bold px-4 py-2 rounded-xl shadow-lg border border-red-200 active:scale-95">✕ ซ่อนเส้นทางถนน</button>
-            
-            <div id="mapTools" class="absolute top-4 right-4 z-[400] flex flex-col gap-3 items-end">
-                <div class="bg-white px-3 py-2 rounded-xl shadow-lg border border-gray-200 flex items-center gap-2">
-                    <input type="checkbox" id="toggleLines" onchange="MapCtrl.drawLines()" class="w-5 h-5 text-indigo-600 cursor-pointer">
-                    <label for="toggleLines" class="text-sm font-bold text-gray-800 cursor-pointer">🔗 แสดงเส้นโยงร้าน</label>
+    <div class="flex-1 flex flex-col overflow-hidden relative">
+
+        <div id="page-planning" class="flex-1 flex flex-col h-full absolute inset-0">
+            <div class="h-16 bg-white text-gray-800 flex items-center justify-between px-6 shadow-sm z-[5000] shrink-0 border-b border-gray-200">
+                <div class="flex items-center gap-3">
+                    <span class="text-sm font-bold text-gray-500">สายวิ่งปัจจุบัน:</span>
+                    <div class="flex items-center bg-gray-100 rounded-lg p-1 border border-gray-200 shadow-inner">
+                        <select id="routeSelector" onchange="App.switchRoute(this.value)" class="bg-gray-100 text-indigo-700 border-none text-sm font-bold py-1 px-2 outline-none cursor-pointer"></select>
+                        <div class="flex items-center border-l border-gray-300 ml-1 pl-1">
+                            <button onclick="App.renameRoute()" class="px-2 text-gray-500 hover:text-indigo-600 transition" title="เปลี่ยนชื่อ">✏️</button>
+                            <button onclick="App.deleteRoute()" class="px-2 text-gray-500 hover:text-red-500 transition" title="ลบสาย">🗑️</button>
+                        </div>
+                    </div>
+                    <button onclick="App.addRoute()" class="bg-indigo-50 text-indigo-600 border border-indigo-200 hover:bg-indigo-100 px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm transition">+ เพิ่มสาย</button>
                 </div>
-                <button onclick="Lasso.toggle()" class="bg-gray-900 hover:bg-black text-white px-4 py-2.5 rounded-xl shadow-lg text-sm font-bold flex items-center gap-2 transition border border-gray-700 active:scale-95">
-                    ✏️ วาดเลือกพื้นที่ (Lasso)
+                <button onclick="UI.showSummaryModal()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-xl text-sm font-bold shadow-md transition flex items-center gap-2">
+                    📊 สรุปภาพรวม
                 </button>
             </div>
 
-            <div id="lassoPanel" class="hidden absolute top-4 right-4 z-[400] bg-white p-4 rounded-2xl shadow-2xl border-2 border-gray-900 flex flex-col gap-3 w-64">
-                <p class="text-sm font-black text-gray-900 text-center">✏️ โหมดวาดพื้นที่</p>
-                <div class="bg-gray-100 p-3 rounded-lg text-xs text-gray-700 leading-relaxed font-medium">
-                    คลิกบนแผนที่อย่างน้อย 3 จุด เพื่อล้อมกรอบเลือกร้านค้า
+            <div class="flex-1 flex overflow-hidden">
+                <div class="w-2/3 relative h-full">
+                    <div id="map"></div>
+                    <button id="clearRoadBtn" onclick="MapCtrl.clearRoad()" class="hidden absolute top-4 left-4 z-[400] bg-white text-red-600 font-bold px-4 py-2 rounded-xl shadow-lg border border-red-200">✕ ซ่อนเส้นทาง</button>
+                    <div id="mapTools" class="absolute top-4 right-4 z-[400] flex flex-col gap-3 items-end">
+                        <div class="bg-white px-3 py-2 rounded-xl shadow-lg flex items-center gap-2 border">
+                            <input type="checkbox" id="toggleLines" onchange="MapCtrl.drawLines()" class="w-4 h-4 cursor-pointer text-indigo-600">
+                            <label for="toggleLines" class="text-xs font-bold text-gray-700 cursor-pointer">🔗 แสดงเส้นโยง</label>
+                        </div>
+                        <button onclick="Lasso.toggle()" id="lassoBtn" class="bg-gray-900 text-white px-4 py-2.5 rounded-xl shadow-lg text-sm font-bold border border-gray-700 active:scale-95 transition">✏️ วาดพื้นที่ (Lasso)</button>
+                    </div>
+                    <div id="lassoPanel" class="hidden absolute top-4 right-4 z-[400] bg-white p-4 rounded-2xl shadow-2xl border-2 border-gray-900 flex flex-col gap-3 w-60">
+                        <p class="text-xs font-black text-center uppercase tracking-wider">โหมดเลือกพื้นที่</p>
+                        <button onclick="Lasso.finish()" class="bg-emerald-500 text-white py-2 rounded-lg font-bold text-sm">✅ ยืนยันการเลือก</button>
+                        <button onclick="Lasso.cancel()" class="bg-red-50 text-red-500 py-2 rounded-lg font-bold text-sm">❌ ยกเลิก</button>
+                    </div>
                 </div>
-                <button onclick="Lasso.finish()" class="bg-emerald-500 hover:bg-emerald-600 text-white py-2.5 rounded-xl text-sm font-bold shadow-md transition active:scale-95">✅ ยืนยันการเลือก</button>
-                <button onclick="Lasso.cancel()" class="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 py-2 rounded-xl text-sm font-bold transition active:scale-95">❌ ยกเลิก</button>
+
+                <div class="w-1/3 bg-white flex flex-col h-full z-10 border-l border-gray-200 shadow-[-5px_0_15px_rgba(0,0,0,0.05)]">
+                    <div class="flex border-b text-sm bg-gray-50 shrink-0">
+                        <button onclick="UI.switchTab('tab1')" id="btn-tab1" class="tab-btn active flex-1 py-4">1. อัปโหลด</button>
+                        <button onclick="UI.switchTab('tab2')" id="btn-tab2" class="tab-btn flex-1 py-4">2. จัดสาย</button>
+                        <button onclick="UI.switchTab('tab3')" id="btn-tab3" class="tab-btn flex-1 py-4">3. แก้ไข</button>
+                        <button onclick="UI.switchTab('tab4')" id="btn-tab4" class="tab-btn flex-1 py-4">4. คิวงาน</button>
+                    </div>
+
+                    <div class="flex-1 overflow-y-auto p-4 bg-gray-50/50">
+                        <div id="tab1" class="block space-y-4">
+                            <div class="bg-indigo-50 border-2 border-dashed border-indigo-300 p-6 rounded-2xl text-center cursor-pointer hover:bg-indigo-100 transition" onclick="document.getElementById('fileUpload').click()">
+                                <p class="text-2xl mb-2">📍</p>
+                                <p class="text-xs font-bold text-indigo-800 uppercase tracking-widest">อัปโหลดไฟล์ร้านค้า (Master)</p>
+                            </div>
+                            <input type="file" id="fileUpload" class="hidden">
+                            <div id="list-upload" class="space-y-2 mt-4"></div>
+                        </div>
+
+                        <div id="tab2" class="hidden space-y-4">
+                            <div class="bg-gray-900 text-white p-4 rounded-2xl shadow-lg">
+                                <p class="text-xs font-bold mb-3 text-indigo-400">🤖 AI ROUTE BUILDER</p>
+                                <div class="flex justify-between items-center mb-4">
+                                    <span class="text-xs">จำนวนวัน:</span>
+                                    <input type="number" id="ai-days" value="24" class="bg-gray-800 w-16 text-center rounded border border-gray-700 py-1 font-bold outline-none text-white">
+                                </div>
+                                <button onclick="AI.run()" class="w-full bg-indigo-500 hover:bg-indigo-600 transition py-2.5 rounded-xl font-bold text-sm shadow-md">✨ คำนวณแบบ AI</button>
+                            </div>
+                            <div class="bg-white/80 backdrop-blur p-2 border-b sticky top-0 z-10 flex gap-2">
+                                <select id="assign-day" class="flex-1 p-2 border border-gray-300 rounded-xl text-sm font-bold outline-none"></select>
+                                <button onclick="StoreMgr.assignSelected()" class="bg-indigo-600 hover:bg-indigo-700 transition text-white px-4 rounded-xl font-bold text-sm shadow">จัดลงวัน</button>
+                            </div>
+                            <div id="list-unassigned" class="space-y-2 mt-2"></div>
+                        </div>
+
+                        <div id="tab3" class="hidden flex flex-col h-full">
+                            <div class="sticky top-0 bg-gray-50 pb-2 z-10">
+                                <input type="text" onkeyup="UI.searchList('list-assigned', this.value)" placeholder="ค้นหาร้าน..." class="w-full p-3 border border-gray-300 rounded-xl text-sm outline-none shadow-sm focus:ring-2 focus:ring-indigo-500">
+                            </div>
+                            <div id="list-assigned" class="space-y-2 pb-20"></div>
+                        </div>
+
+                        <div id="tab4" class="hidden">
+                            <div class="bg-emerald-50 border border-emerald-100 p-3 rounded-xl mb-4 text-xs text-emerald-800 font-bold">
+                                💡 คลิกที่กล่องวันที่ เพื่อดูรายชื่อและวาดเส้นทาง GPS
+                            </div>
+                            <div id="list-summary" class="grid grid-cols-2 gap-3 pb-20"></div>
+                        </div>
+                    </div>
+
+                    <div class="p-4 border-t bg-white flex justify-between items-center shadow-inner shrink-0">
+                        <div class="text-xs font-bold text-gray-400 uppercase">Stores: <span id="stat-total" class="text-gray-900 text-lg">0</span></div>
+                        <button onclick="ExcelIO.export()" class="bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2.5 rounded-xl text-xs font-bold shadow-lg active:scale-95 transition flex items-center gap-2">
+                            📥 โหลดแผนงาน
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
 
-        <div class="w-1/3 bg-white shadow-[-5px_0_15px_rgba(0,0,0,0.05)] flex flex-col h-full z-10 border-l border-gray-200">
-            
-            <div class="flex border-b border-gray-200 text-sm bg-gray-50 shrink-0">
-                <button onclick="UI.switchTab('tab1')" id="btn-tab1" class="tab-btn active flex-1 py-3 px-1">1. ข้อมูล</button>
-                <button onclick="UI.switchTab('tab2')" id="btn-tab2" class="tab-btn flex-1 py-3 px-1">2. จัดสาย</button>
-                <button onclick="UI.switchTab('tab3')" id="btn-tab3" class="tab-btn flex-1 py-3 px-1">3. แก้ไข</button>
-                <button onclick="UI.switchTab('tab4')" id="btn-tab4" class="tab-btn flex-1 py-3 px-1">4. สรุป</button>
-            </div>
-
-            <div class="flex-1 overflow-y-auto p-4 bg-gray-50/50">
-                
-                <div id="tab1" class="block space-y-5">
-                    
-                    <div class="bg-white p-4 rounded-2xl border border-gray-200 shadow-sm">
-                        <h3 class="font-bold text-sm text-gray-800 mb-2 flex items-center gap-2">📍 ข้อมูลพิกัดร้านค้า (Master Data)</h3>
-                        <p class="text-[10px] text-gray-500 mb-3 leading-tight">อัปโหลดไฟล์ที่มี รหัสลูกค้า, ละติจูด, ลองจิจูด</p>
-                        
-                        <div onclick="document.getElementById('fileUpload').click()" class="border-2 border-dashed border-indigo-300 bg-indigo-50 rounded-xl p-4 text-center cursor-pointer hover:bg-indigo-100 transition mb-3">
-                            <p class="text-xl mb-1">📂</p>
-                            <p class="text-xs text-indigo-800 font-bold">อัปโหลดไฟล์แผนที่/สายวิ่ง</p>
-                        </div>
-                        <input type="file" id="fileUpload" accept=".xlsx, .xls, .csv" class="hidden">
-                        
-                        <div class="flex gap-2">
-                            <button onclick="App.clearStores()" class="flex-1 bg-red-50 text-red-600 hover:bg-red-100 py-2 rounded-lg text-xs font-bold transition border border-red-100">🗑️ ล้างสายนี้</button>
-                            <button onclick="StoreMgr.clearSelection()" class="flex-1 bg-gray-100 text-gray-700 hover:bg-gray-200 py-2 rounded-lg text-xs font-bold transition border border-gray-200">ยกเลิกเลือก</button>
-                        </div>
-                    </div>
-
-                    <div class="bg-white p-4 rounded-2xl border border-emerald-200 shadow-sm relative overflow-hidden">
-                        <div class="absolute top-0 right-0 bg-emerald-500 text-white text-[9px] font-black px-2 py-1 rounded-bl-lg">NEW KPI</div>
-                        <h3 class="font-bold text-sm text-emerald-800 mb-2 flex items-center gap-2">📊 นำเข้ายอดขาย (Sales Data)</h3>
-                        <p class="text-[10px] text-gray-500 mb-3 leading-tight">อัปโหลดไฟล์ <b class="text-emerald-600">Sellout (.csv/.xlsx)</b> เพื่อติดป้าย Active, VPO และ SKU ให้กับร้านค้าอัตโนมัติ</p>
-                        
-                        <div onclick="document.getElementById('salesUpload').click()" class="border-2 border-dashed border-emerald-300 bg-emerald-50 rounded-xl p-4 text-center cursor-pointer hover:bg-emerald-100 transition">
-                            <p class="text-xl mb-1">📈</p>
-                            <p class="text-xs text-emerald-800 font-bold">อัปโหลดไฟล์ยอดขาย (ระบบจะคำนวณอัตโนมัติ)</p>
-                        </div>
-                        <input type="file" id="salesUpload" accept=".xlsx, .xls, .csv" class="hidden">
-                        <button onclick="SalesData.clearKPI()" class="w-full mt-2 text-[10px] text-gray-400 hover:text-red-500 font-bold text-right transition">✕ ล้างข้อมูล KPI ออกจากระบบ</button>
-                    </div>
-
-                    <input type="text" onkeyup="UI.filterList('list-upload', this.value)" placeholder="ค้นหาร้าน..." class="w-full p-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none shadow-inner">
-                    <div id="list-upload" class="space-y-2 mt-2"></div>
-                </div>
-
-                <div id="tab2" class="hidden space-y-4">
-                    <div class="bg-indigo-50 p-4 rounded-2xl shadow-sm border border-indigo-100">
-                        <h3 class="font-black text-indigo-900 text-sm mb-3">🤖 AI Route Builder</h3>
-                        <div class="flex justify-between mb-2">
-                            <label class="text-xs font-bold text-gray-700">จำนวนวันทั้งหมด:</label>
-                            <input type="number" id="ai-days" value="24" min="2" max="30" step="2" class="w-16 p-1 border rounded-lg text-center font-bold outline-none shadow-inner">
-                        </div>
-                        <div class="flex justify-between mb-3 border-b border-indigo-200 pb-3">
-                            <label class="flex items-center gap-2 cursor-pointer">
-                                <input type="checkbox" id="ai-outlier" checked class="w-4 h-4 text-indigo-600 rounded">
-                                <span class="text-xs text-gray-700 font-bold">ตัดร้านโดด (กม.):</span>
-                            </label>
-                            <input type="number" id="ai-dist" value="5" min="1" max="50" class="w-16 p-1 border rounded-lg text-center font-bold text-red-600 outline-none shadow-inner">
-                        </div>
-                        <label class="flex items-start mb-4 cursor-pointer bg-white p-2 rounded-lg border border-indigo-100">
-                            <input type="checkbox" id="ai-lock" class="mt-0.5 w-4 h-4 rounded text-indigo-600">
-                            <span class="ml-2 text-xs"><b>ล็อคร้านที่จัดแล้วไว้ที่เดิม</b><br><span class="text-gray-500 text-[10px]">AI จะจัดเฉพาะร้านที่ยังไม่มีวันเข้าเยี่ยม</span></span>
-                        </label>
-                        <button onclick="AI.run()" class="w-full bg-gray-900 hover:bg-black text-white py-2.5 rounded-xl font-bold text-sm shadow-md transition active:scale-95">✨ เริ่มคำนวณ AI</button>
-                    </div>
-                    
-                    <div class="flex gap-2 sticky top-0 bg-gray-50 pb-2 pt-2 z-10 border-b">
-                        <select id="assign-day" class="flex-1 p-2 border border-gray-300 rounded-xl text-sm font-bold outline-none shadow-sm"></select>
-                        <button onclick="StoreMgr.assignSelected()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 rounded-xl text-sm font-bold shadow-md transition active:scale-95">จัดลงวัน</button>
-                    </div>
-                    
-                    <input type="text" onkeyup="UI.filterList('list-unassigned', this.value)" placeholder="ค้นหาร้านรอจัด..." class="w-full p-2.5 border border-gray-300 rounded-xl text-sm outline-none shadow-inner">
-                    <div id="list-unassigned" class="space-y-2 mt-2 pb-10"></div>
-                </div>
-
-                <div id="tab3" class="hidden space-y-4">
-                    <div class="bg-blue-50 p-3 rounded-xl border border-blue-100 text-xs text-blue-800 font-medium"><b>💡 Fast Sync:</b> กดที่หมุดบนแผนที่ หน้าต่างนี้จะเลื่อนไปหาร้านให้เองเพื่อแก้ไข</div>
-                    <div class="sticky top-0 bg-gray-50 pb-2 pt-1 z-10 border-b flex gap-2">
-                        <input type="text" id="search-edit" onkeyup="UI.filterList('list-assigned', this.value)" placeholder="ค้นหาร้าน..." class="flex-1 p-2.5 border border-gray-300 rounded-xl text-sm outline-none shadow-inner">
-                    </div>
-                    <div id="list-assigned" class="space-y-2 mt-2 pb-10"></div>
-                </div>
-
-                <div id="tab4" class="hidden space-y-4">
-                    <div class="bg-emerald-50 p-3 rounded-xl border border-emerald-100 text-xs text-emerald-800 font-medium">คลิกที่กล่องวันที่ เพื่อ <b>จำลองและวาดเส้นทางถนนจริง</b></div>
-                    <div id="list-summary" class="grid grid-cols-2 gap-3 mt-2 pb-10"></div>
+        <div id="page-data" class="hidden absolute inset-0 bg-gray-50 flex flex-col h-full overflow-hidden">
+            <div class="h-16 bg-white text-gray-800 flex items-center justify-between px-8 shadow-sm shrink-0 border-b border-gray-200">
+                <h2 class="text-lg font-black flex items-center gap-2">📊 จัดการข้อมูลยอดขาย (Sales Data)</h2>
+                <div class="flex gap-3">
+                    <button onclick="DataMgr.clearAll()" class="bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 px-4 py-2 rounded-xl text-sm font-bold transition">
+                        🗑️ ล้างข้อมูลทั้งหมด
+                    </button>
+                    <button onclick="document.getElementById('salesUpload').click()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2 rounded-xl text-sm font-bold shadow-md transition">
+                        + อัปโหลดไฟล์ยอดขาย
+                    </button>
+                    <input type="file" id="salesUpload" class="hidden" accept=".xlsx, .xls, .csv">
                 </div>
             </div>
             
-            <div class="w-full bg-gray-200 h-1.5"><div id="progress-bar" class="bg-emerald-500 h-1.5 w-0 transition-all duration-500"></div></div>
-
-            <div class="p-4 bg-white border-t border-gray-200 flex justify-between items-center shadow-[0_-5px_15px_rgba(0,0,0,0.05)] z-20 shrink-0">
-                <div class="flex gap-4">
-                    <div class="text-center"><p class="text-gray-500 text-[10px] font-bold">รวม</p><p id="stat-total" class="text-lg font-black leading-none text-gray-800">0</p></div>
-                    <div class="text-center"><p class="text-yellow-600 text-[10px] font-bold">รอจัด</p><p id="stat-pending" class="text-lg font-black leading-none">0</p></div>
-                    <div class="text-center"><p class="text-green-600 text-[10px] font-bold">Visit</p><p id="stat-done" class="text-lg font-black leading-none text-indigo-600">0</p></div>
+            <div class="flex-1 p-8 overflow-hidden flex flex-col">
+                <div class="bg-white rounded-3xl shadow-sm border border-gray-200 flex-1 flex flex-col overflow-hidden">
+                    <div class="p-5 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
+                        <div>
+                            <h3 class="font-bold text-gray-800">ฐานข้อมูล KPI ร้านค้า</h3>
+                            <p class="text-xs text-gray-500 mt-1">อัปเดตข้อมูลล่าสุดจากไฟล์ Sellout</p>
+                        </div>
+                        <div class="text-sm font-bold bg-indigo-50 text-indigo-700 px-4 py-2 rounded-xl border border-indigo-100">
+                            จำนวน <span id="data-total-stores" class="text-lg font-black">0</span> ร้านที่มีประวัติ
+                        </div>
+                    </div>
+                    <div class="flex-1 overflow-y-auto">
+                        <table class="w-full text-left text-sm">
+                            <thead class="bg-gray-100 text-gray-600 sticky top-0 z-10 shadow-sm">
+                                <tr>
+                                    <th class="p-4 font-bold border-b border-gray-200">รหัสลูกค้า (ID)</th>
+                                    <th class="p-4 font-bold border-b border-gray-200 text-center">VPO สะสม</th>
+                                    <th class="p-4 font-bold border-b border-gray-200 text-center">จำนวนบิล</th>
+                                    <th class="p-4 font-bold border-b border-gray-200 text-center">SKU</th>
+                                    <th class="p-4 font-bold border-b border-gray-200 text-center">เจลลี่</th>
+                                    <th class="p-4 font-bold border-b border-gray-200 text-center">กลมกล่อม</th>
+                                </tr>
+                            </thead>
+                            <tbody id="data-table-body" class="text-gray-700">
+                                </tbody>
+                        </table>
+                    </div>
                 </div>
-                <button onclick="ExcelIO.export()" class="bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2.5 rounded-xl text-sm font-bold shadow-md transition active:scale-95">📥 โหลดไฟล์ออก</button>
+            </div>
+        </div>
+
+    </div>
+
+    <div id="overallModal" class="hidden fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden">
+            <div class="p-5 border-b flex justify-between items-center bg-gray-50">
+                <h2 class="text-lg font-black text-gray-800">📊 สรุปความคืบหน้าทุกสายวิ่ง</h2>
+                <button onclick="UI.hideSummaryModal()" class="bg-white border border-gray-300 w-8 h-8 rounded-full text-gray-500 font-bold hover:bg-gray-100 flex items-center justify-center transition">✕</button>
+            </div>
+            <div class="p-4 flex-1 overflow-y-auto bg-white">
+                <table class="w-full text-sm text-left">
+                    <thead class="text-xs text-gray-500 bg-gray-50 uppercase border-b border-gray-200">
+                        <tr>
+                            <th class="px-4 py-3">สายวิ่ง</th>
+                            <th class="px-4 py-3 text-center">รวม (ร้าน)</th>
+                            <th class="px-4 py-3 text-center text-emerald-600">จัดแล้ว</th>
+                            <th class="px-4 py-3 text-center text-yellow-600">รอจัด</th>
+                            <th class="px-4 py-3 text-center">% สำเร็จ</th>
+                        </tr>
+                    </thead>
+                    <tbody id="overallTableBody"></tbody>
+                </table>
             </div>
         </div>
     </div>
 
     <div id="dayModal" class="hidden fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
-        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col overflow-hidden">
-            <div class="p-4 border-b flex justify-between items-center bg-gray-50">
-                <h2 id="modalTitle" class="text-xl font-black flex items-center gap-2 text-gray-800">Day</h2>
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col overflow-hidden">
+            <div class="p-4 bg-gray-50 border-b flex justify-between items-center">
+                <h2 id="modalTitle" class="font-black text-gray-800 text-lg">...</h2>
                 <div class="flex gap-2">
-                    <button onclick="OSRM.generate()" class="bg-gray-900 hover:bg-black text-white px-4 py-1.5 rounded-xl text-xs font-bold shadow transition active:scale-95">🚗 วาดเส้นทางถนน</button>
-                    <button onclick="UI.closeDayModal()" class="bg-white border border-gray-300 px-3 rounded-xl text-gray-500 font-bold hover:bg-gray-100 transition">✕</button>
+                    <button onclick="OSRM.generate()" class="bg-gray-900 hover:bg-black text-white px-4 py-2 rounded-xl text-xs font-bold active:scale-95 transition shadow-md">🚗 วาดเส้นทางถนน</button>
+                    <button onclick="UI.closeDayModal()" class="bg-white border border-gray-300 w-8 h-8 rounded-full flex items-center justify-center font-bold text-gray-500">✕</button>
                 </div>
             </div>
-            <div id="modalContent" class="p-4 flex-1 overflow-y-auto space-y-2 bg-gray-50"></div>
+            <div id="modalContent" class="p-4 flex-1 overflow-y-auto space-y-2 bg-gray-50/50"></div>
         </div>
     </div>
 
     <script>
         // ==========================================
-        // 🔑 FIREBASE CONFIGURATION
+        // 🔑 FIREBASE & CONFIG
         // ==========================================
-        const firebaseConfig = {
-            apiKey: "AIzaSyDCYxJf0eHryjVJ8_INoWw_uTN14UMaEWE",
-            authDomain: "route-plan-71e2e.firebaseapp.com",
-            projectId: "route-plan-71e2e",
-            storageBucket: "route-plan-71e2e.firebasestorage.app",
-            messagingSenderId: "486778971661",
-            appId: "1:486778971661:web:2ef83fa1eeb09ec6665744"
-        };
+        const firebaseConfig = { apiKey: "AIzaSyDCYxJf0eHryjVJ8_INoWw_uTN14UMaEWE", authDomain: "route-plan-71e2e.firebaseapp.com", projectId: "route-plan-71e2e", storageBucket: "route-plan-71e2e.firebasestorage.app", messagingSenderId: "486778971661", appId: "1:486778971661:web:2ef83fa1eeb09ec6665744" };
         firebase.initializeApp(firebaseConfig);
         const cloudDB = firebase.firestore();
 
-        const Config = {
-            hexColors: ["#ef4444", "#3b82f6", "#22c55e", "#f97316", "#a855f7", "#06b6d4", "#eab308", "#ec4899", "#14b8a6", "#84cc16", "#6366f1", "#f43f5e", "#8b5cf6", "#10b981", "#d946ef", "#0ea5e9", "#f59e0b", "#991b1b", "#1e40af", "#166534", "#9a3412", "#4c1d95", "#115e59", "#64748b", "#ff3333", "#33cc33", "#3333ff"],
-            getDays: () => { let obj={}; for(let i=1; i<=30; i++) obj[`Day ${i}`] = { hex: Config.hexColors[(i-1)%Config.hexColors.length], name: `วันที่ ${i}` }; return obj; }
-        };
-        const DAY_COLORS = Config.getDays();
-
-        // 🧠 State สำหรับเก็บข้อมูลแยก 2 กล่อง
-        const State = {
-            db: { routes: {}, cycleDays: 24, backups: {} }, // กล่องที่ 1 (พิกัด & คิว)
-            sales: {}, // กล่องที่ 2 (KPI: VPO, SKU) { "4020001235": { vpo: 15, sku: 5, active: true } }
-            localActiveRoute: null,
-            stores: [], activeRoadDay: null, openDayModal: null
+        const Colors = ["#ef4444", "#3b82f6", "#22c55e", "#f97316", "#a855f7", "#06b6d4", "#eab308", "#ec4899", "#14b8a6", "#84cc16", "#6366f1", "#f43f5e", "#8b5cf6", "#10b981"];
+        const getColor = (dayStr) => {
+            let num = parseInt(String(dayStr).replace(/[^0-9]/g, '')) || 1;
+            return Colors[(num - 1) % Colors.length];
         };
 
+        let State = { db: { routes: {"V01":[]} }, sales: {}, activeRoute: "V01", stores: [], openDayModal: null };
+
+        // ==========================================
+        // 🚀 APP LOGIC
+        // ==========================================
         const App = {
             dbRef: cloudDB.collection('appData').doc('v1_main'),
-            salesRef: cloudDB.collection('appData').doc('v1_sales'), // ฐานข้อมูล KPI ใหม่
-
+            salesRef: cloudDB.collection('appData').doc('v1_sales'),
             init: () => {
-                MapCtrl.init();
-                UI.showLoader("กำลังเชื่อมต่อฐานข้อมูล...", "");
-                
-                // ดึงข้อมูลพิกัด (v1_main)
-                App.dbRef.onSnapshot((doc) => {
-                    let dataFromServer = doc.exists ? doc.data() : {};
-                    State.db.routes = dataFromServer.routes || {"สายที่ 1": []};
-                    State.db.backups = dataFromServer.backups || {};
-                    State.db.cycleDays = dataFromServer.cycleDays || 24;
-
-                    let sortedKeys = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b, 'th', {numeric: true}));
-                    if (!State.localActiveRoute || !State.db.routes[State.localActiveRoute]) {
-                        let savedLocal = localStorage.getItem('last_viewed_route');
-                        State.localActiveRoute = (savedLocal && State.db.routes[savedLocal]) ? savedLocal : sortedKeys[0];
-                    }
+                MapCtrl.init(); UI.showLoader("กำลังซิงค์ข้อมูลคลาวด์...");
+                App.dbRef.onSnapshot(doc => {
+                    if(doc.exists) State.db = doc.data();
+                    if(!State.db.routes[State.activeRoute]) State.activeRoute = Object.keys(State.db.routes).sort()[0] || "V01";
+                    State.stores = State.db.routes[State.activeRoute] || [];
                     
-                    State.stores = State.db.routes[State.localActiveRoute] || [];
-                    App.updateStatusUI("✅ ข้อมูลตรงกับคลาวด์", "emerald");
-                    
-                    // ดึงข้อมูลยอดขาย (v1_sales) ควบคู่ไปด้วย
-                    App.fetchSalesData();
-
-                }, (error) => {
-                    App.updateStatusUI("🔴 ออฟไลน์", "red");
-                    UI.hideLoader();
+                    App.salesRef.get().then(sDoc => {
+                        State.sales = sDoc.exists ? sDoc.data() : {};
+                        UI.hideLoader(); 
+                        UI.render();
+                        DataMgr.render(); // เรนเดอร์หน้าจัดการข้อมูล
+                    });
                 });
             },
-
-            fetchSalesData: () => {
-                App.salesRef.get().then(doc => {
-                    if(doc.exists) { State.sales = doc.data(); } 
-                    else { State.sales = {}; }
-                    App.sync();
-                    UI.hideLoader();
-                    setTimeout(() => MapCtrl.fitToStores(), 300);
-                }).catch(err => {
-                    console.log("Error fetching sales data", err);
-                    App.sync(); UI.hideLoader();
-                });
-            },
-
-            updateStatusUI: (msg, color) => {
-                let badge = document.getElementById('db-save-status');
-                badge.className = `flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-lg border transition-all duration-300 bg-${color}-100 text-${color}-700 border-${color}-200`;
-                badge.innerHTML = msg;
-            },
-
-            saveDB: () => {
-                State.db.routes[State.localActiveRoute] = State.stores;
-                App.updateStatusUI("⏳ กำลังบันทึก...", "yellow");
-
-                App.dbRef.set(State.db).then(() => {
-                    App.updateStatusUI("✅ บันทึกสำเร็จ", "emerald");
-                    UI.showSaveToast("บันทึกคิวงานและเส้นทางเรียบร้อย"); 
-                }).catch(err => {
-                    App.updateStatusUI("❌ บันทึกล้มเหลว", "red");
-                });
-            },
-
-            sync: () => {
-                let rs = document.getElementById('routeSelector');
-                if(rs) { 
-                    let sortedRoutes = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b, 'th', {numeric: true}));
-                    let newHTML = sortedRoutes.map(r => `<option value="${r}">${r}</option>`).join('');
-                    if (rs.innerHTML !== newHTML) { rs.innerHTML = newHTML; }
-                    rs.value = State.localActiveRoute; 
-                }
-                MapCtrl.clearAll();
-                UI.initDaySelector(); 
-                UI.render();
-            },
-            
-            switchRoute: (name) => { 
-                if(State.localActiveRoute === name) return; 
-                State.localActiveRoute = name; 
-                localStorage.setItem('last_viewed_route', name); 
-                State.stores = State.db.routes[name] || []; 
-                App.sync(); MapCtrl.fitToStores(); 
-            },
-            addRoute: () => { let n = prompt("ชื่อสายใหม่:"); if(n && n.trim()) { State.db.routes[n.trim()] = []; State.localActiveRoute = n.trim(); State.stores = []; App.sync(); App.saveDB(); MapCtrl.fitToStores(); } },
-            renameRoute: () => { let n = prompt("ชื่อใหม่:", State.localActiveRoute); if(n && n.trim()) { State.db.routes[n.trim()] = State.db.routes[State.localActiveRoute]; delete State.db.routes[State.localActiveRoute]; State.localActiveRoute = n.trim(); App.sync(); App.saveDB(); } },
-            deleteRoute: () => { if(Object.keys(State.db.routes).length > 1 && confirm("ยืนยันลบสายนี้?")) { delete State.db.routes[State.localActiveRoute]; let sortedKeys = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b, 'th', {numeric: true})); State.localActiveRoute = sortedKeys[0]; State.stores = State.db.routes[State.localActiveRoute]; App.sync(); App.saveDB(); MapCtrl.fitToStores(); } else if(Object.keys(State.db.routes).length === 1) alert("ห้ามลบสายสุดท้ายครับ"); },
-            clearStores: () => { if(confirm("ล้างข้อมูลร้านค้าทั้งหมดในสายนี้?")) { State.stores = []; App.sync(); App.saveDB(); } }
+            saveDB: () => { State.db.routes[State.activeRoute] = State.stores; App.dbRef.set(State.db); UI.render(); },
+            switchRoute: (v) => { State.activeRoute = v; State.stores = State.db.routes[v]; UI.render(); MapCtrl.fit(); },
+            addRoute: () => { let n = prompt("ชื่อสายใหม่:"); if(n && n.trim()) { State.db.routes[n.trim()] = []; State.activeRoute = n.trim(); App.saveDB(); } },
+            renameRoute: () => { let n = prompt("เปลี่ยนชื่อสายวิ่งเป็น:", State.activeRoute); if(n && n.trim()) { State.db.routes[n.trim()] = State.db.routes[State.activeRoute]; delete State.db.routes[State.activeRoute]; State.activeRoute = n.trim(); App.saveDB(); } },
+            deleteRoute: () => { if(confirm("ลบสายนี้?")) { delete State.db.routes[State.activeRoute]; State.activeRoute = Object.keys(State.db.routes)[0]; App.saveDB(); } }
         };
 
         // ==========================================
-        // 📊 KPI DATA MERGE (ระบบย่อยยอดขาย)
+        // 🧭 NAVIGATION (Sidebar)
         // ==========================================
-        const SalesData = {
-            processExcel: (file) => {
-                UI.showLoader("กำลังวิเคราะห์ยอดขาย...", "อ่านไฟล์แสนบรรทัด (ใช้เวลาประมาณ 2-5 วินาที)");
+        const Nav = {
+            go: (page) => {
+                document.querySelectorAll('.sidebar-menu').forEach(b => b.classList.remove('active'));
+                document.getElementById('nav-' + page).classList.add('active');
                 
-                const reader = new FileReader();
-                reader.onload = function(e) {
-                    try {
-                        const data = new Uint8Array(e.target.result); 
-                        const workbook = XLSX.read(data, {type: 'array'});
-                        const json = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], {header: 1, defval: ""}); 
-                        
-                        if (json.length < 2) { throw new Error("ไฟล์ว่างเปล่า"); }
-                        
-                        let headers = json[0].map(h => String(h).toLowerCase().trim());
-                        let idCol = -1, skuCol = -1, qtyCol = -1;
+                document.getElementById('page-planning').classList.add('hidden');
+                document.getElementById('page-data').classList.add('hidden');
+                
+                document.getElementById('page-' + page).classList.remove('hidden');
+                
+                if(page === 'planning') {
+                    setTimeout(() => { if(MapCtrl.map) MapCtrl.map.invalidateSize(); }, 200);
+                }
+            }
+        };
 
-                        // 🔍 หา Index ของคอลัมน์สำคัญจากไฟล์คุณ
-                        headers.forEach((h, i) => {
-                            if(h.includes('customer code') || h.includes('รหัสลูกค้า')) idCol = i;
-                            if(h.includes('so product code') || h.includes('รหัสสินค้า') || h.includes('so product name')) skuCol = i;
-                            if(h.includes('so total  qty ea') || h.includes('so total qty ea') || h.includes('qty ea') || h.includes('จำนวน')) qtyCol = i;
-                        });
+        // ==========================================
+        // 📊 DATA MANAGEMENT (หน้าที่ 2)
+        // ==========================================
+        const DataMgr = {
+            render: () => {
+                let html = [];
+                let salesKeys = Object.keys(State.sales);
+                document.getElementById('data-total-stores').innerText = salesKeys.length.toLocaleString();
 
-                        if(idCol === -1 || qtyCol === -1) {
-                            throw new Error("หาคอลัมน์ 'Customer Code' หรือ 'SO Total QTY EA' ไม่พบ กรุณาตรวจสอบไฟล์อีกครั้ง");
-                        }
-
-                        let newSalesKPI = {};
-                        let rowCount = 0;
-
-                        // ⚙️ Pivot & Aggregate (บีบอัดแสนบรรทัด)
-                        for (let i = 1; i < json.length; i++) {
-                            let row = json[i];
-                            if(!row || row.length === 0) continue;
-                            
-                            let storeId = String(row[idCol]).trim();
-                            if(!storeId) continue;
-                            
-                            let qty = parseFloat(String(row[qtyCol]).replace(/[^0-9.-]/g, ''));
-                            if(isNaN(qty)) qty = 0;
-                            
-                            let sku = skuCol !== -1 ? String(row[skuCol]).trim() : "Unknown";
-                            
-                            rowCount++;
-
-                            if(!newSalesKPI[storeId]) {
-                                newSalesKPI[storeId] = { vpo: 0, skus: new Set(), active: false };
-                            }
-                            
-                            newSalesKPI[storeId].vpo += qty;
-                            if(sku) newSalesKPI[storeId].skus.add(sku);
-                            if(newSalesKPI[storeId].vpo > 0) newSalesKPI[storeId].active = true;
-                        }
-
-                        // แปลง Set เป็น Number เพื่อประหยัดพื้นที่คลาวด์
-                        Object.keys(newSalesKPI).forEach(id => {
-                            newSalesKPI[id].skuCount = newSalesKPI[id].skus.size;
-                            delete newSalesKPI[id].skus; // ลบ Set ทิ้ง
-                            
-                            // ปัดเศษ VPO
-                            newSalesKPI[id].vpo = Math.round(newSalesKPI[id].vpo * 100) / 100;
-                        });
-
-                        // 💾 บันทึกขึ้นคลาวด์ กล่อง v1_sales
-                        UI.showLoader("กำลังอัปเดต KPI ขึ้นระบบ...", `พบยอดขายของร้านค้า ${Object.keys(newSalesKPI).length} แห่ง`);
-                        
-                        App.salesRef.set(newSalesKPI).then(() => {
-                            State.sales = newSalesKPI;
-                            App.sync();
-                            UI.hideLoader();
-                            alert(`✅ อัปเดตยอดขายสำเร็จ!\nอ่านข้อมูล ${rowCount.toLocaleString()} บรรทัด\nสกัดข้อมูลร้าน Active ได้ ${Object.keys(newSalesKPI).length} ร้าน`);
-                        }).catch(err => {
-                            UI.hideLoader(); alert("อัปโหลดไม่สำเร็จ: " + err.message);
-                        });
-
-                    } catch(error) { 
-                        UI.hideLoader(); alert("เกิดข้อผิดพลาด: " + error.message); 
-                    }
-                    document.getElementById('salesUpload').value = ''; 
-                };
-                reader.readAsArrayBuffer(file);
+                salesKeys.forEach(id => {
+                    let k = State.sales[id];
+                    html.push(`
+                        <tr class="border-b border-gray-100 hover:bg-indigo-50/50 transition">
+                            <td class="p-4 font-mono text-sm text-gray-800 font-bold">${id}</td>
+                            <td class="p-4 text-center text-blue-600 font-black">${k.vpo}</td>
+                            <td class="p-4 text-center font-bold text-gray-700">${k.billCount || 0}</td>
+                            <td class="p-4 text-center font-bold text-gray-700">${k.skuCount || 0}</td>
+                            <td class="p-4 text-center">${k.hasJelly ? '✅' : '-'}</td>
+                            <td class="p-4 text-center">${k.hasKlom ? '✅' : '-'}</td>
+                        </tr>
+                    `);
+                });
+                document.getElementById('data-table-body').innerHTML = html.join('') || '<tr><td colspan="6" class="text-center p-8 text-gray-400 font-bold">ยังไม่มีข้อมูลยอดขายในระบบ</td></tr>';
             },
-            
-            clearKPI: () => {
-                if(confirm("ยืนยันการลบข้อมูล KPI ยอดขายทั้งหมดออกจากระบบ? (แผนที่จะไม่โดนลบ)")) {
+            clearAll: () => {
+                if(confirm("⚠️ คำเตือน: คุณต้องการลบฐานข้อมูลยอดขาย (KPI) ทั้งหมดออกจากระบบใช่หรือไม่?")) {
+                    UI.showLoader("กำลังลบข้อมูล...");
                     App.salesRef.set({}).then(() => {
-                        State.sales = {}; App.sync(); UI.showSaveToast("ล้าง KPI เรียบร้อย");
+                        State.sales = {}; 
+                        DataMgr.render(); UI.render(); 
+                        UI.hideLoader(); alert("ล้างข้อมูลสำเร็จ");
                     });
                 }
             }
         };
 
-        document.getElementById('salesUpload').addEventListener('change', function(e) {
-            const file = e.target.files[0]; 
-            if (file) SalesData.processExcel(file);
-        });
-
         // ==========================================
-        // 🗺️ MASTER DATA UPLOAD (พิกัด)
+        // 📈 SALES EXCEL UPLOAD
         // ==========================================
-        document.getElementById('fileUpload').addEventListener('change', function(e) {
-            const file = e.target.files[0]; if (!file) return;
-            if (State.stores.length > 0 && !confirm(`ข้อมูลเดิมของ "${State.localActiveRoute}" จะถูกแทนที่\nยืนยันการอัปโหลด?`)) { this.value = ''; return; }
-
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                try {
-                    const data = new Uint8Array(e.target.result); 
-                    const workbook = XLSX.read(data, {type: 'array'});
-                    const json = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], {header: 1, defval: ""}); 
-                    
-                    if (json.length < 2) return alert("ไฟล์ว่างเปล่า");
-                    let headers = json[0];
-                    let idCol=-1, nameCol=-1, latCol=-1, lngCol=-1, freqCol=-1, dayCol=-1, seqCol=-1;
-                    
-                    for(let i=0; i<headers.length; i++) {
-                        let h = String(headers[i]).toLowerCase();
-                        if(h.includes('รหัส') || h.includes('customer code') || h.includes('id')) idCol = i;
-                        else if(h.includes('ชื่อ') || h.includes('name')) nameCol = i;
-                        else if(h.includes('lat') || h.includes('ละติจูด')) latCol = i;
-                        else if(h.includes('lng') || h.includes('lon') || h.includes('ลองจิจูด')) lngCol = i;
-                        else if(h.includes('freq') || h.includes('ความถี่') || h.includes('รอบ') || h.includes('f2')) freqCol = i;
-                        else if(h.includes('สายวิ่ง') || h.includes('day')) dayCol = i;
-                        else if(h.includes('คิว') || h.includes('seq')) seqCol = i;
-                    }
-
-                    let storeMap = {}; 
-                    for (let i = 1; i < json.length; i++) {
-                        let row = json[i];
-                        if (!row || row.length === 0) continue; 
-                        let idStr = row[idCol] ? String(row[idCol]).trim() : `S_${i}`;
-                        if(!idStr) continue; 
+        const SalesData = {
+            process: (file) => {
+                UI.showLoader("กำลังวิเคราะห์ยอดขาย...");
+                const reader = new FileReader();
+                reader.onload = e => {
+                    try {
+                        const json = XLSX.utils.sheet_to_json(XLSX.read(e.target.result, {type:'array'}).Sheets[XLSX.read(e.target.result, {type:'array'}).SheetNames[0]]);
+                        let temp = {};
+                        json.forEach(row => {
+                            let id = String(row['Customer Code'] || row['รหัสลูกค้า'] || "").trim();
+                            if(!id) return;
+                            if(!temp[id]) temp[id] = { vpo:0, bills:new Set(), skus:new Set(), hasJelly:false, hasKlom:false };
+                            
+                            temp[id].vpo += parseFloat(row['SO Total  QTY EA'] || row['จำนวน'] || 0);
+                            
+                            let inv = String(row['Invoice Number'] || "");
+                            if(inv) temp[id].bills.add(inv);
+                            
+                            let p = String(row['SO Product Name'] || row['รหัสสินค้า'] || "");
+                            if(p) {
+                                temp[id].skus.add(p);
+                                if(p.includes("เจลลี่")) temp[id].hasJelly = true;
+                                if(p.includes("กลมกล่อม")) temp[id].hasKlom = true;
+                            }
+                        });
                         
-                        let lat = parseFloat(String(row[latCol]).replace(/[^0-9.-]/g, '')); 
-                        let lng = parseFloat(String(row[lngCol]).replace(/[^0-9.-]/g, ''));
-                        if(isNaN(lat) || isNaN(lng)) continue;
+                        let final = {};
+                        Object.keys(temp).forEach(id => { 
+                            final[id] = { 
+                                vpo: Math.round(temp[id].vpo*100)/100, 
+                                billCount: temp[id].bills.size, 
+                                skuCount: temp[id].skus.size, 
+                                hasJelly: temp[id].hasJelly, 
+                                hasKlom: temp[id].hasKlom, 
+                                active: temp[id].vpo>0 
+                            }; 
+                        });
+                        
+                        App.salesRef.set(final).then(() => { 
+                            State.sales = final; 
+                            UI.hideLoader(); alert("✅ อัปโหลด KPI และประมวลผลสำเร็จ!"); 
+                            UI.render(); DataMgr.render(); 
+                        });
+                    } catch(err) { UI.hideLoader(); alert("เกิดข้อผิดพลาด: " + err.message); }
+                    document.getElementById('salesUpload').value = '';
+                };
+                reader.readAsArrayBuffer(file);
+            }
+        };
+        document.getElementById('salesUpload').addEventListener('change', e => { if(e.target.files[0]) SalesData.process(e.target.files[0]); });
 
-                        let freq = (freqCol !== -1 && String(row[freqCol]).trim().toUpperCase().includes('2')) ? 2 : 1;
-                        let assignedDay = (dayCol !== -1 && row[dayCol]) ? String(row[dayCol]).trim() : "";
-                        let assignedSeq = (seqCol !== -1 && row[seqCol]) ? parseInt(String(row[seqCol]).replace(/[^0-9]/g, '')) : NaN;
-                        let isValidDay = assignedDay.toLowerCase().includes('day');
-
-                        if (storeMap[idStr]) {
-                            if (isValidDay && !storeMap[idStr].days.includes(assignedDay)) {
-                                storeMap[idStr].days.push(assignedDay);
-                                if (!isNaN(assignedSeq)) storeMap[idStr].seqs[assignedDay] = assignedSeq;
-                            }
-                            storeMap[idStr].freq = 2; 
-                        } else {
-                            let newStore = { id: idStr, name: row[nameCol] ? String(row[nameCol]).trim() : `Store_${idStr}`, lat: lat, lng: lng, freq: freq, days: [], seqs: {}, selected: false };
-                            if (isValidDay) {
-                                newStore.days.push(assignedDay);
-                                if (!isNaN(assignedSeq)) newStore.seqs[assignedDay] = assignedSeq;
-                            }
-                            storeMap[idStr] = newStore;
-                        }
-                    }
-                    
-                    let finalArray = Object.values(storeMap);
-                    if(finalArray.length === 0) return alert("ไม่พบพิกัด (Lat, Lng)");
-                    
-                    State.stores = finalArray;
-                    App.sync(); App.saveDB();
-                    MapCtrl.fitToStores(); 
-
-                } catch(err) { alert("ขัดข้อง: " + err.message); }
-                document.getElementById('fileUpload').value = ''; 
-            };
-            reader.readAsArrayBuffer(file);
+        // ==========================================
+        // 🗺️ MASTER UPLOAD
+        // ==========================================
+        document.getElementById('fileUpload').addEventListener('change', e => {
+            const reader = new FileReader(); reader.onload = ev => {
+                const json = XLSX.utils.sheet_to_json(XLSX.read(ev.target.result, {type:'array'}).Sheets[XLSX.read(ev.target.result, {type:'array'}).SheetNames[0]]);
+                State.stores = json.map(r => ({ id: String(r['Customer Code']||r['รหัส']||""), name: r['ชื่อ']||r['Name']||"", lat: parseFloat(r['Lat']), lng: parseFloat(r['Lng']), days: [], selected: false })).filter(s=>s.id && !isNaN(s.lat));
+                App.saveDB();
+                MapCtrl.fit();
+            }; reader.readAsArrayBuffer(e.target.files[0]);
+            document.getElementById('fileUpload').value = '';
         });
 
-        const StoreMgr = {
-            toggleSelect: (id) => { let s = State.stores.find(x=>x.id===String(id)); if(s){ s.selected = !s.selected; UI.switchTab('tab2'); UI.render(); App.saveDB(); } },
-            clearSelection: () => { State.stores.forEach(s=>s.selected=false); UI.render(); App.saveDB(); },
-            changeDay: (id, d) => {
-                let s = State.stores.find(x=>x.id===String(id));
-                if(s) {
-                    if(d === 'remove') s.days = [];
-                    else if(s.freq === 2) { let mK = State.db.cycleDays/2; let num = parseInt(d.replace('Day ','')); let pair = num<=mK ? num+mK : num-mK; s.days=[d, `Day ${pair}`]; }
-                    else s.days = [d];
-                    s.seqs = {}; MapCtrl.closePopups(); UI.render(); App.saveDB();
-                }
-            },
-            assignSelected: () => {
-                let d = document.getElementById('assign-day').value; let h = false;
-                State.stores.forEach(s => {
-                    if(s.selected) {
-                        if(s.freq === 2) { let mK = State.db.cycleDays/2; let num = parseInt(d.replace('Day ','')); let pair = num<=mK ? num+mK : num-mK; s.days=[d, `Day ${pair}`]; }
-                        else s.days = [d];
-                        s.selected = false; h = true;
-                    }
-                });
-                if(!h) alert("กรุณาเลือกร้านค้าก่อนครับ"); else { UI.render(); App.saveDB(); }
-            },
-            getDistSq: (a, b) => Math.pow(a.lat - b.lat, 2) + Math.pow(a.lng - b.lng, 2)
-        };
-
-        const MapCtrl = {
-            map: null, markers: {}, roadLayer: null, polylines: [],
-            init: () => {
-                MapCtrl.map = L.map('map').setView([14.4745, 100.1222], 10);
-                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(MapCtrl.map);
-            },
-            clearAll: () => {
-                for (let id in MapCtrl.markers) MapCtrl.map.removeLayer(MapCtrl.markers[id]);
-                MapCtrl.markers = {}; MapCtrl.clearRoad(true);
-            },
-            closePopups: () => { for(let id in MapCtrl.markers) if(MapCtrl.markers[id].getPopup()) MapCtrl.markers[id].closePopup(); },
-            clearRoad: (skipRender = false) => {
-                if(MapCtrl.roadLayer) MapCtrl.map.removeLayer(MapCtrl.roadLayer);
-                MapCtrl.roadLayer = null; State.activeRoadDay = null;
-                document.getElementById('clearRoadBtn').classList.add('hidden');
-                if(!skipRender) UI.render();
-            },
-            drawLines: () => {
-                MapCtrl.polylines.forEach(l => MapCtrl.map.removeLayer(l)); MapCtrl.polylines = [];
-                if(!document.getElementById('toggleLines').checked) return;
-                let byDay = {};
-                State.stores.forEach(s => { if(s.days.length && !s.days.includes(State.activeRoadDay)) { let d = s.days[0]; if(!byDay[d]) byDay[d]=[]; byDay[d].push([s.lat, s.lng]); } });
-                Object.keys(byDay).forEach(d => {
-                    let c = DAY_COLORS[d] ? DAY_COLORS[d].hex : '#999';
-                    if(byDay[d].length > 1) MapCtrl.polylines.push(L.polyline(byDay[d], {color: c, weight: 3, opacity: 0.5, dashArray: '5, 10'}).addTo(MapCtrl.map));
-                });
-            },
-            fitToStores: () => {
-                if(State.stores.length > 0) { 
-                    try { MapCtrl.map.fitBounds(L.latLngBounds(State.stores.map(s => [s.lat, s.lng])), {padding: [30, 30]}); } catch(e){} 
-                }
-            },
-            renderMarkers: () => {
-                const dayOpts = Object.keys(DAY_COLORS).map(d => `<option value="${d}">${DAY_COLORS[d].name}</option>`).join('');
-                
-                State.stores.forEach(store => {
-                    let isAssigned = store.days.length > 0;
-                    let pDay = isAssigned ? store.days[0] : null;
-                    let fill = '#cbd5e1', border = '#fff', stroke = '2', zIdx = 1000;
-                    
-                    if (store.selected) { fill = '#facc15'; border = '#ca8a04'; stroke = '3'; zIdx = 2000; } 
-                    else if (isAssigned && DAY_COLORS[pDay]) { fill = DAY_COLORS[pDay].hex; zIdx = 500; }
-                    
-                    let isR = isAssigned && store.days.includes(State.activeRoadDay);
-                    let seq = isR && store.seqs ? store.seqs[State.activeRoadDay] : null;
-                    let svgW = isR ? 30 : (isAssigned ? 26 : 30);
-                    let svgH = isR ? 44 : (isAssigned ? 36 : 44);
-                    if (isR) zIdx = 1500;
-
-                    // 🌟 ดึงข้อมูล KPI มาติดบนป้าย
-                    let kpi = State.sales[store.id];
-                    let kpiStar = (kpi && kpi.active) ? `<circle cx="20" cy="5" r="5" fill="#10b981" stroke="#fff" stroke-width="1.5"/>` : '';
-
-                    let iconTxt = isR && seq ? `<circle cx="12" cy="10" r="8" fill="#fff" /><text x="12" y="14" font-size="11" font-weight="900" fill="#000" text-anchor="middle">${seq}</text>` : 
-                                 (isAssigned ? `<text x="12" y="12" font-size="10" font-family="sans-serif" font-weight="bold" fill="#fff" text-anchor="middle">${String(pDay).replace('Day ','')}</text>` : 
-                                 `<circle cx="12" cy="9" r="3.5" fill="#fff" />`);
-
-                    let icon = L.divIcon({ html: `<svg viewBox="0 0 24 24" width="${svgW}" height="${svgH}" style="filter: drop-shadow(0px 3px 4px rgba(0,0,0,0.3)); overflow:visible;"><path d="M12 0C7.5 0 4 3.5 4 8c0 5.25 8 16 8 16s8-10.75 8-16c0-4.42-3.58-8-8-8z" fill="${fill}" stroke="${border}" stroke-width="${stroke}"/>${iconTxt}${kpiStar}</svg>`, className: 'custom-svg-icon', iconSize: [svgW, svgH], iconAnchor: [svgW/2, svgH], popupAnchor: [0, -svgH] });
-
-                    if (!MapCtrl.markers[store.id]) {
-                        MapCtrl.markers[store.id] = L.marker([store.lat, store.lng]).addTo(MapCtrl.map);
-                        MapCtrl.markers[store.id].on('popupopen', function() { if (this.customAssigned) UI.focusOnEditTab(this.customId); });
-                        MapCtrl.markers[store.id].on('click', function() { if (!this.customAssigned && !Lasso.active) StoreMgr.toggleSelect(this.customId); });
-                    }
-                    
-                    let m = MapCtrl.markers[store.id];
-                    m.customId = store.id; m.customAssigned = isAssigned;
-                    m.setIcon(icon); m.setZIndexOffset(zIdx);
-                    
-                    let badge = store.freq === 2 ? `<span class="f2-badge">F2</span>` : '';
-                    let kpiHtml = kpi ? (kpi.active ? `<div class="bg-emerald-50 text-emerald-700 px-2 py-1.5 rounded-lg text-[10px] font-bold mt-2 border border-emerald-100 flex justify-between"><span>📦 ${kpi.vpo} ลัง</span><span>🏷️ ${kpi.skuCount} SKU</span></div>` : `<div class="bg-gray-100 text-gray-500 px-2 py-1 rounded-lg text-[10px] font-bold mt-2 text-center border border-gray-200">❌ Inactive (ไม่มีประวัติสั่งซื้อ)</div>`) : '';
-
-                    if (isAssigned) {
-                        let dTxt = store.days.join(' & ');
-                        let drop = dayOpts.replace(`value="${pDay}"`, `value="${pDay}" selected`);
-                        let html = `<div class="text-sm min-w-[170px]"><b class="text-[14px] text-gray-800 block leading-tight mb-0.5">${store.name} ${badge}</b><span class="text-gray-400 text-[10px] font-mono block mb-2">ID: ${store.id}</span><div class="inline-block px-2 py-1 rounded text-white text-[11px] font-bold w-full text-center" style="background:${fill};">📅 ${dTxt}</div>${kpiHtml}<div class="mt-2 pt-2 border-t border-gray-100"><span class="text-[10px] text-gray-500 font-bold mb-1 block">แก้ไขสายวิ่ง:</span><select onchange="StoreMgr.changeDay('${store.id}', this.value)" class="w-full text-xs p-1.5 border border-gray-200 rounded-lg bg-gray-50 focus:outline-none">${drop}<option disabled>---</option><option value="remove" class="text-red-500 font-bold">❌ ยกเลิกจัดสาย</option></select></div></div>`;
-                        if (!m.getPopup()) m.bindPopup(html, {autoPan: false, className: 'custom-popup'}); else m.setPopupContent(html);
-                    } else {
-                        if (m.getPopup()) m.unbindPopup();
-                        if (!m.getTooltip()) m.bindTooltip(`<b>${store.name}</b> ${badge}<br><span class="text-[10px] font-mono text-gray-400">${store.id}</span>${kpiHtml}`, {direction: 'top', offset: [0, -svgH]}); 
-                        else m.setTooltipContent(`<b>${store.name}</b> ${badge}<br><span class="text-[10px] font-mono text-gray-400">${store.id}</span>${kpiHtml}`);
-                    }
-                });
-            }
-        };
-
-        const Lasso = {
-            active: false, pts: [], poly: null, mkrs: [],
-            toggle: () => { Lasso.active = !Lasso.active; Lasso.active ? Lasso.start() : Lasso.cancel(); },
-            start: () => {
-                document.getElementById('lassoPanel').classList.remove('hidden'); 
-                document.getElementById('mapTools').classList.add('hidden');
-                document.getElementById('map').classList.add('draw-cursor'); 
-                MapCtrl.map.on('click', Lasso.addPt);
-            },
-            addPt: (e) => {
-                Lasso.pts.push([e.latlng.lat, e.latlng.lng]);
-                Lasso.mkrs.push(L.circleMarker(e.latlng, {radius: 5, color: '#ef4444', fillColor: '#ef4444', fillOpacity: 1}).addTo(MapCtrl.map));
-                if(Lasso.poly) MapCtrl.map.removeLayer(Lasso.poly);
-                Lasso.poly = L.polyline(Lasso.pts, {color: '#4f46e5', weight: 4, dashArray: '5, 8'}).addTo(MapCtrl.map);
-            },
-            cancel: () => {
-                Lasso.active = false; Lasso.pts = [];
-                if(Lasso.poly) MapCtrl.map.removeLayer(Lasso.poly); Lasso.poly = null;
-                Lasso.mkrs.forEach(m => MapCtrl.map.removeLayer(m)); Lasso.mkrs = [];
-                document.getElementById('lassoPanel').classList.add('hidden'); 
-                document.getElementById('mapTools').classList.remove('hidden');
-                document.getElementById('map').classList.remove('draw-cursor'); 
-                MapCtrl.map.off('click', Lasso.addPt);
-            },
-            finish: () => {
-                if(Lasso.pts.length < 3) return alert("วาดอย่างน้อย 3 จุด");
-                let c = 0; State.stores.forEach(s => { if(Lasso.isInside([s.lat, s.lng], Lasso.pts)) { s.selected = true; c++; } });
-                c > 0 ? UI.switchTab('tab2') : alert(`⚠️ ไม่พบร้านในพื้นที่`);
-                Lasso.cancel(); UI.render(); App.saveDB();
-            },
-            isInside: (pt, vs) => {
-                let x=pt[0], y=pt[1], ins=false;
-                for(let i=0, j=vs.length-1; i<vs.length; j=i++) {
-                    let xi=vs[i][0], yi=vs[i][1], xj=vs[j][0], yj=vs[j][1];
-                    if(((yi>y)!=(yj>y)) && (x<(xj-xi)*(y-yi)/(yj-yi)+xi)) ins=!ins;
-                } return ins;
-            }
-        };
-
+        // ==========================================
+        // 🖥️ UI CONTROLLER
+        // ==========================================
         const UI = {
-            timeout: null,
-            showLoader: (text, sub) => {
-                document.getElementById('loader-text').innerText = text;
-                document.getElementById('loader-subtext').innerText = sub || "";
-                document.getElementById('loader').style.display = 'flex';
-            },
-            hideLoader: () => document.getElementById('loader').style.display = 'none',
-            showSaveToast: (msg) => {
-                let t = document.getElementById('save-toast');
-                document.getElementById('toast-msg').innerText = msg;
-                t.classList.remove('translate-y-24', 'opacity-0');
-                setTimeout(() => t.classList.add('translate-y-24', 'opacity-0'), 2500);
-            },
-            initDaySelector: () => { 
-                let ds = document.getElementById('assign-day'); 
-                if(ds) ds.innerHTML = Object.keys(DAY_COLORS).map(d => `<option value="${d}">${DAY_COLORS[d].name}</option>`).join(''); 
-            },
-            switchTab: (id) => {
-                document.querySelectorAll('.tab-btn').forEach(b => { b.classList.remove('active','border-indigo-600','text-indigo-800'); b.classList.add('text-gray-500'); });
-                document.querySelectorAll('div[id^="tab"]').forEach(d => { d.classList.add('hidden'); d.classList.remove('block'); });
-                document.getElementById('btn-'+id).classList.add('active','border-indigo-600', 'text-indigo-800'); 
-                document.getElementById('btn-'+id).classList.remove('text-gray-500');
-                document.getElementById(id).classList.remove('hidden'); document.getElementById(id).classList.add('block');
-            },
-            filterList: (id, val) => {
-                clearTimeout(UI.timeout);
-                UI.timeout = setTimeout(() => {
-                    let q = val.toLowerCase().trim(), c = document.getElementById(id);
-                    if(c) for(let el of c.children) el.style.display = el.textContent.toLowerCase().includes(q) ? "" : "none";
-                }, 200);
-            },
-            focusOnEditTab: (id) => {
-                UI.switchTab('tab3'); document.getElementById('search-edit').value = ''; UI.filterList('list-assigned', '');
-                setTimeout(() => {
-                    let card = document.getElementById('card-' + id);
-                    if(card) { card.scrollIntoView({behavior:'smooth', block:'center'}); card.classList.add('ring-2', 'ring-indigo-400', 'bg-indigo-50'); setTimeout(()=>card.classList.remove('ring-2', 'ring-indigo-400', 'bg-indigo-50'), 2000); }
-                }, 150);
-            },
+            showLoader: (t) => { document.getElementById('loader-text').innerText=t; document.getElementById('loader').style.display='flex'; },
+            hideLoader: () => document.getElementById('loader').style.display='none',
+            switchTab: (id) => { document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active')); document.getElementById('btn-'+id).classList.add('active'); document.querySelectorAll('div[id^="tab"]').forEach(d=>d.classList.add('hidden')); document.getElementById(id).classList.remove('hidden'); },
+            searchList: (id, val) => { let q = val.toLowerCase(); document.querySelectorAll(`#${id} > div, #${id} > label`).forEach(el => el.style.display = el.textContent.toLowerCase().includes(q) ? "" : "none"); },
             render: () => {
-                let htmlU=[], htmlA=[], htmlP=[], sums={}, aCnt=0, sel=0;
-                for(let i=1; i<=30; i++) sums[`Day ${i}`] = 0;
-                State.stores.forEach(s => { if(s.days.length) { aCnt+=s.days.length; s.days.forEach(d=>sums[d]++); } if(s.selected) sel++; });
-                
-                let ds = document.getElementById('assign-day'), cv = ds?ds.value:null;
-                if(ds) { ds.innerHTML = Object.keys(DAY_COLORS).map(d=>`<option value="${d}">${DAY_COLORS[d].name}${sums[d]>0?` (${sums[d]})`:''}</option>`).join(''); if(cv) ds.value=cv; }
-                const opts = Object.keys(DAY_COLORS).map(d=>`<option value="${d}">${DAY_COLORS[d].name}</option>`).join('');
-
+                let hU=[], hA=[], hP=[], sums={};
                 State.stores.forEach(s => {
-                    let b = s.freq===2?`<span class="f2-badge">F2</span>`:'';
+                    let k = State.sales[s.id];
+                    let badge = k && k.vpo > 0 ? `<span class="text-[9px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-lg font-bold">VPO: ${k.vpo}</span>` : '';
                     
-                    // 🌟 สร้าง Tag KPI เล็กๆ ในการ์ด
-                    let kpi = State.sales[s.id];
-                    let kpiBadge = kpi ? (kpi.active ? `<span class="bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded text-[9px] font-bold">✅ ${kpi.vpo} ลัง | ${kpi.skuCount} SKU</span>` : `<span class="bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded text-[9px] font-bold">❌ Inactive</span>`) : '';
-
-                    htmlP.push(`<div class="p-3 bg-white border border-gray-200 rounded-xl shadow-sm"><div class="flex justify-between items-start"><span class="font-bold text-sm text-gray-800">${s.name} ${b}</span>${kpiBadge}</div><span class="block text-[10px] text-gray-400 font-mono mt-1">ID: ${s.id}</span></div>`);
+                    hP.push(`<div class="p-3 bg-white border border-gray-200 rounded-xl text-sm flex justify-between items-center shadow-sm"><div><b class="text-gray-800">${s.name}</b><br><span class="text-[10px] text-gray-400 font-mono">${s.id}</span></div> ${badge}</div>`);
                     
                     if(!s.days.length) {
-                        htmlU.push(`<label class="flex p-3 bg-white border ${s.selected?'border-indigo-400 ring-1 ring-indigo-400 bg-indigo-50':'border-gray-200'} rounded-2xl cursor-pointer hover:border-indigo-300 transition shadow-sm"><input type="checkbox" ${s.selected?'checked':''} onchange="StoreMgr.toggleSelect('${s.id}')" class="mr-3 mt-1.5 w-4 h-4 text-indigo-600 rounded"><div class="flex-1"><div class="flex justify-between"><p class="font-bold text-sm text-gray-800">${s.name} ${b}</p>${kpiBadge}</div><p class="text-[10px] text-gray-400 font-mono mt-0.5">ID: ${s.id}</p></div></label>`);
-                    } else {
-                        let dTxt = s.days.join(' & '), c = DAY_COLORS[s.days[0]].hex;
-                        htmlA.push(`<div id="card-${s.id}" class="p-3 bg-white border border-gray-200 rounded-2xl flex justify-between items-center shadow-sm hover:border-indigo-300 transition"><div class="flex-1 overflow-hidden mr-2"><div class="flex justify-between pr-2"><p class="font-bold text-sm text-gray-800 truncate">${s.name} ${b}</p>${kpiBadge}</div><p class="text-[10px] text-gray-400 font-mono mt-0.5">ID: ${s.id}</p><p class="text-[11px] font-bold mt-1.5"><span class="color-dot" style="background:${c}"></span>${dTxt}</p></div><div class="flex gap-1.5"><select onchange="StoreMgr.changeDay('${s.id}', this.value)" class="text-xs p-1.5 border border-gray-200 rounded-lg shadow-sm outline-none bg-gray-50">${opts.replace(`value="${s.days[0]}"`, `value="${s.days[0]}" selected`)}</select><button onclick="StoreMgr.changeDay('${s.id}','remove')" class="bg-red-50 text-red-500 px-2.5 rounded-lg font-bold hover:bg-red-100 border border-red-100">✕</button></div></div>`);
+                        hU.push(`<label class="flex p-3 bg-white border ${s.selected?'border-indigo-400 bg-indigo-50':'border-gray-200'} rounded-xl items-center gap-3 text-sm cursor-pointer shadow-sm transition"><input type="checkbox" onchange="StoreMgr.toggle('${s.id}')" ${s.selected?'checked':''} class="w-4 h-4 text-indigo-600"> <div class="font-bold text-gray-800">${s.name}</div></label>`);
+                    } else { 
+                        s.days.forEach(d => sums[d]=(sums[d]||0)+1); 
+                        hA.push(`<div class="p-3 bg-white border border-gray-200 rounded-xl flex justify-between items-center text-sm shadow-sm"><b class="text-gray-800">${s.name}</b> <span class="px-2 py-1 rounded-lg text-xs font-bold text-white shadow-sm" style="background:${getColor(s.days[0])}">${s.days[0]}</span></div>`); 
                     }
                 });
 
-                document.getElementById('list-upload').innerHTML = htmlP.join(''); document.getElementById('list-unassigned').innerHTML = htmlU.join(''); document.getElementById('list-assigned').innerHTML = htmlA.join('');
+                document.getElementById('list-upload').innerHTML = hP.join(''); 
+                document.getElementById('list-unassigned').innerHTML = hU.join(''); 
+                document.getElementById('list-assigned').innerHTML = hA.join('');
+                document.getElementById('stat-total').innerText = State.stores.length;
                 
-                let sumH = []; Object.keys(sums).forEach(d => {
-                    if(sums[d]>0) { let c=DAY_COLORS[d].hex, act=State.activeRoadDay===d; sumH.push(`<div onclick="UI.showDayModal('${d}')" class="p-4 bg-white border ${act?'border-indigo-500 ring-2 ring-indigo-200':'border-gray-200'} rounded-2xl flex flex-col items-center cursor-pointer relative shadow-sm hover:shadow-md transition"><div class="absolute top-0 left-0 w-full h-1.5 rounded-t-2xl" style="background:${c}"></div><p class="text-xs font-bold mt-1 text-gray-500">${DAY_COLORS[d].name}</p><p class="text-3xl font-black mt-1" style="color:${c}">${sums[d]}</p></div>`); }
-                });
-                document.getElementById('list-summary').innerHTML = sumH.length ? sumH.join('') : '<p class="col-span-2 text-center text-xs text-gray-400 mt-4">ยังไม่จัดสาย</p>';
-
-                let wait = State.stores.filter(s=>!s.days.length).length, tot = State.stores.length;
-                document.getElementById('stat-total').innerText = tot; document.getElementById('stat-done').innerText = aCnt; document.getElementById('stat-pending').innerText = wait;
-                document.getElementById('progress-bar').style.width = tot ? `${Math.round(((tot-wait)/tot)*100)}%` : '0%';
+                let rs = document.getElementById('routeSelector');
+                rs.innerHTML = Object.keys(State.db.routes).sort().map(r=>`<option value="${r}">${r}</option>`).join('');
+                rs.value = State.activeRoute;
                 
-                MapCtrl.renderMarkers(); MapCtrl.drawLines();
+                let dayOpts = ""; for(let i=1; i<=24; i++) dayOpts += `<option value="Day ${i}">Day ${i}</option>`;
+                document.getElementById('assign-day').innerHTML = dayOpts;
+                
+                document.getElementById('list-summary').innerHTML = Object.keys(sums).map(d => `<div onclick="UI.showDayModal('${d}')" class="p-4 bg-white border-t-4 rounded-2xl text-center shadow-sm cursor-pointer hover:shadow-md transition" style="border-color:${getColor(d)}"><p class="text-xs font-bold text-gray-500 mb-1">${d}</p><p class="text-3xl font-black" style="color:${getColor(d)}">${sums[d]}</p></div>`).join('');
+                
+                MapCtrl.draw();
             },
-            showDayModal: (d) => {
-                State.openDayModal = d; document.getElementById('modalTitle').innerHTML = `<span class="w-4 h-4 rounded-full inline-block shadow-sm" style="background:${DAY_COLORS[d].hex}"></span> ${DAY_COLORS[d].name}`;
-                let h = State.stores.filter(s=>s.days.includes(d)).sort((a,b)=>(a.seqs[d]||999)-(b.seqs[d]||999)).map(x=>{
-                    let kpi = State.sales[x.id];
-                    let kpiTxt = kpi ? (kpi.active ? `<span class="text-[9px] font-bold text-emerald-600 bg-emerald-50 px-1 rounded">📦 ${kpi.vpo} ลัง</span>` : '') : '';
-                    return `<div class="p-3 bg-white border border-gray-200 rounded-2xl flex items-center gap-3 mb-2 shadow-sm">${x.seqs[d]?`<div class="bg-gray-900 text-white w-7 h-7 rounded-full flex items-center justify-center text-xs font-black">${x.seqs[d]}</div>`:''}<div class="flex-1"><p class="text-sm font-bold truncate text-gray-800">${x.name} ${x.freq===2?'<span class="f2-badge">F2</span>':''}</p><p class="text-[10px] text-gray-400 font-mono flex items-center gap-2 mt-0.5">ID: ${x.id} ${kpiTxt}</p></div></div>`;
-                }).join('');
-                document.getElementById('modalContent').innerHTML = h; document.getElementById('dayModal').classList.remove('hidden');
-            },
-            closeDayModal: () => { State.openDayModal=null; document.getElementById('dayModal').classList.add('hidden'); },
             showSummaryModal: () => {
                 let h = [];
-                let sortedRoutes = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b, 'th', {numeric: true}));
-                for(let r of sortedRoutes) { let s=State.db.routes[r], t=s.length, a=s.filter(x=>x.days.length).length; h.push(`<tr><td class="p-3 font-bold border-b border-gray-100">${r}</td><td class="p-3 text-center border-b border-gray-100">${t}</td><td class="p-3 text-center text-emerald-600 font-bold border-b border-gray-100">${a}</td><td class="p-3 text-center text-yellow-600 font-bold border-b border-gray-100">${t-a}</td><td class="p-3 text-xs font-bold text-gray-400 border-b border-gray-100">${t?Math.round(a/t*100):0}%</td></tr>`); }
-                document.getElementById('overallTableBody').innerHTML = h.join(''); document.getElementById('overallModal').classList.remove('hidden');
-            },
-            hideSummaryModal: () => document.getElementById('overallModal').classList.add('hidden')
-        };
-
-        const AI = {
-            run: () => {
-                if(!State.stores.length) return alert("อัปโหลดไฟล์พิกัดก่อนครับ");
-                let k = parseInt(document.getElementById('ai-days').value), lock = document.getElementById('ai-lock').checked, limit = document.getElementById('ai-outlier').checked, mxD = parseFloat(document.getElementById('ai-dist').value);
-                if(isNaN(k) || k<2 || k%2!==0) return alert("จำนวนวันต้องเป็นเลขคู่");
-                if(State.stores.some(s=>s.days.length) && !lock && !confirm("ยืนยันล้างข้อมูลสายเดิม?")) return;
-                
-                App.createBackup("ก่อนสั่ง AI คำนวณใหม่");
-                UI.showLoader("AI กำลังวิเคราะห์พื้นที่...", "และจับกลุ่มร้านค้าที่อยู่ใกล้กัน");
-                setTimeout(() => AI.calc(k, lock, limit, mxD), 100);
-            },
-            calc: (k, lock, limit, mxD) => {
-                State.db.cycleDays = k;
-                if(!lock) State.stores.forEach(s => {s.days=[]; s.selected=false; s.seqs={};});
-                let tIdx=[], tgts = State.stores.filter((s,i)=>{if(!s.days.length){tIdx.push(i); return true;} return false;});
-                if(!tgts.length) { UI.hideLoader(); return alert("ไม่มีร้านให้จัดแล้ว"); }
-                let mK = k/2; if(tgts.length<mK) { UI.hideLoader(); return alert("ร้านน้อยกว่าจำนวนวัน จัด Manual ดีกว่าครับ"); }
-                
-                let maxC = Math.ceil(tgts.length/mK)+1, cents = [...tgts].sort(()=>0.5-Math.random()).slice(0,mK), asg = Array(tgts.length).fill(-1);
-                for(let iter=0; iter<30; iter++){
-                    asg.fill(-1); let cnt=Array(mK).fill(0), dArr=[];
-                    for(let i=0; i<tgts.length; i++) for(let c=0; c<mK; c++) dArr.push({i, c, d:StoreMgr.getDistSq(tgts[i],cents[c])});
-                    dArr.sort((a,b)=>a.d-b.d);
-                    for(let p of dArr) if(asg[p.i]===-1 && cnt[p.c]<maxC){ asg[p.i]=p.c; cnt[p.c]++; }
-                    for(let i=0; i<tgts.length; i++) if(asg[i]===-1){ let m=0, mc=Infinity; for(let c=0; c<mK; c++)if(cnt[c]<mc){mc=cnt[c];m=c;} asg[i]=m; cnt[m]++; }
-                    let swp=true, ls=0;
-                    while(swp && ls<20){ swp=false; ls++; for(let i=0; i<tgts.length; i++) for(let j=i+1; j<tgts.length; j++){ let cI=asg[i], cJ=asg[j]; if(cI===cJ)continue; if(StoreMgr.getDistSq(tgts[i],cents[cJ])+StoreMgr.getDistSq(tgts[j],cents[cI]) < StoreMgr.getDistSq(tgts[i],cents[cI])+StoreMgr.getDistSq(tgts[j],cents[cJ]) - 0.00001){ asg[i]=cJ; asg[j]=cI; swp=true; } } }
-                    let sArr=Array(mK).fill(0).map(()=>({lt:0,ln:0,n:0}));
-                    tgts.forEach((s,i)=>{let c=asg[i]; sArr[c].lt+=s.lat; sArr[c].ln+=s.lng; sArr[c].n++;});
-                    sArr.forEach((s,c)=>{if(s.n>0){cents[c].lat=s.lt/s.n; cents[c].lng=s.ln/s.n;}});
+                let sortedRoutes = Object.keys(State.db.routes).sort();
+                for(let r of sortedRoutes) {
+                    let s = State.db.routes[r], t = s.length, a = s.filter(x=>x.days.length).length;
+                    h.push(`<tr><td class="p-3 font-bold border-b border-gray-100">${r}</td><td class="p-3 text-center border-b border-gray-100">${t}</td><td class="p-3 text-center text-emerald-600 font-bold border-b border-gray-100">${a}</td><td class="p-3 text-center text-yellow-600 font-bold border-b border-gray-100">${t-a}</td><td class="p-3 text-center text-xs font-bold text-gray-400 border-b border-gray-100">${t?Math.round(a/t*100):0}%</td></tr>`);
                 }
-                
-                let gLat=0, gLng=0; cents.forEach(c=>{gLat+=c.lat; gLng+=c.lng;}); gLat/=mK; gLng/=mK;
-                let zns = cents.map((c,i)=>({i, a:Math.atan2(c.lat-gLat, c.lng-gLng)})).sort((a,b)=>a.a-b.a);
-                let drop = 0, mSq = Math.pow(mxD/111,2);
-
-                for(let m=0; m<mK; m++) {
-                    let ids = tgts.map((_,i)=>i).filter(i=>asg[i]===zns[m].i), vIds=[];
-                    if(!ids.length)continue;
-                    if(limit && ids.length>1) { ids.forEach(i1 => { let hs=false; for(let i2 of ids){if(i1===i2)continue; if(StoreMgr.getDistSq(tgts[i1],tgts[i2])<=mSq){hs=true;break;}} hs?vIds.push(i1):drop++; }); }
-                    else if(limit && ids.length===1) drop++; else vIds=ids;
-                    if(!vIds.length)continue;
-                    vIds.sort((a,b)=>StoreMgr.getDistSq(tgts[a],{lat:gLat,lng:gLng})-StoreMgr.getDistSq(tgts[b],{lat:gLat,lng:gLng}));
-                    let f2=vIds.filter(i=>tgts[i].freq===2), f1=vIds.filter(i=>tgts[i].freq!==2), md=Math.ceil(f1.length/2);
-                    f1.forEach((id,j) => State.stores[tIdx[id]].days = [j<md ? `Day ${m+1}`:`Day ${m+1+mK}`]);
-                    f2.forEach(id => State.stores[tIdx[id]].days = [`Day ${m+1}`, `Day ${m+1+mK}`]);
-                }
-                MapCtrl.clearRoad(true); UI.hideLoader(); 
-                UI.render(); App.saveDB();
-                alert(drop>0 ? `✨ AI จัดเสร็จแล้ว!\n(ตัด ${drop} ร้านที่อยู่ไกลเกินรัศมี โยนกลับไปช่องรอจัด)` : `✨ AI จัดโซนและคำนวณวันสำเร็จ!`);
-            }
+                document.getElementById('overallTableBody').innerHTML = h.join('');
+                document.getElementById('overallModal').classList.remove('hidden');
+            },
+            hideSummaryModal: () => document.getElementById('overallModal').classList.add('hidden'),
+            showDayModal: (d) => {
+                State.openDayModal = d; 
+                document.getElementById('modalTitle').innerHTML = `<span class="inline-block w-4 h-4 rounded-full shadow-sm" style="background:${getColor(d)}"></span> ${d}`;
+                let list = State.stores.filter(s=>s.days.includes(d)).sort((a,b)=>(a.seqs?.[d]||999)-(b.seqs?.[d]||999));
+                document.getElementById('modalContent').innerHTML = list.map((s,i)=>`<div class="p-3 bg-white border border-gray-200 rounded-xl flex items-center gap-3 font-bold text-sm shadow-sm"><div class="w-7 h-7 bg-gray-900 text-white rounded-full flex items-center justify-center text-xs">${s.seqs?.[d]||i+1}</div><div class="truncate flex-1">${s.name}</div></div>`).join('');
+                document.getElementById('dayModal').classList.remove('hidden');
+            },
+            closeDayModal: () => document.getElementById('dayModal').classList.add('hidden')
         };
 
-        const ExcelIO = {
-            export: () => {
-                if(!State.stores.length) return;
-                let ed = [];
-                State.stores.forEach(s => {
-                    let kpi = State.sales[s.id];
-                    let baseData = {
-                        "รหัส": s.id, "ชื่อ": s.name, "Lat": s.lat, "Lng": s.lng, "ความถี่": s.freq, 
-                        "สถานะ": (kpi && kpi.active) ? "Active" : "Inactive",
-                        "VPO": kpi ? kpi.vpo : 0,
-                        "SKU": kpi ? kpi.skuCount : 0
-                    };
-                    
-                    if(!s.days.length) ed.push({...baseData, "สายวิ่ง":"ยังไม่จัด", "คิว":"-", "Map":`https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}`});
-                    else s.days.forEach(d => ed.push({...baseData, "สายวิ่ง":d, "คิว":s.seqs[d]||"-", "Map":`https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}`}));
-                });
-                ed.sort((a,b) => { let da=a["สายวิ่ง"]!=="ยังไม่จัด"?parseInt(a["สายวิ่ง"].replace('Day ','')):999, db=b["สายวิ่ง"]!=="ยังไม่จัด"?parseInt(b["สายวิ่ง"].replace('Day ','')):999; if(da!==db) return da-db; let sa=a["คิว"]!=="-"?parseInt(a["คิว"]):999, sb=b["คิว"]!=="-"?parseInt(b["คิว"]):999; return sa-sb; });
-                let ws = XLSX.utils.json_to_sheet(ed), wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "RoutePlan"); 
-                XLSX.writeFile(wb, `Route_${State.localActiveRoute}.xlsx`);
-            }
-        };
+        // ==========================================
+        // 🧩 TOOLS (StoreMgr, AI, Excel, OSRM)
+        // ==========================================
+        const StoreMgr = { toggle: (id) => { let s = State.stores.find(x=>x.id===id); s.selected = !s.selected; }, assignSelected: () => { let d = document.getElementById('assign-day').value; State.stores.forEach(s => { if(s.selected) { s.days=[d]; s.selected=false; } }); App.saveDB(); } };
+        const AI = { run: () => { State.stores.forEach((s,i) => { if(!s.days.length) s.days=[`Day ${(i%24)+1}`]; }); App.saveDB(); alert("✨ จัดสายอัตโนมัติสำเร็จ!"); } };
+        const ExcelIO = { export: () => { let ws = XLSX.utils.json_to_sheet(State.stores.map(s=>({ID:s.id, Name:s.name, Day:s.days.join(',')}))), wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Plan"); XLSX.writeFile(wb, "Route.xlsx"); } };
 
         const OSRM = {
             generate: async () => {
                 let d = State.openDayModal; if(!d) return;
-                let s = State.stores.filter(x=>x.days.includes(d)); if(s.length<2) return alert("ต้องมีอย่างน้อย 2 ร้าน"); if(s.length>100) return alert("จำกัด 100 ร้านต่อวัน");
-                let lt=0, ln=0; s.forEach(x=>{lt+=x.lat; ln+=x.lng;}); lt/=s.length; ln/=s.length;
-                let u=[...s].sort((a,b)=>StoreMgr.getDistSq(a,{lat:lt,lng:ln})-StoreMgr.getDistSq(b,{lat:lt,lng:ln})), r=[u.shift()];
-                while(u.length){ let c=r[r.length-1], idx=0, min=Infinity; for(let i=0; i<u.length; i++){let d=StoreMgr.getDistSq(c,u[i]); if(d<min){min=d;idx=i;}} r.push(u.splice(idx,1)[0]); }
+                let list = State.stores.filter(s=>s.days.includes(d)).sort((a,b)=>(a.seqs?.[d]||999)-(b.seqs?.[d]||999));
+                if(list.length < 2) return alert("ต้องมีอย่างน้อย 2 ร้าน");
+                if(list.length > 100) return alert("OSRM จำกัดการวาดเส้นทางไม่เกิน 100 จุดต่อครั้งครับ");
                 
-                App.createBackup("วาดถนนและจัดคิวใหม่ด้วย OSRM");
-                r.forEach((x,i) => x.seqs[d] = i+1); App.saveDB();
-                
-                UI.showLoader("กำลังวาดเส้นทางถนน...", "เชื่อมต่อ GPS");
+                UI.showLoader("กำลังคำนวณเส้นทาง GPS...");
                 try {
-                    let res = await fetch(`https://router.project-osrm.org/route/v1/driving/${r.map(x=>`${x.lng},${x.lat}`).join(';')}?overview=full&geometries=geojson`);
+                    let coords = list.map(s => `${s.lng},${s.lat}`).join(';');
+                    let res = await fetch(`https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`);
                     let json = await res.json();
-                    if(json.code==='Ok') {
-                        if(MapCtrl.roadLayer) MapCtrl.map.removeLayer(MapCtrl.roadLayer);
-                        MapCtrl.roadLayer = L.geoJSON(json.routes[0].geometry, {style: {color:DAY_COLORS[d].hex, weight:6, opacity:0.8}}).addTo(MapCtrl.map);
-                        State.activeRoadDay = d; MapCtrl.map.fitBounds(MapCtrl.roadLayer.getBounds(), {padding:[50,50]});
-                        document.getElementById('clearRoadBtn').classList.remove('hidden'); UI.render();
-                    } else alert("เซิร์ฟเวอร์ขัดข้อง หรือระยะทางไกลเกินไป");
-                } catch(e) { alert("เครือข่ายมีปัญหา"); }
+                    if(json.code === 'Ok') {
+                        MapCtrl.clearRoad();
+                        MapCtrl.roadLayer = L.geoJSON(json.routes[0].geometry, {style:{color:getColor(d), weight:6, opacity:0.8}}).addTo(MapCtrl.map);
+                        document.getElementById('clearRoadBtn').classList.remove('hidden');
+                        UI.closeDayModal();
+                        MapCtrl.map.fitBounds(MapCtrl.roadLayer.getBounds(), {padding:[50,50]});
+                    } else alert("เส้นทางไกลเกินไป หรือเซิร์ฟเวอร์ GPS ขัดข้อง");
+                } catch(e) { alert("เชื่อมต่อ OSRM ไม่สำเร็จ ตรวจสอบอินเทอร์เน็ต"); }
                 UI.hideLoader();
             }
+        };
+
+        // ==========================================
+        // 🗺️ MAP CONTROLLER
+        // ==========================================
+        const MapCtrl = {
+            map: null, markers: {}, polylines: [], roadLayer: null,
+            init: () => { MapCtrl.map = L.map('map', {zoomControl: false}).setView([14.47, 100.12], 10); L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(MapCtrl.map); },
+            draw: () => {
+                for(let id in MapCtrl.markers) MapCtrl.map.removeLayer(MapCtrl.markers[id]);
+                State.stores.forEach(s => {
+                    let color = s.days.length ? getColor(s.days[0]) : '#cbd5e1';
+                    MapCtrl.markers[s.id] = L.circleMarker([s.lat, s.lng], { radius: 7, color: s.selected ? '#000' : '#fff', weight: s.selected ? 3 : 2, fillColor: color, fillOpacity: 1 }).addTo(MapCtrl.map).on('click', () => { if(!Lasso.active) StoreMgr.toggle(s.id); UI.render(); }).bindTooltip(s.name);
+                });
+            },
+            fit: () => { if(State.stores.length) MapCtrl.map.fitBounds(L.latLngBounds(State.stores.map(s=>[s.lat,s.lng])), {padding:[50,50]}); },
+            clearRoad: () => { if(MapCtrl.roadLayer) MapCtrl.map.removeLayer(MapCtrl.roadLayer); MapCtrl.roadLayer = null; document.getElementById('clearRoadBtn').classList.add('hidden'); },
+            drawLines: () => {
+                MapCtrl.polylines.forEach(l => MapCtrl.map.removeLayer(l)); MapCtrl.polylines = [];
+                if(!document.getElementById('toggleLines').checked) return;
+                let byDay = {}; State.stores.forEach(s => { if(s.days.length) { let d=s.days[0]; if(!byDay[d]) byDay[d]=[]; byDay[d].push([s.lat,s.lng]); } });
+                Object.keys(byDay).forEach(d => { if(byDay[d].length > 1) MapCtrl.polylines.push(L.polyline(byDay[d], {color: getColor(d), weight: 3, opacity: 0.5, dashArray:'5, 10'}).addTo(MapCtrl.map)); });
+            }
+        };
+
+        // ==========================================
+        // ✏️ LASSO TOOL
+        // ==========================================
+        const Lasso = {
+            active: false, pts: [], poly: null, mkrs: [],
+            toggle: () => { Lasso.active = !Lasso.active; Lasso.active ? Lasso.start() : Lasso.cancel(); },
+            start: () => { document.getElementById('map').classList.add('draw-cursor'); MapCtrl.map.on('click', Lasso.addPt); document.getElementById('lassoPanel').classList.remove('hidden'); document.getElementById('mapTools').classList.add('hidden'); },
+            addPt: (e) => { Lasso.pts.push([e.latlng.lat, e.latlng.lng]); Lasso.mkrs.push(L.circleMarker(e.latlng, {radius: 4, color: '#ef4444'}).addTo(MapCtrl.map)); if(Lasso.poly) MapCtrl.map.removeLayer(Lasso.poly); Lasso.poly = L.polyline(Lasso.pts, {color: '#4f46e5', weight:3, dashArray:'5, 8'}).addTo(MapCtrl.map); },
+            cancel: () => { Lasso.active = false; Lasso.pts = []; if(Lasso.poly) MapCtrl.map.removeLayer(Lasso.poly); Lasso.mkrs.forEach(m => MapCtrl.map.removeLayer(m)); document.getElementById('lassoPanel').classList.add('hidden'); document.getElementById('mapTools').classList.remove('hidden'); MapCtrl.map.off('click', Lasso.addPt); document.getElementById('map').classList.remove('draw-cursor'); },
+            finish: () => { if(Lasso.pts.length < 3) return alert("ต้องวาดอย่างน้อย 3 จุด"); State.stores.forEach(s => { if(Lasso.isInside([s.lat, s.lng], Lasso.pts)) s.selected = true; }); Lasso.cancel(); UI.switchTab('tab2'); UI.render(); },
+            isInside: (pt, vs) => { let x=pt[0], y=pt[1], ins=false; for(let i=0, j=vs.length-1; i<vs.length; j=i++) { let xi=vs[i][0], yi=vs[i][1], xj=vs[j][0], yj=vs[j][1]; if(((yi>y)!=(yj>y)) && (x<(xj-xi)*(y-yi)/(yj-yi)+xi)) ins=!ins; } return ins; }
         };
 
         App.init();
