@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Sales App V79 (Familiar UI + Deep Analytics)</title>
+    <title>Sales App V79.1 (Smart Route + Navigation)</title>
     
     <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore-compat.js"></script>
@@ -25,7 +25,10 @@
         .drag-handle:active { cursor: grabbing; }
         .app-tab { display: none; height: 100%; width: 100%; overflow-y: auto; padding-bottom: 80px; }
         .app-tab.active { display: block; }
-        #tab-route.active { display: flex; flex-direction: column; overflow: hidden; padding-bottom: 70px; }
+        
+        /* ปรับแต่ง Tab Route ให้รองรับทั้งมือถือและคอมพิวเตอร์ */
+        #tab-route.active { display: flex; flex-direction: column; overflow: hidden; padding-bottom: 70px; height: 100%; }
+        
         .nav-item { color: #94a3b8; transition: all 0.2s; }
         .nav-item.active { color: #2563eb; }
     </style>
@@ -103,26 +106,36 @@
         </div>
 
         <div id="tab-route" class="app-tab">
-            <div class="bg-white p-3 shrink-0 border-b">
-                <select id="day-select" class="w-full bg-gray-50 text-gray-900 text-sm font-bold outline-none px-3 py-3 rounded-xl border border-gray-300 text-center appearance-none"></select>
+            <div class="bg-white p-3 shrink-0 border-b z-20 relative shadow-sm">
+                <select id="day-select" class="w-full bg-gray-50 text-gray-900 text-sm font-bold outline-none px-3 py-2.5 rounded-xl border border-gray-300 text-center appearance-none"></select>
             </div>
-            <div id="map-container" class="h-[32vh] shrink-0 relative border-b bg-gray-200 flex items-center justify-center">
-                <button id="btn-load-map" onclick="MapCtrl.initAndDraw()" class="bg-blue-600 text-white px-6 py-2.5 rounded-full font-bold shadow-lg">📍 เปิดแผนที่นำทาง</button>
-                <div id="map" class="w-full h-full hidden"></div>
-                <button id="btn-fit-map" onclick="MapCtrl.fitBounds()" class="hidden absolute bottom-4 right-4 z-[400] bg-white p-2.5 rounded-full shadow-lg border text-blue-600"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-width="2.5" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" /></svg></button>
-            </div>
-            <div class="flex-1 bg-gray-50 overflow-y-auto p-4 relative">
-                <div class="flex justify-between items-center mb-3"><h3 class="font-bold text-sm text-gray-800" id="route-title">คิวงานวันนี้</h3><span class="text-[10px] text-gray-500 font-medium bg-gray-200 px-2 py-1 rounded">ลาก ≡ สลับคิว</span></div>
-                <div id="route-store-list" class="space-y-3 pb-20"></div>
+            
+            <div class="flex-1 flex flex-col lg:flex-row overflow-hidden relative w-full h-full">
+                
+                <div id="map-container" class="h-[40vh] lg:h-full lg:flex-1 shrink-0 relative border-b lg:border-b-0 lg:border-r bg-gray-200 flex items-center justify-center z-10 transition-all">
+                    <button id="btn-load-map" onclick="MapCtrl.initAndDraw()" class="bg-blue-600 text-white px-6 py-2.5 rounded-full font-bold shadow-lg active:scale-95 transition">📍 เปิดแผนที่นำทาง</button>
+                    <div id="map" class="w-full h-full hidden"></div>
+                    <button id="btn-fit-map" onclick="MapCtrl.fitBounds()" class="hidden absolute bottom-4 right-4 z-[400] bg-white p-2.5 rounded-full shadow-lg border text-blue-600 active:scale-95 transition">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" /></svg>
+                    </button>
+                </div>
+                
+                <div class="flex-1 lg:w-[22%] lg:min-w-[300px] bg-gray-50 p-3 relative z-10 flex flex-col">
+                    <div class="flex justify-between items-center mb-3 shrink-0">
+                        <h3 class="font-bold text-sm text-gray-800" id="route-title">คิวงานวันนี้</h3>
+                        <span class="text-[10px] text-gray-500 font-medium bg-gray-200 px-2 py-1 rounded">ลาก ≡ สลับคิว</span>
+                    </div>
+                    <div id="route-store-list" class="space-y-3 pb-20 flex-1 overflow-y-auto"></div>
+                </div>
             </div>
         </div>
 
     </div>
 
     <nav id="bottom-nav" class="fixed bottom-0 w-full bg-white border-t flex justify-around items-center pt-2 pb-6 px-2 z-[1000] hidden shadow-lg">
-        <button onclick="UI.switchTab('dashboard')" id="nav-dashboard" class="nav-item active flex flex-col items-center w-1/3"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg><span class="text-[10px] font-bold mt-1">ภาพรวม</span></button>
-        <button onclick="UI.switchTab('stores')" id="nav-stores" class="nav-item flex flex-col items-center w-1/3"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg><span class="text-[10px] font-bold mt-1">ร้านค้า</span></button>
-        <button onclick="UI.switchTab('route')" id="nav-route" class="nav-item flex flex-col items-center w-1/3"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/></svg><span class="text-[10px] font-bold mt-1">คิวงาน</span></button>
+        <button onclick="UI.switchTab('dashboard')" id="nav-dashboard" class="nav-item active flex flex-col items-center w-1/3"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg><span class="text-[10px] font-bold mt-1">ภาพรวม</span></button>
+        <button onclick="UI.switchTab('stores')" id="nav-stores" class="nav-item flex flex-col items-center w-1/3"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg><span class="text-[10px] font-bold mt-1">ร้านค้า</span></button>
+        <button onclick="UI.switchTab('route')" id="nav-route" class="nav-item flex flex-col items-center w-1/3"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/></svg><span class="text-[10px] font-bold mt-1">คิวงาน</span></button>
     </nav>
 
     <div id="store-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-[99999] flex items-center justify-center p-4">
@@ -246,7 +259,7 @@
                 let html = State.allStores.map(s => {
                     let k = State.sales[s.id];
                     let badge = k && k.vpo > 0 ? `<span class="bg-emerald-100 text-emerald-700 text-[10px] px-2 py-0.5 rounded-lg font-bold">Active</span>` : `<span class="bg-gray-100 text-gray-400 text-[10px] px-2 py-0.5 rounded-lg font-bold">Inactive</span>`;
-                    return `<div onclick="UI.openModal('${s.id}')" data-search="${s.id} ${s.name}" class="bg-white p-4 rounded-2xl border shadow-sm flex justify-between items-center active:bg-gray-50 transition">
+                    return `<div onclick="UI.openModal('${s.id}')" data-search="${s.id.toLowerCase()} ${s.name.toLowerCase()}" class="bg-white p-4 rounded-2xl border shadow-sm flex justify-between items-center active:bg-gray-50 transition cursor-pointer">
                         <div class="overflow-hidden mr-2"><p class="font-black text-sm text-gray-800 truncate">${s.name}</p><p class="text-[10px] text-gray-400 font-mono">ID: ${s.id}</p></div>
                         ${badge}
                     </div>`;
@@ -255,9 +268,9 @@
             },
             setupRoute: () => {
                 let ds = new Set(); State.allStores.forEach(s => s.days.forEach(d => ds.add(d)));
-                let sorted = Array.from(ds).sort();
+                let sorted = Array.from(ds).sort((a,b) => parseInt(a.replace('Day ','')) - parseInt(b.replace('Day ','')));
                 let el = document.getElementById('day-select');
-                el.innerHTML = sorted.map(d => `<option value="${d}">${d.replace('Day','คิววันที่')}</option>`).join('');
+                el.innerHTML = sorted.map(d => `<option value="${d}">${d.replace('Day ','คิววันที่ ')}</option>`).join('');
                 if(!State.currentDay) State.currentDay = sorted[0];
                 el.value = State.currentDay;
                 Processor.routeList();
@@ -265,8 +278,29 @@
             routeList: () => {
                 let list = State.allStores.filter(s => s.days.includes(State.currentDay));
                 list.sort((a,b) => (a.seqs?.[State.currentDay] || 999) - (b.seqs?.[State.currentDay] || 999));
-                let html = list.map((s, i) => `<div data-id="${s.id}" class="store-item bg-white p-3 rounded-2xl border shadow-sm flex items-center gap-3 relative"><div class="drag-handle text-gray-300">≡</div><div class="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center font-black text-sm">${s.seqs?.[State.currentDay] || i+1}</div><div class="flex-1 font-bold text-[13px] truncate" onclick="UI.openModal('${s.id}')">${s.name}</div><button onclick="UI.openModal('${s.id}')" class="text-blue-500 font-black text-xs">📊 KPI</button></div>`).join('');
-                let c = document.getElementById('route-store-list'); c.innerHTML = html || '<p class="text-center text-gray-400 mt-5">ไม่มีคิวงาน</p>';
+                
+                // โค้ดส่วนที่ปรับเพิ่มปุ่มนำทาง และจัดหน้าตาให้สวยงาม
+                let html = list.map((s, i) => {
+                    let seq = s.seqs?.[State.currentDay] || i+1;
+                    let navLink = `https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}&travelmode=driving`;
+                    return `
+                    <div data-id="${s.id}" class="store-item bg-white p-3 rounded-2xl border shadow-sm flex flex-col gap-2 relative mb-3">
+                        <div class="flex items-center gap-2">
+                            <div class="drag-handle text-gray-300 px-1 cursor-grab active:cursor-grabbing">≡</div>
+                            <div class="w-7 h-7 rounded-full bg-blue-600 text-white flex items-center justify-center font-black text-xs shrink-0 shadow-sm">${seq}</div>
+                            <div class="flex-1 font-bold text-[13px] leading-tight cursor-pointer truncate" onclick="UI.openModal('${s.id}')">${s.name}</div>
+                        </div>
+                        <div class="flex gap-2 pl-9">
+                            <button onclick="UI.openModal('${s.id}')" class="bg-blue-50 hover:bg-blue-100 text-blue-600 px-3 py-1.5 rounded-lg font-bold text-[11px] flex-1 border border-blue-100 transition active:scale-95">📊 KPI</button>
+                            <a href="${navLink}" target="_blank" class="bg-emerald-50 hover:bg-emerald-100 text-emerald-600 px-3 py-1.5 rounded-lg font-bold text-[11px] flex-1 text-center border border-emerald-100 transition active:scale-95">🚗 นำทาง</a>
+                        </div>
+                    </div>`;
+                }).join('');
+                
+                let c = document.getElementById('route-store-list'); 
+                c.innerHTML = html || '<p class="text-center text-gray-400 mt-5">ไม่มีคิวงาน</p>';
+                document.getElementById('route-title').innerText = `คิวงาน (${list.length} ร้าน)`;
+                
                 if(sortableList) sortableList.destroy();
                 sortableList = Sortable.create(c, { handle: '.drag-handle', animation: 250, onEnd: Processor.handleDrag });
                 MapCtrl.drawMap();
@@ -297,8 +331,8 @@
                 let list = State.allStores.filter(s => s.days.includes(State.currentDay));
                 list.forEach((s, i) => {
                     let seq = s.seqs?.[State.currentDay] || i+1;
-                    let icon = L.divIcon({ html: `<svg viewBox="0 0 24 24" width="30" height="40"><path d="M12 0C7 0 3 4 3 9c0 7 9 15 9 15s9-8 9-15c0-5-4-9-9-9z" fill="#2563eb" stroke="#fff" stroke-width="2"/><circle cx="12" cy="9" r="7" fill="#fff"/><text x="12" y="13" font-size="10" font-weight="900" fill="#000" text-anchor="middle">${seq}</text></svg>`, className: '', iconSize: [30, 40], iconAnchor: [15, 40] });
-                    let m = L.marker([s.lat, s.lng], { icon }).addTo(map).bindPopup(`<b class="text-xs">${s.name}</b>`, { closeButton: false });
+                    let icon = L.divIcon({ html: `<svg viewBox="0 0 24 24" width="30" height="40" style="filter: drop-shadow(0px 2px 3px rgba(0,0,0,0.3)); overflow:visible;"><path d="M12 0C7 0 3 4 3 9c0 7 9 15 9 15s9-8 9-15c0-5-4-9-9-9z" fill="#2563eb" stroke="#fff" stroke-width="2"/><circle cx="12" cy="9" r="7" fill="#fff"/><text x="12" y="13" font-size="10" font-weight="900" fill="#000" text-anchor="middle">${seq}</text></svg>`, className: '', iconSize: [30, 40], iconAnchor: [15, 40], popupAnchor: [0, -40] });
+                    let m = L.marker([s.lat, s.lng], { icon }).addTo(map).bindPopup(`<div class="text-center pb-1"><b class="text-xs">${s.name}</b><br><button onclick="UI.openModal('${s.id}')" class="bg-gray-100 text-gray-700 px-3 py-1 rounded border mt-1 text-[10px] font-bold shadow-sm">ดูข้อมูล</button></div>`, { closeButton: false });
                     mapMarkers.push(m);
                 });
                 MapCtrl.fitBounds();
@@ -307,6 +341,7 @@
         };
 
         document.getElementById('day-select').addEventListener('change', (e) => { State.currentDay = e.target.value; Processor.routeList(); });
+        window.addEventListener('resize', () => { if(map) map.invalidateSize(); });
         document.addEventListener('DOMContentLoaded', App.checkAuth);
     </script>
 </body>
