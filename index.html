@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Route Admin (Sidebar & Data Management)</title>
+    <title>Route Admin V81 (Sidebar + Full Routing System)</title>
     
     <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore-compat.js"></script>
@@ -61,7 +61,7 @@
         <div id="page-planning" class="flex-1 flex flex-col h-full absolute inset-0">
             <div class="h-16 bg-white text-gray-800 flex items-center justify-between px-6 shadow-sm z-[5000] shrink-0 border-b border-gray-200">
                 <div class="flex items-center gap-3">
-                    <span class="text-sm font-bold text-gray-500">สายวิ่งปัจจุบัน:</span>
+                    <span class="text-sm font-bold text-gray-500">สายวิ่ง:</span>
                     <div class="flex items-center bg-gray-100 rounded-lg p-1 border border-gray-200 shadow-inner">
                         <select id="routeSelector" onchange="App.switchRoute(this.value)" class="bg-gray-100 text-indigo-700 border-none text-sm font-bold py-1 px-2 outline-none cursor-pointer"></select>
                         <div class="flex items-center border-l border-gray-300 ml-1 pl-1">
@@ -79,7 +79,7 @@
             <div class="flex-1 flex overflow-hidden">
                 <div class="w-2/3 relative h-full">
                     <div id="map"></div>
-                    <button id="clearRoadBtn" onclick="MapCtrl.clearRoad()" class="hidden absolute top-4 left-4 z-[400] bg-white text-red-600 font-bold px-4 py-2 rounded-xl shadow-lg border border-red-200">✕ ซ่อนเส้นทาง</button>
+                    <button id="clearRoadBtn" onclick="MapCtrl.clearRoad()" class="hidden absolute top-4 left-4 z-[400] bg-white text-red-600 font-bold px-4 py-2 rounded-xl shadow-lg border border-red-200">✕ ซ่อนเส้นทางถนน</button>
                     <div id="mapTools" class="absolute top-4 right-4 z-[400] flex flex-col gap-3 items-end">
                         <div class="bg-white px-3 py-2 rounded-xl shadow-lg flex items-center gap-2 border">
                             <input type="checkbox" id="toggleLines" onchange="MapCtrl.drawLines()" class="w-4 h-4 cursor-pointer text-indigo-600">
@@ -96,36 +96,49 @@
 
                 <div class="w-1/3 bg-white flex flex-col h-full z-10 border-l border-gray-200 shadow-[-5px_0_15px_rgba(0,0,0,0.05)]">
                     <div class="flex border-b text-sm bg-gray-50 shrink-0">
-                        <button onclick="UI.switchTab('tab1')" id="btn-tab1" class="tab-btn active flex-1 py-4">1. อัปโหลด</button>
+                        <button onclick="UI.switchTab('tab1')" id="btn-tab1" class="tab-btn active flex-1 py-4">1. ข้อมูล</button>
                         <button onclick="UI.switchTab('tab2')" id="btn-tab2" class="tab-btn flex-1 py-4">2. จัดสาย</button>
                         <button onclick="UI.switchTab('tab3')" id="btn-tab3" class="tab-btn flex-1 py-4">3. แก้ไข</button>
                         <button onclick="UI.switchTab('tab4')" id="btn-tab4" class="tab-btn flex-1 py-4">4. คิวงาน</button>
                     </div>
 
                     <div class="flex-1 overflow-y-auto p-4 bg-gray-50/50">
+                        
                         <div id="tab1" class="block space-y-4">
                             <div class="bg-indigo-50 border-2 border-dashed border-indigo-300 p-6 rounded-2xl text-center cursor-pointer hover:bg-indigo-100 transition" onclick="document.getElementById('fileUpload').click()">
                                 <p class="text-2xl mb-2">📍</p>
                                 <p class="text-xs font-bold text-indigo-800 uppercase tracking-widest">อัปโหลดไฟล์ร้านค้า (Master)</p>
                             </div>
                             <input type="file" id="fileUpload" class="hidden">
-                            <div id="list-upload" class="space-y-2 mt-4"></div>
+                            <button onclick="App.clearStores()" class="w-full text-xs text-red-500 font-bold py-2 hover:bg-red-50 rounded transition border border-transparent hover:border-red-200">🗑️ ล้างข้อมูลร้านค้าในสายนี้ทิ้ง</button>
+                            <div id="list-upload" class="space-y-2 mt-2"></div>
                         </div>
 
                         <div id="tab2" class="hidden space-y-4">
                             <div class="bg-gray-900 text-white p-4 rounded-2xl shadow-lg">
                                 <p class="text-xs font-bold mb-3 text-indigo-400">🤖 AI ROUTE BUILDER</p>
-                                <div class="flex justify-between items-center mb-4">
-                                    <span class="text-xs">จำนวนวัน:</span>
+                                <div class="flex justify-between items-center mb-2">
+                                    <span class="text-xs">จำนวนวันทั้งหมด:</span>
                                     <input type="number" id="ai-days" value="24" class="bg-gray-800 w-16 text-center rounded border border-gray-700 py-1 font-bold outline-none text-white">
                                 </div>
-                                <button onclick="AI.run()" class="w-full bg-indigo-500 hover:bg-indigo-600 transition py-2.5 rounded-xl font-bold text-sm shadow-md">✨ คำนวณแบบ AI</button>
+                                <div class="flex justify-between items-center mb-3">
+                                    <label class="flex items-center gap-2 cursor-pointer">
+                                        <input type="checkbox" id="ai-outlier" checked class="w-4 h-4 text-indigo-500 rounded">
+                                        <span class="text-xs text-gray-300">ตัดร้านโดด (กม.):</span>
+                                    </label>
+                                    <input type="number" id="ai-dist" value="5" class="bg-gray-800 w-16 text-center rounded border border-gray-700 py-1 font-bold outline-none text-red-400">
+                                </div>
+                                <label class="flex items-start mb-4 cursor-pointer">
+                                    <input type="checkbox" id="ai-lock" class="mt-0.5 w-4 h-4 rounded text-indigo-500">
+                                    <span class="ml-2 text-xs text-gray-300">ล็อคร้านที่จัดไว้แล้ว<br><span class="text-[9px] text-gray-500">AI จะจัดเฉพาะร้านที่ยังว่าง</span></span>
+                                </label>
+                                <button onclick="AI.run()" class="w-full bg-indigo-500 hover:bg-indigo-600 transition py-2.5 rounded-xl font-bold text-sm shadow-md">✨ เริ่มคำนวณอัตโนมัติ</button>
                             </div>
                             <div class="bg-white/80 backdrop-blur p-2 border-b sticky top-0 z-10 flex gap-2">
                                 <select id="assign-day" class="flex-1 p-2 border border-gray-300 rounded-xl text-sm font-bold outline-none"></select>
                                 <button onclick="StoreMgr.assignSelected()" class="bg-indigo-600 hover:bg-indigo-700 transition text-white px-4 rounded-xl font-bold text-sm shadow">จัดลงวัน</button>
                             </div>
-                            <div id="list-unassigned" class="space-y-2 mt-2"></div>
+                            <div id="list-unassigned" class="space-y-2 mt-2 pb-10"></div>
                         </div>
 
                         <div id="tab3" class="hidden flex flex-col h-full">
@@ -137,14 +150,14 @@
 
                         <div id="tab4" class="hidden">
                             <div class="bg-emerald-50 border border-emerald-100 p-3 rounded-xl mb-4 text-xs text-emerald-800 font-bold">
-                                💡 คลิกที่กล่องวันที่ เพื่อดูรายชื่อและวาดเส้นทาง GPS
+                                💡 คลิกที่กล่องวันที่ เพื่อดูรายชื่อและจำลองเส้นทาง GPS
                             </div>
                             <div id="list-summary" class="grid grid-cols-2 gap-3 pb-20"></div>
                         </div>
                     </div>
 
                     <div class="p-4 border-t bg-white flex justify-between items-center shadow-inner shrink-0">
-                        <div class="text-xs font-bold text-gray-400 uppercase">Stores: <span id="stat-total" class="text-gray-900 text-lg">0</span></div>
+                        <div class="text-xs font-bold text-gray-400 uppercase">Stores: <span id="stat-total" class="text-gray-900 text-lg font-black">0</span></div>
                         <button onclick="ExcelIO.export()" class="bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2.5 rounded-xl text-xs font-bold shadow-lg active:scale-95 transition flex items-center gap-2">
                             📥 โหลดแผนงาน
                         </button>
@@ -155,7 +168,7 @@
 
         <div id="page-data" class="hidden absolute inset-0 bg-gray-50 flex flex-col h-full overflow-hidden">
             <div class="h-16 bg-white text-gray-800 flex items-center justify-between px-8 shadow-sm shrink-0 border-b border-gray-200">
-                <h2 class="text-lg font-black flex items-center gap-2">📊 จัดการข้อมูลยอดขาย (Sales Data)</h2>
+                <h2 class="text-lg font-black flex items-center gap-2">📊 จัดการข้อมูลยอดขาย (Sales Data KPI)</h2>
                 <div class="flex gap-3">
                     <button onclick="DataMgr.clearAll()" class="bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 px-4 py-2 rounded-xl text-sm font-bold transition">
                         🗑️ ล้างข้อมูลทั้งหมด
@@ -172,7 +185,7 @@
                     <div class="p-5 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
                         <div>
                             <h3 class="font-bold text-gray-800">ฐานข้อมูล KPI ร้านค้า</h3>
-                            <p class="text-xs text-gray-500 mt-1">อัปเดตข้อมูลล่าสุดจากไฟล์ Sellout</p>
+                            <p class="text-xs text-gray-500 mt-1">อัปเดตข้อมูลล่าสุดจากไฟล์ Sellout (ประมวลผล บิล และ SKU ให้อัตโนมัติ)</p>
                         </div>
                         <div class="text-sm font-bold bg-indigo-50 text-indigo-700 px-4 py-2 rounded-xl border border-indigo-100">
                             จำนวน <span id="data-total-stores" class="text-lg font-black">0</span> ร้านที่มีประวัติ
@@ -245,12 +258,9 @@
         const cloudDB = firebase.firestore();
 
         const Colors = ["#ef4444", "#3b82f6", "#22c55e", "#f97316", "#a855f7", "#06b6d4", "#eab308", "#ec4899", "#14b8a6", "#84cc16", "#6366f1", "#f43f5e", "#8b5cf6", "#10b981"];
-        const getColor = (dayStr) => {
-            let num = parseInt(String(dayStr).replace(/[^0-9]/g, '')) || 1;
-            return Colors[(num - 1) % Colors.length];
-        };
+        const DAY_COLORS = (() => { let obj = {}; for(let i=1; i<=30; i++) obj[`Day ${i}`] = { hex: Colors[(i-1)%Colors.length], name: `วันที่ ${i}` }; return obj; })();
 
-        let State = { db: { routes: {"V01":[]} }, sales: {}, activeRoute: "V01", stores: [], openDayModal: null };
+        let State = { db: { routes: {"V01":[]} }, sales: {}, localActiveRoute: null, stores: [], openDayModal: null };
 
         // ==========================================
         // 🚀 APP LOGIC
@@ -259,25 +269,26 @@
             dbRef: cloudDB.collection('appData').doc('v1_main'),
             salesRef: cloudDB.collection('appData').doc('v1_sales'),
             init: () => {
-                MapCtrl.init(); UI.showLoader("กำลังซิงค์ข้อมูลคลาวด์...");
+                MapCtrl.init(); UI.showLoader("กำลังซิงค์ข้อมูล...");
                 App.dbRef.onSnapshot(doc => {
                     if(doc.exists) State.db = doc.data();
-                    if(!State.db.routes[State.activeRoute]) State.activeRoute = Object.keys(State.db.routes).sort()[0] || "V01";
-                    State.stores = State.db.routes[State.activeRoute] || [];
+                    if(!State.db.routes[State.localActiveRoute]) State.localActiveRoute = Object.keys(State.db.routes).sort()[0] || "V01";
+                    State.stores = State.db.routes[State.localActiveRoute] || [];
                     
                     App.salesRef.get().then(sDoc => {
                         State.sales = sDoc.exists ? sDoc.data() : {};
                         UI.hideLoader(); 
                         UI.render();
-                        DataMgr.render(); // เรนเดอร์หน้าจัดการข้อมูล
+                        DataMgr.render();
                     });
                 });
             },
-            saveDB: () => { State.db.routes[State.activeRoute] = State.stores; App.dbRef.set(State.db); UI.render(); },
-            switchRoute: (v) => { State.activeRoute = v; State.stores = State.db.routes[v]; UI.render(); MapCtrl.fit(); },
-            addRoute: () => { let n = prompt("ชื่อสายใหม่:"); if(n && n.trim()) { State.db.routes[n.trim()] = []; State.activeRoute = n.trim(); App.saveDB(); } },
-            renameRoute: () => { let n = prompt("เปลี่ยนชื่อสายวิ่งเป็น:", State.activeRoute); if(n && n.trim()) { State.db.routes[n.trim()] = State.db.routes[State.activeRoute]; delete State.db.routes[State.activeRoute]; State.activeRoute = n.trim(); App.saveDB(); } },
-            deleteRoute: () => { if(confirm("ลบสายนี้?")) { delete State.db.routes[State.activeRoute]; State.activeRoute = Object.keys(State.db.routes)[0]; App.saveDB(); } }
+            saveDB: () => { State.db.routes[State.localActiveRoute] = State.stores; App.dbRef.set(State.db); UI.render(); },
+            switchRoute: (v) => { State.localActiveRoute = v; State.stores = State.db.routes[v]; UI.render(); MapCtrl.fitToStores(); },
+            addRoute: () => { let n = prompt("ชื่อสายใหม่:"); if(n && n.trim()) { State.db.routes[n.trim()] = []; State.localActiveRoute = n.trim(); App.saveDB(); MapCtrl.fitToStores(); } },
+            renameRoute: () => { let n = prompt("เปลี่ยนชื่อสายวิ่งเป็น:", State.localActiveRoute); if(n && n.trim()) { State.db.routes[n.trim()] = State.db.routes[State.localActiveRoute]; delete State.db.routes[State.localActiveRoute]; State.localActiveRoute = n.trim(); App.saveDB(); } },
+            deleteRoute: () => { if(confirm("ลบสายนี้?")) { delete State.db.routes[State.localActiveRoute]; State.localActiveRoute = Object.keys(State.db.routes)[0]; App.saveDB(); MapCtrl.fitToStores(); } },
+            clearStores: () => { if(confirm("ล้างข้อมูลร้านค้าทั้งหมดในสายนี้ทิ้ง?")) { State.stores = []; App.saveDB(); } }
         };
 
         // ==========================================
@@ -287,15 +298,10 @@
             go: (page) => {
                 document.querySelectorAll('.sidebar-menu').forEach(b => b.classList.remove('active'));
                 document.getElementById('nav-' + page).classList.add('active');
-                
                 document.getElementById('page-planning').classList.add('hidden');
                 document.getElementById('page-data').classList.add('hidden');
-                
                 document.getElementById('page-' + page).classList.remove('hidden');
-                
-                if(page === 'planning') {
-                    setTimeout(() => { if(MapCtrl.map) MapCtrl.map.invalidateSize(); }, 200);
-                }
+                if(page === 'planning') setTimeout(() => { if(MapCtrl.map) MapCtrl.map.invalidateSize(); }, 200);
             }
         };
 
@@ -304,10 +310,8 @@
         // ==========================================
         const DataMgr = {
             render: () => {
-                let html = [];
-                let salesKeys = Object.keys(State.sales);
+                let html = []; let salesKeys = Object.keys(State.sales);
                 document.getElementById('data-total-stores').innerText = salesKeys.length.toLocaleString();
-
                 salesKeys.forEach(id => {
                     let k = State.sales[id];
                     html.push(`
@@ -324,19 +328,15 @@
                 document.getElementById('data-table-body').innerHTML = html.join('') || '<tr><td colspan="6" class="text-center p-8 text-gray-400 font-bold">ยังไม่มีข้อมูลยอดขายในระบบ</td></tr>';
             },
             clearAll: () => {
-                if(confirm("⚠️ คำเตือน: คุณต้องการลบฐานข้อมูลยอดขาย (KPI) ทั้งหมดออกจากระบบใช่หรือไม่?")) {
+                if(confirm("⚠️ ลบฐานข้อมูลยอดขาย (KPI) ทั้งหมด?")) {
                     UI.showLoader("กำลังลบข้อมูล...");
-                    App.salesRef.set({}).then(() => {
-                        State.sales = {}; 
-                        DataMgr.render(); UI.render(); 
-                        UI.hideLoader(); alert("ล้างข้อมูลสำเร็จ");
-                    });
+                    App.salesRef.set({}).then(() => { State.sales = {}; DataMgr.render(); UI.render(); UI.hideLoader(); alert("ล้างข้อมูลสำเร็จ"); });
                 }
             }
         };
 
         // ==========================================
-        // 📈 SALES EXCEL UPLOAD
+        // 📈 UPLOAD SYSTEMS (Master & Sales)
         // ==========================================
         const SalesData = {
             process: (file) => {
@@ -352,35 +352,15 @@
                             if(!temp[id]) temp[id] = { vpo:0, bills:new Set(), skus:new Set(), hasJelly:false, hasKlom:false };
                             
                             temp[id].vpo += parseFloat(row['SO Total  QTY EA'] || row['จำนวน'] || 0);
-                            
-                            let inv = String(row['Invoice Number'] || "");
-                            if(inv) temp[id].bills.add(inv);
-                            
+                            let inv = String(row['Invoice Number'] || ""); if(inv) temp[id].bills.add(inv);
                             let p = String(row['SO Product Name'] || row['รหัสสินค้า'] || "");
-                            if(p) {
-                                temp[id].skus.add(p);
-                                if(p.includes("เจลลี่")) temp[id].hasJelly = true;
-                                if(p.includes("กลมกล่อม")) temp[id].hasKlom = true;
-                            }
+                            if(p) { temp[id].skus.add(p); if(p.includes("เจลลี่")) temp[id].hasJelly=true; if(p.includes("กลมกล่อม")) temp[id].hasKlom=true; }
                         });
                         
                         let final = {};
-                        Object.keys(temp).forEach(id => { 
-                            final[id] = { 
-                                vpo: Math.round(temp[id].vpo*100)/100, 
-                                billCount: temp[id].bills.size, 
-                                skuCount: temp[id].skus.size, 
-                                hasJelly: temp[id].hasJelly, 
-                                hasKlom: temp[id].hasKlom, 
-                                active: temp[id].vpo>0 
-                            }; 
-                        });
+                        Object.keys(temp).forEach(id => { final[id] = { vpo: Math.round(temp[id].vpo*100)/100, billCount: temp[id].bills.size, skuCount: temp[id].skus.size, hasJelly: temp[id].hasJelly, hasKlom: temp[id].hasKlom, active: temp[id].vpo>0 }; });
                         
-                        App.salesRef.set(final).then(() => { 
-                            State.sales = final; 
-                            UI.hideLoader(); alert("✅ อัปโหลด KPI และประมวลผลสำเร็จ!"); 
-                            UI.render(); DataMgr.render(); 
-                        });
+                        App.salesRef.set(final).then(() => { State.sales = final; UI.hideLoader(); alert("✅ อัปโหลด KPI สำเร็จ!"); UI.render(); DataMgr.render(); });
                     } catch(err) { UI.hideLoader(); alert("เกิดข้อผิดพลาด: " + err.message); }
                     document.getElementById('salesUpload').value = '';
                 };
@@ -389,15 +369,11 @@
         };
         document.getElementById('salesUpload').addEventListener('change', e => { if(e.target.files[0]) SalesData.process(e.target.files[0]); });
 
-        // ==========================================
-        // 🗺️ MASTER UPLOAD
-        // ==========================================
         document.getElementById('fileUpload').addEventListener('change', e => {
             const reader = new FileReader(); reader.onload = ev => {
                 const json = XLSX.utils.sheet_to_json(XLSX.read(ev.target.result, {type:'array'}).Sheets[XLSX.read(ev.target.result, {type:'array'}).SheetNames[0]]);
                 State.stores = json.map(r => ({ id: String(r['Customer Code']||r['รหัส']||""), name: r['ชื่อ']||r['Name']||"", lat: parseFloat(r['Lat']), lng: parseFloat(r['Lng']), days: [], selected: false })).filter(s=>s.id && !isNaN(s.lat));
-                App.saveDB();
-                MapCtrl.fit();
+                App.saveDB(); MapCtrl.fitToStores();
             }; reader.readAsArrayBuffer(e.target.files[0]);
             document.getElementById('fileUpload').value = '';
         });
@@ -412,17 +388,27 @@
             searchList: (id, val) => { let q = val.toLowerCase(); document.querySelectorAll(`#${id} > div, #${id} > label`).forEach(el => el.style.display = el.textContent.toLowerCase().includes(q) ? "" : "none"); },
             render: () => {
                 let hU=[], hA=[], hP=[], sums={};
+                let optHtml = Object.keys(DAY_COLORS).map(d => `<option value="${d}">${d}</option>`).join('');
+
                 State.stores.forEach(s => {
                     let k = State.sales[s.id];
                     let badge = k && k.vpo > 0 ? `<span class="text-[9px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-lg font-bold">VPO: ${k.vpo}</span>` : '';
                     
+                    // Tab 1
                     hP.push(`<div class="p-3 bg-white border border-gray-200 rounded-xl text-sm flex justify-between items-center shadow-sm"><div><b class="text-gray-800">${s.name}</b><br><span class="text-[10px] text-gray-400 font-mono">${s.id}</span></div> ${badge}</div>`);
                     
+                    // Tab 2 & 3
                     if(!s.days.length) {
-                        hU.push(`<label class="flex p-3 bg-white border ${s.selected?'border-indigo-400 bg-indigo-50':'border-gray-200'} rounded-xl items-center gap-3 text-sm cursor-pointer shadow-sm transition"><input type="checkbox" onchange="StoreMgr.toggle('${s.id}')" ${s.selected?'checked':''} class="w-4 h-4 text-indigo-600"> <div class="font-bold text-gray-800">${s.name}</div></label>`);
+                        hU.push(`<label class="flex p-3 bg-white border ${s.selected?'border-indigo-400 bg-indigo-50 ring-1 ring-indigo-400':'border-gray-200'} rounded-xl items-center gap-3 text-sm cursor-pointer shadow-sm transition"><input type="checkbox" onchange="StoreMgr.toggle('${s.id}')" ${s.selected?'checked':''} class="w-4 h-4 text-indigo-600"> <div class="font-bold text-gray-800 flex-1 truncate">${s.name}</div></label>`);
                     } else { 
                         s.days.forEach(d => sums[d]=(sums[d]||0)+1); 
-                        hA.push(`<div class="p-3 bg-white border border-gray-200 rounded-xl flex justify-between items-center text-sm shadow-sm"><b class="text-gray-800">${s.name}</b> <span class="px-2 py-1 rounded-lg text-xs font-bold text-white shadow-sm" style="background:${getColor(s.days[0])}">${s.days[0]}</span></div>`); 
+                        let dropHtml = `<select onchange="StoreMgr.changeDay('${s.id}', this.value)" class="text-xs font-bold p-1 bg-gray-50 border rounded-md outline-none cursor-pointer">${Object.keys(DAY_COLORS).map(d => `<option value="${d}" ${s.days[0]===d?'selected':''}>${d}</option>`).join('')}</select>`;
+                        hA.push(`
+                        <div class="p-3 bg-white border border-gray-200 rounded-xl flex justify-between items-center shadow-sm gap-2">
+                            <div class="flex-1 overflow-hidden"><b class="text-gray-800 text-sm truncate block">${s.name}</b><span class="text-[10px] text-gray-400 font-mono">ID: ${s.id}</span></div>
+                            ${dropHtml}
+                            <button onclick="StoreMgr.changeDay('${s.id}', 'remove')" class="bg-red-50 text-red-500 px-2 py-1 rounded-md font-bold text-xs hover:bg-red-100 transition">✕</button>
+                        </div>`); 
                     }
                 });
 
@@ -435,27 +421,24 @@
                 rs.innerHTML = Object.keys(State.db.routes).sort().map(r=>`<option value="${r}">${r}</option>`).join('');
                 rs.value = State.activeRoute;
                 
-                let dayOpts = ""; for(let i=1; i<=24; i++) dayOpts += `<option value="Day ${i}">Day ${i}</option>`;
-                document.getElementById('assign-day').innerHTML = dayOpts;
+                document.getElementById('assign-day').innerHTML = optHtml;
                 
-                document.getElementById('list-summary').innerHTML = Object.keys(sums).map(d => `<div onclick="UI.showDayModal('${d}')" class="p-4 bg-white border-t-4 rounded-2xl text-center shadow-sm cursor-pointer hover:shadow-md transition" style="border-color:${getColor(d)}"><p class="text-xs font-bold text-gray-500 mb-1">${d}</p><p class="text-3xl font-black" style="color:${getColor(d)}">${sums[d]}</p></div>`).join('');
+                // Tab 4 Summary
+                document.getElementById('list-summary').innerHTML = Object.keys(sums).map(d => `<div onclick="UI.showDayModal('${d}')" class="p-4 bg-white border-t-4 rounded-2xl text-center shadow-sm cursor-pointer hover:shadow-md transition" style="border-color:${DAY_COLORS[d].hex}"><p class="text-xs font-bold text-gray-500 mb-1">${d}</p><p class="text-3xl font-black" style="color:${DAY_COLORS[d].hex}">${sums[d]}</p></div>`).join('');
                 
                 MapCtrl.draw();
             },
             showSummaryModal: () => {
-                let h = [];
-                let sortedRoutes = Object.keys(State.db.routes).sort();
+                let h = []; let sortedRoutes = Object.keys(State.db.routes).sort();
                 for(let r of sortedRoutes) {
                     let s = State.db.routes[r], t = s.length, a = s.filter(x=>x.days.length).length;
                     h.push(`<tr><td class="p-3 font-bold border-b border-gray-100">${r}</td><td class="p-3 text-center border-b border-gray-100">${t}</td><td class="p-3 text-center text-emerald-600 font-bold border-b border-gray-100">${a}</td><td class="p-3 text-center text-yellow-600 font-bold border-b border-gray-100">${t-a}</td><td class="p-3 text-center text-xs font-bold text-gray-400 border-b border-gray-100">${t?Math.round(a/t*100):0}%</td></tr>`);
                 }
-                document.getElementById('overallTableBody').innerHTML = h.join('');
-                document.getElementById('overallModal').classList.remove('hidden');
+                document.getElementById('overallTableBody').innerHTML = h.join(''); document.getElementById('overallModal').classList.remove('hidden');
             },
             hideSummaryModal: () => document.getElementById('overallModal').classList.add('hidden'),
             showDayModal: (d) => {
-                State.openDayModal = d; 
-                document.getElementById('modalTitle').innerHTML = `<span class="inline-block w-4 h-4 rounded-full shadow-sm" style="background:${getColor(d)}"></span> ${d}`;
+                State.openDayModal = d; document.getElementById('modalTitle').innerHTML = `<span class="inline-block w-4 h-4 rounded-full shadow-sm" style="background:${DAY_COLORS[d].hex}"></span> ${d}`;
                 let list = State.stores.filter(s=>s.days.includes(d)).sort((a,b)=>(a.seqs?.[d]||999)-(b.seqs?.[d]||999));
                 document.getElementById('modalContent').innerHTML = list.map((s,i)=>`<div class="p-3 bg-white border border-gray-200 rounded-xl flex items-center gap-3 font-bold text-sm shadow-sm"><div class="w-7 h-7 bg-gray-900 text-white rounded-full flex items-center justify-center text-xs">${s.seqs?.[d]||i+1}</div><div class="truncate flex-1">${s.name}</div></div>`).join('');
                 document.getElementById('dayModal').classList.remove('hidden');
@@ -466,8 +449,70 @@
         // ==========================================
         // 🧩 TOOLS (StoreMgr, AI, Excel, OSRM)
         // ==========================================
-        const StoreMgr = { toggle: (id) => { let s = State.stores.find(x=>x.id===id); s.selected = !s.selected; }, assignSelected: () => { let d = document.getElementById('assign-day').value; State.stores.forEach(s => { if(s.selected) { s.days=[d]; s.selected=false; } }); App.saveDB(); } };
-        const AI = { run: () => { State.stores.forEach((s,i) => { if(!s.days.length) s.days=[`Day ${(i%24)+1}`]; }); App.saveDB(); alert("✨ จัดสายอัตโนมัติสำเร็จ!"); } };
+        const StoreMgr = { 
+            toggle: (id) => { let s = State.stores.find(x=>x.id===id); s.selected = !s.selected; UI.render(); App.saveDB(); }, 
+            assignSelected: () => { let d = document.getElementById('assign-day').value; State.stores.forEach(s => { if(s.selected) { s.days=[d]; s.selected=false; } }); App.saveDB(); },
+            changeDay: (id, val) => { let s = State.stores.find(x=>x.id===id); if(s) { if(val==='remove') s.days=[]; else s.days=[val]; s.seqs={}; App.saveDB(); MapCtrl.closePopups(); } }
+        };
+
+        const AI = {
+            run: () => {
+                if(!State.stores.length) return alert("อัปโหลดไฟล์พิกัดก่อนครับ");
+                let k = parseInt(document.getElementById('ai-days').value) || 24;
+                let lock = document.getElementById('ai-lock')?.checked || false;
+                let limit = document.getElementById('ai-outlier')?.checked || false;
+                let mxD = parseFloat(document.getElementById('ai-dist').value) || 5;
+                
+                if(State.stores.some(s=>s.days.length) && !lock && !confirm("ล้างข้อมูลสายเดิมและจัดใหม่ทั้งหมด?")) return;
+                
+                UI.showLoader("🤖 AI กำลังวิเคราะห์พื้นที่...", "กำลังคำนวณระยะทางและจัดกลุ่ม...");
+                setTimeout(() => AI.calc(k, lock, limit, mxD), 100);
+            },
+            calc: (k, lock, limit, mxD) => {
+                if(!lock) State.stores.forEach(s => { s.days=[]; s.selected=false; s.seqs={}; });
+                let tIdx=[], tgts = State.stores.filter((s,i)=>{ if(!s.days.length){ tIdx.push(i); return true; } return false; });
+                if(!tgts.length) { UI.hideLoader(); return alert("ไม่มีร้านให้จัดแล้ว"); }
+                
+                let mK = k; if(tgts.length < mK) { UI.hideLoader(); return alert("ร้านน้อยกว่าจำนวนวัน จัด Manual ดีกว่าครับ"); }
+                
+                let cents = [...tgts].sort(()=>0.5-Math.random()).slice(0,mK).map(s=>({lat:s.lat, lng:s.lng}));
+                let asg = Array(tgts.length).fill(-1);
+                let getDist = (a,b) => Math.pow(a.lat-b.lat,2) + Math.pow(a.lng-b.lng,2);
+                
+                for(let iter=0; iter<30; iter++){
+                    let cnt = Array(mK).fill(0);
+                    let maxC = Math.ceil(tgts.length/mK) + 2;
+                    asg.fill(-1);
+                    
+                    let dArr = [];
+                    for(let i=0; i<tgts.length; i++) for(let c=0; c<mK; c++) dArr.push({i, c, d:getDist(tgts[i], cents[c])});
+                    dArr.sort((a,b)=>a.d-b.d);
+                    
+                    for(let p of dArr) if(asg[p.i]===-1 && cnt[p.c]<maxC){ asg[p.i]=p.c; cnt[p.c]++; }
+                    for(let i=0; i<tgts.length; i++) if(asg[i]===-1){ asg[i]=0; cnt[0]++; }
+                    
+                    let sArr = Array(mK).fill(0).map(()=>({lt:0,ln:0,n:0}));
+                    tgts.forEach((s,i)=>{ let c=asg[i]; sArr[c].lt+=s.lat; sArr[c].ln+=s.lng; sArr[c].n++; });
+                    sArr.forEach((s,c)=>{ if(s.n>0){ cents[c].lat=s.lt/s.n; cents[c].lng=s.ln/s.n; }});
+                }
+                
+                let drop = 0; let mSq = Math.pow(mxD/111, 2);
+                for(let m=0; m<mK; m++) {
+                    let ids = tgts.map((_,i)=>i).filter(i=>asg[i]===m);
+                    if(!ids.length) continue;
+                    let cLat = cents[m].lat, cLng = cents[m].lng;
+                    ids.forEach(i => {
+                        let s = tgts[i];
+                        if(limit && getDist(s, {lat:cLat, lng:cLng}) > mSq) drop++;
+                        else State.stores[tIdx[i]].days = [`Day ${m+1}`];
+                    });
+                }
+                
+                MapCtrl.clearRoad(); UI.hideLoader(); App.saveDB();
+                alert(`✨ AI จัดสายสำเร็จ!\n(จัดลง ${k} วัน${drop>0 ? `, ตัดร้านไกลเกินรัศมีทิ้ง ${drop} ร้าน`:''})`);
+            }
+        };
+
         const ExcelIO = { export: () => { let ws = XLSX.utils.json_to_sheet(State.stores.map(s=>({ID:s.id, Name:s.name, Day:s.days.join(',')}))), wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Plan"); XLSX.writeFile(wb, "Route.xlsx"); } };
 
         const OSRM = {
@@ -475,7 +520,7 @@
                 let d = State.openDayModal; if(!d) return;
                 let list = State.stores.filter(s=>s.days.includes(d)).sort((a,b)=>(a.seqs?.[d]||999)-(b.seqs?.[d]||999));
                 if(list.length < 2) return alert("ต้องมีอย่างน้อย 2 ร้าน");
-                if(list.length > 100) return alert("OSRM จำกัดการวาดเส้นทางไม่เกิน 100 จุดต่อครั้งครับ");
+                if(list.length > 100) return alert("OSRM จำกัดการวาดเส้นทางไม่เกิน 100 จุดต่อครั้ง");
                 
                 UI.showLoader("กำลังคำนวณเส้นทาง GPS...");
                 try {
@@ -484,7 +529,7 @@
                     let json = await res.json();
                     if(json.code === 'Ok') {
                         MapCtrl.clearRoad();
-                        MapCtrl.roadLayer = L.geoJSON(json.routes[0].geometry, {style:{color:getColor(d), weight:6, opacity:0.8}}).addTo(MapCtrl.map);
+                        MapCtrl.roadLayer = L.geoJSON(json.routes[0].geometry, {style:{color:DAY_COLORS[d].hex, weight:6, opacity:0.8}}).addTo(MapCtrl.map);
                         document.getElementById('clearRoadBtn').classList.remove('hidden');
                         UI.closeDayModal();
                         MapCtrl.map.fitBounds(MapCtrl.roadLayer.getBounds(), {padding:[50,50]});
@@ -503,17 +548,28 @@
             draw: () => {
                 for(let id in MapCtrl.markers) MapCtrl.map.removeLayer(MapCtrl.markers[id]);
                 State.stores.forEach(s => {
-                    let color = s.days.length ? getColor(s.days[0]) : '#cbd5e1';
-                    MapCtrl.markers[s.id] = L.circleMarker([s.lat, s.lng], { radius: 7, color: s.selected ? '#000' : '#fff', weight: s.selected ? 3 : 2, fillColor: color, fillOpacity: 1 }).addTo(MapCtrl.map).on('click', () => { if(!Lasso.active) StoreMgr.toggle(s.id); UI.render(); }).bindTooltip(s.name);
+                    let color = s.days.length ? DAY_COLORS[s.days[0]].hex : '#cbd5e1';
+                    let m = L.circleMarker([s.lat, s.lng], { radius: 7, color: s.selected ? '#000' : '#fff', weight: s.selected ? 3 : 2, fillColor: color, fillOpacity: 1 }).addTo(MapCtrl.map);
+                    
+                    if(s.days.length) {
+                        let opts = Object.keys(DAY_COLORS).map(d => `<option value="${d}" ${s.days[0]===d?'selected':''}>${d}</option>`).join('');
+                        let popupHtml = `<div class="text-sm font-bold text-gray-800">${s.name}</div><div class="text-[10px] text-gray-500 mb-2">ID: ${s.id}</div><select onchange="StoreMgr.changeDay('${s.id}', this.value)" class="w-full p-1.5 border border-gray-300 rounded text-xs font-bold mb-1 outline-none bg-gray-50">${opts}<option value="remove" class="text-red-500 font-bold">❌ ลบออกจากคิว</option></select>`;
+                        m.bindPopup(popupHtml, {className: 'custom-popup'});
+                    } else {
+                        m.bindTooltip(s.name);
+                        m.on('click', () => { if(!Lasso.active) StoreMgr.toggle(s.id); });
+                    }
+                    MapCtrl.markers[s.id] = m;
                 });
             },
-            fit: () => { if(State.stores.length) MapCtrl.map.fitBounds(L.latLngBounds(State.stores.map(s=>[s.lat,s.lng])), {padding:[50,50]}); },
+            closePopups: () => { for(let id in MapCtrl.markers) if(MapCtrl.markers[id].getPopup()) MapCtrl.markers[id].closePopup(); },
+            fitToStores: () => { if(State.stores.length) MapCtrl.map.fitBounds(L.latLngBounds(State.stores.map(s=>[s.lat,s.lng])), {padding:[50,50]}); },
             clearRoad: () => { if(MapCtrl.roadLayer) MapCtrl.map.removeLayer(MapCtrl.roadLayer); MapCtrl.roadLayer = null; document.getElementById('clearRoadBtn').classList.add('hidden'); },
             drawLines: () => {
                 MapCtrl.polylines.forEach(l => MapCtrl.map.removeLayer(l)); MapCtrl.polylines = [];
                 if(!document.getElementById('toggleLines').checked) return;
                 let byDay = {}; State.stores.forEach(s => { if(s.days.length) { let d=s.days[0]; if(!byDay[d]) byDay[d]=[]; byDay[d].push([s.lat,s.lng]); } });
-                Object.keys(byDay).forEach(d => { if(byDay[d].length > 1) MapCtrl.polylines.push(L.polyline(byDay[d], {color: getColor(d), weight: 3, opacity: 0.5, dashArray:'5, 10'}).addTo(MapCtrl.map)); });
+                Object.keys(byDay).forEach(d => { if(byDay[d].length > 1) MapCtrl.polylines.push(L.polyline(byDay[d], {color: DAY_COLORS[d].hex, weight: 3, opacity: 0.5, dashArray:'5, 10'}).addTo(MapCtrl.map)); });
             }
         };
 
@@ -526,7 +582,7 @@
             start: () => { document.getElementById('map').classList.add('draw-cursor'); MapCtrl.map.on('click', Lasso.addPt); document.getElementById('lassoPanel').classList.remove('hidden'); document.getElementById('mapTools').classList.add('hidden'); },
             addPt: (e) => { Lasso.pts.push([e.latlng.lat, e.latlng.lng]); Lasso.mkrs.push(L.circleMarker(e.latlng, {radius: 4, color: '#ef4444'}).addTo(MapCtrl.map)); if(Lasso.poly) MapCtrl.map.removeLayer(Lasso.poly); Lasso.poly = L.polyline(Lasso.pts, {color: '#4f46e5', weight:3, dashArray:'5, 8'}).addTo(MapCtrl.map); },
             cancel: () => { Lasso.active = false; Lasso.pts = []; if(Lasso.poly) MapCtrl.map.removeLayer(Lasso.poly); Lasso.mkrs.forEach(m => MapCtrl.map.removeLayer(m)); document.getElementById('lassoPanel').classList.add('hidden'); document.getElementById('mapTools').classList.remove('hidden'); MapCtrl.map.off('click', Lasso.addPt); document.getElementById('map').classList.remove('draw-cursor'); },
-            finish: () => { if(Lasso.pts.length < 3) return alert("ต้องวาดอย่างน้อย 3 จุด"); State.stores.forEach(s => { if(Lasso.isInside([s.lat, s.lng], Lasso.pts)) s.selected = true; }); Lasso.cancel(); UI.switchTab('tab2'); UI.render(); },
+            finish: () => { if(Lasso.pts.length < 3) return alert("ต้องวาดอย่างน้อย 3 จุด"); State.stores.forEach(s => { if(Lasso.isInside([s.lat, s.lng], Lasso.pts)) s.selected = true; }); Lasso.cancel(); UI.switchTab('tab2'); App.saveDB(); },
             isInside: (pt, vs) => { let x=pt[0], y=pt[1], ins=false; for(let i=0, j=vs.length-1; i<vs.length; j=i++) { let xi=vs[i][0], yi=vs[i][1], xj=vs[j][0], yj=vs[j][1]; if(((yi>y)!=(yj>y)) && (x<(xj-xi)*(y-yi)/(yj-yi)+xi)) ins=!ins; } return ins; }
         };
 
