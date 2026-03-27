@@ -63,13 +63,18 @@ const App = {
 
         let isMainLoaded = false, isSalesLoaded = false;
         
+        let isMainLoaded = false, isSalesLoaded = false;
+        
         const checkReady = () => { 
             if(isMainLoaded && isSalesLoaded) { 
                 document.getElementById('loader').style.display = 'none'; 
                 Processor.run(); 
                 
-                // 🌟 เพิ่มบรรทัดนี้ครับ: บังคับให้เปิดหน้า "ภาพรวม" เป็นหน้าแรกเสมอหลังจากโหลดเสร็จ
-                UI.switchTab('dashboard');
+                // 🌟 แก้ไขตรงนี้: ใส่ if ดักไว้ให้ทำงานแค่ตอนเปิดแอปครั้งแรก
+                if (!State.isLoaded) {
+                    UI.switchTab('dashboard');
+                    State.isLoaded = true; // บันทึกไว้ว่าเปิดแอปเสร็จแล้ว จะได้ไม่เด้งอีก
+                }
             } 
         };
 
