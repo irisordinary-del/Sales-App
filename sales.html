@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Sales App V79.4 (Fast Mode)</title>
+    <title>Sales App V79.5 (Resizable Layout)</title>
     
     <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore-compat.js"></script>
@@ -45,41 +45,15 @@
         <div id="tab-dashboard" class="app-tab bg-gray-50">
             <div class="flex-1 overflow-y-auto p-4 pb-24 space-y-3">
                 <h2 class="font-black text-lg text-gray-800">สรุปยอดสายวิ่ง 📊</h2>
-                
                 <div class="grid grid-cols-2 gap-2">
-                    <div class="bg-white p-3 rounded-2xl shadow-sm border">
-                        <p class="text-[9px] text-gray-400 font-bold mb-0.5 uppercase">ยอดรวมเดือนนี้</p>
-                        <p class="text-xl font-black text-gray-800 leading-tight" id="dash-sales">0</p>
-                    </div>
-                    <div class="bg-white p-3 rounded-2xl shadow-sm border border-blue-100">
-                        <p class="text-[9px] text-blue-400 font-bold mb-0.5 uppercase">VPO (เฉลี่ยบิล)</p>
-                        <p class="text-xl font-black text-blue-600 leading-tight" id="dash-vpo">0</p>
-                    </div>
-                    <div class="bg-white p-3 rounded-2xl shadow-sm border border-indigo-100">
-                        <p class="text-[9px] text-indigo-400 font-bold mb-0.5 uppercase">Avg SKU / ร้าน</p>
-                        <p class="text-xl font-black text-indigo-600 leading-tight" id="dash-sku">0</p>
-                    </div>
-                    <div class="bg-white p-3 rounded-2xl shadow-sm border border-emerald-100">
-                        <p class="text-[9px] text-emerald-500 font-bold mb-0.5 uppercase">ร้านที่ซื้อจริง</p>
-                        <p class="text-xl font-black text-emerald-600 leading-tight" id="dash-active">0</p>
-                    </div>
+                    <div class="bg-white p-3 rounded-2xl shadow-sm border"><p class="text-[9px] text-gray-400 font-bold mb-0.5 uppercase">ยอดรวมเดือนนี้</p><p class="text-xl font-black text-gray-800 leading-tight" id="dash-sales">0</p></div>
+                    <div class="bg-white p-3 rounded-2xl shadow-sm border border-blue-100"><p class="text-[9px] text-blue-400 font-bold mb-0.5 uppercase">VPO (เฉลี่ยบิล)</p><p class="text-xl font-black text-blue-600 leading-tight" id="dash-vpo">0</p></div>
+                    <div class="bg-white p-3 rounded-2xl shadow-sm border border-indigo-100"><p class="text-[9px] text-indigo-400 font-bold mb-0.5 uppercase">Avg SKU / ร้าน</p><p class="text-xl font-black text-indigo-600 leading-tight" id="dash-sku">0</p></div>
+                    <div class="bg-white p-3 rounded-2xl shadow-sm border border-emerald-100"><p class="text-[9px] text-emerald-500 font-bold mb-0.5 uppercase">ร้านที่ซื้อจริง</p><p class="text-xl font-black text-emerald-600 leading-tight" id="dash-active">0</p></div>
                 </div>
-
                 <div class="space-y-2 pt-2">
-                    <div class="bg-white p-3 rounded-2xl shadow-sm border border-pink-100 flex justify-between items-center">
-                        <div>
-                            <p class="text-xs font-bold text-gray-500">การกระจาย เจลลี่</p>
-                            <p class="text-lg font-black text-pink-500 leading-tight" id="dash-dist-jelly">0%</p>
-                        </div>
-                        <div class="text-right"><p class="text-[9px] font-bold text-gray-400">ครอบคลุม <span id="cnt-jelly">0</span> ร้าน</p></div>
-                    </div>
-                    <div class="bg-white p-3 rounded-2xl shadow-sm border border-amber-100 flex justify-between items-center">
-                        <div>
-                            <p class="text-xs font-bold text-gray-500">การกระจาย กลมกล่อม</p>
-                            <p class="text-lg font-black text-amber-500 leading-tight" id="dash-dist-klom">0%</p>
-                        </div>
-                        <div class="text-right"><p class="text-[9px] font-bold text-gray-400">ครอบคลุม <span id="cnt-klom">0</span> ร้าน</p></div>
-                    </div>
+                    <div class="bg-white p-3 rounded-2xl shadow-sm border border-pink-100 flex justify-between items-center"><div><p class="text-xs font-bold text-gray-500">การกระจาย เจลลี่</p><p class="text-lg font-black text-pink-500 leading-tight" id="dash-dist-jelly">0%</p></div><div class="text-right"><p class="text-[9px] font-bold text-gray-400">ครอบคลุม <span id="cnt-jelly">0</span> ร้าน</p></div></div>
+                    <div class="bg-white p-3 rounded-2xl shadow-sm border border-amber-100 flex justify-between items-center"><div><p class="text-xs font-bold text-gray-500">การกระจาย กลมกล่อม</p><p class="text-lg font-black text-amber-500 leading-tight" id="dash-dist-klom">0%</p></div><div class="text-right"><p class="text-[9px] font-bold text-gray-400">ครอบคลุม <span id="cnt-klom">0</span> ร้าน</p></div></div>
                 </div>
             </div>
         </div>
@@ -89,9 +63,7 @@
                 <h2 class="font-black text-lg text-gray-800 mb-3">รายชื่อร้านค้าทั้งหมด</h2>
                 <input type="text" id="search-input" onkeyup="UI.searchStores(this.value)" placeholder="ค้นหารหัสหรือชื่อร้าน..." class="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500">
             </div>
-            <div class="flex-1 overflow-y-auto p-4 pb-24">
-                <div id="all-store-list" class="space-y-3"></div>
-            </div>
+            <div class="flex-1 overflow-y-auto p-4 pb-24"><div id="all-store-list" class="space-y-3"></div></div>
         </div>
 
         <div id="tab-route" class="app-tab bg-gray-50">
@@ -99,8 +71,9 @@
                 <select id="day-select" class="w-full bg-gray-50 text-gray-900 text-sm font-bold outline-none px-3 py-2 rounded-lg border border-gray-300 text-center appearance-none"></select>
             </div>
             
-            <div class="flex-1 flex flex-col lg:flex-row min-h-0 w-full relative">
-                <div id="map-container" class="h-[25vh] lg:h-full lg:w-[80%] shrink-0 border-b lg:border-b-0 lg:border-r relative bg-gray-200 flex items-center justify-center z-10 transition-all">
+            <div id="split-container" class="flex-1 flex flex-col lg:flex-row min-h-0 w-full relative">
+                
+                <div id="map-container" class="relative bg-gray-200 flex items-center justify-center z-10 transition-none">
                     <button id="btn-load-map" onclick="MapCtrl.initAndDraw()" class="bg-blue-600 text-white px-5 py-2 rounded-full text-sm font-bold shadow-lg active:scale-95 transition">📍 เปิดแผนที่นำทาง</button>
                     <div id="map" class="w-full h-full hidden"></div>
                     <button id="btn-fit-map" onclick="MapCtrl.fitBounds()" class="hidden absolute bottom-3 right-3 z-[400] bg-white p-2 rounded-full shadow-lg border text-blue-600 active:scale-95 transition">
@@ -108,13 +81,18 @@
                     </button>
                 </div>
                 
-                <div class="flex-1 lg:w-[20%] flex flex-col overflow-hidden bg-gray-50 relative z-10">
+                <div id="resizer" class="bg-white border-y lg:border-y-0 lg:border-x border-gray-200 flex items-center justify-center z-20 cursor-row-resize lg:cursor-col-resize hover:bg-gray-100 transition-colors shadow-[0_0_10px_rgba(0,0,0,0.05)]" style="flex: 0 0 16px; touch-action: none;">
+                    <div class="w-12 h-1.5 bg-gray-300 rounded-full lg:w-1.5 lg:h-12"></div>
+                </div>
+                
+                <div id="route-side-panel" class="flex-1 flex flex-col overflow-hidden bg-gray-50 relative z-10">
                     <div class="flex justify-between items-center p-3 shrink-0 bg-white border-b shadow-sm">
                         <h3 class="font-bold text-sm text-gray-800" id="route-title">คิวงาน</h3>
                         <span class="text-[9px] text-gray-500 font-medium bg-gray-100 px-2 py-0.5 rounded border">ลาก ≡ สลับคิว</span>
                     </div>
                     <div id="route-store-list" class="flex-1 overflow-y-auto px-3 py-3 pb-24 space-y-2"></div>
                 </div>
+
             </div>
         </div>
 
