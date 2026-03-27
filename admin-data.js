@@ -49,54 +49,122 @@ const DataMgr = {
     }
 };
 
+// 🌟 อัปเกรด 2: ระบบ Data Mapping เลือกคอลัมน์ก่อนนำเข้า
 const SalesData = {
+    tempJson: [], // เก็บไฟล์ที่อ่านมาไว้ชั่วคราวก่อนจับคู่
+    
     processExcel: (file) => {
-        UI.showLoader("กำลังอ่านไฟล์และสร้างตาราง...", "ใช้เวลาประมาณ 2-5 วินาที");
+        UI.showLoader("กำลังอ่านหัวคอลัมน์...", "รอสักครู่");
         const reader = new FileReader();
         reader.onload = function(e) {
             try {
-                const data = new Uint8Array(e.target.result); const workbook = XLSX.read(data, {type: 'array'});
+                const data = new Uint8Array(e.target.result); 
+                const workbook = XLSX.read(data, {type: 'array'});
                 const json = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], {defval: ""}); 
                 if (json.length < 1) throw new Error("ไฟล์ว่างเปล่า");
                 
-                let headers = Object.keys(json[0]);
-                let idCol = headers.find(h => h.toLowerCase().includes('customer code') || h.includes('รหัสลูกค้า') || h.includes('id')) || headers[0];
-                let skuCol = headers.find(h => h.toLowerCase().includes('so product code') || h.includes('รหัสสินค้า') || h.includes('product'));
-                let qtyCol = headers.find(h => h.toLowerCase().includes('so total') || h.includes('qty') || h.includes('จำนวน') || h.includes('vpo'));
-                let invCol = headers.find(h => h.toLowerCase().includes('invoice') || h.includes('เลขที่บิล') || h.includes('bill'));
+                SalesData.tempJson = json; // พักข้อมูลไว้
+                let headers = Object.keys(json[0]); // ดึงหัวคอลัมน์ทั้งหมดออกมา
+                
+                // โครงสร้างที่ระบบต้องการ พร้อมคำใบ้สำหรับการเดาอัตโนมัติ
+                let fields = [
+                    { id: 'map-id', label: '1. รหัสลูกค้า <span class="text-red-500">*จำเป็น</span>', guess: ['customer code', 'รหัส', 'id'] },
+                    { id: 'map-name', label: '2. ชื่อร้านค้า', guess: ['customer name', 'ชื่อ', 'name'] },
+                    { id: 'map-vpo', label: '3. ยอดขาย (Qty/VPO)', guess: ['so total', 'qty', 'จำนวน', 'vpo'] },
+                    { id: 'map-bill', label: '4. เลขที่บิล (Invoice)', guess: ['invoice', 'เลขที่บิล', 'bill', 'เอกสาร'] },
+                    { id: 'map-sku', label: '5. รหัสสินค้า (SKU)', guess: ['so product code', 'รหัสสินค้า', 'product', 'sku'] }
+                ];
 
-                let temp = {}; let rowCount = 0;
-                json.forEach(row => {
-                    let storeId = String(row[idCol]).trim(); if(!storeId) return;
-                    rowCount++;
-                    if(!temp[storeId]) { temp[storeId] = { _originalRow: { ...row }, vpo: 0, bills: new Set(), skus: new Set(), hasJelly: false, hasKlom: false }; }
+                // สร้าง Dropdown จับคู่
+                let formHtml = fields.map(f => {
+                    // ให้ระบบเดาว่าน่าจะตรงกับคอลัมน์ไหน
+                    let bestMatch = headers.find(h => f.guess.some(g => h.toLowerCase().includes(g))) || "";
+                    let options = `<option value="" class="text-gray-400">-- ❌ ไม่ใช้ข้อมูลส่วนนี้ --</option>` + 
+                                  headers.map(h => `<option value="${h}" ${h === bestMatch ? 'selected' : ''}>${h}</option>`).join('');
                     
-                    let qty = qtyCol ? parseFloat(String(row[qtyCol]).replace(/[^0-9.-]/g, '')) : 0;
-                    if(!isNaN(qty)) temp[storeId].vpo += qty;
-                    if(invCol && row[invCol]) temp[storeId].bills.add(row[invCol]);
-                    if(skuCol && row[skuCol]) { let sku = String(row[skuCol]).trim(); temp[storeId].skus.add(sku); if(sku.includes("เจลลี่")) temp[storeId].hasJelly = true; if(sku.includes("กลมกล่อม")) temp[storeId].hasKlom = true; }
-                });
+                    return `
+                    <div class="bg-gray-50/50 p-2 rounded-lg border border-gray-200">
+                        <label class="block text-xs font-bold text-gray-700 mb-1">${f.label}</label>
+                        <select id="${f.id}" class="w-full p-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-white font-medium shadow-inner">
+                            ${options}
+                        </select>
+                    </div>`;
+                }).join('');
 
-                let newSalesKPI = {};
-                Object.keys(temp).forEach(id => {
-                    newSalesKPI[id] = {
-                        ...temp[id]._originalRow,
-                        _originalRow: temp[id]._originalRow,
-                        vpo: Math.round(temp[id].vpo * 100) / 100,
-                        billCount: temp[id].bills.size, skuCount: temp[id].skus.size, hasJelly: temp[id].hasJelly, hasKlom: temp[id].hasKlom, active: temp[id].vpo > 0
-                    };
-                });
-
-                UI.showLoader("กำลังอัปเดตตารางและแผนที่...", `พบข้อมูล ${Object.keys(newSalesKPI).length} ร้าน`);
-                App.salesRef.set(newSalesKPI).then(() => {
-                    State.sales = newSalesKPI; App.sync(); DataMgr.render(); UI.hideLoader();
-                    alert(`✅ นำเข้าข้อมูลสำเร็จ!\nระบบสร้างตารางตรงตามไฟล์ของคุณเรียบร้อย`);
-                }).catch(err => { UI.hideLoader(); alert("อัปโหลดไม่สำเร็จ: " + err.message); });
+                // เอาฟอร์มไปแปะและเปิดหน้าต่าง
+                document.getElementById('mapping-form').innerHTML = formHtml;
+                UI.hideLoader();
+                document.getElementById('mappingModal').classList.remove('hidden');
 
             } catch(error) { UI.hideLoader(); alert("เกิดข้อผิดพลาด: " + error.message); }
-            document.getElementById('salesUpload').value = ''; 
+            document.getElementById('salesUpload').value = ''; // เคลียร์ช่องอัปโหลด
         };
         reader.readAsArrayBuffer(file);
+    },
+
+    applyMapping: () => {
+        // ดึงค่าจากการจับคู่มาใช้งาน
+        let idCol = document.getElementById('map-id').value;
+        let nameCol = document.getElementById('map-name').value;
+        let vpoCol = document.getElementById('map-vpo').value;
+        let billCol = document.getElementById('map-bill').value;
+        let skuCol = document.getElementById('map-sku').value;
+
+        if(!idCol) {
+            return alert("❌ กรุณาเลือกคอลัมน์สำหรับ 'รหัสลูกค้า'\nถ้าระบุไม่ได้ ระบบจะไม่สามารถผูกข้อมูลกับแผนที่ได้ครับ");
+        }
+
+        document.getElementById('mappingModal').classList.add('hidden');
+        UI.showLoader("กำลังประมวลผลข้อมูล...", "ระบบกำลังจัดกลุ่มตามที่คุณเลือก");
+
+        setTimeout(() => {
+            let temp = {}; 
+            SalesData.tempJson.forEach(row => {
+                let storeId = String(row[idCol]).trim(); 
+                if(!storeId) return;
+                
+                if(!temp[storeId]) { 
+                    temp[storeId] = { 
+                        id: storeId,
+                        name: nameCol && row[nameCol] ? String(row[nameCol]).trim() : 'ไม่ระบุชื่อ',
+                        vpo: 0, bills: new Set(), skus: new Set(), hasJelly: false, hasKlom: false 
+                    }; 
+                }
+                
+                let qty = vpoCol && row[vpoCol] ? parseFloat(String(row[vpoCol]).replace(/[^0-9.-]/g, '')) : 0;
+                if(!isNaN(qty)) temp[storeId].vpo += qty;
+                
+                if(billCol && row[billCol]) temp[storeId].bills.add(row[billCol]);
+                
+                if(skuCol && row[skuCol]) { 
+                    let sku = String(row[skuCol]).trim(); 
+                    temp[storeId].skus.add(sku); 
+                    if(sku.includes("เจลลี่")) temp[storeId].hasJelly = true; 
+                    if(sku.includes("กลมกล่อม")) temp[storeId].hasKlom = true; 
+                }
+            });
+
+            let newSalesKPI = {};
+            Object.keys(temp).forEach(id => {
+                newSalesKPI[id] = {
+                    id: temp[id].id,
+                    name: temp[id].name,
+                    vpo: Math.round(temp[id].vpo * 100) / 100,
+                    billCount: temp[id].bills.size, 
+                    skuCount: temp[id].skus.size, 
+                    hasJelly: temp[id].hasJelly, 
+                    hasKlom: temp[id].hasKlom, 
+                    active: temp[id].vpo > 0
+                };
+            });
+
+            App.salesRef.set(newSalesKPI).then(() => {
+                State.sales = newSalesKPI; App.sync(); DataMgr.render(); UI.hideLoader();
+                SalesData.tempJson = []; // คืนพื้นที่หน่วยความจำ
+                alert(`✅ นำเข้าข้อมูลสำเร็จ!\nจัดระเบียบข้อมูล ${Object.keys(newSalesKPI).length} ร้านค้าเรียบร้อยแล้ว`);
+            }).catch(err => { UI.hideLoader(); alert("อัปโหลดไม่สำเร็จ: " + err.message); });
+            
+        }, 100); // ดีเลย์นิดนึงให้ UI Loader โชว์ขึ้นมาก่อน
     }
 };
 
