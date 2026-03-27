@@ -1,6 +1,3 @@
-// ==========================================
-// 1. ระบบจัดการร้านค้าบนแผนที่และคิวงาน (Store Manager)
-// ==========================================
 const StoreMgr = {
     toggleSelect: (id) => { let s = State.stores.find(x=>x.id===String(id)); if(s){ s.selected = !s.selected; UI.switchTab('tab2'); UI.render(); App.saveDB(); } },
     clearSelection: () => { State.stores.forEach(s=>s.selected=false); UI.render(); App.saveDB(); },
@@ -10,82 +7,13 @@ const StoreMgr = {
 };
 
 // ==========================================
-// 2. ระบบตารางแสดงผล KPI (Data Manager)
+// 📂 ระบบหน้าข้อมูลดิบ (Raw Data)
 // ==========================================
-const DataMgr = {
-    render: () => {
-        let html = []; 
-        let salesKeys = Object.keys(State.sales);
-        document.getElementById('data-total-stores').innerText = salesKeys.length.toLocaleString();
-
-        if(salesKeys.length === 0) {
-            document.getElementById('data-table-head').innerHTML = '';
-            document.getElementById('data-table-body').innerHTML = '<tr><td colspan="10" class="text-center p-8 text-gray-400 font-bold">ยังไม่มีข้อมูลยอดขายในระบบ</td></tr>';
-            return;
-        }
-
-        let firstRecord = State.sales[salesKeys[0]];
-        let standardKeys = ['id', 'name', 'vpo', 'billCount', 'skuCount', 'hasJelly', 'hasKlom', 'active'];
-        let customKeys = Object.keys(firstRecord).filter(k => !standardKeys.includes(k));
-        let customTh = customKeys.map(k => `<th class="p-3 px-4 font-bold border-b border-gray-200 whitespace-nowrap bg-indigo-50/50 sticky top-0 text-indigo-800">${k}</th>`).join('');
-
-        let thHtml = `
-            <tr>
-                <th class="p-3 px-4 font-bold border-b border-gray-200 whitespace-nowrap bg-gray-100 sticky top-0 text-gray-700">รหัสลูกค้า</th>
-                <th class="p-3 px-4 font-bold border-b border-gray-200 whitespace-nowrap bg-gray-100 sticky top-0 text-gray-700">ชื่อร้านค้า</th>
-                ${customTh}
-                <th class="p-3 px-4 font-black border-b border-gray-200 whitespace-nowrap text-emerald-700 bg-emerald-50 border-l border-emerald-100 sticky top-0">VPO (ลัง)</th>
-                <th class="p-3 px-4 font-bold border-b border-gray-200 whitespace-nowrap text-emerald-700 bg-emerald-50 sticky top-0">จำนวนบิล</th>
-                <th class="p-3 px-4 font-bold border-b border-gray-200 whitespace-nowrap text-emerald-700 bg-emerald-50 sticky top-0">จำนวน SKU</th>
-                <th class="p-3 px-4 font-bold border-b border-gray-200 whitespace-nowrap text-indigo-700 bg-indigo-50 border-l border-indigo-100 sticky top-0">สินค้าโฟกัส</th>
-            </tr>
-        `;
-        document.getElementById('data-table-head').innerHTML = thHtml;
-
-        salesKeys.forEach(id => {
-            let k = State.sales[id];
-            let focusHtml = '';
-            if(k.hasJelly) focusHtml += `<span class="bg-pink-100 text-pink-600 px-2 py-0.5 rounded text-[10px] font-bold mr-1 border border-pink-200">เจลลี่</span>`;
-            if(k.hasKlom) focusHtml += `<span class="bg-amber-100 text-amber-600 px-2 py-0.5 rounded text-[10px] font-bold border border-amber-200">กลมกล่อม</span>`;
-            if(!k.hasJelly && !k.hasKlom) focusHtml = `<span class="text-gray-300 text-xs font-bold">-</span>`;
-
-            let customTd = customKeys.map(key => `<td class="p-3 px-4 text-sm font-medium text-gray-600 border-b border-gray-100 whitespace-nowrap bg-indigo-50/10">${k[key] !== undefined && k[key] !== "" ? k[key] : '-'}</td>`).join('');
-
-            let tds = `
-                <td class="p-3 px-4 text-sm font-mono text-gray-500 border-b border-gray-100 whitespace-nowrap">${k.id}</td>
-                <td class="p-3 px-4 text-sm font-bold text-gray-800 border-b border-gray-100 whitespace-nowrap">${k.name}</td>
-                ${customTd}
-                <td class="p-3 px-4 text-sm font-black text-blue-600 border-b border-gray-100 whitespace-nowrap bg-emerald-50/30 border-l border-emerald-100">${k.vpo || 0}</td>
-                <td class="p-3 px-4 text-sm font-bold text-gray-600 border-b border-gray-100 whitespace-nowrap bg-emerald-50/30">${k.billCount || 0}</td>
-                <td class="p-3 px-4 text-sm font-bold text-gray-600 border-b border-gray-100 whitespace-nowrap bg-emerald-50/30">${k.skuCount || 0}</td>
-                <td class="p-3 px-4 border-b border-gray-100 whitespace-nowrap bg-indigo-50/30 border-l border-indigo-100">${focusHtml}</td>
-            `;
-
-            html.push(`<tr class="hover:bg-indigo-50/60 transition">${tds}</tr>`);
-        });
-        
-        document.getElementById('data-table-body').innerHTML = html.join('');
-    },
-    clearAll: () => {
-        if(confirm("⚠️ ยืนยันการลบข้อมูลยอดขาย (KPI) ทั้งหมดออกจากระบบ? (แผนที่จะไม่โดนลบ)")) {
-            UI.showLoader("กำลังลบข้อมูล...");
-            cloudDB.collection('v1_sales_chunks').get().then(snap => {
-                let delBatch = cloudDB.batch();
-                snap.forEach(doc => delBatch.delete(doc.ref));
-                return delBatch.commit();
-            }).then(() => { State.sales = {}; App.sync(); DataMgr.render(); UI.hideLoader(); UI.showSaveToast("ล้าง KPI เรียบร้อย"); });
-        }
-    }
-};
-
-// ==========================================
-// 3. ระบบประมวลผล Excel (Auto-Chunking)
-// ==========================================
-const SalesData = {
-    tempJson: [], tempHeaders: [], customFieldCount: 0, 
+const RawDataMgr = {
+    tempJson: [],
     
     processExcel: (file) => {
-        UI.showLoader("กำลังอ่านหัวคอลัมน์...", "รอสักครู่");
+        UI.showLoader("กำลังอ่านไฟล์...", "รอสักครู่");
         const reader = new FileReader();
         reader.onload = function(e) {
             try {
@@ -93,96 +21,225 @@ const SalesData = {
                 const json = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], {defval: ""}); 
                 if (json.length < 1) throw new Error("ไฟล์ว่างเปล่า");
                 
-                SalesData.tempJson = json; 
-                let headers = Object.keys(json[0]); SalesData.tempHeaders = headers; SalesData.customFieldCount = 0;
-                
-                let fields = [
-                    { id: 'map-id', label: '1. รหัสลูกค้า <span class="text-red-500">*จำเป็น</span>', guess: ['customer code', 'รหัส', 'id'] },
-                    { id: 'map-name', label: '2. ชื่อร้านค้า', guess: ['customer name', 'ชื่อ', 'name'] },
-                    { id: 'map-vpo', label: '3. ยอดขาย (Qty/VPO)', guess: ['so total', 'qty', 'จำนวน', 'vpo'] },
-                    { id: 'map-bill', label: '4. เลขที่บิล (Invoice)', guess: ['invoice', 'เลขที่บิล', 'bill', 'เอกสาร'] },
-                    { id: 'map-sku', label: '5. รหัสสินค้า (SKU)', guess: ['so product code', 'รหัสสินค้า', 'product', 'sku'] }
-                ];
+                RawDataMgr.tempJson = json;
+                let headers = Object.keys(json[0]);
+                let savedCols = State.db.savedRawColumns || []; // ดึงค่าที่เคยติ๊กไว้
 
-                let formHtml = fields.map(f => {
-                    let bestMatch = headers.find(h => f.guess.some(g => h.toLowerCase().includes(g))) || "";
-                    let options = `<option value="" class="text-gray-400">-- ❌ ไม่ใช้ข้อมูลส่วนนี้ --</option>` + headers.map(h => `<option value="${h}" ${h === bestMatch ? 'selected' : ''}>${h}</option>`).join('');
-                    return `<div class="bg-gray-50/50 p-2 rounded-lg border border-gray-200"><label class="block text-xs font-bold text-gray-700 mb-1">${f.label}</label><select id="${f.id}" class="w-full p-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-white font-medium shadow-inner">${options}</select></div>`;
+                // สร้าง Checkbox ให้ติ๊กเลือกคอลัมน์
+                let html = headers.map(h => {
+                    let isChecked = savedCols.length === 0 || savedCols.includes(h) ? 'checked' : '';
+                    return `
+                    <label class="flex items-center gap-2 p-2 border rounded-lg bg-gray-50 cursor-pointer hover:bg-indigo-50">
+                        <input type="checkbox" value="${h}" class="raw-col-cb w-4 h-4 text-indigo-600 rounded" ${isChecked}>
+                        <span class="text-xs font-bold text-gray-700 truncate">${h}</span>
+                    </label>`;
                 }).join('');
 
-                formHtml += `<div class="mt-4 pt-4 border-t border-gray-200"><div class="flex justify-between items-center mb-2"><label class="block text-sm font-black text-indigo-700">➕ คอลัมน์เพิ่มเติม (Custom)</label><button onclick="SalesData.addCustomField()" class="bg-indigo-100 hover:bg-indigo-200 text-indigo-700 px-3 py-1 rounded-lg text-xs font-bold transition shadow-sm">+ เพิ่มคอลัมน์</button></div><div id="custom-fields-container" class="space-y-2"></div></div>`;
-                document.getElementById('mapping-form').innerHTML = formHtml; UI.hideLoader(); document.getElementById('mappingModal').classList.remove('hidden');
-            } catch(error) { UI.hideLoader(); alert("เกิดข้อผิดพลาด: " + error.message); }
-            document.getElementById('salesUpload').value = ''; 
+                document.getElementById('column-checkboxes').innerHTML = html;
+                UI.hideLoader();
+                document.getElementById('columnSelectModal').classList.remove('hidden');
+
+            } catch(error) { UI.hideLoader(); alert("Error: " + error.message); }
+            document.getElementById('rawUpload').value = ''; 
         };
         reader.readAsArrayBuffer(file);
     },
 
-    addCustomField: () => {
-        let container = document.getElementById('custom-fields-container');
-        let fieldId = `custom-map-${SalesData.customFieldCount++}`;
-        let options = `<option value="" disabled selected>-- เลือกคอลัมน์จาก Excel --</option>` + SalesData.tempHeaders.map(h => `<option value="${h}">${h}</option>`).join('');
-        let div = document.createElement('div'); div.className = "flex gap-2 items-center bg-indigo-50/50 p-2 rounded-lg border border-indigo-100 animate-fade-in"; div.id = `box-${fieldId}`;
-        div.innerHTML = `<select id="${fieldId}" class="custom-map-select flex-1 p-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-500 bg-white font-medium shadow-inner">${options}</select><button onclick="document.getElementById('box-${fieldId}').remove()" class="w-8 h-8 rounded-lg bg-red-50 text-red-500 hover:bg-red-100 font-bold transition flex-shrink-0">✕</button>`;
-        container.appendChild(div);
-    },
+    applyImport: () => {
+        // กวาดคอลัมน์ที่ติ๊ก
+        let selectedCols = [];
+        document.querySelectorAll('.raw-col-cb:checked').forEach(cb => selectedCols.push(cb.value));
+        if(selectedCols.length === 0) return alert("กรุณาเลือกอย่างน้อย 1 คอลัมน์");
 
-    applyMapping: () => {
-        let idCol = document.getElementById('map-id').value; let nameCol = document.getElementById('map-name').value; let vpoCol = document.getElementById('map-vpo').value; let billCol = document.getElementById('map-bill').value; let skuCol = document.getElementById('map-sku').value;
-        let customCols = []; document.querySelectorAll('.custom-map-select').forEach(sel => { if(sel.value) customCols.push(sel.value); });
-
-        if(!idCol) return alert("❌ กรุณาเลือกคอลัมน์สำหรับ 'รหัสลูกค้า'");
-        document.getElementById('mappingModal').classList.add('hidden');
-        UI.showLoader("กำลังประมวลผลข้อมูล...", "กำลังแบ่งไฟล์เป็นกล่องย่อยเพื่อหลบลิมิต 1MB ของ Firebase...");
+        document.getElementById('columnSelectModal').classList.add('hidden');
+        UI.showLoader("กำลังกรองข้อมูล...", "สร้างฐานข้อมูลดิบ");
 
         setTimeout(() => {
-            let temp = {}; 
-            SalesData.tempJson.forEach(row => {
-                let storeId = String(row[idCol]).trim(); if(!storeId) return;
-                if(!temp[storeId]) { 
-                    temp[storeId] = { id: storeId, name: nameCol && row[nameCol] ? String(row[nameCol]).trim() : 'ไม่ระบุชื่อ', vpo: 0, bills: new Set(), skus: new Set(), hasJelly: false, hasKlom: false }; 
-                    customCols.forEach(col => { temp[storeId][col] = row[col] !== undefined ? row[col] : ""; });
-                }
-                let qty = vpoCol && row[vpoCol] ? parseFloat(String(row[vpoCol]).replace(/[^0-9.-]/g, '')) : 0;
-                if(!isNaN(qty)) temp[storeId].vpo += qty;
-                if(billCol && row[billCol]) temp[storeId].bills.add(row[billCol]);
-                if(skuCol && row[skuCol]) { let sku = String(row[skuCol]).trim(); temp[storeId].skus.add(sku); if(sku.includes("เจลลี่")) temp[storeId].hasJelly = true; if(sku.includes("กลมกล่อม")) temp[storeId].hasKlom = true; }
+            // สร้าง Array ใหม่ที่เก็บเฉพาะคอลัมน์ที่เลือก
+            let rawData = RawDataMgr.tempJson.map(row => {
+                let cleanRow = {};
+                selectedCols.forEach(col => { cleanRow[col] = row[col]; });
+                return cleanRow;
             });
 
-            let newSalesKPI = {};
-            Object.keys(temp).forEach(id => {
-                newSalesKPI[id] = { id: temp[id].id, name: temp[id].name, vpo: Math.round(temp[id].vpo * 100) / 100, billCount: temp[id].bills.size, skuCount: temp[id].skus.size, hasJelly: temp[id].hasJelly, hasKlom: temp[id].hasKlom, active: temp[id].vpo > 0 };
-                customCols.forEach(col => { newSalesKPI[id][col] = temp[id][col]; });
-            });
+            // บันทึกค่าที่เลือกไว้ใช้ครั้งต่อไป
+            State.db.savedRawColumns = selectedCols;
+            App.dbRef.update({ savedRawColumns: selectedCols }); // เซฟลง Firebase
 
-            // 🚀 หัวใจสำคัญ: ระบบหั่นข้อมูล (Chunking) เป็นชิ้นละ 400 ร้านค้า เพื่อหลบข้อจำกัด 1MB
-            cloudDB.collection('v1_sales_chunks').get().then(snap => {
-                // ขั้นที่ 1: ลบกล่องเก่าทิ้งก่อน
+            // เซฟ Data เป็น Chunks ลง Firebase 
+            cloudDB.collection('v1_raw_chunks').get().then(snap => {
                 let delBatch = cloudDB.batch(); snap.forEach(doc => delBatch.delete(doc.ref));
                 return delBatch.commit();
             }).then(() => {
-                // ขั้นที่ 2: แบ่งกล่องละ 400 ข้อมูล แล้วอัปโหลด
-                let keys = Object.keys(newSalesKPI);
-                let chunkSize = 400; 
-                let promises = [];
-                for(let i=0; i<keys.length; i+=chunkSize) {
-                    let chunkData = {};
-                    keys.slice(i, i+chunkSize).forEach(k => chunkData[k] = newSalesKPI[k]);
-                    promises.push(cloudDB.collection('v1_sales_chunks').doc('chunk_'+(i/chunkSize)).set(chunkData));
+                let chunkSize = 500; let promises = [];
+                for(let i=0; i<rawData.length; i+=chunkSize) {
+                    let chunk = { rows: rawData.slice(i, i+chunkSize) };
+                    promises.push(cloudDB.collection('v1_raw_chunks').doc('chunk_'+(i/chunkSize)).set(chunk));
                 }
                 return Promise.all(promises);
             }).then(() => {
-                State.sales = newSalesKPI; App.sync(); DataMgr.render(); UI.hideLoader(); SalesData.tempJson = []; 
-                alert(`✅ นำเข้าข้อมูลสำเร็จ!\nจัดระเบียบข้อมูล ${Object.keys(newSalesKPI).length} ร้านค้าเรียบร้อยแล้ว`);
+                State.rawData = rawData; 
+                RawDataMgr.renderTable(); 
+                UI.hideLoader(); 
+                RawDataMgr.tempJson = [];
+                alert("✅ อัปโหลดข้อมูลดิบสำเร็จ!");
             }).catch(err => { UI.hideLoader(); alert("อัปโหลดไม่สำเร็จ: " + err.message); });
             
-        }, 100); 
+        }, 100);
+    },
+
+    renderTable: () => {
+        let raw = State.rawData || [];
+        document.getElementById('raw-total-rows').innerText = raw.length.toLocaleString();
+        
+        if(raw.length === 0) {
+            document.getElementById('raw-table-head').innerHTML = '';
+            document.getElementById('raw-table-body').innerHTML = '<tr><td class="text-center p-8 text-gray-400">ไม่มีข้อมูลดิบ</td></tr>';
+            return;
+        }
+
+        let cols = Object.keys(raw[0]);
+        let th = '<tr>' + cols.map(c => `<th class="p-3 border-b bg-gray-100 sticky top-0">${c}</th>`).join('') + '</tr>';
+        document.getElementById('raw-table-head').innerHTML = th;
+
+        // โชว์แค่ 500 บรรทัดแรกกันค้าง
+        let html = raw.slice(0, 500).map(row => {
+            return '<tr class="hover:bg-blue-50/50">' + cols.map(c => `<td class="p-3 text-sm border-b border-gray-100">${row[c] !== undefined ? row[c] : ''}</td>`).join('') + '</tr>';
+        }).join('');
+        
+        if(raw.length > 500) html += `<tr><td colspan="${cols.length}" class="text-center p-4 text-xs text-gray-400">... ซ่อนข้อมูลแถวที่ 501 ถึง ${raw.length} ไว้เพื่อความรวดเร็ว ...</td></tr>`;
+        document.getElementById('raw-table-body').innerHTML = html;
+    },
+
+    clearAll: () => {
+        if(confirm("ล้างข้อมูลดิบทั้งหมด?")) {
+            UI.showLoader("กำลังลบ...");
+            cloudDB.collection('v1_raw_chunks').get().then(snap => {
+                let delBatch = cloudDB.batch(); snap.forEach(doc => delBatch.delete(doc.ref));
+                return delBatch.commit();
+            }).then(() => { State.rawData = []; RawDataMgr.renderTable(); UI.hideLoader(); });
+        }
     }
 };
 
 // ==========================================
-// 4. ระบบ Export ไฟล์ (Excel IO)
+// 🎯 ระบบหน้าจัดการ KPI (เชื่อมต่อไปหา Sales)
 // ==========================================
+const KPIMgr = {
+    renderSetup: () => {
+        if(!State.rawData || State.rawData.length === 0) {
+            document.getElementById('kpi-selectors').innerHTML = '<p class="col-span-3 text-red-500 font-bold text-sm">⚠️ ยังไม่มีข้อมูลดิบ กรุณาไปที่แท็บ "ข้อมูลการขาย" เพื่ออัปโหลดก่อนครับ</p>';
+            return;
+        }
+
+        let cols = Object.keys(State.rawData[0]);
+        let saved = State.db.kpiSettings || {}; // ดึงค่าเดิมถ้าเคยตั้งไว้
+
+        let fields = [
+            { id: 'kpi-id', label: 'คอลัมน์ "รหัสร้าน" (อ้างอิง)', val: saved.idCol || cols.find(h=>h.toLowerCase().includes('id')||h.includes('รหัส')) },
+            { id: 'kpi-name', label: 'คอลัมน์ "ชื่อร้าน" (ไว้โชว์)', val: saved.nameCol || cols.find(h=>h.toLowerCase().includes('name')||h.includes('ชื่อ')) },
+            { id: 'kpi-vpo', label: 'คอลัมน์ "ยอดขาย" (บวกเลข)', val: saved.vpoCol || cols.find(h=>h.toLowerCase().includes('qty')||h.includes('จำนวน')) },
+            { id: 'kpi-bill', label: 'คอลัมน์ "เลขที่บิล" (นับจำนวน)', val: saved.billCol || cols.find(h=>h.toLowerCase().includes('invoice')||h.includes('บิล')) },
+            { id: 'kpi-sku', label: 'คอลัมน์ "รหัสสินค้า" (นับจำนวน)', val: saved.skuCol || cols.find(h=>h.toLowerCase().includes('sku')||h.includes('product')) }
+        ];
+
+        let html = fields.map(f => {
+            let opts = `<option value="">-- ไม่ใช้ --</option>` + cols.map(c => `<option value="${c}" ${c===f.val?'selected':''}>${c}</option>`).join('');
+            return `<div class="bg-gray-50 p-3 rounded-xl border border-gray-200"><label class="text-xs font-bold text-gray-700 block mb-1">${f.label}</label><select id="${f.id}" class="w-full p-2 border rounded-lg text-sm bg-white">${opts}</select></div>`;
+        }).join('');
+
+        document.getElementById('kpi-selectors').innerHTML = html;
+        document.getElementById('kpi-focus-1').value = saved.f1 || "เจลลี่";
+        document.getElementById('kpi-focus-2').value = saved.f2 || "กลมกล่อม";
+    },
+
+    calculatePreview: () => {
+        if(!State.rawData || State.rawData.length === 0) return alert("ไม่มีข้อมูลดิบ");
+        
+        let idCol = document.getElementById('kpi-id').value;
+        if(!idCol) return alert("จำเป็นต้องระบุคอลัมน์ รหัสร้าน ครับ");
+
+        let conf = {
+            idCol: idCol, nameCol: document.getElementById('kpi-name').value,
+            vpoCol: document.getElementById('kpi-vpo').value, billCol: document.getElementById('kpi-bill').value, skuCol: document.getElementById('kpi-sku').value,
+            f1: document.getElementById('kpi-focus-1').value.trim(), f2: document.getElementById('kpi-focus-2').value.trim()
+        };
+
+        // เซฟการตั้งค่านี้ไว้
+        State.db.kpiSettings = conf;
+        App.dbRef.update({ kpiSettings: conf });
+
+        UI.showLoader("กำลังประมวลผล KPI...");
+        setTimeout(() => {
+            let temp = {};
+            State.rawData.forEach(row => {
+                let sId = String(row[conf.idCol]).trim(); if(!sId) return;
+                if(!temp[sId]) { temp[sId] = { id: sId, name: conf.nameCol?row[conf.nameCol]:'ไม่ระบุ', vpo:0, bills:new Set(), skus:new Set(), h1:false, h2:false }; }
+                
+                let qty = conf.vpoCol ? parseFloat(String(row[conf.vpoCol]).replace(/[^0-9.-]/g, '')) : 0;
+                if(!isNaN(qty)) temp[sId].vpo += qty;
+                
+                if(conf.billCol && row[conf.billCol]) temp[sId].bills.add(row[conf.billCol]);
+                
+                if(conf.skuCol && row[conf.skuCol]) {
+                    let sku = String(row[conf.skuCol]); temp[sId].skus.add(sku);
+                    if(conf.f1 && sku.includes(conf.f1)) temp[sId].h1 = true;
+                    if(conf.f2 && sku.includes(conf.f2)) temp[sId].h2 = true;
+                }
+            });
+
+            let newSalesKPI = {};
+            Object.keys(temp).forEach(id => {
+                newSalesKPI[id] = { id: id, name: temp[id].name, vpo: Math.round(temp[id].vpo*100)/100, billCount: temp[id].bills.size, skuCount: temp[id].skus.size, hasJelly: temp[id].h1, hasKlom: temp[id].h2, active: temp[id].vpo > 0 };
+            });
+
+            State.previewSales = newSalesKPI; // เก็บไว้ชั่วคราวก่อนส่งให้ Sales
+            KPIMgr.renderPreview(newSalesKPI, conf);
+            UI.hideLoader();
+        }, 100);
+    },
+
+    renderPreview: (kpiData, conf) => {
+        let keys = Object.keys(kpiData);
+        document.getElementById('kpi-preview-count').innerText = keys.length.toLocaleString();
+        
+        let th = `<tr><th class="p-3 bg-gray-100 sticky top-0">รหัสร้าน</th><th class="p-3 bg-gray-100 sticky top-0">ชื่อร้าน</th><th class="p-3 bg-emerald-50 text-emerald-700 sticky top-0">VPO (รวม)</th><th class="p-3 bg-gray-100 sticky top-0">บิล</th><th class="p-3 bg-gray-100 sticky top-0">SKU</th><th class="p-3 bg-gray-100 sticky top-0">สินค้าโฟกัส</th></tr>`;
+        document.getElementById('kpi-preview-head').innerHTML = th;
+
+        let html = keys.slice(0, 300).map(id => {
+            let k = kpiData[id];
+            let fHtml = '';
+            if(k.hasJelly) fHtml += `<span class="bg-pink-100 text-pink-700 px-2 rounded text-[10px] font-bold mr-1">${conf.f1}</span>`;
+            if(k.hasKlom) fHtml += `<span class="bg-amber-100 text-amber-700 px-2 rounded text-[10px] font-bold">${conf.f2}</span>`;
+            return `<tr><td class="p-3 text-sm border-b">${k.id}</td><td class="p-3 text-sm border-b font-bold">${k.name}</td><td class="p-3 text-sm border-b font-black text-blue-600 bg-emerald-50/30">${k.vpo}</td><td class="p-3 text-sm border-b">${k.billCount}</td><td class="p-3 text-sm border-b">${k.skuCount}</td><td class="p-3 text-sm border-b">${fHtml}</td></tr>`;
+        }).join('');
+
+        if(keys.length > 300) html += `<tr><td colspan="6" class="text-center p-3 text-xs text-gray-400">... แสดงตัวอย่าง 300 ร้านแรก ...</td></tr>`;
+        document.getElementById('kpi-preview-body').innerHTML = html;
+    },
+
+    deployToSales: () => {
+        if(!State.previewSales) return alert("กรุณากด 'ทดสอบคำนวณ KPI' ให้เห็นตารางตัวอย่างก่อนส่งครับ");
+        UI.showLoader("กำลังอัปโหลดส่งให้ Sales...", "กำลังแบ่งกล่องข้อมูล...");
+        
+        cloudDB.collection('v1_sales_chunks').get().then(snap => {
+            let delBatch = cloudDB.batch(); snap.forEach(doc => delBatch.delete(doc.ref));
+            return delBatch.commit();
+        }).then(() => {
+            let keys = Object.keys(State.previewSales);
+            let chunkSize = 500; let promises = [];
+            for(let i=0; i<keys.length; i+=chunkSize) {
+                let chunkData = {}; keys.slice(i, i+chunkSize).forEach(k => chunkData[k] = State.previewSales[k]);
+                promises.push(cloudDB.collection('v1_sales_chunks').doc('chunk_'+(i/chunkSize)).set(chunkData));
+            }
+            return Promise.all(promises);
+        }).then(() => {
+            State.sales = State.previewSales; // อัปเดตฝั่งตัวเองให้ตรงกับ Sales
+            App.sync(); UI.hideLoader(); alert("🚀 ส่งข้อมูลให้ Sales App สำเร็จเรียบร้อย!");
+        }).catch(err => { UI.hideLoader(); alert("อัปโหลดไม่สำเร็จ: " + err.message); });
+    }
+};
+
 const ExcelIO = {
     export: () => {
         if(!State.stores.length) return; let ed = [];
@@ -196,51 +253,49 @@ const ExcelIO = {
     }
 };
 
-// ==========================================
-// 5. ระบบประสานงานหลัก (App Core)
-// ==========================================
 const App = {
     dbRef: cloudDB.collection('appData').doc('v1_main'),
 
     init: () => {
         MapCtrl.init();
-        UI.showLoader("กำลังเชื่อมต่อฐานข้อมูล...", "");
+        UI.showLoader("กำลังเชื่อมต่อ...", "");
         
         App.dbRef.onSnapshot((doc) => {
-            let dataFromServer = doc.exists ? doc.data() : {};
-            State.db.routes = dataFromServer.routes || {"สายที่ 1": []};
-            State.db.backups = dataFromServer.backups || {};
-            State.db.cycleDays = dataFromServer.cycleDays || 24;
+            let d = doc.exists ? doc.data() : {};
+            State.db = { ...State.db, ...d }; // รวมข้อมูล Route และ Settings
+            State.db.routes = State.db.routes || {"สายที่ 1": []};
+            State.db.cycleDays = State.db.cycleDays || 24;
 
             let sortedKeys = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b, 'th', {numeric: true}));
             if (!State.localActiveRoute || !State.db.routes[State.localActiveRoute]) {
-                let savedLocal = localStorage.getItem('last_viewed_route');
-                State.localActiveRoute = (savedLocal && State.db.routes[savedLocal]) ? savedLocal : sortedKeys[0];
+                State.localActiveRoute = localStorage.getItem('last_viewed_route') || sortedKeys[0];
             }
             State.stores = State.db.routes[State.localActiveRoute] || [];
-            App.updateStatusUI("✅ ข้อมูลตรงกับคลาวด์", "emerald");
-            App.fetchSalesData();
-        }, (error) => { App.updateStatusUI("🔴 ออฟไลน์", "red"); UI.hideLoader(); });
+            
+            App.fetchRawData(); // ดึงก้อนข้อมูลดิบ
+            App.fetchSalesData(); // ดึงก้อน KPI
+        }, (err) => { UI.hideLoader(); alert("ออฟไลน์"); });
 
-        document.getElementById('salesUpload').addEventListener('change', function(e) { const file = e.target.files[0]; if (file) SalesData.processExcel(file); });
+        document.getElementById('rawUpload').addEventListener('change', function(e) { const f = e.target.files[0]; if(f) RawDataMgr.processExcel(f); });
         document.getElementById('fileUpload').addEventListener('change', App.handleMapUpload);
     },
 
-    // 🚀 ระบบดาวน์โหลดข้อมูล: ดึงกล่องย่อยทุกกล่องมารวมร่างกัน
-    fetchSalesData: () => {
-        cloudDB.collection('v1_sales_chunks').get().then(snap => {
-            let mergedSales = {};
-            snap.forEach(doc => { Object.assign(mergedSales, doc.data()); });
-            State.sales = mergedSales;
-            App.sync(); UI.hideLoader(); DataMgr.render(); 
-            setTimeout(() => MapCtrl.fitToStores(), 300);
-        }).catch(err => { App.sync(); UI.hideLoader(); });
+    fetchRawData: () => {
+        cloudDB.collection('v1_raw_chunks').get().then(snap => {
+            let raw = []; snap.forEach(doc => { raw = raw.concat(doc.data().rows || []); });
+            State.rawData = raw; RawDataMgr.renderTable();
+        });
     },
 
-    updateStatusUI: (msg, color) => { let badge = document.getElementById('db-save-status'); badge.className = `flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-lg border transition-all duration-300 bg-${color}-100 text-${color}-700 border-${color}-200`; badge.innerHTML = msg; },
-    saveDB: () => { State.db.routes[State.localActiveRoute] = State.stores; App.updateStatusUI("⏳ กำลังบันทึก...", "yellow"); App.dbRef.set(State.db).then(() => { App.updateStatusUI("✅ บันทึกสำเร็จ", "emerald"); UI.showSaveToast("บันทึกคิวงานและเส้นทางเรียบร้อย"); }).catch(err => { App.updateStatusUI("❌ บันทึกล้มเหลว", "red"); }); },
-    sync: () => { let rs = document.getElementById('routeSelector'); if(rs) { let sortedRoutes = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b, 'th', {numeric: true})); let newHTML = sortedRoutes.map(r => `<option value="${r}">${r}</option>`).join(''); if (rs.innerHTML !== newHTML) { rs.innerHTML = newHTML; } rs.value = State.localActiveRoute; } MapCtrl.clearAll(); UI.initDaySelector(); UI.render(); },
-    
+    fetchSalesData: () => {
+        cloudDB.collection('v1_sales_chunks').get().then(snap => {
+            let merged = {}; snap.forEach(doc => { Object.assign(merged, doc.data()); });
+            State.sales = merged; App.sync(); UI.hideLoader();
+        });
+    },
+
+    saveDB: () => { State.db.routes[State.localActiveRoute] = State.stores; App.dbRef.update({ routes: State.db.routes }); },
+    sync: () => { let rs = document.getElementById('routeSelector'); if(rs) { let sortedRoutes = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b, 'th', {numeric: true})); let newHTML = sortedRoutes.map(r => `<option value="${r}">${r}</option>`).join(''); if (rs.innerHTML !== newHTML) rs.innerHTML = newHTML; rs.value = State.localActiveRoute; } MapCtrl.clearAll(); UI.initDaySelector(); UI.render(); },
     switchRoute: (name) => { if(State.localActiveRoute === name) return; State.localActiveRoute = name; localStorage.setItem('last_viewed_route', name); State.stores = State.db.routes[name] || []; App.sync(); MapCtrl.fitToStores(); },
     addRoute: () => { let n = prompt("ชื่อสายใหม่:"); if(n && n.trim()) { State.db.routes[n.trim()] = []; State.localActiveRoute = n.trim(); State.stores = []; App.sync(); App.saveDB(); MapCtrl.fitToStores(); } },
     renameRoute: () => { let n = prompt("ชื่อใหม่:", State.localActiveRoute); if(n && n.trim()) { State.db.routes[n.trim()] = State.db.routes[State.localActiveRoute]; delete State.db.routes[State.localActiveRoute]; State.localActiveRoute = n.trim(); App.sync(); App.saveDB(); } },
