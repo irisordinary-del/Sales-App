@@ -11,7 +11,7 @@ const Nav = {
         document.getElementById('page-' + page).classList.remove('hidden');
         
         if(page === 'planning') setTimeout(() => { if(MapCtrl.map) MapCtrl.map.invalidateSize(); }, 200);
-        if(page === 'kpi') KPIMgr.renderSetup(); // โหลดข้อมูลตอนเปิดหน้า KPI
+        if(page === 'kpi') KPIMgr.renderSetup(); 
     }
 };
 
@@ -35,7 +35,6 @@ const UI = {
 
         State.stores.forEach(s => {
             let b = s.freq===2?`<span class="f2-badge">F2</span>`:'';
-            // ดึง KPI สรุปที่ Sales ใช้มาแสดงบนหมุดแผนที่
             let kpi = State.sales[s.id];
             let kpiBadge = kpi ? (kpi.active ? `<span class="bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded text-[9px] font-bold">✅ ${kpi.vpo} ลัง | ${kpi.skuCount} SKU</span>` : `<span class="bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded text-[9px] font-bold">❌ Inactive</span>`) : '';
 
@@ -52,8 +51,18 @@ const UI = {
         document.getElementById('list-upload').innerHTML = htmlP.join(''); document.getElementById('list-unassigned').innerHTML = htmlU.join(''); document.getElementById('list-assigned').innerHTML = htmlA.join('');
         
         let wait = State.stores.filter(s=>!s.days.length).length, tot = State.stores.length;
-        document.getElementById('stat-total').innerText = tot; document.getElementById('stat-done').innerText = aCnt; document.getElementById('stat-pending').innerText = wait;
-        document.getElementById('progress-bar').style.width = tot ? `${Math.round(((tot-wait)/tot)*100)}%` : '0%';
+        
+        // 🌟 แก้ไขแล้ว: ใส่ระบบป้องกัน (Safeguard) เช็คก่อนว่ามีกล่องอยู่จริงไหม ถึงจะอัปเดตตัวเลข
+        let elTotal = document.getElementById('stat-total');
+        let elDone = document.getElementById('stat-done');
+        let elPending = document.getElementById('stat-pending'); 
+        let elProgress = document.getElementById('progress-bar');
+        
+        if(elTotal) elTotal.innerText = tot; 
+        if(elDone) elDone.innerText = aCnt; 
+        if(elPending) elPending.innerText = wait;
+        if(elProgress) elProgress.style.width = tot ? `${Math.round(((tot-wait)/tot)*100)}%` : '0%';
+        
         MapCtrl.renderMarkers(); MapCtrl.drawLines();
     },
     showDayModal: (d) => {
@@ -61,5 +70,11 @@ const UI = {
         let h = State.stores.filter(s=>s.days.includes(d)).sort((a,b)=>(a.seqs[d]||999)-(b.seqs[d]||999)).map(x=>`<div class="p-3 bg-white border border-gray-200 rounded-2xl flex items-center gap-3 mb-2 shadow-sm">${x.seqs[d]?`<div class="bg-gray-900 text-white w-7 h-7 rounded-full flex items-center justify-center text-xs font-black">${x.seqs[d]}</div>`:''}<div class="flex-1"><p class="text-sm font-bold truncate text-gray-800">${x.name} ${x.freq===2?'<span class="f2-badge">F2</span>':''}</p><p class="text-[10px] text-gray-400 font-mono mt-0.5">ID: ${x.id}</p></div></div>`).join('');
         document.getElementById('modalContent').innerHTML = h; document.getElementById('dayModal').classList.remove('hidden');
     },
-    closeDayModal: () => { State.openDayModal=null; document.getElementById('dayModal').classList.add('hidden'); }
+    closeDayModal: () => { State.openDayModal=null; document.getElementById('dayModal').classList.add('hidden'); },
+    showSummaryModal: () => {
+        let h = []; let sortedRoutes = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b, 'th', {numeric: true}));
+        for(let r of sortedRoutes) { let s=State.db.routes[r], t=s.length, a=s.filter(x=>x.days.length).length; h.push(`<tr><td class="p-3 font-bold border-b border-gray-100">${r}</td><td class="p-3 text-center border-b border-gray-100">${t}</td><td class="p-3 text-center text-emerald-600 font-bold border-b border-gray-100">${a}</td><td class="p-3 text-center text-yellow-600 font-bold border-b border-gray-100">${t-a}</td><td class="p-3 text-xs font-bold text-gray-400 border-b border-gray-100">${t?Math.round(a/t*100):0}%</td></tr>`); }
+        document.getElementById('overallTableBody').innerHTML = h.join(''); document.getElementById('overallModal').classList.remove('hidden');
+    },
+    hideSummaryModal: () => document.getElementById('overallModal').classList.add('hidden')
 };
