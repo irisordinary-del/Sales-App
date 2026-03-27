@@ -2,13 +2,13 @@ const firebaseConfig = { apiKey: "AIzaSyDCYxJf0eHryjVJ8_INoWw_uTN14UMaEWE", auth
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 
-// 🚀 เทคนิค 1: Cache โหลดไว ไม่รอเน็ต
 db.enablePersistence({ synchronizeTabs: true }).catch(function(err) { console.warn("Cache Warning: ", err); });
 
 const docMain = db.collection('appData').doc('v1_main');
 const docSales = db.collection('appData').doc('v1_sales');
 
-let State = { myRoute: "", allStores: [], routeStores: [], sales: {}, currentDay: "", isLoaded: false };
+// 🌟 เพิ่ม mapNeedsFit เข้าไปใน State เพื่อกันแผนที่ซูมเด้งเองตอนลากจัดคิว
+let State = { myRoute: "", allStores: [], routeStores: [], sales: {}, currentDay: "", isLoaded: false, mapNeedsFit: true };
 let map = null, mapMarkers = [], sortableList = null;
 
 const UI = {
@@ -17,7 +17,7 @@ const UI = {
         document.getElementById('nav-' + id).classList.add('active');
         document.querySelectorAll('.app-tab').forEach(el => el.classList.remove('active'));
         document.getElementById('tab-' + id).classList.add('active');
-        if(id === 'route' && map) { setTimeout(() => { map.invalidateSize(); MapCtrl.fitBounds(); }, 200); }
+        if(id === 'route' && map) { setTimeout(() => { map.invalidateSize(); if(State.mapNeedsFit) MapCtrl.fitBounds(); }, 200); }
     },
     searchStores: (val) => {
         let q = val.toLowerCase().trim();
@@ -61,7 +61,6 @@ const App = {
         document.getElementById('user-route-label').innerText = State.myRoute;
         document.getElementById('loader').style.display = 'flex';
 
-        // 🚀 เทคนิค 3: โหลดข้อมูลขนานกัน (Parallel Fetching)
         let isMainLoaded = false, isSalesLoaded = false;
         const checkReady = () => { if(isMainLoaded && isSalesLoaded) { document.getElementById('loader').style.display = 'none'; Processor.run(); } };
 
@@ -88,7 +87,8 @@ const Processor = {
         let ds = new Set(); State.allStores.forEach(s => s.days.forEach(d => ds.add(d)));
         let sorted = Array.from(ds).sort((a,b) => parseInt(a.replace('Day ','')) - parseInt(b.replace('Day ','')));
         let el = document.getElementById('day-select'); el.innerHTML = sorted.map(d => `<option value="${d}">${d.replace('Day ','คิววันที่ ')}</option>`).join('');
-        if(!State.currentDay) State.currentDay = sorted[0]; el.value = State.currentDay; Processor.routeList();
+        if(!State.currentDay) { State.currentDay = sorted[0]; State.mapNeedsFit = true; } // ซูมแค่ตอนโหลดครั้งแรก
+        el.value = State.currentDay; Processor.routeList();
     },
     routeList: () => {
         let list = State.allStores.filter(s => s.days.includes(State.currentDay));
@@ -137,12 +137,18 @@ const MapCtrl = {
             let m = L.marker([s.lat, s.lng], { icon }).addTo(map).bindPopup(`<div class="text-center pb-1"><b class="text-xs">${s.name}</b><br><button onclick="UI.openModal('${s.id}')" class="bg-gray-100 text-gray-700 px-3 py-1 rounded border mt-1 text-[10px] font-bold shadow-sm">ดูข้อมูล</button></div>`, { closeButton: false });
             mapMarkers.push(m);
         });
-        MapCtrl.fitBounds();
+        
+        // 🌟 ซูมเฉพาะตอนบังคับให้ซูมเท่านั้น (เช่น ตอนเปลี่ยนวัน) ลากคิวงานจะได้ไม่เด้ง
+        if (State.mapNeedsFit) {
+            MapCtrl.fitBounds();
+            State.mapNeedsFit = false; // ปิดธงซูมทิ้ง
+        }
     },
-    fitBounds: () => { if(mapMarkers.length && map) map.fitBounds(new L.featureGroup(mapMarkers).getBounds(), { padding: [30, 30] }); }
+    fitBounds: () => { if(mapMarkers.length && map) map.fitBounds(new L.featureGroup(mapMarkers).getBounds(), { padding: [30, 30] }); },
+    forceFitBounds: () => { State.mapNeedsFit = true; MapCtrl.drawMap(); } // สำหรับปุ่มกดซูมบนแผนที่
 };
 
-// 🌟 ระบบลากปรับขนาด (Drag to Resize)
+// 🌟 ระบบลากปรับขนาด (อัปเดตให้รองรับคอมพิวเตอร์ และจำกัดต่ำสุดที่ 25%)
 const Resizer = {
     init: () => {
         const resizer = document.getElementById('resizer');
@@ -152,29 +158,30 @@ const Resizer = {
         resizer.addEventListener('pointerdown', (e) => {
             isResizing = true;
             document.body.style.cursor = window.innerWidth >= 1024 ? 'col-resize' : 'row-resize';
-            mapContainer.style.pointerEvents = 'none'; // ปิดการกดโดนแผนที่ตอนลาก
+            mapContainer.style.pointerEvents = 'none'; 
+            e.preventDefault(); 
         });
 
-        document.addEventListener('pointermove', (e) => {
+        window.addEventListener('pointermove', (e) => {
             if (!isResizing) return;
             const container = document.getElementById('split-container');
             const rect = container.getBoundingClientRect();
             
             if (window.innerWidth >= 1024) {
-                // จอคอม: ลากซ้าย-ขวา
+                // Desktop: ลากซ้าย-ขวา
                 let newWidth = ((e.clientX - rect.left) / rect.width) * 100;
-                newWidth = Math.max(20, Math.min(newWidth, 75)); // แผนที่หดได้สุด 20% ขยายสุด 75%
+                newWidth = Math.max(25, Math.min(newWidth, 75)); // 🌟 ลดต่ำสุดได้ 25%
                 mapContainer.style.flex = `0 0 ${newWidth}%`;
             } else {
-                // มือถือ: ลากขึ้น-ลง
+                // Mobile: ลากขึ้น-ลง
                 let newHeight = ((e.clientY - rect.top) / rect.height) * 100;
-                newHeight = Math.max(15, Math.min(newHeight, 85)); // แผนที่หดได้สุด 15% ขยายสุด 85%
+                newHeight = Math.max(25, Math.min(newHeight, 75)); // 🌟 ลดต่ำสุดได้ 25%
                 mapContainer.style.flex = `0 0 ${newHeight}%`;
             }
             if(map) map.invalidateSize();
         });
 
-        document.addEventListener('pointerup', () => {
+        window.addEventListener('pointerup', () => {
             if (isResizing) {
                 isResizing = false;
                 document.body.style.cursor = '';
@@ -184,6 +191,11 @@ const Resizer = {
     }
 };
 
-document.getElementById('day-select').addEventListener('change', (e) => { State.currentDay = e.target.value; Processor.routeList(); });
+// 🌟 เมื่อเปลี่ยนวัน ให้เปิดธง mapNeedsFit = true เพื่อให้แผนที่ซูมหาพื้นที่ใหม่
+document.getElementById('day-select').addEventListener('change', (e) => { 
+    State.currentDay = e.target.value; 
+    State.mapNeedsFit = true; 
+    Processor.routeList(); 
+});
 window.addEventListener('resize', () => { if(map) map.invalidateSize(); });
 document.addEventListener('DOMContentLoaded', () => { App.checkAuth(); Resizer.init(); });
