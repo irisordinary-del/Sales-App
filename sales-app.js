@@ -1,6 +1,3 @@
-// sales-app.js
-
-// 1. ตั้งค่า Firebase
 const firebaseConfig = { 
     apiKey: "AIzaSyDCYxJf0eHryjVJ8_INoWw_uTN14UMaEWE", 
     authDomain: "route-plan-71e2e.firebaseapp.com", 
@@ -12,20 +9,17 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 
-// 🚀 เทคนิคที่ 1: เปิดระบบ Cache (Offline Persistence)
-// ช่วยให้แอปโหลดข้อมูลจากหน่วยความจำเครื่องมือถือทันทีที่เปิดแอปครั้งที่สอง ไม่ต้องรอเน็ต!
+// 🚀 ความเร็วระดับ 1: เปิดระบบ Cache ให้เซลส์โหลดข้อมูลเก่าในเครื่องได้ทันทีเมื่อเน็ตช้า
 db.enablePersistence({ synchronizeTabs: true }).catch(function(err) {
-    console.warn("ไม่สามารถเปิดใช้งานโหมด Cache ได้ (อาจจะใช้หน้าต่างไม่ระบุตัวตนอยู่): ", err);
+    console.warn("Firebase Cache Warning: ", err);
 });
 
 const docMain = db.collection('appData').doc('v1_main');
 const docSales = db.collection('appData').doc('v1_sales');
 
-// 2. ตัวแปรเก็บข้อมูล (State)
 let State = { myRoute: "", allStores: [], routeStores: [], sales: {}, currentDay: "", isLoaded: false };
 let map = null, mapMarkers = [], sortableList = null;
 
-// 3. ระบบควบคุมหน้าจอ (UI)
 const UI = {
     switchTab: (id) => {
         document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
@@ -58,12 +52,12 @@ const UI = {
         };
         setBox('m-j-box', 'm-j-status', k.hasJelly);
         setBox('m-k-box', 'm-k-status', k.hasKlom);
+        document.getElementById('m-nav-btn').onclick = () => window.open(`https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}&travelmode=driving`);
         document.getElementById('store-modal').classList.remove('hidden');
     },
     closeModal: () => document.getElementById('store-modal').classList.add('hidden')
 };
 
-// 4. ระบบจัดการบัญชี (App)
 const App = {
     checkAuth: () => { let saved = localStorage.getItem('route_code'); if(saved) { State.myRoute = saved; App.start(); } else document.getElementById('login-screen').style.display='flex'; },
     login: () => { let u = document.getElementById('login-input').value.trim().toUpperCase(); if(!u) return alert("กรุณาระบุรหัสสาย"); State.myRoute = u; localStorage.setItem('route_code', u); App.start(); },
@@ -76,18 +70,29 @@ const App = {
         document.getElementById('user-route-label').innerText = State.myRoute;
         document.getElementById('loader').style.display = 'flex';
 
-        docMain.onSnapshot(doc => {
-            State.allStores = doc.exists && doc.data().routes ? doc.data().routes[State.myRoute] || [] : [];
-            docSales.onSnapshot(sDoc => {
-                State.sales = sDoc.exists ? sDoc.data() : {};
+        // 🚀 ความเร็วระดับ 2: โหลดข้อมูล 2 ก้อน (Map + KPI) ตีคู่ขนานกันไปเลย ไม่ต้องรอคิวกัน
+        let isMainLoaded = false;
+        let isSalesLoaded = false;
+
+        const checkReady = () => {
+            if(isMainLoaded && isSalesLoaded) {
                 document.getElementById('loader').style.display = 'none';
                 Processor.run();
-            });
+            }
+        };
+
+        docMain.onSnapshot(doc => {
+            State.allStores = doc.exists && doc.data().routes ? doc.data().routes[State.myRoute] || [] : [];
+            isMainLoaded = true; checkReady();
+        });
+
+        docSales.onSnapshot(sDoc => {
+            State.sales = sDoc.exists ? sDoc.data() : {};
+            isSalesLoaded = true; checkReady();
         });
     }
 };
 
-// 5. ระบบคำนวณและสร้างเนื้อหา (Processor)
 const Processor = {
     run: () => {
         Processor.dashboard();
@@ -115,9 +120,9 @@ const Processor = {
     stores: () => {
         let html = State.allStores.map(s => {
             let k = State.sales[s.id];
-            let badge = k && k.vpo > 0 ? `<span class="bg-emerald-100 text-emerald-700 text-[9px] px-2 py-0.5 rounded-full font-bold">Active</span>` : `<span class="bg-gray-100 text-gray-400 text-[9px] px-2 py-0.5 rounded-full font-bold">Inactive</span>`;
+            let badge = k && k.vpo > 0 ? `<span class="bg-emerald-100 text-emerald-700 text-[9px] px-2 py-0.5 rounded-lg font-bold">Active</span>` : `<span class="bg-gray-100 text-gray-400 text-[9px] px-2 py-0.5 rounded-lg font-bold">Inactive</span>`;
             return `<div onclick="UI.openModal('${s.id}')" data-search="${s.id.toLowerCase()} ${s.name.toLowerCase()}" class="bg-white p-3.5 rounded-2xl border shadow-sm flex justify-between items-center transition cursor-pointer active:bg-gray-50">
-                <div class="overflow-hidden mr-2"><p class="font-bold text-[13px] text-gray-800 truncate">${s.name}</p><p class="text-[10px] text-gray-400 font-mono">ID: ${s.id}</p></div>
+                <div class="overflow-hidden mr-2"><p class="font-bold text-sm text-gray-800 truncate">${s.name}</p><p class="text-[10px] text-gray-400 font-mono">ID: ${s.id}</p></div>
                 ${badge}
             </div>`;
         }).join('');
@@ -140,15 +145,15 @@ const Processor = {
             let seq = s.seqs?.[State.currentDay] || i+1;
             let navLink = `https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}&travelmode=driving`;
             return `
-            <div data-id="${s.id}" class="store-item bg-white p-2 rounded-xl border shadow-sm flex items-center justify-between gap-2 relative mb-2">
-                <div class="flex items-center gap-2 overflow-hidden w-full">
-                    <div class="drag-handle text-gray-300 px-1 cursor-grab active:cursor-grabbing">≡</div>
-                    <div class="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center font-black text-[11px] shrink-0">${seq}</div>
-                    <div class="font-bold text-sm text-gray-800 leading-tight cursor-pointer truncate" onclick="UI.openModal('${s.id}')">${s.name}</div>
-                </div>
-                <div class="flex items-center gap-1 shrink-0">
-                    <button onclick="UI.openModal('${s.id}')" class="bg-blue-50 text-blue-600 px-2 py-1.5 rounded-lg text-[10px] font-bold border border-blue-100 active:scale-95 transition">📊 KPI</button>
-                    <a href="${navLink}" target="_blank" class="bg-emerald-50 text-emerald-600 px-2 py-1.5 rounded-lg text-[10px] font-bold border border-emerald-100 active:scale-95 transition">🚗 นำทาง</a>
+            <div data-id="${s.id}" class="store-item bg-white p-2.5 rounded-xl border shadow-sm flex items-center gap-2 relative mb-2.5">
+                <div class="drag-handle text-gray-300 px-1 cursor-grab active:cursor-grabbing">≡</div>
+                <div class="w-7 h-7 rounded-full bg-blue-600 text-white flex items-center justify-center font-black text-xs shrink-0 shadow-sm">${seq}</div>
+                
+                <div class="flex-1 font-bold text-sm text-gray-800 leading-tight cursor-pointer truncate" onclick="UI.openModal('${s.id}')">${s.name}</div>
+                
+                <div class="flex items-center gap-1.5 shrink-0">
+                    <button onclick="UI.openModal('${s.id}')" class="bg-blue-50 hover:bg-blue-100 text-blue-600 px-2 py-1.5 rounded-lg font-bold text-[10px] border border-blue-100 transition active:scale-95">📊 KPI</button>
+                    <a href="${navLink}" target="_blank" class="bg-emerald-50 hover:bg-emerald-100 text-emerald-600 px-2 py-1.5 rounded-lg font-bold text-[10px] text-center border border-emerald-100 transition active:scale-95">🚗 นำทาง</a>
                 </div>
             </div>`;
         }).join('');
@@ -173,42 +178,33 @@ const Processor = {
     }
 };
 
-// 6. ระบบแผนที่ (Map)
 const MapCtrl = {
     initAndDraw: () => {
         document.getElementById('btn-load-map').classList.add('hidden');
         document.getElementById('map').classList.remove('hidden');
         document.getElementById('btn-fit-map').classList.remove('hidden');
-        if(!map) { 
-            map = L.map('map', { zoomControl: false }).setView([14.4745, 100.1222], 10); 
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map); 
-        }
+        if(!map) { map = L.map('map', { zoomControl: false }).setView([14.4745, 100.1222], 10); L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map); }
         setTimeout(() => { map.invalidateSize(); MapCtrl.drawMap(); }, 200);
     },
     drawMap: () => {
         if(!map) return;
-
-        // 🚀 เทคนิคที่ 3: ลดภาระแผนที่ซ้ำซ้อน 
-        // เราจะไม่ทำลาย Object map เดิมทิ้ง แต่จะแค่ "ลบหมุดเก่าออก" และ "ปักหมุดใหม่" แทน 
-        // ช่วยให้แอปไม่ต้องเรนเดอร์กระเบื้อง (Tiles) แผนที่ใหม่ทั้งหมด ประหยัดแบตเตอรี่และเน็ตมือถือ
+        
+        // 🚀 ความเร็วระดับ 3 (โค้ดเดิมที่คุณทำไว้ดีอยู่แล้ว): ลบเฉพาะหมุดแผนที่ (Layer) ทิ้ง ไม่ทุบกระดานทิ้งทั้งหมด ช่วยประหยัดแบตเตอรี่
         mapMarkers.forEach(m => map.removeLayer(m)); 
         mapMarkers = [];
-
+        
         let list = State.allStores.filter(s => s.days.includes(State.currentDay));
         list.forEach((s, i) => {
             let seq = s.seqs?.[State.currentDay] || i+1;
-            let icon = L.divIcon({ html: `<svg viewBox="0 0 24 24" width="28" height="38" style="filter: drop-shadow(0px 2px 3px rgba(0,0,0,0.3)); overflow:visible;"><path d="M12 0C7 0 3 4 3 9c0 7 9 15 9 15s9-8 9-15c0-5-4-9-9-9z" fill="#2563eb" stroke="#fff" stroke-width="2"/><circle cx="12" cy="9" r="6" fill="#fff"/><text x="12" y="12.5" font-size="9" font-weight="900" fill="#000" text-anchor="middle">${seq}</text></svg>`, className: '', iconSize: [28, 38], iconAnchor: [14, 38], popupAnchor: [0, -38] });
-            let m = L.marker([s.lat, s.lng], { icon }).addTo(map).bindPopup(`<div class="text-center pb-1"><b class="text-[10px]">${s.name}</b></div>`, { closeButton: false });
+            let icon = L.divIcon({ html: `<svg viewBox="0 0 24 24" width="30" height="40" style="filter: drop-shadow(0px 2px 3px rgba(0,0,0,0.3)); overflow:visible;"><path d="M12 0C7 0 3 4 3 9c0 7 9 15 9 15s9-8 9-15c0-5-4-9-9-9z" fill="#2563eb" stroke="#fff" stroke-width="2"/><circle cx="12" cy="9" r="7" fill="#fff"/><text x="12" y="13" font-size="10" font-weight="900" fill="#000" text-anchor="middle">${seq}</text></svg>`, className: '', iconSize: [30, 40], iconAnchor: [15, 40], popupAnchor: [0, -40] });
+            let m = L.marker([s.lat, s.lng], { icon }).addTo(map).bindPopup(`<div class="text-center pb-1"><b class="text-xs">${s.name}</b><br><button onclick="UI.openModal('${s.id}')" class="bg-gray-100 text-gray-700 px-3 py-1 rounded border mt-1 text-[10px] font-bold shadow-sm">ดูข้อมูล</button></div>`, { closeButton: false });
             mapMarkers.push(m);
         });
         MapCtrl.fitBounds();
     },
-    fitBounds: () => { 
-        if(mapMarkers.length && map) map.fitBounds(new L.featureGroup(mapMarkers).getBounds(), { padding: [30, 30] }); 
-    }
+    fitBounds: () => { if(mapMarkers.length && map) map.fitBounds(new L.featureGroup(mapMarkers).getBounds(), { padding: [30, 30] }); }
 };
 
-// 7. กำหนดค่า Event Listeners
 document.getElementById('day-select').addEventListener('change', (e) => { State.currentDay = e.target.value; Processor.routeList(); });
 window.addEventListener('resize', () => { if(map) map.invalidateSize(); });
 document.addEventListener('DOMContentLoaded', App.checkAuth);
