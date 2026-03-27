@@ -62,7 +62,16 @@ const App = {
         document.getElementById('loader').style.display = 'flex';
 
         let isMainLoaded = false, isSalesLoaded = false;
-        const checkReady = () => { if(isMainLoaded && isSalesLoaded) { document.getElementById('loader').style.display = 'none'; Processor.run(); } };
+        
+        const checkReady = () => { 
+            if(isMainLoaded && isSalesLoaded) { 
+                document.getElementById('loader').style.display = 'none'; 
+                Processor.run(); 
+                
+                // 🌟 เพิ่มบรรทัดนี้ครับ: บังคับให้เปิดหน้า "ภาพรวม" เป็นหน้าแรกเสมอหลังจากโหลดเสร็จ
+                UI.switchTab('dashboard');
+            } 
+        };
 
         docMain.onSnapshot(doc => { State.allStores = doc.exists && doc.data().routes ? doc.data().routes[State.myRoute] || [] : []; isMainLoaded = true; checkReady(); });
         docSales.onSnapshot(sDoc => { State.sales = sDoc.exists ? sDoc.data() : {}; isSalesLoaded = true; checkReady(); });
