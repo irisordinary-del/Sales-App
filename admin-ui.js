@@ -50,9 +50,13 @@ const UI = {
 
         document.getElementById('list-upload').innerHTML = htmlP.join(''); document.getElementById('list-unassigned').innerHTML = htmlU.join(''); document.getElementById('list-assigned').innerHTML = htmlA.join('');
         
+        // 🌟 พระเอกของเราที่หายไป: โค้ดสร้างกล่องสรุปวันที่ ในแท็บ 4
+        let sumH = []; Object.keys(sums).forEach(d => { if(sums[d]>0) { let c=DAY_COLORS[d].hex, act=State.activeRoadDay===d; sumH.push(`<div onclick="UI.showDayModal('${d}')" class="p-4 bg-white border ${act?'border-indigo-500 ring-2 ring-indigo-200':'border-gray-200'} rounded-2xl flex flex-col items-center cursor-pointer relative shadow-sm hover:shadow-md transition"><div class="absolute top-0 left-0 w-full h-1.5 rounded-t-2xl" style="background:${c}"></div><p class="text-xs font-bold mt-1 text-gray-500">${DAY_COLORS[d].name}</p><p class="text-3xl font-black mt-1" style="color:${c}">${sums[d]}</p></div>`); } });
+        let elSummary = document.getElementById('list-summary');
+        if(elSummary) elSummary.innerHTML = sumH.length ? sumH.join('') : '<p class="col-span-2 text-center text-xs text-gray-400 mt-4">ยังไม่จัดสาย</p>';
+
         let wait = State.stores.filter(s=>!s.days.length).length, tot = State.stores.length;
         
-        // 🌟 แก้ไขแล้ว: ใส่ระบบป้องกัน (Safeguard) เช็คก่อนว่ามีกล่องอยู่จริงไหม ถึงจะอัปเดตตัวเลข
         let elTotal = document.getElementById('stat-total');
         let elDone = document.getElementById('stat-done');
         let elPending = document.getElementById('stat-pending'); 
