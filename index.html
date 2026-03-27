@@ -42,6 +42,7 @@
                 </div>
                 <div class="flex items-center gap-3">
                     <div id="db-save-status" class="hidden items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-lg border transition-all duration-300"></div>
+                    <button onclick="UI.showSummaryModal()" class="bg-gray-800 border border-gray-600 hover:bg-gray-700 px-4 py-1.5 rounded-lg text-sm font-bold shadow-md transition ml-2 flex items-center gap-2 text-white">📊 ภาพรวม</button>
                 </div>
             </div>
 
@@ -103,6 +104,7 @@
                     <div class="p-4 bg-white border-t border-gray-200 flex justify-between items-center shadow-[0_-5px_15px_rgba(0,0,0,0.05)] z-20 shrink-0">
                         <div class="flex gap-4">
                             <div class="text-center"><p class="text-gray-500 text-[10px] font-bold">รวม</p><p id="stat-total" class="text-lg font-black leading-none text-gray-800">0</p></div>
+                            <div class="text-center"><p class="text-yellow-600 text-[10px] font-bold">รอจัด</p><p id="stat-pending" class="text-lg font-black leading-none">0</p></div>
                             <div class="text-center"><p class="text-green-600 text-[10px] font-bold">Visit</p><p id="stat-done" class="text-lg font-black leading-none text-indigo-600">0</p></div>
                         </div>
                         <button onclick="ExcelIO.export()" class="bg-emerald-600 text-white px-5 py-2.5 rounded-xl text-sm font-bold">📥 โหลดไฟล์ออก</button>
@@ -193,6 +195,13 @@
                 <button onclick="document.getElementById('columnSelectModal').classList.add('hidden')" class="flex-1 bg-white border border-gray-300 text-gray-700 py-2.5 rounded-xl text-sm font-bold shadow-sm">ยกเลิก</button>
                 <button onclick="RawDataMgr.applyImport()" class="flex-1 bg-blue-600 text-white py-2.5 rounded-xl text-sm font-bold shadow-md">✅ นำเข้าข้อมูล</button>
             </div>
+        </div>
+    </div>
+
+    <div id="overallModal" class="hidden fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden">
+            <div class="p-5 border-b flex justify-between items-center bg-gray-50"><h2 class="text-lg font-black text-gray-800">📊 สรุปความคืบหน้า</h2><button onclick="UI.hideSummaryModal()" class="w-8 h-8 rounded-full border border-gray-300 text-gray-500 hover:bg-gray-100 font-bold transition">✕</button></div>
+            <div class="p-4 flex-1 overflow-y-auto bg-white"><table class="w-full text-sm text-left"><thead class="text-xs text-gray-500 bg-gray-50 border-b"><tr><th class="px-4 py-3">สายวิ่ง</th><th class="px-4 py-3 text-center">รวม</th><th class="px-4 py-3 text-center text-emerald-600">จัดแล้ว</th><th class="px-4 py-3 text-center text-yellow-600">รอจัด</th><th class="px-4 py-3 text-center">%</th></tr></thead><tbody id="overallTableBody"></tbody></table></div>
         </div>
     </div>
 
