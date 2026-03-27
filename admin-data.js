@@ -1,3 +1,6 @@
+// ==========================================
+// 1. ระบบจัดการร้านค้าบนแผนที่และคิวงาน (Store Manager)
+// ==========================================
 const StoreMgr = {
     toggleSelect: (id) => { let s = State.stores.find(x=>x.id===String(id)); if(s){ s.selected = !s.selected; UI.switchTab('tab2'); UI.render(); App.saveDB(); } },
     clearSelection: () => { State.stores.forEach(s=>s.selected=false); UI.render(); App.saveDB(); },
@@ -6,7 +9,9 @@ const StoreMgr = {
     getDistSq: (a, b) => Math.pow(a.lat - b.lat, 2) + Math.pow(a.lng - b.lng, 2)
 };
 
-// 🌟 อัปเกรด 1: ตารางแสดงผลที่รองรับ "คอลัมน์แบบไดนามิก (งอกเองได้)"
+// ==========================================
+// 2. ระบบตารางแสดงผล KPI (Data Manager)
+// ==========================================
 const DataMgr = {
     render: () => {
         let html = []; 
@@ -20,17 +25,15 @@ const DataMgr = {
         }
 
         let firstRecord = State.sales[salesKeys[0]];
-        
-        // คีย์พื้นฐานของระบบ
         let standardKeys = ['id', 'name', 'vpo', 'billCount', 'skuCount', 'hasJelly', 'hasKlom', 'active'];
         
-        // กรองหา "คีย์พิเศษ (Custom Columns)" ที่คุณเพิ่มเข้ามาตอน Mapping
+        // ค้นหาคอลัมน์พิเศษ (Custom Columns) ที่เพิ่มเข้ามาตอน Mapping
         let customKeys = Object.keys(firstRecord).filter(k => !standardKeys.includes(k));
 
-        // สร้างหัวตาราง (Th) สำหรับคอลัมน์เสริม
+        // สร้างหัวตาราง (Th) สำหรับคอลัมน์พิเศษ
         let customTh = customKeys.map(k => `<th class="p-3 px-4 font-bold border-b border-gray-200 whitespace-nowrap bg-indigo-50/50 sticky top-0 text-indigo-800">${k}</th>`).join('');
 
-        // จัดหัวตารางใหม่ให้เป็นระเบียบ
+        // จัดโครงสร้างหัวตารางทั้งหมด
         let thHtml = `
             <tr>
                 <th class="p-3 px-4 font-bold border-b border-gray-200 whitespace-nowrap bg-gray-100 sticky top-0 text-gray-700">รหัสลูกค้า</th>
@@ -44,16 +47,15 @@ const DataMgr = {
         `;
         document.getElementById('data-table-head').innerHTML = thHtml;
 
+        // วนลูปสร้างข้อมูลแต่ละแถว
         salesKeys.forEach(id => {
             let k = State.sales[id];
             
-            // เช็คป้าย Tag สำหรับสินค้าโฟกัส
             let focusHtml = '';
             if(k.hasJelly) focusHtml += `<span class="bg-pink-100 text-pink-600 px-2 py-0.5 rounded text-[10px] font-bold mr-1 border border-pink-200">เจลลี่</span>`;
             if(k.hasKlom) focusHtml += `<span class="bg-amber-100 text-amber-600 px-2 py-0.5 rounded text-[10px] font-bold border border-amber-200">กลมกล่อม</span>`;
             if(!k.hasJelly && !k.hasKlom) focusHtml = `<span class="text-gray-300 text-xs font-bold">-</span>`;
 
-            // ดึงข้อมูลสำหรับคอลัมน์เสริม
             let customTd = customKeys.map(key => `<td class="p-3 px-4 text-sm font-medium text-gray-600 border-b border-gray-100 whitespace-nowrap bg-indigo-50/10">${k[key] !== undefined && k[key] !== "" ? k[key] : '-'}</td>`).join('');
 
             let tds = `
@@ -79,11 +81,13 @@ const DataMgr = {
     }
 };
 
-// 🌟 อัปเกรด 2: ระบบ Data Mapping แบบเพิ่มคอลัมน์ได้ไม่จำกัด!
+// ==========================================
+// 3. ระบบประมวลผล Excel (Sales Data & Mapping)
+// ==========================================
 const SalesData = {
     tempJson: [], 
     tempHeaders: [], 
-    customFieldCount: 0, // ตัวนับจำนวนคอลัมน์พิเศษที่ถูกเพิ่ม
+    customFieldCount: 0, 
     
     processExcel: (file) => {
         UI.showLoader("กำลังอ่านหัวคอลัมน์...", "รอสักครู่");
@@ -97,10 +101,9 @@ const SalesData = {
                 
                 SalesData.tempJson = json; 
                 let headers = Object.keys(json[0]);
-                SalesData.tempHeaders = headers; // เก็บหัวตารางไว้ใช้กับ Dropdown
+                SalesData.tempHeaders = headers; 
                 SalesData.customFieldCount = 0;
                 
-                // โครงสร้างที่ระบบต้องการ พร้อมคำใบ้สำหรับการเดาอัตโนมัติ
                 let fields = [
                     { id: 'map-id', label: '1. รหัสลูกค้า <span class="text-red-500">*จำเป็น</span>', guess: ['customer code', 'รหัส', 'id'] },
                     { id: 'map-name', label: '2. ชื่อร้านค้า', guess: ['customer name', 'ชื่อ', 'name'] },
@@ -109,7 +112,6 @@ const SalesData = {
                     { id: 'map-sku', label: '5. รหัสสินค้า (SKU)', guess: ['so product code', 'รหัสสินค้า', 'product', 'sku'] }
                 ];
 
-                // สร้าง Dropdown จับคู่พื้นฐาน
                 let formHtml = fields.map(f => {
                     let bestMatch = headers.find(h => f.guess.some(g => h.toLowerCase().includes(g))) || "";
                     let options = `<option value="" class="text-gray-400">-- ❌ ไม่ใช้ข้อมูลส่วนนี้ --</option>` + 
@@ -124,7 +126,6 @@ const SalesData = {
                     </div>`;
                 }).join('');
 
-                // 🌟 เพิ่มโซนสำหรับ "คอลัมน์พิเศษ (Custom)"
                 formHtml += `
                     <div class="mt-4 pt-4 border-t border-gray-200">
                         <div class="flex justify-between items-center mb-2">
@@ -145,7 +146,6 @@ const SalesData = {
         reader.readAsArrayBuffer(file);
     },
 
-    // 🌟 ฟังก์ชันสำหรับเสก Dropdown ใหม่
     addCustomField: () => {
         let container = document.getElementById('custom-fields-container');
         let fieldId = `custom-map-${SalesData.customFieldCount++}`;
@@ -172,15 +172,12 @@ const SalesData = {
         let billCol = document.getElementById('map-bill').value;
         let skuCol = document.getElementById('map-sku').value;
 
-        // 🌟 กวาดหาคอลัมน์พิเศษทั้งหมดที่ผู้ใช้กดเพิ่ม
         let customCols = [];
         document.querySelectorAll('.custom-map-select').forEach(sel => {
             if(sel.value) customCols.push(sel.value);
         });
 
-        if(!idCol) {
-            return alert("❌ กรุณาเลือกคอลัมน์สำหรับ 'รหัสลูกค้า'\nถ้าระบุไม่ได้ ระบบจะไม่สามารถผูกข้อมูลกับแผนที่ได้ครับ");
-        }
+        if(!idCol) return alert("❌ กรุณาเลือกคอลัมน์สำหรับ 'รหัสลูกค้า'\nถ้าระบุไม่ได้ ระบบจะไม่สามารถผูกข้อมูลกับแผนที่ได้ครับ");
 
         document.getElementById('mappingModal').classList.add('hidden');
         UI.showLoader("กำลังประมวลผลข้อมูล...", "ระบบกำลังจัดกลุ่มและรวมคอลัมน์");
@@ -193,22 +190,15 @@ const SalesData = {
                 
                 if(!temp[storeId]) { 
                     temp[storeId] = { 
-                        id: storeId,
-                        name: nameCol && row[nameCol] ? String(row[nameCol]).trim() : 'ไม่ระบุชื่อ',
+                        id: storeId, name: nameCol && row[nameCol] ? String(row[nameCol]).trim() : 'ไม่ระบุชื่อ',
                         vpo: 0, bills: new Set(), skus: new Set(), hasJelly: false, hasKlom: false 
                     }; 
-                    
-                    // 🌟 สร้างพื้นที่เก็บคอลัมน์พิเศษล่วงหน้า
-                    customCols.forEach(col => {
-                        temp[storeId][col] = row[col] !== undefined ? row[col] : "";
-                    });
+                    customCols.forEach(col => { temp[storeId][col] = row[col] !== undefined ? row[col] : ""; });
                 }
                 
                 let qty = vpoCol && row[vpoCol] ? parseFloat(String(row[vpoCol]).replace(/[^0-9.-]/g, '')) : 0;
                 if(!isNaN(qty)) temp[storeId].vpo += qty;
-                
                 if(billCol && row[billCol]) temp[storeId].bills.add(row[billCol]);
-                
                 if(skuCol && row[skuCol]) { 
                     let sku = String(row[skuCol]).trim(); 
                     temp[storeId].skus.add(sku); 
@@ -220,25 +210,17 @@ const SalesData = {
             let newSalesKPI = {};
             Object.keys(temp).forEach(id => {
                 newSalesKPI[id] = {
-                    id: temp[id].id,
-                    name: temp[id].name,
+                    id: temp[id].id, name: temp[id].name,
                     vpo: Math.round(temp[id].vpo * 100) / 100,
-                    billCount: temp[id].bills.size, 
-                    skuCount: temp[id].skus.size, 
-                    hasJelly: temp[id].hasJelly, 
-                    hasKlom: temp[id].hasKlom, 
-                    active: temp[id].vpo > 0
+                    billCount: temp[id].bills.size, skuCount: temp[id].skus.size, 
+                    hasJelly: temp[id].hasJelly, hasKlom: temp[id].hasKlom, active: temp[id].vpo > 0
                 };
-                
-                // 🌟 ยัดคอลัมน์พิเศษใส่กล่องข้อมูล ก่อนส่งขึ้น Firebase
-                customCols.forEach(col => {
-                    newSalesKPI[id][col] = temp[id][col];
-                });
+                customCols.forEach(col => { newSalesKPI[id][col] = temp[id][col]; });
             });
 
             App.salesRef.set(newSalesKPI).then(() => {
                 State.sales = newSalesKPI; App.sync(); DataMgr.render(); UI.hideLoader();
-                SalesData.tempJson = []; // คืนพื้นที่หน่วยความจำ
+                SalesData.tempJson = []; 
                 alert(`✅ นำเข้าข้อมูลสำเร็จ!\nเพิ่มคอลัมน์พิเศษ ${customCols.length} คอลัมน์ เรียบร้อยแล้ว`);
             }).catch(err => { UI.hideLoader(); alert("อัปโหลดไม่สำเร็จ: " + err.message); });
             
@@ -246,6 +228,9 @@ const SalesData = {
     }
 };
 
+// ==========================================
+// 4. ระบบ Export ไฟล์ (Excel IO)
+// ==========================================
 const ExcelIO = {
     export: () => {
         if(!State.stores.length) return; let ed = [];
@@ -256,5 +241,140 @@ const ExcelIO = {
         });
         ed.sort((a,b) => { let da=a["สายวิ่ง"]!=="ยังไม่จัด"?parseInt(a["สายวิ่ง"].replace('Day ','')):999, db=b["สายวิ่ง"]!=="ยังไม่จัด"?parseInt(b["สายวิ่ง"].replace('Day ','')):999; if(da!==db) return da-db; let sa=a["คิว"]!=="-"?parseInt(a["คิว"]):999, sb=b["คิว"]!=="-"?parseInt(b["คิว"]):999; return sa-sb; });
         let ws = XLSX.utils.json_to_sheet(ed), wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "RoutePlan"); XLSX.writeFile(wb, `Route_${State.localActiveRoute}.xlsx`);
+    }
+};
+
+// ==========================================
+// 5. ระบบประสานงานหลัก (App Core)
+// ==========================================
+const App = {
+    dbRef: cloudDB.collection('appData').doc('v1_main'),
+    salesRef: cloudDB.collection('appData').doc('v1_sales'),
+
+    init: () => {
+        MapCtrl.init();
+        UI.showLoader("กำลังเชื่อมต่อฐานข้อมูล...", "");
+        
+        App.dbRef.onSnapshot((doc) => {
+            let dataFromServer = doc.exists ? doc.data() : {};
+            State.db.routes = dataFromServer.routes || {"สายที่ 1": []};
+            State.db.backups = dataFromServer.backups || {};
+            State.db.cycleDays = dataFromServer.cycleDays || 24;
+
+            let sortedKeys = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b, 'th', {numeric: true}));
+            if (!State.localActiveRoute || !State.db.routes[State.localActiveRoute]) {
+                let savedLocal = localStorage.getItem('last_viewed_route');
+                State.localActiveRoute = (savedLocal && State.db.routes[savedLocal]) ? savedLocal : sortedKeys[0];
+            }
+            
+            State.stores = State.db.routes[State.localActiveRoute] || [];
+            App.updateStatusUI("✅ ข้อมูลตรงกับคลาวด์", "emerald");
+            
+            App.fetchSalesData();
+
+        }, (error) => {
+            App.updateStatusUI("🔴 ออฟไลน์", "red");
+            UI.hideLoader();
+        });
+
+        // ตรวจจับปุ่มอัปโหลดไฟล์
+        document.getElementById('salesUpload').addEventListener('change', function(e) { const file = e.target.files[0]; if (file) SalesData.processExcel(file); });
+        document.getElementById('fileUpload').addEventListener('change', App.handleMapUpload);
+    },
+
+    fetchSalesData: () => {
+        App.salesRef.get().then(doc => {
+            if(doc.exists) { State.sales = doc.data(); } else { State.sales = {}; }
+            App.sync();
+            UI.hideLoader();
+            DataMgr.render(); 
+            setTimeout(() => MapCtrl.fitToStores(), 300);
+        }).catch(err => {
+            App.sync(); UI.hideLoader();
+        });
+    },
+
+    updateStatusUI: (msg, color) => {
+        let badge = document.getElementById('db-save-status');
+        badge.className = `flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-lg border transition-all duration-300 bg-${color}-100 text-${color}-700 border-${color}-200`;
+        badge.innerHTML = msg;
+    },
+
+    saveDB: () => {
+        State.db.routes[State.localActiveRoute] = State.stores;
+        App.updateStatusUI("⏳ กำลังบันทึก...", "yellow");
+        App.dbRef.set(State.db).then(() => {
+            App.updateStatusUI("✅ บันทึกสำเร็จ", "emerald");
+            UI.showSaveToast("บันทึกคิวงานและเส้นทางเรียบร้อย"); 
+        }).catch(err => { App.updateStatusUI("❌ บันทึกล้มเหลว", "red"); });
+    },
+
+    sync: () => {
+        let rs = document.getElementById('routeSelector');
+        if(rs) { 
+            let sortedRoutes = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b, 'th', {numeric: true}));
+            let newHTML = sortedRoutes.map(r => `<option value="${r}">${r}</option>`).join('');
+            if (rs.innerHTML !== newHTML) { rs.innerHTML = newHTML; }
+            rs.value = State.localActiveRoute; 
+        }
+        MapCtrl.clearAll(); UI.initDaySelector(); UI.render();
+    },
+    
+    switchRoute: (name) => { if(State.localActiveRoute === name) return; State.localActiveRoute = name; localStorage.setItem('last_viewed_route', name); State.stores = State.db.routes[name] || []; App.sync(); MapCtrl.fitToStores(); },
+    addRoute: () => { let n = prompt("ชื่อสายใหม่:"); if(n && n.trim()) { State.db.routes[n.trim()] = []; State.localActiveRoute = n.trim(); State.stores = []; App.sync(); App.saveDB(); MapCtrl.fitToStores(); } },
+    renameRoute: () => { let n = prompt("ชื่อใหม่:", State.localActiveRoute); if(n && n.trim()) { State.db.routes[n.trim()] = State.db.routes[State.localActiveRoute]; delete State.db.routes[State.localActiveRoute]; State.localActiveRoute = n.trim(); App.sync(); App.saveDB(); } },
+    deleteRoute: () => { if(Object.keys(State.db.routes).length > 1 && confirm("ยืนยันลบสายนี้?")) { delete State.db.routes[State.localActiveRoute]; let sortedKeys = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b, 'th', {numeric: true})); State.localActiveRoute = sortedKeys[0]; State.stores = State.db.routes[State.localActiveRoute]; App.sync(); App.saveDB(); MapCtrl.fitToStores(); } else if(Object.keys(State.db.routes).length === 1) alert("ห้ามลบสายสุดท้ายครับ"); },
+    clearStores: () => { if(confirm("ล้างข้อมูลร้านค้าทั้งหมดในสายนี้?")) { State.stores = []; App.sync(); App.saveDB(); } },
+    
+    handleMapUpload: function(e) {
+        const file = e.target.files[0]; if (!file) return;
+        if (State.stores.length > 0 && !confirm(`ข้อมูลเดิมของ "${State.localActiveRoute}" จะถูกแทนที่\nยืนยันการอัปโหลด?`)) { this.value = ''; return; }
+
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            try {
+                const data = new Uint8Array(e.target.result); const workbook = XLSX.read(data, {type: 'array'});
+                const json = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], {header: 1, defval: ""}); 
+                if (json.length < 2) return alert("ไฟล์ว่างเปล่า");
+                let headers = json[0], idCol=-1, nameCol=-1, latCol=-1, lngCol=-1, freqCol=-1, dayCol=-1, seqCol=-1;
+                for(let i=0; i<headers.length; i++) {
+                    let h = String(headers[i]).toLowerCase();
+                    if(h.includes('รหัส') || h.includes('customer code') || h.includes('id')) idCol = i;
+                    else if(h.includes('ชื่อ') || h.includes('name')) nameCol = i;
+                    else if(h.includes('lat') || h.includes('ละติจูด')) latCol = i;
+                    else if(h.includes('lng') || h.includes('lon') || h.includes('ลองจิจูด')) lngCol = i;
+                    else if(h.includes('freq') || h.includes('ความถี่') || h.includes('รอบ') || h.includes('f2')) freqCol = i;
+                    else if(h.includes('สายวิ่ง') || h.includes('day')) dayCol = i;
+                    else if(h.includes('คิว') || h.includes('seq')) seqCol = i;
+                }
+
+                let storeMap = {}; 
+                for (let i = 1; i < json.length; i++) {
+                    let row = json[i]; if (!row || row.length === 0) continue; 
+                    let idStr = row[idCol] ? String(row[idCol]).trim() : `S_${i}`; if(!idStr) continue; 
+                    let lat = parseFloat(String(row[latCol]).replace(/[^0-9.-]/g, '')); let lng = parseFloat(String(row[lngCol]).replace(/[^0-9.-]/g, ''));
+                    if(isNaN(lat) || isNaN(lng)) continue;
+
+                    let freq = (freqCol !== -1 && String(row[freqCol]).trim().toUpperCase().includes('2')) ? 2 : 1;
+                    let assignedDay = (dayCol !== -1 && row[dayCol]) ? String(row[dayCol]).trim() : "";
+                    let assignedSeq = (seqCol !== -1 && row[seqCol]) ? parseInt(String(row[seqCol]).replace(/[^0-9]/g, '')) : NaN;
+                    let isValidDay = assignedDay.toLowerCase().includes('day');
+
+                    if (storeMap[idStr]) {
+                        if (isValidDay && !storeMap[idStr].days.includes(assignedDay)) { storeMap[idStr].days.push(assignedDay); if (!isNaN(assignedSeq)) storeMap[idStr].seqs[assignedDay] = assignedSeq; }
+                        storeMap[idStr].freq = 2; 
+                    } else {
+                        let newStore = { id: idStr, name: row[nameCol] ? String(row[nameCol]).trim() : `Store_${idStr}`, lat: lat, lng: lng, freq: freq, days: [], seqs: {}, selected: false };
+                        if (isValidDay) { newStore.days.push(assignedDay); if (!isNaN(assignedSeq)) newStore.seqs[assignedDay] = assignedSeq; }
+                        storeMap[idStr] = newStore;
+                    }
+                }
+                let finalArray = Object.values(storeMap); if(finalArray.length === 0) return alert("ไม่พบพิกัด (Lat, Lng)");
+                State.stores = finalArray; App.sync(); App.saveDB(); MapCtrl.fitToStores(); 
+
+            } catch(err) { alert("ขัดข้อง: " + err.message); }
+            document.getElementById('fileUpload').value = ''; 
+        };
+        reader.readAsArrayBuffer(file);
     }
 };
