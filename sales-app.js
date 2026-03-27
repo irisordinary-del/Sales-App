@@ -14,7 +14,7 @@ const db = firebase.firestore();
 db.enablePersistence({ synchronizeTabs: true }).catch(function(err) { console.warn("Cache Warning: ", err); });
 
 const docMain = db.collection('appData').doc('v1_main');
-const docSales = db.collection('appData').doc('v1_sales');
+const colSales = db.collection('v1_sales_chunks');
 
 // 🌟 State ควบคุมแอป (มี isLoaded ไว้กันเด้ง และ mapNeedsFit ไว้กันแผนที่ซูมมั่ว)
 let State = { myRoute: "", allStores: [], routeStores: [], sales: {}, currentDay: "", isLoaded: false, mapNeedsFit: true };
@@ -87,7 +87,12 @@ const App = {
         };
 
         docMain.onSnapshot(doc => { State.allStores = doc.exists && doc.data().routes ? doc.data().routes[State.myRoute] || [] : []; isMainLoaded = true; checkReady(); });
-        docSales.onSnapshot(sDoc => { State.sales = sDoc.exists ? sDoc.data() : {}; isSalesLoaded = true; checkReady(); });
+        colSales.onSnapshot(snap => {
+            let merged = {};
+            snap.forEach(doc => { Object.assign(merged, doc.data()); });
+            State.sales = merged;
+            isSalesLoaded = true; checkReady();
+        });
     }
 };
 
