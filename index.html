@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Route Planner (Admin V72)</title>
+    <title>Route Planner (Admin - Raw & KPI แยกส่วน)</title>
     
     <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore-compat.js"></script>
@@ -12,19 +12,19 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-    
     <link rel="stylesheet" href="admin-style.css">
 </head>
 <body class="flex h-screen relative bg-slate-50">
 
     <div id="loader"><div class="spinner"></div><p id="loader-text" class="text-indigo-700 font-bold text-lg">กำลังประมวลผล...</p><p id="loader-subtext" class="text-gray-500 text-sm mt-2 font-medium"></p></div>
-    <div id="save-toast" class="fixed bottom-8 left-1/2 transform -translate-x-1/2 translate-y-24 opacity-0 bg-gray-900 text-white px-5 py-2.5 rounded-full shadow-2xl transition-all duration-300 z-[9999] text-sm font-bold flex items-center gap-2 pointer-events-none border border-gray-700"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" /></svg><span id="toast-msg">เปลี่ยนแปลงข้อมูลเรียบร้อย</span></div>
+    <div id="save-toast" class="fixed bottom-8 left-1/2 transform -translate-x-1/2 translate-y-24 opacity-0 bg-gray-900 text-white px-5 py-2.5 rounded-full shadow-2xl transition-all duration-300 z-[9999] text-sm font-bold flex items-center gap-2 pointer-events-none"><span id="toast-msg">บันทึกเรียบร้อย</span></div>
 
-    <aside class="w-16 md:w-48 bg-slate-900 flex flex-col shrink-0 z-[6000] shadow-2xl transition-all">
-        <div class="h-16 flex items-center justify-center bg-slate-950 border-b border-slate-800"><h1 class="text-xl font-black text-indigo-400 tracking-wider hidden md:block">R<span class="text-white">Admin</span></h1><h1 class="text-xl font-black text-indigo-400 tracking-wider md:hidden">R<span class="text-white">A</span></h1></div>
+    <aside class="w-16 md:w-56 bg-slate-900 flex flex-col shrink-0 z-[6000] shadow-2xl transition-all">
+        <div class="h-16 flex items-center justify-center bg-slate-950 border-b border-slate-800"><h1 class="text-xl font-black text-indigo-400 tracking-wider hidden md:block">R<span class="text-white">Admin</span></h1></div>
         <nav class="flex-1 py-4 space-y-1 overflow-hidden">
             <button onclick="Nav.go('planning')" id="nav-planning" class="sidebar-menu active w-full flex items-center px-4 md:px-5 py-3.5 text-sm font-bold"><span class="text-lg md:mr-3">📍</span> <span class="hidden md:inline">วางแผนคิวงาน</span></button>
-            <button onclick="Nav.go('data')" id="nav-data" class="sidebar-menu w-full flex items-center px-4 md:px-5 py-3.5 text-sm font-bold"><span class="text-lg md:mr-3">📊</span> <span class="hidden md:inline">จัดการข้อมูล KPI</span></button>
+            <button onclick="Nav.go('data')" id="nav-data" class="sidebar-menu w-full flex items-center px-4 md:px-5 py-3.5 text-sm font-bold"><span class="text-lg md:mr-3">📂</span> <span class="hidden md:inline">ข้อมูลการขาย (ดิบ)</span></button>
+            <button onclick="Nav.go('kpi')" id="nav-kpi" class="sidebar-menu w-full flex items-center px-4 md:px-5 py-3.5 text-sm font-bold text-emerald-400"><span class="text-lg md:mr-3">🎯</span> <span class="hidden md:inline">จัดการสมการ KPI</span></button>
         </nav>
     </aside>
 
@@ -35,35 +35,32 @@
                 <div class="flex items-center gap-3">
                     <h1 class="text-xl font-black tracking-wide text-indigo-400 mr-2 hidden sm:block">Route<span class="text-white">Plan</span></h1>
                     <div class="flex items-center bg-gray-800 rounded-lg p-1 border border-gray-700">
-                        <span class="text-xs text-gray-400 px-2 hidden md:inline">สายขาย:</span>
-                        <select id="routeSelector" onchange="App.switchRoute(this.value)" class="bg-gray-900 text-white border-none text-sm focus:ring-0 outline-none font-bold py-1 px-2 rounded cursor-pointer max-w-[120px] sm:max-w-[200px] truncate"></select>
-                        <div class="flex items-center border-l border-gray-700 ml-1 pl-1"><button onclick="App.renameRoute()" class="text-gray-400 hover:text-white px-2 py-1 transition" title="เปลี่ยนชื่อสาย">✏️</button><button onclick="App.deleteRoute()" class="text-gray-400 hover:text-red-400 px-2 py-1 transition" title="ลบสายวิ่ง">🗑️</button></div>
+                        <select id="routeSelector" onchange="App.switchRoute(this.value)" class="bg-gray-900 text-white border-none text-sm focus:ring-0 outline-none font-bold py-1 px-2 rounded cursor-pointer max-w-[120px] sm:max-w-[200px]"></select>
+                        <div class="flex items-center border-l border-gray-700 ml-1 pl-1"><button onclick="App.renameRoute()" class="text-gray-400 hover:text-white px-2 py-1 transition">✏️</button><button onclick="App.deleteRoute()" class="text-gray-400 hover:text-red-400 px-2 py-1 transition">🗑️</button></div>
                     </div>
                     <button onclick="App.addRoute()" class="bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-md text-xs font-bold shadow-sm transition">+ เพิ่มสาย</button>
                 </div>
                 <div class="flex items-center gap-3">
                     <div id="db-save-status" class="hidden items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-lg border transition-all duration-300"></div>
-                    <button onclick="UI.showSummaryModal()" class="bg-gray-800 border border-gray-600 hover:bg-gray-700 px-4 py-1.5 rounded-lg text-sm font-bold shadow-md transition ml-2 flex items-center gap-2">📊 ภาพรวม</button>
                 </div>
             </div>
 
             <div class="flex-1 flex overflow-hidden">
                 <div class="w-2/3 relative h-full">
                     <div id="map"></div>
-                    <button onclick="MapCtrl.fitToStores()" class="absolute bottom-6 right-6 z-[400] bg-white p-3 rounded-xl shadow-lg border border-gray-200 text-indigo-600 hover:bg-indigo-50 focus:outline-none transition active:scale-95" title="ซูมดูร้านทั้งหมด"><svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" /></svg></button>
-                    <button id="clearRoadBtn" onclick="MapCtrl.clearRoad()" class="hidden absolute top-4 left-4 z-[400] bg-white text-red-600 font-bold px-4 py-2 rounded-xl shadow-lg border border-red-200 active:scale-95">✕ ซ่อนเส้นทางถนน</button>
+                    <button onclick="MapCtrl.fitToStores()" class="absolute bottom-6 right-6 z-[400] bg-white p-3 rounded-xl shadow-lg border border-gray-200 text-indigo-600 hover:bg-indigo-50 transition">🗺️</button>
+                    <button id="clearRoadBtn" onclick="MapCtrl.clearRoad()" class="hidden absolute top-4 left-4 z-[400] bg-white text-red-600 font-bold px-4 py-2 rounded-xl shadow-lg border border-red-200">✕ ซ่อนเส้นทาง</button>
                     <div id="mapTools" class="absolute top-4 right-4 z-[400] flex flex-col gap-3 items-end">
-                        <div class="bg-white px-3 py-2 rounded-xl shadow-lg border border-gray-200 flex items-center gap-2"><input type="checkbox" id="toggleLines" onchange="MapCtrl.drawLines()" class="w-5 h-5 text-indigo-600 cursor-pointer"><label for="toggleLines" class="text-sm font-bold text-gray-800 cursor-pointer">🔗 แสดงเส้นโยงร้าน</label></div>
-                        <button onclick="Lasso.toggle()" class="bg-gray-900 hover:bg-black text-white px-4 py-2.5 rounded-xl shadow-lg text-sm font-bold flex items-center gap-2 transition active:scale-95">✏️ วาดเลือกพื้นที่</button>
+                        <div class="bg-white px-3 py-2 rounded-xl shadow-lg border border-gray-200 flex items-center gap-2"><input type="checkbox" id="toggleLines" onchange="MapCtrl.drawLines()" class="w-5 h-5 text-indigo-600"><label for="toggleLines" class="text-sm font-bold text-gray-800">🔗 เส้นโยงร้าน</label></div>
+                        <button onclick="Lasso.toggle()" class="bg-gray-900 hover:bg-black text-white px-4 py-2.5 rounded-xl shadow-lg text-sm font-bold">✏️ วาดเลือกพื้นที่</button>
                     </div>
                     <div id="lassoPanel" class="hidden absolute top-4 right-4 z-[400] bg-white p-4 rounded-2xl shadow-2xl border-2 border-gray-900 flex flex-col gap-3 w-64">
-                        <p class="text-sm font-black text-center">✏️ โหมดวาดพื้นที่</p>
-                        <button onclick="Lasso.finish()" class="bg-emerald-500 text-white py-2.5 rounded-xl text-sm font-bold shadow-md transition active:scale-95">✅ ยืนยัน</button>
-                        <button onclick="Lasso.cancel()" class="bg-red-50 text-red-600 border border-red-200 py-2 rounded-xl text-sm font-bold transition active:scale-95">❌ ยกเลิก</button>
+                        <button onclick="Lasso.finish()" class="bg-emerald-500 text-white py-2.5 rounded-xl text-sm font-bold shadow-md">✅ ยืนยัน</button>
+                        <button onclick="Lasso.cancel()" class="bg-red-50 text-red-600 py-2 rounded-xl text-sm font-bold">❌ ยกเลิก</button>
                     </div>
                 </div>
 
-                <div class="w-1/3 bg-white shadow-[[-5px_0_15px_rgba(0,0,0,0.05)]] flex flex-col h-full z-10 border-l border-gray-200">
+                <div class="w-1/3 bg-white shadow-[-5px_0_15px_rgba(0,0,0,0.05)] flex flex-col h-full z-10 border-l border-gray-200">
                     <div class="flex border-b border-gray-200 text-sm bg-gray-50 shrink-0">
                         <button onclick="UI.switchTab('tab1')" id="btn-tab1" class="tab-btn active flex-1 py-3 px-1">1. ข้อมูล</button>
                         <button onclick="UI.switchTab('tab2')" id="btn-tab2" class="tab-btn flex-1 py-3 px-1">2. จัดสาย</button>
@@ -75,13 +72,9 @@
                         <div id="tab1" class="block space-y-5">
                             <div class="bg-white p-4 rounded-2xl border border-gray-200 shadow-sm">
                                 <h3 class="font-bold text-sm text-gray-800 mb-2">📍 ข้อมูลพิกัดร้านค้า (Master Data)</h3>
-                                <div onclick="document.getElementById('fileUpload').click()" class="border-2 border-dashed border-indigo-300 bg-indigo-50 rounded-xl p-4 text-center cursor-pointer hover:bg-indigo-100 transition mb-3"><p class="text-xl mb-1">📂</p><p class="text-xs text-indigo-800 font-bold">อัปโหลดไฟล์แผนที่</p></div>
+                                <div onclick="document.getElementById('fileUpload').click()" class="border-2 border-dashed border-indigo-300 bg-indigo-50 rounded-xl p-4 text-center cursor-pointer mb-3"><p class="text-xl mb-1">📂</p><p class="text-xs text-indigo-800 font-bold">อัปโหลดไฟล์แผนที่</p></div>
                                 <input type="file" id="fileUpload" accept=".xlsx, .xls, .csv" class="hidden">
-                                <div class="flex gap-2"><button onclick="App.clearStores()" class="flex-1 bg-red-50 text-red-600 hover:bg-red-100 py-2 rounded-lg text-xs font-bold transition border border-red-100">ล้างสายนี้</button><button onclick="StoreMgr.clearSelection()" class="flex-1 bg-gray-100 text-gray-700 py-2 rounded-lg text-xs font-bold transition border border-gray-200">ยกเลิกเลือก</button></div>
-                            </div>
-                            <div class="bg-white p-4 rounded-2xl border border-emerald-200 shadow-sm relative overflow-hidden">
-                                <h3 class="font-bold text-sm text-emerald-800 mb-2">📊 นำเข้ายอดขาย (Sales Data)</h3>
-                                <button onclick="Nav.go('data')" class="w-full bg-emerald-600 text-white py-2 rounded-lg text-xs font-bold shadow transition hover:bg-emerald-500">➡️ ไปที่หน้าจัดการยอดขาย</button>
+                                <div class="flex gap-2"><button onclick="App.clearStores()" class="flex-1 bg-red-50 text-red-600 py-2 rounded-lg text-xs font-bold border border-red-100">ล้างสายนี้</button><button onclick="StoreMgr.clearSelection()" class="flex-1 bg-gray-100 text-gray-700 py-2 rounded-lg text-xs font-bold border border-gray-200">ยกเลิกเลือก</button></div>
                             </div>
                             <input type="text" onkeyup="UI.filterList('list-upload', this.value)" placeholder="ค้นหาร้าน..." class="w-full p-2.5 border border-gray-300 rounded-xl text-sm outline-none shadow-inner">
                             <div id="list-upload" class="space-y-2 mt-2"></div>
@@ -90,34 +83,29 @@
                         <div id="tab2" class="hidden space-y-4">
                             <div class="bg-indigo-50 p-4 rounded-2xl shadow-sm border border-indigo-100">
                                 <h3 class="font-black text-indigo-900 text-sm mb-3">🤖 AI Route Builder</h3>
-                                <div class="flex justify-between mb-2"><label class="text-xs font-bold text-gray-700">จำนวนวันทั้งหมด:</label><input type="number" id="ai-days" value="24" class="w-16 p-1 border rounded-lg text-center font-bold outline-none shadow-inner"></div>
-                                <div class="flex justify-between mb-3 border-b border-indigo-200 pb-3"><label class="text-xs font-bold text-gray-700"><input type="checkbox" id="ai-outlier" checked class="rounded text-indigo-600 focus:ring-indigo-500"> ตัดร้านโดด (กม.):</label><input type="number" id="ai-dist" value="5" class="w-16 p-1 border rounded-lg text-center font-bold text-red-600"></div>
-                                <label class="flex items-start mb-4 bg-white p-2 rounded-lg border border-indigo-100"><input type="checkbox" id="ai-lock" class="mt-0.5 rounded text-indigo-600 focus:ring-indigo-500"><span class="ml-2 text-xs text-gray-700"><b>ล็อคร้านที่จัดแล้วไว้ที่เดิม</b></span></label>
-                                <button onclick="AI.run()" class="w-full bg-gray-900 text-white py-2.5 rounded-xl font-bold text-sm shadow-md active:scale-95 transition hover:bg-black">✨ เริ่มคำนวณ AI</button>
+                                <div class="flex justify-between mb-2"><label class="text-xs font-bold">จำนวนวันทั้งหมด:</label><input type="number" id="ai-days" value="24" class="w-16 p-1 border rounded-lg text-center font-bold"></div>
+                                <div class="flex justify-between mb-3 border-b border-indigo-200 pb-3"><label class="text-xs font-bold"><input type="checkbox" id="ai-outlier" checked> ตัดร้านโดด (กม.):</label><input type="number" id="ai-dist" value="5" class="w-16 p-1 border rounded-lg text-center font-bold text-red-600"></div>
+                                <button onclick="AI.run()" class="w-full bg-gray-900 text-white py-2.5 rounded-xl font-bold text-sm shadow-md">✨ เริ่มคำนวณ AI</button>
                             </div>
-                            <div class="flex gap-2 sticky top-0 bg-gray-50 pb-2 pt-2 z-10 border-b"><select id="assign-day" class="flex-1 p-2 border rounded-xl text-sm font-bold outline-none"></select><button onclick="StoreMgr.assignSelected()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 rounded-xl text-sm font-bold shadow-md active:scale-95 transition">จัดลงวัน</button></div>
+                            <div class="flex gap-2 sticky top-0 bg-gray-50 pb-2 pt-2 z-10 border-b"><select id="assign-day" class="flex-1 p-2 border rounded-xl text-sm font-bold"></select><button onclick="StoreMgr.assignSelected()" class="bg-indigo-600 text-white px-4 rounded-xl text-sm font-bold">จัดลงวัน</button></div>
                             <div id="list-unassigned" class="space-y-2 mt-2 pb-10"></div>
                         </div>
 
                         <div id="tab3" class="hidden space-y-4">
-                            <div class="sticky top-0 bg-gray-50 pb-2 pt-1 z-10 border-b"><input type="text" id="search-edit" onkeyup="UI.filterList('list-assigned', this.value)" placeholder="ค้นหาร้าน..." class="w-full p-2.5 border border-gray-300 rounded-xl text-sm shadow-inner outline-none focus:border-indigo-500"></div>
+                            <div class="sticky top-0 bg-gray-50 pb-2 pt-1 z-10 border-b"><input type="text" id="search-edit" onkeyup="UI.filterList('list-assigned', this.value)" placeholder="ค้นหาร้าน..." class="w-full p-2.5 border border-gray-300 rounded-xl text-sm"></div>
                             <div id="list-assigned" class="space-y-2 mt-2 pb-10"></div>
                         </div>
 
-                        <div id="tab4" class="hidden space-y-4">
-                            <div class="bg-emerald-50 p-3 rounded-xl border border-emerald-100 text-xs text-emerald-800 font-medium">คลิกที่กล่องวันที่ เพื่อ <b>จำลองและวาดเส้นทางถนนจริง</b></div>
-                            <div id="list-summary" class="grid grid-cols-2 gap-3 mt-2 pb-10"></div>
-                        </div>
+                        <div id="tab4" class="hidden space-y-4"><div id="list-summary" class="grid grid-cols-2 gap-3 mt-2 pb-10"></div></div>
                     </div>
                     
                     <div class="w-full bg-gray-200 h-1.5"><div id="progress-bar" class="bg-emerald-500 h-1.5 w-0 transition-all duration-500"></div></div>
                     <div class="p-4 bg-white border-t border-gray-200 flex justify-between items-center shadow-[0_-5px_15px_rgba(0,0,0,0.05)] z-20 shrink-0">
                         <div class="flex gap-4">
                             <div class="text-center"><p class="text-gray-500 text-[10px] font-bold">รวม</p><p id="stat-total" class="text-lg font-black leading-none text-gray-800">0</p></div>
-                            <div class="text-center"><p class="text-yellow-600 text-[10px] font-bold">รอจัด</p><p id="stat-pending" class="text-lg font-black leading-none">0</p></div>
                             <div class="text-center"><p class="text-green-600 text-[10px] font-bold">Visit</p><p id="stat-done" class="text-lg font-black leading-none text-indigo-600">0</p></div>
                         </div>
-                        <button onclick="ExcelIO.export()" class="bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2.5 rounded-xl text-sm font-bold shadow-md active:scale-95 transition">📥 โหลดไฟล์ออก</button>
+                        <button onclick="ExcelIO.export()" class="bg-emerald-600 text-white px-5 py-2.5 rounded-xl text-sm font-bold">📥 โหลดไฟล์ออก</button>
                     </div>
                 </div>
             </div>
@@ -125,26 +113,64 @@
 
         <div id="page-data" class="hidden absolute inset-0 bg-gray-50 flex flex-col h-full overflow-hidden">
             <div class="h-16 bg-white text-gray-800 flex items-center justify-between px-6 md:px-8 shadow-sm shrink-0 border-b border-gray-200">
-                <h2 class="text-lg font-black flex items-center gap-2">📊 จัดการข้อมูลยอดขาย (Sales Data)</h2>
+                <div>
+                    <h2 class="text-lg font-black flex items-center gap-2">📂 ฐานข้อมูลการขาย (Raw Data)</h2>
+                    <p class="text-[10px] text-gray-500">ตารางนี้แสดงข้อมูลดิบตามคอลัมน์ที่คุณเลือกไว้เท่านั้น</p>
+                </div>
                 <div class="flex gap-3">
-                    <button onclick="DataMgr.clearAll()" class="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 px-4 py-2 rounded-xl text-sm font-bold transition shadow-sm">🗑️ ล้างตาราง</button>
-                    <button onclick="document.getElementById('salesUpload').click()" class="bg-emerald-600 hover:bg-emerald-500 text-white px-4 md:px-5 py-2 rounded-xl text-sm font-bold shadow-md transition active:scale-95">+ อัปโหลดไฟล์ Excel</button>
-                    <input type="file" id="salesUpload" class="hidden" accept=".xlsx, .xls, .csv">
+                    <button onclick="RawDataMgr.clearAll()" class="bg-red-50 text-red-600 border border-red-200 px-4 py-2 rounded-xl text-sm font-bold">🗑️ ล้างตาราง</button>
+                    <button onclick="document.getElementById('rawUpload').click()" class="bg-blue-600 text-white px-4 md:px-5 py-2 rounded-xl text-sm font-bold shadow-md">+ นำเข้า Excel (ข้อมูลดิบ)</button>
+                    <input type="file" id="rawUpload" class="hidden" accept=".xlsx, .xls, .csv">
                 </div>
             </div>
             <div class="flex-1 p-4 md:p-8 overflow-hidden flex flex-col">
                 <div class="bg-white rounded-3xl shadow-sm border border-gray-200 flex-1 flex flex-col overflow-hidden">
-                    <div class="p-5 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
-                        <div>
-                            <h3 class="font-bold text-gray-800">ตารางข้อมูลหลังประมวลผล (KPI)</h3>
-                            <p class="text-xs text-gray-500 mt-0.5">ระบบดึงมาเฉพาะคอลัมน์ที่คุณเลือกไว้ตอน Mapping</p>
-                        </div>
-                        <div class="text-sm font-bold bg-indigo-50 text-indigo-700 px-4 py-2 rounded-xl border border-indigo-100 shadow-inner">จำนวน <span id="data-total-stores" class="text-lg font-black">0</span> แถว</div>
-                    </div>
                     <div class="flex-1 overflow-auto relative">
                         <table class="w-full text-left text-sm min-w-max border-collapse">
-                            <thead id="data-table-head" class="bg-gray-100 text-gray-600 sticky top-0 z-10 shadow-sm border-b border-gray-200"></thead>
-                            <tbody id="data-table-body" class="text-gray-700"></tbody>
+                            <thead id="raw-table-head" class="bg-gray-100 text-gray-600 sticky top-0 z-10 shadow-sm border-b border-gray-200"></thead>
+                            <tbody id="raw-table-body" class="text-gray-700"></tbody>
+                        </table>
+                    </div>
+                    <div class="p-3 border-t bg-gray-50 text-right text-xs font-bold text-gray-500">รวมทั้งหมด <span id="raw-total-rows" class="text-blue-600 text-sm">0</span> แถว</div>
+                </div>
+            </div>
+        </div>
+
+        <div id="page-kpi" class="hidden absolute inset-0 bg-gray-50 flex flex-col h-full overflow-y-auto">
+            <div class="h-16 bg-white text-gray-800 flex items-center justify-between px-6 md:px-8 shadow-sm shrink-0 border-b border-gray-200 sticky top-0 z-50">
+                <h2 class="text-lg font-black flex items-center gap-2 text-emerald-600">🎯 จัดการสมการ KPI (ส่งให้ Sales)</h2>
+                <div class="flex gap-2">
+                    <button onclick="KPIMgr.calculatePreview()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-xl text-sm font-bold shadow-md transition">🔄 ทดสอบคำนวณ KPI</button>
+                    <button onclick="KPIMgr.deployToSales()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2 rounded-xl text-sm font-bold shadow-md transition">🚀 บันทึกและส่งให้ Sales App</button>
+                </div>
+            </div>
+            
+            <div class="p-4 md:p-8 max-w-6xl mx-auto w-full space-y-6">
+                <div class="bg-white p-6 rounded-3xl shadow-sm border border-gray-200">
+                    <h3 class="font-black text-gray-800 mb-4 border-b pb-2">1. จับคู่คอลัมน์ (ดึงจากหน้าข้อมูลดิบ)</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4" id="kpi-selectors">
+                        </div>
+                    <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div class="bg-pink-50 p-3 rounded-xl border border-pink-100">
+                            <label class="text-xs font-bold text-pink-700 block mb-1">คำค้นหา สินค้าโฟกัส 1 (เช่น เจลลี่)</label>
+                            <input type="text" id="kpi-focus-1" class="w-full p-2 border border-pink-200 rounded-lg text-sm outline-none">
+                        </div>
+                        <div class="bg-amber-50 p-3 rounded-xl border border-amber-100">
+                            <label class="text-xs font-bold text-amber-700 block mb-1">คำค้นหา สินค้าโฟกัส 2 (เช่น กลมกล่อม)</label>
+                            <input type="text" id="kpi-focus-2" class="w-full p-2 border border-amber-200 rounded-lg text-sm outline-none">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-white p-6 rounded-3xl shadow-sm border border-gray-200">
+                    <div class="flex justify-between items-center mb-4 border-b pb-2">
+                        <h3 class="font-black text-gray-800">2. ตัวอย่างผลลัพธ์ (Preview สำหรับ Sales)</h3>
+                        <span class="text-xs font-bold bg-emerald-100 text-emerald-700 px-3 py-1 rounded-lg">สรุปยอดรวม <span id="kpi-preview-count" class="text-base">0</span> ร้านค้า</span>
+                    </div>
+                    <div class="overflow-x-auto max-h-[400px] border border-gray-200 rounded-xl">
+                        <table class="w-full text-left text-sm border-collapse">
+                            <thead id="kpi-preview-head" class="bg-gray-100 text-gray-600 sticky top-0 shadow-sm border-b"></thead>
+                            <tbody id="kpi-preview-body" class="text-gray-700"></tbody>
                         </table>
                     </div>
                 </div>
@@ -153,50 +179,30 @@
 
     </div>
 
-    <div id="overallModal" class="hidden fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
-        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden">
-            <div class="p-5 border-b flex justify-between items-center bg-gray-50"><h2 class="text-lg font-black text-gray-800">📊 สรุปความคืบหน้า</h2><button onclick="UI.hideSummaryModal()" class="w-8 h-8 rounded-full border border-gray-300 text-gray-500 hover:bg-gray-100 font-bold transition">✕</button></div>
-            <div class="p-4 flex-1 overflow-y-auto bg-white"><table class="w-full text-sm text-left"><thead class="text-xs text-gray-500 bg-gray-50 border-b"><tr><th class="px-4 py-3">สายวิ่ง</th><th class="px-4 py-3 text-center">รวม</th><th class="px-4 py-3 text-center text-emerald-600">จัดแล้ว</th><th class="px-4 py-3 text-center text-yellow-600">รอจัด</th><th class="px-4 py-3 text-center">%</th></tr></thead><tbody id="overallTableBody"></tbody></table></div>
-        </div>
-    </div>
-
-    <div id="dayModal" class="hidden fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
-        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col overflow-hidden">
-            <div class="p-4 bg-gray-50 border-b flex justify-between items-center"><h2 id="modalTitle" class="text-xl font-black flex items-center gap-2 text-gray-800">Day</h2><div class="flex gap-2"><button onclick="OSRM.generate()" class="bg-gray-900 text-white px-4 py-1.5 rounded-xl text-xs font-bold shadow-md active:scale-95 transition hover:bg-black">🚗 วาดเส้นถนน</button><button onclick="UI.closeDayModal()" class="bg-white border border-gray-300 w-8 h-8 rounded-full text-gray-500 hover:bg-gray-100 font-bold transition">✕</button></div></div>
-            <div id="modalContent" class="p-4 flex-1 overflow-y-auto space-y-2 bg-gray-50/50"></div>
-        </div>
-    </div>
-
-    <div id="mappingModal" class="hidden fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-[99999] flex items-center justify-center p-4">
-        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-md flex flex-col overflow-hidden transform transition-all max-h-[90vh]">
+    <div id="columnSelectModal" class="hidden fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-[99999] flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-lg flex flex-col overflow-hidden max-h-[85vh]">
             <div class="p-5 border-b bg-gray-50 flex justify-between items-center shrink-0">
-                <h2 class="text-lg font-black text-gray-800 flex items-center gap-2">⚙️ จับคู่คอลัมน์ (Mapping)</h2>
-                <button onclick="document.getElementById('mappingModal').classList.add('hidden')" class="w-8 h-8 rounded-full border border-gray-300 bg-white text-gray-500 font-bold hover:bg-gray-100 transition shadow-sm flex items-center justify-center">✕</button>
+                <h2 class="text-lg font-black text-gray-800">⚙️ เลือกคอลัมน์ที่ต้องการนำเข้า</h2>
             </div>
-            
             <div class="p-5 bg-white overflow-y-auto flex-1">
-                <p class="text-xs text-gray-500 mb-4 leading-relaxed">กรุณาเลือกคอลัมน์จากไฟล์ Excel ของคุณ ให้ตรงกับข้อมูลที่ระบบต้องการ (ระบบเดาให้อัตโนมัติแล้ว)</p>
-                <div id="mapping-form" class="space-y-3">
+                <p class="text-xs text-gray-500 mb-4 bg-blue-50 p-3 rounded-lg border border-blue-100">ติ๊กเลือกคอลัมน์จาก Excel ที่คุณต้องการนำเข้ามาเก็บในฐานข้อมูลดิบ (ระบบจะจำค่าที่คุณติ๊กไว้ใช้ครั้งต่อไป)</p>
+                <div id="column-checkboxes" class="grid grid-cols-2 gap-3">
                     </div>
             </div>
-            
             <div class="p-4 bg-gray-50 border-t border-gray-100 flex gap-3 shrink-0">
-                <button onclick="document.getElementById('mappingModal').classList.add('hidden')" class="flex-1 bg-white border border-gray-300 text-gray-700 py-2.5 rounded-xl text-sm font-bold shadow-sm active:scale-95 transition hover:bg-gray-100">ยกเลิก</button>
-                <button onclick="SalesData.applyMapping()" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-xl text-sm font-bold shadow-md active:scale-95 transition">✅ นำเข้าข้อมูล</button>
+                <button onclick="document.getElementById('columnSelectModal').classList.add('hidden')" class="flex-1 bg-white border border-gray-300 text-gray-700 py-2.5 rounded-xl text-sm font-bold shadow-sm">ยกเลิก</button>
+                <button onclick="RawDataMgr.applyImport()" class="flex-1 bg-blue-600 text-white py-2.5 rounded-xl text-sm font-bold shadow-md">✅ นำเข้าข้อมูล</button>
             </div>
         </div>
     </div>
+
+    <div id="dayModal" class="hidden fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4"><div class="bg-white rounded-3xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col overflow-hidden"><div class="p-4 bg-gray-50 border-b flex justify-between items-center"><h2 id="modalTitle" class="text-xl font-black flex items-center gap-2">Day</h2><button onclick="UI.closeDayModal()" class="bg-white border w-8 h-8 rounded-full font-bold">✕</button></div><div id="modalContent" class="p-4 flex-1 overflow-y-auto space-y-2 bg-gray-50/50"></div></div></div>
 
     <script src="app-config.js"></script>
     <script src="admin-ui.js"></script>
     <script src="admin-map.js"></script>
     <script src="admin-data.js"></script>
     <script src="admin-ai.js"></script>
-    
-    <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            App.init();
-        });
-    </script>
+    <script> document.addEventListener('DOMContentLoaded', () => { App.init(); }); </script>
 </body>
 </html>
