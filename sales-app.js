@@ -1,13 +1,22 @@
-const firebaseConfig = { apiKey: "AIzaSyDCYxJf0eHryjVJ8_INoWw_uTN14UMaEWE", authDomain: "route-plan-71e2e.firebaseapp.com", projectId: "route-plan-71e2e", storageBucket: "route-plan-71e2e.firebasestorage.app", messagingSenderId: "486778971661", appId: "1:486778971661:web:2ef83fa1eeb09ec6665744" };
+// 1. ตั้งค่า Firebase
+const firebaseConfig = { 
+    apiKey: "AIzaSyDCYxJf0eHryjVJ8_INoWw_uTN14UMaEWE", 
+    authDomain: "route-plan-71e2e.firebaseapp.com", 
+    projectId: "route-plan-71e2e", 
+    storageBucket: "route-plan-71e2e.firebasestorage.app", 
+    messagingSenderId: "486778971661", 
+    appId: "1:486778971661:web:2ef83fa1eeb09ec6665744" 
+};
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 
+// 🚀 เทคนิค 1: Cache โหลดไว ไม่รอเน็ต
 db.enablePersistence({ synchronizeTabs: true }).catch(function(err) { console.warn("Cache Warning: ", err); });
 
 const docMain = db.collection('appData').doc('v1_main');
 const docSales = db.collection('appData').doc('v1_sales');
 
-// 🌟 เพิ่ม mapNeedsFit เข้าไปใน State เพื่อกันแผนที่ซูมเด้งเองตอนลากจัดคิว
+// 🌟 State ควบคุมแอป (มี isLoaded ไว้กันเด้ง และ mapNeedsFit ไว้กันแผนที่ซูมมั่ว)
 let State = { myRoute: "", allStores: [], routeStores: [], sales: {}, currentDay: "", isLoaded: false, mapNeedsFit: true };
 let map = null, mapMarkers = [], sortableList = null;
 
@@ -61,8 +70,7 @@ const App = {
         document.getElementById('user-route-label').innerText = State.myRoute;
         document.getElementById('loader').style.display = 'flex';
 
-        let isMainLoaded = false, isSalesLoaded = false;
-        
+        // 🚀 เทคนิค โหลดข้อมูลขนานกัน (Parallel Fetching)
         let isMainLoaded = false, isSalesLoaded = false;
         
         const checkReady = () => { 
@@ -70,10 +78,10 @@ const App = {
                 document.getElementById('loader').style.display = 'none'; 
                 Processor.run(); 
                 
-                // 🌟 แก้ไขตรงนี้: ใส่ if ดักไว้ให้ทำงานแค่ตอนเปิดแอปครั้งแรก
+                // 🌟 แก้ไขตรงนี้: สลับไปหน้าภาพรวม "เฉพาะตอนโหลดเข้าแอปครั้งแรก" เท่านั้น
                 if (!State.isLoaded) {
                     UI.switchTab('dashboard');
-                    State.isLoaded = true; // บันทึกไว้ว่าเปิดแอปเสร็จแล้ว จะได้ไม่เด้งอีก
+                    State.isLoaded = true; // ล็อกไว้เลย จะได้ไม่เด้งอีกเวลาจัดคิวงาน
                 }
             } 
         };
@@ -101,8 +109,14 @@ const Processor = {
         let ds = new Set(); State.allStores.forEach(s => s.days.forEach(d => ds.add(d)));
         let sorted = Array.from(ds).sort((a,b) => parseInt(a.replace('Day ','')) - parseInt(b.replace('Day ','')));
         let el = document.getElementById('day-select'); el.innerHTML = sorted.map(d => `<option value="${d}">${d.replace('Day ','คิววันที่ ')}</option>`).join('');
-        if(!State.currentDay) { State.currentDay = sorted[0]; State.mapNeedsFit = true; } // ซูมแค่ตอนโหลดครั้งแรก
-        el.value = State.currentDay; Processor.routeList();
+        
+        // 🌟 ซูมแผนที่ใหม่เฉพาะตอนโหลดครั้งแรก หรือตอนเปลี่ยนวัน
+        if(!State.currentDay) { 
+            State.currentDay = sorted[0]; 
+            State.mapNeedsFit = true; 
+        } 
+        el.value = State.currentDay; 
+        Processor.routeList();
     },
     routeList: () => {
         let list = State.allStores.filter(s => s.days.includes(State.currentDay));
@@ -124,13 +138,17 @@ const Processor = {
         
         let c = document.getElementById('route-store-list'); c.innerHTML = html || '<p class="text-center text-gray-400 mt-5">ไม่มีคิวงาน</p>';
         document.getElementById('route-title').innerText = `คิวงาน (${list.length} ร้าน)`;
+        
         if(sortableList) sortableList.destroy();
         sortableList = Sortable.create(c, { handle: '.drag-handle', animation: 250, onEnd: Processor.handleDrag });
+        
         MapCtrl.drawMap();
     },
     handleDrag: () => {
         let items = document.querySelectorAll('#route-store-list > .store-item'), updated = [...State.allStores];
         items.forEach((item, index) => { let id = item.getAttribute('data-id'), target = updated.find(s => s.id === id); if(target) { if(!target.seqs) target.seqs = {}; target.seqs[State.currentDay] = index + 1; } });
+        
+        // เซฟลงคลาวด์ (ซึ่งมันจะกระตุ้น onSnapshot ให้ทำงานอีกรอบ)
         docMain.update({ [`routes.${State.myRoute}`]: updated });
     }
 };
@@ -152,17 +170,17 @@ const MapCtrl = {
             mapMarkers.push(m);
         });
         
-        // 🌟 ซูมเฉพาะตอนบังคับให้ซูมเท่านั้น (เช่น ตอนเปลี่ยนวัน) ลากคิวงานจะได้ไม่เด้ง
+        // 🌟 ซูมเฉพาะตอนบังคับให้ซูมเท่านั้น ลากคิวงานจะได้ไม่เด้ง
         if (State.mapNeedsFit) {
             MapCtrl.fitBounds();
-            State.mapNeedsFit = false; // ปิดธงซูมทิ้ง
+            State.mapNeedsFit = false; // ซูมเสร็จแล้วปิดธงทิ้ง
         }
     },
     fitBounds: () => { if(mapMarkers.length && map) map.fitBounds(new L.featureGroup(mapMarkers).getBounds(), { padding: [30, 30] }); },
     forceFitBounds: () => { State.mapNeedsFit = true; MapCtrl.drawMap(); } // สำหรับปุ่มกดซูมบนแผนที่
 };
 
-// 🌟 ระบบลากปรับขนาด (อัปเดตให้รองรับคอมพิวเตอร์ และจำกัดต่ำสุดที่ 25%)
+// 🌟 ระบบลากปรับขนาด (Resizable)
 const Resizer = {
     init: () => {
         const resizer = document.getElementById('resizer');
@@ -205,7 +223,7 @@ const Resizer = {
     }
 };
 
-// 🌟 เมื่อเปลี่ยนวัน ให้เปิดธง mapNeedsFit = true เพื่อให้แผนที่ซูมหาพื้นที่ใหม่
+// 🌟 เมื่อเปลี่ยนวัน ให้เปิดธง mapNeedsFit = true เพื่อให้แผนที่ซูมหาพื้นที่ของวันนั้นๆ ใหม่
 document.getElementById('day-select').addEventListener('change', (e) => { 
     State.currentDay = e.target.value; 
     State.mapNeedsFit = true; 
