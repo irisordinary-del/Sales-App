@@ -40,6 +40,7 @@ const MapCtrl = {
     
 // 🌟 พระเอกกลับมาแล้ว: หมุดรูปหยดน้ำ มีตัวเลขด้านใน + กล่อง Popup แบบเดิม (พร้อมระบบซ่อมพิกัดอัตโนมัติ)
     // 🌟 หมุดรูปหยดน้ำ + ระบบตรวจจับร้านที่พิกัดพัง (Error Radar)
+   // 🌟 หมุดรูปหยดน้ำ + ระบบตรวจเช็คยอดหมุด (Marker Status Radar)
     renderMarkers: () => {
         if (!MapCtrl.map) return;
         MapCtrl.markers.forEach(m => MapCtrl.map.removeLayer(m)); 
@@ -109,6 +110,45 @@ const MapCtrl = {
                 MapCtrl.failedStores.push(`❌ ${s.name} (ID: ${s.id})`);
             }
         });
+
+        // 📊 ระบบตรวจเช็คยอดหมุด VS รายชื่อทั้งหมด
+        let totalStores = State.stores.length;
+        let successMarkers = MapCtrl.markers.length;
+        let failedCount = MapCtrl.failedStores.length;
+
+        // ลบปุ่มเก่าออกก่อน (ป้องกันปุ่มซ้อนกัน)
+        let oldWarnBtn = document.getElementById('map-warn-btn');
+        if(oldWarnBtn) oldWarnBtn.remove();
+
+        let statusBtn = document.getElementById('map-status-btn');
+        if (!statusBtn) {
+            statusBtn = document.createElement('button');
+            statusBtn.id = 'map-status-btn';
+            document.getElementById('map').parentElement.appendChild(statusBtn);
+        }
+
+        // แสดงผลตามสถานะจริง
+        if (failedCount > 0) {
+            // 🔴 กรณีมีหมุดพัง (สีแดงกระพริบ)
+            statusBtn.className = 'absolute bottom-20 right-6 z-[400] bg-red-50 text-red-600 font-bold px-4 py-2.5 rounded-xl shadow-lg border border-red-200 hover:bg-red-100 transition flex items-center gap-2 animate-pulse text-sm';
+            statusBtn.innerHTML = `⚠️ หมุดหาย ${failedCount} ร้าน (คลิกดู)`;
+            statusBtn.onclick = () => {
+                alert(`📊 สรุปข้อมูล:\n- รายชื่อทั้งหมด: ${totalStores} ร้าน\n- สร้างหมุดสำเร็จ: ${successMarkers} หมุด\n- สร้างไม่สำเร็จ: ${failedCount} ร้าน\n\n⚠️ รายชื่อร้านที่พิกัดมีปัญหา (Lat/Lng ว่างหรือผิดปกติ):\n${MapCtrl.failedStores.join("\n")}\n\n👉 โปรดไปแก้พิกัดในไฟล์ Excel แล้วอัปโหลดใหม่ครับ`);
+            };
+            statusBtn.style.display = 'flex';
+        } else if (totalStores > 0) {
+            // 🟢 กรณีหมุดครบสมบูรณ์ 100% (สีเขียวสบายตา)
+            statusBtn.className = 'absolute bottom-20 right-6 z-[400] bg-emerald-50 text-emerald-600 font-bold px-4 py-2 rounded-xl shadow-md border border-emerald-200 hover:bg-emerald-100 transition flex items-center gap-2 text-xs opacity-90 hover:opacity-100';
+            statusBtn.innerHTML = `✅ แสดงหมุดครบ ${successMarkers}/${totalStores} ร้าน`;
+            statusBtn.onclick = () => {
+                alert(`🎉 ยอดเยี่ยมมากครับ!\nระบบสร้างหมุดลงบนแผนที่สำเร็จครบถ้วนทั้ง ${successMarkers} ร้าน ไม่มีพิกัดตกหล่นเลยครับ`);
+            };
+            statusBtn.style.display = 'flex';
+        } else {
+            // กรณีล้างสาย (ไม่มีข้อมูล)
+            statusBtn.style.display = 'none';
+        }
+    },
 
         // 🚨 สร้างปุ่มแจ้งเตือนสีแดงกระพริบ บนมุมขวาล่างของแผนที่
         let warnBtn = document.getElementById('map-warn-btn');
