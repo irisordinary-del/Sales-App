@@ -3,7 +3,8 @@
 // ==========================================
 
 // 1. ศูนย์กลางจัดเก็บข้อมูล (State Management)
-const State = {
+// 🛡️ เปลี่ยนมาใช้ var เพื่อป้องกัน Error ตัวแปรชนกัน (Identifier has already been declared)
+var State = {
     stores: [],                 
     sales: {},                  
     db: { routes: {}, cycleDays: 24 }, 
@@ -13,7 +14,7 @@ const State = {
 };
 
 // 2. ระบบจัดการแอปและคลาวด์ (App & Firebase)
-const App = {
+var App = {
     dbRef: null,
     
     init: () => {
@@ -25,7 +26,6 @@ const App = {
         // 🔥 2. ตรวจสอบ Firebase (แบบยืดหยุ่น ไม่บล็อกระบบ)
         if (typeof firebase === 'undefined' || !firebase.apps.length) {
             console.warn("⚠️ ไม่พบการตั้งค่า Firebase: เข้าสู่โหมดทำงานชั่วคราว");
-            // ถ้าคลาวด์พัง ให้จำลองข้อมูลเปล่าๆ ขึ้นมาเพื่อให้แอปทำงานต่อได้ ไม่หน้าขาว
             State.db = { routes: { "Offline Route": [] }, cycleDays: 24 };
             App.updateRouteSelector();
             App.switchRoute("Offline Route");
@@ -34,7 +34,7 @@ const App = {
         }
         
         App.dbRef = firebase.firestore().collection('sales_app').doc('main_data');
-        UI.showLoader("กำลังโหลดข้อมูล...", "เชื่อมต่อฐานข้อมูลคลาวด์");
+        if (typeof UI !== 'undefined' && UI.showLoader) UI.showLoader("กำลังโหลดข้อมูล...", "เชื่อมต่อฐานข้อมูลคลาวด์");
         App.loadDB();
         ExcelIO.init();
     },
@@ -63,11 +63,10 @@ const App = {
                 App.updateRouteSelector();
                 App.switchRoute("Default Route");
             }
-            UI.hideLoader();
+            if (typeof UI !== 'undefined' && UI.hideLoader) UI.hideLoader();
         }).catch(err => {
-            UI.hideLoader();
+            if (typeof UI !== 'undefined' && UI.hideLoader) UI.hideLoader();
             console.error("Load DB Error:", err);
-            // ถ้าโหลดไม่ได้จริงๆ ก็ให้เข้าโหมดออฟไลน์ แผนที่จะได้ไม่ขาว
             State.db = { routes: { "Error Route": [] }, cycleDays: 24 };
             App.updateRouteSelector();
             App.switchRoute("Error Route");
@@ -81,7 +80,7 @@ const App = {
         App.updateStatusUI("⏳ กำลังบันทึก...", "yellow");
         App.dbRef.set(State.db).then(() => {
             App.updateStatusUI("✅ บันทึกสำเร็จ", "emerald");
-            UI.showSaveToast("บันทึกข้อมูลคิวงานเรียบร้อย");
+            if (typeof UI !== 'undefined' && UI.showSaveToast) UI.showSaveToast("บันทึกข้อมูลคิวงานเรียบร้อย");
         }).catch(err => {
             App.updateStatusUI("❌ บันทึกล้มเหลว", "red");
             console.error("Save DB Error:", err);
@@ -154,7 +153,7 @@ const App = {
         if (!confirm(`⚠️ ยืนยันล้างข้อมูลร้านค้าทั้งหมดในสาย "${State.localActiveRoute}" ใช่หรือไม่?`)) return;
         State.stores = [];
         App.saveDB();
-        UI.render();
+        if (typeof UI !== 'undefined' && UI.render) UI.render();
     },
 
     updateStatusUI: (text, color) => {
@@ -169,15 +168,15 @@ const App = {
 };
 
 // 3. ระบบจัดการข้อมูลร้านค้าบนหน้าจอ
-const StoreMgr = {
+var StoreMgr = {
     toggleSelect: (id) => {
         let s = State.stores.find(x => x.id === id);
         if(s) s.selected = !s.selected;
-        UI.render();
+        if (typeof UI !== 'undefined' && UI.render) UI.render();
     },
     clearSelection: () => {
         State.stores.forEach(s => s.selected = false);
-        UI.render();
+        if (typeof UI !== 'undefined' && UI.render) UI.render();
     },
     assignSelected: () => {
         let day = document.getElementById('assign-day').value;
@@ -196,8 +195,8 @@ const StoreMgr = {
         });
         if(count > 0) {
             App.saveDB();
-            UI.render();
-            UI.showSaveToast(`จัดลง ${DAY_COLORS[day].name} สำเร็จ ${count} ร้าน`);
+            if (typeof UI !== 'undefined' && UI.render) UI.render();
+            if (typeof UI !== 'undefined' && UI.showSaveToast && DAY_COLORS[day]) UI.showSaveToast(`จัดลง ${DAY_COLORS[day].name} สำเร็จ ${count} ร้าน`);
         } else {
             alert("กรุณาเลือกร้านค้าก่อนจัดวัน");
         }
@@ -216,7 +215,7 @@ const StoreMgr = {
             }
         }
         App.saveDB();
-        UI.render();
+        if (typeof UI !== 'undefined' && UI.render) UI.render();
     },
     getDistSq: (p1, p2) => {
         let dx = p1.lng - p2.lng, dy = p1.lat - p2.lat;
@@ -225,7 +224,7 @@ const StoreMgr = {
 };
 
 // 4. ระบบนำเข้าและส่งออก Excel (Smart Excel Manager)
-const ExcelIO = {
+var ExcelIO = {
     init: () => {
         let el = document.getElementById('fileUpload');
         if (el) el.addEventListener('change', ExcelIO.importMap);
@@ -233,7 +232,7 @@ const ExcelIO = {
     importMap: (e) => {
         let file = e.target.files[0];
         if (!file) return;
-        UI.showLoader("กำลังอ่านไฟล์ Excel...", "กำลังตรวจสอบและซ่อมแซมข้อมูล...");
+        if (typeof UI !== 'undefined' && UI.showLoader) UI.showLoader("กำลังอ่านไฟล์ Excel...", "กำลังตรวจสอบและซ่อมแซมข้อมูล...");
         
         let reader = new FileReader();
         reader.onload = (evt) => {
@@ -284,13 +283,13 @@ const ExcelIO = {
                 
                 State.stores = newStores;
                 App.saveDB();
-                UI.render();
-                MapCtrl.fitToStores();
-                UI.hideLoader();
-                UI.showSaveToast(`นำเข้าสำเร็จ ${newStores.length} ร้าน`);
+                if (typeof UI !== 'undefined' && UI.render) UI.render();
+                if (typeof MapCtrl !== 'undefined' && MapCtrl.fitToStores) MapCtrl.fitToStores();
+                if (typeof UI !== 'undefined' && UI.hideLoader) UI.hideLoader();
+                if (typeof UI !== 'undefined' && UI.showSaveToast) UI.showSaveToast(`นำเข้าสำเร็จ ${newStores.length} ร้าน`);
                 
             } catch(err) {
-                UI.hideLoader();
+                if (typeof UI !== 'undefined' && UI.hideLoader) UI.hideLoader();
                 alert("❌ เกิดข้อผิดพลาดในการอ่านไฟล์: " + err.message);
             }
         };
@@ -306,7 +305,7 @@ const ExcelIO = {
             'ชื่อร้านค้า': s.name,
             'Lat': s.lat,
             'Lng': s.lng,
-            'วันวิ่งคิว': s.days.length ? parseInt(s.days[0].replace('Day ', '')) : '', 
+            'วันวิ่งคิว': s.days && s.days.length ? parseInt(s.days[0].replace('Day ', '')) : '', 
             'ความถี่': s.freq
         }));
         
