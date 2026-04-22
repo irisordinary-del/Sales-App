@@ -17,11 +17,18 @@ const App = {
     dbRef: null,
     
     init: () => {
-        // เชื่อมต่อ Firebase
-        if (!firebase.apps.length) {
-            console.error("Firebase ยังไม่ได้ตั้งค่าใน index.html");
-            return;
+        // 🗺️ 1. สั่งเปิดแผนที่ให้โชว์ขึ้นมาก่อนเป็นอันดับแรก! (แก้ปัญหาจอขาว)
+        if (typeof MapCtrl !== 'undefined' && MapCtrl.init) {
+            MapCtrl.init();
         }
+        
+        // 🔥 2. ตรวจสอบว่ามีไฟล์ app-config.js (รหัสฐานข้อมูล) หรือไม่
+        if (typeof firebase === 'undefined' || !firebase.apps.length) {
+            console.error("Firebase is not initialized.");
+            alert("⚠️ ไม่สามารถเชื่อมต่อฐานข้อมูลได้!\n\nระบบไม่พบการตั้งค่า Firebase โปรดตรวจสอบว่ามีไฟล์ 'app-config.js' อยู่ในโฟลเดอร์เดียวกับโปรเจกต์ และใส่รหัสถูกต้องหรือไม่ครับ");
+            return; // หยุดการทำงานตรงนี้ เพื่อไม่ให้แอปพัง
+        }
+        
         App.dbRef = firebase.firestore().collection('sales_app').doc('main_data');
         
         UI.showLoader("กำลังโหลดข้อมูล...", "เชื่อมต่อฐานข้อมูลคลาวด์");
@@ -313,8 +320,7 @@ const ExcelIO = {
 };
 
 // ==========================================
-// ส่วนเพิ่มเติม (ถ้าในแอปคุณมีระบบ RawData และ KPI)
-// ถ้าระบบเรียกใช้ จะได้ไม่ Error ครับ
+// ส่วนเพิ่มเติม (ป้องกัน Error ถ้าโมดูลอื่นยังไม่โหลด)
 // ==========================================
 if (typeof RawDataMgr === 'undefined') {
     window.RawDataMgr = { clearAll: () => {}, applyImport: () => {} };
