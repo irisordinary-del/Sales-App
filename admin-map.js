@@ -1,4 +1,6 @@
-// ระบบจัดการแผนที่และหมุด
+// ==========================================
+// 1. ระบบจัดการแผนที่และหมุด (Map Controller)
+// ==========================================
 const MapCtrl = {
     map: null, markers: [], lines: [], roadLines: [],
     
@@ -37,16 +39,28 @@ const MapCtrl = {
     
     closePopups: () => { MapCtrl.map.closePopup(); },
     
+    // 🌟 ส่วนที่แก้ไข: เอารูปแบบหมุดแบบเดิมกลับมา (ไม่กระโดด)
     renderMarkers: () => {
         MapCtrl.markers.forEach(m => MapCtrl.map.removeLayer(m)); MapCtrl.markers = [];
         State.stores.forEach(s => {
+            // เลือกสีตามวัน ถ้ายังไม่จัดเป็นสีเทา
             let color = s.days.length ? DAY_COLORS[s.days[0]].hex : '#9CA3AF';
             
-            // สไตล์หมุดปกติ และ หมุดที่ถูกเลือก (กระโดดได้)
-            let iconHtml = `<div style="background-color: ${color}; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.4);"></div>`;
-            if(s.selected) iconHtml = `<div class="animate-bounce" style="background-color: #4F46E5; width: 20px; height: 20px; border-radius: 50%; border: 3px solid white; box-shadow: 0 0 8px rgba(79,70,229,0.8);"></div>`;
+            // สไตล์แบบเดิม: วงกลม static นิ่งๆ
+            let size = 12; // ขนาดปกติ
+            let borderWidth = 2;
+            let borderColor = 'white';
             
-            let icon = L.divIcon({ className: 'custom-icon', html: iconHtml, iconSize: [14, 14], iconAnchor: [7, 7] });
+            // ถ้าถูกเลือก ให้ขยายขนาดนิดนึงและเปลี่ยนสีขอบ
+            if(s.selected) {
+                size = 16;
+                borderColor = '#4F46E5'; // สีขอบน้ำเงินเข้มตอนเลือก
+                borderWidth = 3;
+            }
+
+            let iconHtml = `<div style="background-color: ${color}; width: ${size}px; height: ${size}px; border-radius: 50%; border: ${borderWidth}px solid ${borderColor}; box-shadow: 0 0 4px rgba(0,0,0,0.3); transition: all 0.2s;"></div>`;
+            
+            let icon = L.divIcon({ className: 'custom-icon', html: iconHtml, iconSize: [size, size], iconAnchor: [size/2, size/2] });
             let marker = L.marker([s.lat, s.lng], { icon: icon }).addTo(MapCtrl.map);
             marker.bindPopup(`<b>${s.name}</b><br><span style="font-size:10px;color:gray">ID: ${s.id}</span>`);
             MapCtrl.markers.push(marker);
@@ -78,7 +92,9 @@ const MapCtrl = {
     }
 };
 
-// 🌟 พระเอกที่หายไป: ระบบวาดถนนจริง (OSRM API)
+// ==========================================
+// 🚗 2. ระบบวาดเส้นถนนจริง (OSRM API)
+// ==========================================
 const OSRM = {
     generate: async () => {
         let day = State.openDayModal;
@@ -87,16 +103,15 @@ const OSRM = {
         let stores = State.stores.filter(s => s.days.includes(day)).sort((a,b) => (a.seqs[day]||999)-(b.seqs[day]||999));
         if(stores.length < 2) return alert("ต้องมีอย่างน้อย 2 ร้านในวันนี้ เพื่อวาดเส้นทางครับ");
 
-        // ป้องกัน Error จากข้อจำกัดของ OSRM (ห้ามเกิน 90 พิกัด)
+        // ป้องกันคอมค้างจากพิกัด OSRM เกิน limit
         if(stores.length > 90) {
-            return alert("⚠️ ไม่สามารถวาดเส้นถนนได้ครับ เนื่องจากวันนี้มีร้านค้ากระจุกตัวเกิน 90 ร้าน (ระบบวาดถนนจำกัดไว้เพื่อป้องกันคอมพิวเตอร์ค้างครับ)");
+            return alert("⚠️ ไม่สามารถวาดเส้นถนนได้ครับ เนื่องจากวันนี้มีร้านค้ากระจุกตัวเกิน 90 ร้าน");
         }
 
-        UI.showLoader("กำลังคำนวณเส้นทางถนนจริง...", "เชื่อมต่อดาวเทียม OSRM API");
+        UI.showLoader("กำลังคำนวณเส้นทางถนนจริง...", "เชื่อมต่อ OSRM API");
         UI.closeDayModal();
 
         try {
-            // ดึงพิกัดมาร้อยเรียงกัน
             let coords = stores.map(s => `${s.lng},${s.lat}`).join(';');
             let url = `https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`;
 
@@ -105,32 +120,30 @@ const OSRM = {
 
             if(data.code !== 'Ok') throw new Error(data.message || "OSRM API Error");
 
-            // ลบเส้นเดิมออกก่อนวาดใหม่
             MapCtrl.clearRoad(false);
 
             let color = DAY_COLORS[day].hex;
-            // สลับพิกัดจาก [Lng, Lat] เป็น [Lat, Lng] ให้ตรงกับที่แผนที่ต้องการ
+            // สลับพิกัดจาก [Lng, Lat] เป็น [Lat, Lng]
             let routeCoords = data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
             
             let pl = L.polyline(routeCoords, { color: color, weight: 5, opacity: 0.8 }).addTo(MapCtrl.map);
             MapCtrl.roadLines.push(pl);
             
-            // ซูมแผนที่ไปดูเส้นทางที่วาดเสร็จ
             MapCtrl.map.fitBounds(pl.getBounds(), { padding: [50, 50] });
 
-            // โชว์ปุ่มกากบาท "ซ่อนเส้นทาง"
             document.getElementById('clearRoadBtn').classList.remove('hidden');
             UI.hideLoader();
 
         } catch(err) {
             UI.hideLoader();
             alert("❌ เกิดข้อผิดพลาดในการวาดเส้นถนน: " + err.message);
-            console.error(err);
         }
     }
 };
 
-// ระบบวาดบ่วง Lasso เพื่อเลือกร้านหลายๆ ร้าน
+// ==========================================
+// ✏️ 3. ระบบวาดบ่วงเลือกพื้นที่ (Lasso Tool)
+// ==========================================
 const Lasso = {
     active: false, polygon: null, points: [],
     
@@ -150,7 +163,7 @@ const Lasso = {
     onDown: (e) => {
         Lasso.points = [e.latlng];
         if (Lasso.polygon) MapCtrl.map.removeLayer(Lasso.polygon);
-        Lasso.polygon = L.polygon(Lasso.points, { color: '#000', weight: 2, fillOpacity: 0.2 }).addTo(MapCtrl.map);
+        Lasso.polygon = L.polygon(Lasso.points, { color: '#000', weight: 2, fillOpacity: 0.1, dashArray: '5, 5' }).addTo(MapCtrl.map);
         MapCtrl.map.on('mousemove', Lasso.onMove);
         MapCtrl.map.on('mouseup', Lasso.onUp);
     },
@@ -177,7 +190,7 @@ const Lasso = {
         Lasso.cancel();
         UI.switchTab('tab2');
         UI.render();
-        if (selCount > 0) UI.showSaveToast(`เลือกพื้นที่สำเร็จ ${selCount} ร้าน`);
+        if (selCount > 0) UI.showSaveToast(`เลือกสำเร็จ ${selCount} ร้าน (ไปที่แท็บ 2 เพื่อจัดวัน)`);
     },
     
     cancel: () => {
