@@ -27,7 +27,15 @@ const UI = {
     render: () => {
         let htmlU=[], htmlA=[], htmlP=[], sums={}, aCnt=0, sel=0;
         for(let i=1; i<=30; i++) sums[`Day ${i}`] = 0;
-        State.stores.forEach(s => { if(s.days.length) { aCnt+=s.days.length; s.days.forEach(d=>sums[d]++); } if(s.selected) sel++; });
+        
+        State.stores.forEach(s => { 
+            // 🛡️ ระบบป้องกัน: ถ้าวันในข้อมูลไม่มีในระบบจริงๆ ให้ลบทิ้งเป็นรอจัด
+            if (s.days.length && !DAY_COLORS[s.days[0]]) {
+                s.days = [];
+            }
+            if(s.days.length) { aCnt+=s.days.length; s.days.forEach(d=>sums[d]++); } 
+            if(s.selected) sel++; 
+        });
         
         let ds = document.getElementById('assign-day'), cv = ds?ds.value:null;
         if(ds) { ds.innerHTML = Object.keys(DAY_COLORS).map(d=>`<option value="${d}">${DAY_COLORS[d].name}${sums[d]>0?` (${sums[d]})`:''}</option>`).join(''); if(cv) ds.value=cv; }
@@ -43,15 +51,22 @@ const UI = {
             if(!s.days.length) {
                 htmlU.push(`<label class="flex p-3 bg-white border ${s.selected?'border-indigo-400 ring-1 ring-indigo-400 bg-indigo-50':'border-gray-200'} rounded-2xl cursor-pointer shadow-sm"><input type="checkbox" ${s.selected?'checked':''} onchange="StoreMgr.toggleSelect('${s.id}')" class="mr-3 mt-1.5 w-4 h-4 text-indigo-600 rounded"><div class="flex-1"><div class="flex justify-between"><p class="font-bold text-sm text-gray-800">${s.name} ${b}</p>${kpiBadge}</div><p class="text-[10px] text-gray-400 font-mono mt-0.5">ID: ${s.id}</p></div></label>`);
             } else {
-                let dTxt = s.days.join(' & '), c = DAY_COLORS[s.days[0]].hex;
+                let dTxt = s.days.join(' & ');
+                // 🛡️ ป้องกัน error ตรงนี้
+                let c = DAY_COLORS[s.days[0]] ? DAY_COLORS[s.days[0]].hex : '#9CA3AF'; 
+                
                 htmlA.push(`<div id="card-${s.id}" class="p-3 bg-white border border-gray-200 rounded-2xl flex justify-between items-center shadow-sm"><div class="flex-1 overflow-hidden mr-2"><div class="flex justify-between pr-2"><p class="font-bold text-sm text-gray-800 truncate">${s.name} ${b}</p>${kpiBadge}</div><p class="text-[10px] text-gray-400 font-mono mt-0.5">ID: ${s.id}</p><p class="text-[11px] font-bold mt-1.5"><span class="color-dot" style="background:${c}"></span>${dTxt}</p></div><div class="flex gap-1.5"><select onchange="StoreMgr.changeDay('${s.id}', this.value)" class="text-xs p-1.5 border border-gray-200 rounded-lg shadow-sm outline-none bg-gray-50">${opts.replace(`value="${s.days[0]}"`, `value="${s.days[0]}" selected`)}</select><button onclick="StoreMgr.changeDay('${s.id}','remove')" class="bg-red-50 text-red-500 px-2.5 rounded-lg font-bold hover:bg-red-100 border border-red-100">✕</button></div></div>`);
             }
         });
 
         document.getElementById('list-upload').innerHTML = htmlP.join(''); document.getElementById('list-unassigned').innerHTML = htmlU.join(''); document.getElementById('list-assigned').innerHTML = htmlA.join('');
         
-        // 🌟 พระเอกของเราที่หายไป: โค้ดสร้างกล่องสรุปวันที่ ในแท็บ 4
-        let sumH = []; Object.keys(sums).forEach(d => { if(sums[d]>0) { let c=DAY_COLORS[d].hex, act=State.activeRoadDay===d; sumH.push(`<div onclick="UI.showDayModal('${d}')" class="p-4 bg-white border ${act?'border-indigo-500 ring-2 ring-indigo-200':'border-gray-200'} rounded-2xl flex flex-col items-center cursor-pointer relative shadow-sm hover:shadow-md transition"><div class="absolute top-0 left-0 w-full h-1.5 rounded-t-2xl" style="background:${c}"></div><p class="text-xs font-bold mt-1 text-gray-500">${DAY_COLORS[d].name}</p><p class="text-3xl font-black mt-1" style="color:${c}">${sums[d]}</p></div>`); } });
+        let sumH = []; Object.keys(sums).forEach(d => { 
+            if(sums[d]>0 && DAY_COLORS[d]) { 
+                let c=DAY_COLORS[d].hex, act=State.activeRoadDay===d; 
+                sumH.push(`<div onclick="UI.showDayModal('${d}')" class="p-4 bg-white border ${act?'border-indigo-500 ring-2 ring-indigo-200':'border-gray-200'} rounded-2xl flex flex-col items-center cursor-pointer relative shadow-sm hover:shadow-md transition"><div class="absolute top-0 left-0 w-full h-1.5 rounded-t-2xl" style="background:${c}"></div><p class="text-xs font-bold mt-1 text-gray-500">${DAY_COLORS[d].name}</p><p class="text-3xl font-black mt-1" style="color:${c}">${sums[d]}</p></div>`); 
+            } 
+        });
         let elSummary = document.getElementById('list-summary');
         if(elSummary) elSummary.innerHTML = sumH.length ? sumH.join('') : '<p class="col-span-2 text-center text-xs text-gray-400 mt-4">ยังไม่จัดสาย</p>';
 
@@ -70,6 +85,7 @@ const UI = {
         MapCtrl.renderMarkers(); MapCtrl.drawLines();
     },
     showDayModal: (d) => {
+        if(!DAY_COLORS[d]) return;
         State.openDayModal = d; document.getElementById('modalTitle').innerHTML = `<span class="w-4 h-4 rounded-full inline-block shadow-sm" style="background:${DAY_COLORS[d].hex}"></span> ${DAY_COLORS[d].name}`;
         let h = State.stores.filter(s=>s.days.includes(d)).sort((a,b)=>(a.seqs[d]||999)-(b.seqs[d]||999)).map(x=>`<div class="p-3 bg-white border border-gray-200 rounded-2xl flex items-center gap-3 mb-2 shadow-sm">${x.seqs[d]?`<div class="bg-gray-900 text-white w-7 h-7 rounded-full flex items-center justify-center text-xs font-black">${x.seqs[d]}</div>`:''}<div class="flex-1"><p class="text-sm font-bold truncate text-gray-800">${x.name} ${x.freq===2?'<span class="f2-badge">F2</span>':''}</p><p class="text-[10px] text-gray-400 font-mono mt-0.5">ID: ${x.id}</p></div></div>`).join('');
         document.getElementById('modalContent').innerHTML = h; document.getElementById('dayModal').classList.remove('hidden');
