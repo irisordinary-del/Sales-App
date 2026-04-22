@@ -205,8 +205,20 @@
         </div>
     </div>
 
-    <div id="dayModal" class="hidden fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4"><div class="bg-white rounded-3xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col overflow-hidden"><div class="p-4 bg-gray-50 border-b flex justify-between items-center"><h2 id="modalTitle" class="text-xl font-black flex items-center gap-2">Day</h2><button onclick="UI.closeDayModal()" class="bg-white border w-8 h-8 rounded-full font-bold">✕</button></div><div id="modalContent" class="p-4 flex-1 overflow-y-auto space-y-2 bg-gray-50/50"></div></div></div>
+   <div id="dayModal" class="hidden fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col overflow-hidden">
+            <div class="p-4 bg-gray-50 border-b flex justify-between items-center">
+                <h2 id="modalTitle" class="text-xl font-black flex items-center gap-2 text-gray-800">Day</h2>
+                <div class="flex gap-2">
+                    <button onclick="OSRM.generate()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-1.5 rounded-xl text-xs font-bold active:scale-95 transition shadow-sm">🚗 วาดเส้นถนนจริง</button>
+                    <button onclick="UI.closeDayModal()" class="bg-white border border-gray-300 w-8 h-8 rounded-full text-gray-500 hover:bg-gray-100 font-bold transition flex items-center justify-center">✕</button>
+                </div>
+            </div>
+            <div id="modalContent" class="p-4 flex-1 overflow-y-auto space-y-2 bg-gray-50/50"></div>
+        </div>
+    </div>
 
+    
     <script src="app-config.js"></script>
     <script src="admin-ui.js"></script>
     <script src="admin-map.js"></script>
