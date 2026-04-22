@@ -5,7 +5,6 @@ const MapCtrl = {
     map: null, markers: [], lines: [], roadLines: [],
     
     init: () => {
-        // ตั้งค่าพิกัดเริ่มต้น (กรุงเทพฯ)
         MapCtrl.map = L.map('map').setView([13.7563, 100.5018], 10);
         L.tileLayer('https://{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', { 
             maxZoom: 20, 
@@ -39,30 +38,61 @@ const MapCtrl = {
     
     closePopups: () => { MapCtrl.map.closePopup(); },
     
-    // 🌟 ส่วนที่แก้ไข: เอารูปแบบหมุดแบบเดิมกลับมา (ไม่กระโดด)
+    // 🌟 พระเอกกลับมาแล้ว: หมุดรูปหยดน้ำ มีตัวเลขด้านใน + กล่อง Popup แบบเดิม
     renderMarkers: () => {
         MapCtrl.markers.forEach(m => MapCtrl.map.removeLayer(m)); MapCtrl.markers = [];
-        State.stores.forEach(s => {
-            // เลือกสีตามวัน ถ้ายังไม่จัดเป็นสีเทา
-            let color = s.days.length ? DAY_COLORS[s.days[0]].hex : '#9CA3AF';
-            
-            // สไตล์แบบเดิม: วงกลม static นิ่งๆ
-            let size = 12; // ขนาดปกติ
-            let borderWidth = 2;
-            let borderColor = 'white';
-            
-            // ถ้าถูกเลือก ให้ขยายขนาดนิดนึงและเปลี่ยนสีขอบ
-            if(s.selected) {
-                size = 16;
-                borderColor = '#4F46E5'; // สีขอบน้ำเงินเข้มตอนเลือก
-                borderWidth = 3;
-            }
+        
+        const opts = Object.keys(DAY_COLORS).map(d => `<option value="${d}">${DAY_COLORS[d].name}</option>`).join('');
 
-            let iconHtml = `<div style="background-color: ${color}; width: ${size}px; height: ${size}px; border-radius: 50%; border: ${borderWidth}px solid ${borderColor}; box-shadow: 0 0 4px rgba(0,0,0,0.3); transition: all 0.2s;"></div>`;
+        State.stores.forEach(s => {
+            let color = s.days.length ? DAY_COLORS[s.days[0]].hex : '#9CA3AF';
+            let dayNum = s.days.length ? s.days[0].replace('Day ', '') : '';
             
-            let icon = L.divIcon({ className: 'custom-icon', html: iconHtml, iconSize: [size, size], iconAnchor: [size/2, size/2] });
+            let scale = s.selected ? 'scale(1.2)' : 'scale(1)';
+            let zIndex = s.selected ? 1000 : 1;
+            let borderColor = s.selected ? '#000' : 'white';
+
+            // ดีไซน์หมุดหยดน้ำแบบในรูปของคุณเป๊ะๆ
+            let iconHtml = `
+                <div style="position: relative; width: 28px; height: 38px; transform: ${scale}; z-index: ${zIndex};">
+                    <div style="position: absolute; top: 0; left: 0; width: 28px; height: 28px; background-color: ${color}; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); border: 2px solid ${borderColor}; box-shadow: 2px 2px 5px rgba(0,0,0,0.4);"></div>
+                    <div style="position: absolute; top: 0; left: 0; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; color: white; font-size: 12px; font-weight: 900; text-shadow: 1px 1px 2px rgba(0,0,0,0.8); z-index: 2;">
+                        ${dayNum}
+                    </div>
+                </div>
+            `;
+            
+            let icon = L.divIcon({ className: 'custom-icon', html: iconHtml, iconSize: [28, 38], iconAnchor: [14, 38] });
             let marker = L.marker([s.lat, s.lng], { icon: icon }).addTo(MapCtrl.map);
-            marker.bindPopup(`<b>${s.name}</b><br><span style="font-size:10px;color:gray">ID: ${s.id}</span>`);
+            
+            let currentDay = s.days.length ? s.days[0] : '';
+            
+            // ป้ายบอกวันสีเขียว (หรือสีตามวัน) ตรงกลางกล่อง
+            let dayBadge = currentDay ? `<div style="background:${color}; color:white; padding:6px; border-radius:8px; font-size:13px; font-weight:bold; text-align:center; margin:10px 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">📅 ${DAY_COLORS[currentDay].name}</div>` : `<div style="background:#9CA3AF; color:white; padding:6px; border-radius:8px; font-size:13px; font-weight:bold; text-align:center; margin:10px 0;">❌ ยังไม่จัดสาย</div>`;
+
+            // ดีไซน์ Popup แบบเดียวกับในรูปเป๊ะๆ
+            let popupContent = `
+                <div style="min-width: 180px; font-family: 'Prompt', sans-serif;">
+                    <b style="font-size:15px; color:#1F2937;">${s.name}</b><br>
+                    <span style="font-size:10px; color:#6B7280;">ID: ${s.id}</span>
+                    
+                    ${dayBadge}
+
+                    <div style="margin-top: 8px;">
+                        <label style="font-size:11px; font-weight:bold; color:#4B5563; display:block; margin-bottom:4px;">แก้ไขสายวิ่ง:</label>
+                        <select onchange="StoreMgr.changeDay('${s.id}', this.value)" style="width: 100%; padding: 6px; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 12px; outline: none; cursor:pointer; background-color:#F9FAFB;">
+                            <option value="remove" ${!currentDay ? 'selected' : ''}>-- ❌ รอจัด (ถอดออก) --</option>
+                            ${opts.replace(`value="${currentDay}"`, `value="${currentDay}" selected`)}
+                        </select>
+                    </div>
+
+                    <button onclick="StoreMgr.toggleSelect('${s.id}')" style="margin-top: 12px; width: 100%; padding: 8px; font-size: 12px; font-weight: bold; color: white; background: ${s.selected ? '#EF4444' : '#4F46E5'}; border-radius: 6px; border: none; cursor: pointer; transition: 0.2s; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                        ${s.selected ? '❌ ยกเลิกเลือก' : '✅ เลือกร้านนี้'}
+                    </button>
+                </div>
+            `;
+
+            marker.bindPopup(popupContent);
             MapCtrl.markers.push(marker);
         });
     },
@@ -103,7 +133,6 @@ const OSRM = {
         let stores = State.stores.filter(s => s.days.includes(day)).sort((a,b) => (a.seqs[day]||999)-(b.seqs[day]||999));
         if(stores.length < 2) return alert("ต้องมีอย่างน้อย 2 ร้านในวันนี้ เพื่อวาดเส้นทางครับ");
 
-        // ป้องกันคอมค้างจากพิกัด OSRM เกิน limit
         if(stores.length > 90) {
             return alert("⚠️ ไม่สามารถวาดเส้นถนนได้ครับ เนื่องจากวันนี้มีร้านค้ากระจุกตัวเกิน 90 ร้าน");
         }
@@ -123,7 +152,6 @@ const OSRM = {
             MapCtrl.clearRoad(false);
 
             let color = DAY_COLORS[day].hex;
-            // สลับพิกัดจาก [Lng, Lat] เป็น [Lat, Lng]
             let routeCoords = data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
             
             let pl = L.polyline(routeCoords, { color: color, weight: 5, opacity: 0.8 }).addTo(MapCtrl.map);
