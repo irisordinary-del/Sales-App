@@ -123,7 +123,7 @@ const MapCtrl = {
 };
 
 // ==========================================
-// 🚗 2. ระบบวาดเส้นถนนจริง (OSRM API)
+// 🚗 2. ระบบวาดเส้นถนนจริง (OSRM API - มีเซิร์ฟเวอร์สำรอง)
 // ==========================================
 const OSRM = {
     generate: async () => {
@@ -137,24 +137,37 @@ const OSRM = {
             return alert("⚠️ ไม่สามารถวาดเส้นถนนได้ครับ เนื่องจากวันนี้มีร้านค้ากระจุกตัวเกิน 90 ร้าน");
         }
 
-        UI.showLoader("กำลังคำนวณเส้นทางถนนจริง...", "เชื่อมต่อ OSRM API");
+        UI.showLoader("กำลังคำนวณเส้นทางถนนจริง...", "กำลังเชื่อมต่อดาวเทียมนำทาง...");
         UI.closeDayModal();
 
         try {
             let coords = stores.map(s => `${s.lng},${s.lat}`).join(';');
-            let url = `https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`;
+            
+            // 🌟 URL 1: เซิร์ฟเวอร์ของเยอรมัน (เสถียรกว่า)
+            let url1 = `https://routing.openstreetmap.de/routed-car/route/v1/driving/${coords}?overview=full&geometries=geojson`;
+            // 🌟 URL 2: เซิร์ฟเวอร์สาธารณะหลัก (เผื่อตัวแรกพัง)
+            let url2 = `https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`;
 
-            let res = await fetch(url);
-            let data = await res.json();
+            let data;
+            try {
+                // ลองเซิร์ฟเวอร์แรกก่อน
+                let res = await fetch(url1);
+                data = await res.json();
+            } catch (e1) {
+                console.warn("เซิร์ฟเวอร์ 1 ล่ม, กำลังสลับไปเซิร์ฟเวอร์ 2...");
+                // ถ้าพัง สลับมาเซิร์ฟเวอร์สอง
+                let res2 = await fetch(url2);
+                data = await res2.json();
+            }
 
-            if(data.code !== 'Ok') throw new Error(data.message || "OSRM API Error");
+            if(!data || data.code !== 'Ok') throw new Error(data ? data.message : "ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้");
 
             MapCtrl.clearRoad(false);
 
             let color = DAY_COLORS[day].hex;
             let routeCoords = data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
             
-            let pl = L.polyline(routeCoords, { color: color, weight: 5, opacity: 0.8 }).addTo(MapCtrl.map);
+            let pl = L.polyline(routeCoords, { color: color, weight: 6, opacity: 0.8 }).addTo(MapCtrl.map);
             MapCtrl.roadLines.push(pl);
             
             MapCtrl.map.fitBounds(pl.getBounds(), { padding: [50, 50] });
@@ -164,7 +177,8 @@ const OSRM = {
 
         } catch(err) {
             UI.hideLoader();
-            alert("❌ เกิดข้อผิดพลาดในการวาดเส้นถนน: " + err.message);
+            alert("❌ เซิร์ฟเวอร์วาดเส้นทางฟรีทำงานหนักเกินไป (Failed to fetch)\n\nระบบบล็อกการดึงข้อมูลชั่วคราว โปรดลองกดวาดเส้นทางใหม่อีกครั้งในอีกสักครู่ครับ");
+            console.error(err);
         }
     }
 };
