@@ -4,10 +4,10 @@
 
 // 1. ศูนย์กลางจัดเก็บข้อมูล (State Management)
 const State = {
-    stores: [],                 // ข้อมูลร้านค้าในสายปัจจุบัน
-    sales: {},                  // ข้อมูลยอดขาย/KPI ที่ผูกกับร้านค้า
-    db: { routes: {}, cycleDays: 24 }, // โครงสร้างข้อมูลที่จะเซฟขึ้นคลาวด์
-    localActiveRoute: "402V02", // ชื่อสายวิ่งที่กำลังเปิดดูอยู่
+    stores: [],                 
+    sales: {},                  
+    db: { routes: {}, cycleDays: 24 }, 
+    localActiveRoute: "402V02", 
     activeRoadDay: null,
     openDayModal: null
 };
@@ -17,20 +17,23 @@ const App = {
     dbRef: null,
     
     init: () => {
-        // 🗺️ 1. สั่งเปิดแผนที่ให้โชว์ขึ้นมาก่อนเป็นอันดับแรก! (แก้ปัญหาจอขาว)
-        if (typeof MapCtrl !== 'undefined' && MapCtrl.init) {
-            MapCtrl.init();
+        // 🗺️ 1. สั่งเปิดแผนที่ให้โชว์ขึ้นมาก่อนเสมอ (แก้ปัญหาจอขาว)
+        if (typeof MapCtrl !== 'undefined' && MapCtrl.init && !MapCtrl.map) {
+            try { MapCtrl.init(); } catch(e) { console.warn("Map init alert:", e); }
         }
         
-        // 🔥 2. ตรวจสอบว่ามีไฟล์ app-config.js (รหัสฐานข้อมูล) หรือไม่
+        // 🔥 2. ตรวจสอบ Firebase (แบบยืดหยุ่น ไม่บล็อกระบบ)
         if (typeof firebase === 'undefined' || !firebase.apps.length) {
-            console.error("Firebase is not initialized.");
-            alert("⚠️ ไม่สามารถเชื่อมต่อฐานข้อมูลได้!\n\nระบบไม่พบการตั้งค่า Firebase โปรดตรวจสอบว่ามีไฟล์ 'app-config.js' อยู่ในโฟลเดอร์เดียวกับโปรเจกต์ และใส่รหัสถูกต้องหรือไม่ครับ");
-            return; // หยุดการทำงานตรงนี้ เพื่อไม่ให้แอปพัง
+            console.warn("⚠️ ไม่พบการตั้งค่า Firebase: เข้าสู่โหมดทำงานชั่วคราว");
+            // ถ้าคลาวด์พัง ให้จำลองข้อมูลเปล่าๆ ขึ้นมาเพื่อให้แอปทำงานต่อได้ ไม่หน้าขาว
+            State.db = { routes: { "Offline Route": [] }, cycleDays: 24 };
+            App.updateRouteSelector();
+            App.switchRoute("Offline Route");
+            ExcelIO.init();
+            return;
         }
         
         App.dbRef = firebase.firestore().collection('sales_app').doc('main_data');
-        
         UI.showLoader("กำลังโหลดข้อมูล...", "เชื่อมต่อฐานข้อมูลคลาวด์");
         App.loadDB();
         ExcelIO.init();
@@ -64,12 +67,15 @@ const App = {
         }).catch(err => {
             UI.hideLoader();
             console.error("Load DB Error:", err);
-            alert("❌ โหลดข้อมูลล้มเหลว: " + err.message);
+            // ถ้าโหลดไม่ได้จริงๆ ก็ให้เข้าโหมดออฟไลน์ แผนที่จะได้ไม่ขาว
+            State.db = { routes: { "Error Route": [] }, cycleDays: 24 };
+            App.updateRouteSelector();
+            App.switchRoute("Error Route");
         });
     },
     
     saveDB: () => {
-        if (!State.localActiveRoute) return;
+        if (!State.localActiveRoute || !App.dbRef) return;
         State.db.routes[State.localActiveRoute] = State.stores;
         
         App.updateStatusUI("⏳ กำลังบันทึก...", "yellow");
@@ -93,13 +99,12 @@ const App = {
     switchRoute: (routeName) => {
         State.localActiveRoute = routeName;
         State.stores = State.db.routes[routeName] || [];
-        
-        // รีเซ็ตสถานะการเลือกร้าน
         State.stores.forEach(s => s.selected = false);
         
-        UI.render();
-        MapCtrl.fitToStores();
-        document.getElementById('routeSelector').value = routeName;
+        if (typeof UI !== 'undefined' && UI.render) UI.render();
+        if (typeof MapCtrl !== 'undefined' && MapCtrl.fitToStores) MapCtrl.fitToStores();
+        let sel = document.getElementById('routeSelector');
+        if(sel) sel.value = routeName;
     },
 
     addRoute: () => {
@@ -194,7 +199,7 @@ const StoreMgr = {
             UI.render();
             UI.showSaveToast(`จัดลง ${DAY_COLORS[day].name} สำเร็จ ${count} ร้าน`);
         } else {
-            alert("กรุณาเลือกร้านค้าก่อนจัดวัน (ติ๊กถูกหน้าร้าน หรือใช้ Lasso เลือกบนแผนที่)");
+            alert("กรุณาเลือกร้านค้าก่อนจัดวัน");
         }
     },
     changeDay: (id, day) => {
@@ -240,7 +245,6 @@ const ExcelIO = {
                 
                 let newStores = [];
                 rows.forEach(r => {
-                    // ดึงหัวคอลัมน์หลายๆ แบบเผื่อพิมพ์ผิด
                     let id = r['รหัสร้านค้า'] || r['ID'] || r['Store ID'] || r['รหัส'] || r['id'];
                     let name = r['ชื่อร้านค้า'] || r['Name'] || r['Store Name'] || r['ชื่อร้าน'] || r['name'];
                     let lat = r['Lat'] || r['Latitude'] || r['ละติจูด'] || r['lat'];
@@ -254,18 +258,13 @@ const ExcelIO = {
                     let lngF = parseFloat(lng);
                     if(isNaN(latF) || isNaN(lngF)) return;
                     
-                    // 🌟 ระบบดึงตัวเลขวันสุดฉลาด (Smart Day Parser)
                     let days = [];
                     if (dayRaw !== undefined && dayRaw !== null && dayRaw !== '') {
                         let str = String(dayRaw).trim();
-                        // ค้นหาเฉพาะตัวเลขที่ซ่อนอยู่ในข้อความ
                         let match = str.match(/\d+/); 
                         if (match) {
                             let num = parseInt(match[0]);
-                            // ถ้าเลขอยู่ในช่วง 1 ถึง 30 ให้แปลงเป็นฟอร์แมตมาตรฐาน
-                            if (num >= 1 && num <= 30) {
-                                days = [`Day ${num}`];
-                            }
+                            if (num >= 1 && num <= 30) days = [`Day ${num}`];
                         }
                     }
                     
@@ -296,7 +295,7 @@ const ExcelIO = {
             }
         };
         reader.readAsArrayBuffer(file);
-        e.target.value = ''; // เคลียร์ไฟล์เดิมออกเผื่ออัปโหลดไฟล์เดิมซ้ำ
+        e.target.value = '';
     },
     
     export: () => {
@@ -307,7 +306,6 @@ const ExcelIO = {
             'ชื่อร้านค้า': s.name,
             'Lat': s.lat,
             'Lng': s.lng,
-            // 🌟 ตอน Export ออกไป จะส่งไปแค่ "ตัวเลข" เพียวๆ ครับ
             'วันวิ่งคิว': s.days.length ? parseInt(s.days[0].replace('Day ', '')) : '', 
             'ความถี่': s.freq
         }));
@@ -319,9 +317,6 @@ const ExcelIO = {
     }
 };
 
-// ==========================================
-// ส่วนเพิ่มเติม (ป้องกัน Error ถ้าโมดูลอื่นยังไม่โหลด)
-// ==========================================
 if (typeof RawDataMgr === 'undefined') {
     window.RawDataMgr = { clearAll: () => {}, applyImport: () => {} };
 }
