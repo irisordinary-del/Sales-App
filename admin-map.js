@@ -2,7 +2,7 @@
 // 1. ระบบจัดการแผนที่และหมุด (Map Controller)
 // ==========================================
 const MapCtrl = {
-    map: null, markers: [], lines: [], roadLines: [],
+    map: null, markers: [], lines: [], roadLines: [], failedStores: [],
     
     init: () => {
         MapCtrl.map = L.map('map').setView([13.7563, 100.5018], 10);
@@ -32,15 +32,22 @@ const MapCtrl = {
     
     fitToStores: () => {
         if(!State.stores.length) return;
-        let bounds = L.latLngBounds(State.stores.map(s => [s.lat, s.lng]));
-        MapCtrl.map.fitBounds(bounds, { padding: [30, 30] });
+        let bounds = L.latLngBounds(State.stores.map(s => {
+            // เช็คว่าพิกัดพังไหมก่อนหาขอบเขต
+            let lat = parseFloat(s.lat), lng = parseFloat(s.lng);
+            if(isNaN(lat) || isNaN(lng) || lat===0 || lng===0) return null;
+            if (Math.abs(lat) > 90) return [lng, lat]; // สลับกลับชั่วคราวเพื่อให้ fitBounds ทำงานได้
+            return [lat, lng];
+        }).filter(b => b !== null));
+        
+        if(Object.keys(bounds).length > 0) {
+            MapCtrl.map.fitBounds(bounds, { padding: [30, 30] });
+        }
     },
     
     closePopups: () => { MapCtrl.map.closePopup(); },
     
-// 🌟 พระเอกกลับมาแล้ว: หมุดรูปหยดน้ำ มีตัวเลขด้านใน + กล่อง Popup แบบเดิม (พร้อมระบบซ่อมพิกัดอัตโนมัติ)
-    // 🌟 หมุดรูปหยดน้ำ + ระบบตรวจจับร้านที่พิกัดพัง (Error Radar)
-   // 🌟 หมุดรูปหยดน้ำ + ระบบตรวจเช็คยอดหมุด (Marker Status Radar)
+    // 🌟 หมุดรูปหยดน้ำ + ระบบตรวจเช็คยอดหมุด (Marker Status Radar)
     renderMarkers: () => {
         if (!MapCtrl.map) return;
         MapCtrl.markers.forEach(m => MapCtrl.map.removeLayer(m)); 
@@ -75,7 +82,7 @@ const MapCtrl = {
                 let borderColor = s.selected ? '#000' : 'white';
 
                 let iconHtml = `
-                    <div style="position: relative; width: 28px; height: 38px; transform: ${scale};">
+                    <div style="position: relative; width: 28px; height: 38px; transform: ${scale}; z-index: ${s.selected ? 1000 : 1};">
                         <div style="position: absolute; top: 0; left: 0; width: 28px; height: 28px; background-color: ${color}; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); border: 2px solid ${borderColor}; box-shadow: 2px 2px 5px rgba(0,0,0,0.4);"></div>
                         <div style="position: absolute; top: 0; left: 0; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; color: white; font-size: 12px; font-weight: 900; text-shadow: 1px 1px 2px rgba(0,0,0,0.8); z-index: 2;">
                             ${dayNum}
@@ -86,18 +93,21 @@ const MapCtrl = {
                 let marker = L.marker([lat, lng], { icon: icon }).addTo(MapCtrl.map);
                 
                 let currentDay = (s.days && s.days.length) ? s.days[0] : '';
-                let dayBadge = currentDay ? `<div style="background:${color}; color:white; padding:6px; border-radius:8px; font-size:13px; font-weight:bold; text-align:center; margin:10px 0;">📅 ${DAY_COLORS[currentDay].name}</div>` : `<div style="background:#9CA3AF; color:white; padding:6px; border-radius:8px; font-size:13px; font-weight:bold; text-align:center; margin:10px 0;">❌ ยังไม่จัดสาย</div>`;
+                let dayBadge = currentDay ? `<div style="background:${color}; color:white; padding:6px; border-radius:8px; font-size:13px; font-weight:bold; text-align:center; margin:10px 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">📅 ${DAY_COLORS[currentDay].name}</div>` : `<div style="background:#9CA3AF; color:white; padding:6px; border-radius:8px; font-size:13px; font-weight:bold; text-align:center; margin:10px 0;">❌ ยังไม่จัดสาย</div>`;
 
                 let popupContent = `
                     <div style="min-width: 180px; font-family: 'Prompt', sans-serif;">
-                        <b style="font-size:15px;">${s.name}</b><br>
-                        <span style="font-size:10px; color:gray;">ID: ${s.id}</span>
+                        <b style="font-size:15px; color:#1F2937;">${s.name}</b><br>
+                        <span style="font-size:10px; color:#6B7280;">ID: ${s.id}</span>
                         ${dayBadge}
-                        <select onchange="StoreMgr.changeDay('${s.id}', this.value)" style="width:100%; padding:6px; border-radius:6px; font-size:12px; background-color:#F9FAFB;">
-                            <option value="remove">-- ❌ ถอดออกจากสาย --</option>
-                            ${opts.replace(`value="${currentDay}"`, `value="${currentDay}" selected`)}
-                        </select>
-                        <button onclick="StoreMgr.toggleSelect('${s.id}')" style="margin-top:10px; width:100%; padding:8px; color:white; background:${s.selected?'#EF4444':'#4F46E5'}; border-radius:6px; border:none; font-weight:bold; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                        <div style="margin-top: 8px;">
+                            <label style="font-size:11px; font-weight:bold; color:#4B5563; display:block; margin-bottom:4px;">แก้ไขสายวิ่ง:</label>
+                            <select onchange="StoreMgr.changeDay('${s.id}', this.value)" style="width:100%; padding:6px; border: 1px solid #D1D5DB; border-radius:6px; font-size:12px; background-color:#F9FAFB; cursor:pointer;">
+                                <option value="remove">-- ❌ รอจัด (ถอดออก) --</option>
+                                ${opts.replace(`value="${currentDay}"`, `value="${currentDay}" selected`)}
+                            </select>
+                        </div>
+                        <button onclick="StoreMgr.toggleSelect('${s.id}')" style="margin-top:12px; width:100%; padding:8px; color:white; background:${s.selected?'#EF4444':'#4F46E5'}; border-radius:6px; border:none; font-weight:bold; box-shadow: 0 2px 4px rgba(0,0,0,0.1); cursor:pointer;">
                             ${s.selected ? '❌ ยกเลิกเลือก' : '✅ เลือกร้านนี้'}
                         </button>
                     </div>`;
@@ -133,7 +143,7 @@ const MapCtrl = {
             statusBtn.className = 'absolute bottom-20 right-6 z-[400] bg-red-50 text-red-600 font-bold px-4 py-2.5 rounded-xl shadow-lg border border-red-200 hover:bg-red-100 transition flex items-center gap-2 animate-pulse text-sm';
             statusBtn.innerHTML = `⚠️ หมุดหาย ${failedCount} ร้าน (คลิกดู)`;
             statusBtn.onclick = () => {
-                alert(`📊 สรุปข้อมูล:\n- รายชื่อทั้งหมด: ${totalStores} ร้าน\n- สร้างหมุดสำเร็จ: ${successMarkers} หมุด\n- สร้างไม่สำเร็จ: ${failedCount} ร้าน\n\n⚠️ รายชื่อร้านที่พิกัดมีปัญหา (Lat/Lng ว่างหรือผิดปกติ):\n${MapCtrl.failedStores.join("\n")}\n\n👉 โปรดไปแก้พิกัดในไฟล์ Excel แล้วอัปโหลดใหม่ครับ`);
+                alert(`📊 สรุปข้อมูล:\n- รายชื่อทั้งหมด: ${totalStores} ร้าน\n- สร้างหมุดสำเร็จ: ${successMarkers} หมุด\n- สร้างไม่สำเร็จ: ${failedCount} ร้าน\n\n⚠️ รายชื่อร้านที่พิกัดมีปัญหา (Lat/Lng ว่าง หรือ ผิดปกติ):\n${MapCtrl.failedStores.join("\n")}\n\n👉 โปรดไปแก้พิกัดในไฟล์ Excel แล้วอัปโหลดใหม่ครับ`);
             };
             statusBtn.style.display = 'flex';
         } else if (totalStores > 0) {
@@ -148,28 +158,8 @@ const MapCtrl = {
             // กรณีล้างสาย (ไม่มีข้อมูล)
             statusBtn.style.display = 'none';
         }
-    },
 
-        // 🚨 สร้างปุ่มแจ้งเตือนสีแดงกระพริบ บนมุมขวาล่างของแผนที่
-        let warnBtn = document.getElementById('map-warn-btn');
-        if (MapCtrl.failedStores.length > 0) {
-            if (!warnBtn) {
-                warnBtn = document.createElement('button');
-                warnBtn.id = 'map-warn-btn';
-                // ตกแต่งปุ่มให้เป็นสีแดงเตะตา พร้อมเอฟเฟกต์กระพริบเบาๆ (animate-pulse)
-                warnBtn.className = 'absolute bottom-20 right-6 z-[400] bg-red-50 text-red-600 font-bold px-4 py-3 rounded-xl shadow-lg border border-red-200 hover:bg-red-100 transition flex items-center gap-2 animate-pulse';
-                warnBtn.onclick = () => {
-                    alert(`⚠️ มี ${MapCtrl.failedStores.length} ร้านที่ไม่แสดงบนแผนที่ เนื่องจากพิกัด (Lat/Lng) ว่างเปล่า หรือมีข้อผิดพลาดครับ:\n\n${MapCtrl.failedStores.join("\n")}\n\n👉 โปรดไปแก้ในไฟล์ Excel แล้วอัปโหลดใหม่ครับ`);
-                };
-                // แปะปุ่มลงไปบนกล่องแผนที่
-                document.getElementById('map').parentElement.appendChild(warnBtn);
-            }
-            warnBtn.innerHTML = `⚠️ พบปัญหาพิกัด ${MapCtrl.failedStores.length} ร้าน (คลิกดู)`;
-            warnBtn.style.display = 'flex';
-        } else {
-            // ถ้าพิกัดเป๊ะทุกร้าน ก็ซ่อนปุ่มทิ้งไป
-            if (warnBtn) warnBtn.style.display = 'none';
-        }
+        MapCtrl.drawLines(); // วาดเส้นเชื่อมโยงหลังจากวาดหมุดเสร็จ
     },
     
     drawLines: () => {
@@ -179,7 +169,7 @@ const MapCtrl = {
         
         let dayGroups = {};
         State.stores.forEach(s => {
-            if(s.days.length) { 
+            if(s.days && s.days.length) { 
                 s.days.forEach(d => { 
                     if(!dayGroups[d]) dayGroups[d] = []; 
                     dayGroups[d].push(s); 
@@ -188,8 +178,19 @@ const MapCtrl = {
         });
 
         Object.keys(dayGroups).forEach(d => {
-            let pts = dayGroups[d].sort((a,b) => (a.seqs[d]||999)-(b.seqs[d]||999)).map(x => [x.lat, x.lng]);
-            if(pts.length > 1) {
+            let pts = dayGroups[d]
+                .filter(x => {
+                    let lat = parseFloat(x.lat), lng = parseFloat(x.lng);
+                    return !isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0;
+                })
+                .sort((a,b) => (a.seqs[d]||999)-(b.seqs[d]||999))
+                .map(x => {
+                    let lat = parseFloat(x.lat), lng = parseFloat(x.lng);
+                    if (Math.abs(lat) > 90) return [lng, lat]; // ซ่อมพิกัดสลับ
+                    return [lat, lng];
+                });
+                
+            if(pts.length > 1 && DAY_COLORS[d]) {
                 let pl = L.polyline(pts, { color: DAY_COLORS[d].hex, weight: 2, opacity: 0.6, dashArray: '5, 5' }).addTo(MapCtrl.map);
                 MapCtrl.lines.push(pl);
             }
@@ -205,10 +206,17 @@ const OSRM = {
         let day = State.openDayModal;
         if(!day) return alert("กรุณาเลือกวันก่อน");
         
-        let stores = State.stores.filter(s => s.days.includes(day)).sort((a,b) => (a.seqs[day]||999)-(b.seqs[day]||999));
-        if(stores.length < 2) return alert("ต้องมีอย่างน้อย 2 ร้านในวันนี้ เพื่อวาดเส้นทางครับ");
+        let stores = State.stores.filter(s => s.days && s.days.includes(day)).sort((a,b) => (a.seqs[day]||999)-(b.seqs[day]||999));
+        
+        // กรองร้านที่พิกัดพังออกก่อนส่งไปให้ OSRM วาด
+        let validStores = stores.filter(s => {
+            let lat = parseFloat(s.lat), lng = parseFloat(s.lng);
+            return !isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0;
+        });
 
-        if(stores.length > 90) {
+        if(validStores.length < 2) return alert("ต้องมีหมุดอย่างน้อย 2 ร้านที่มีพิกัดถูกต้องในวันนี้ เพื่อวาดเส้นทางครับ");
+
+        if(validStores.length > 90) {
             return alert("⚠️ ไม่สามารถวาดเส้นถนนได้ครับ เนื่องจากวันนี้มีร้านค้ากระจุกตัวเกิน 90 ร้าน");
         }
 
@@ -216,7 +224,11 @@ const OSRM = {
         UI.closeDayModal();
 
         try {
-            let coords = stores.map(s => `${s.lng},${s.lat}`).join(';');
+            let coords = validStores.map(s => {
+                let lat = parseFloat(s.lat), lng = parseFloat(s.lng);
+                if (Math.abs(lat) > 90) return `${lat},${lng}`; // สลับ Lng, Lat ให้ถูกต้อง
+                return `${lng},${lat}`;
+            }).join(';');
             
             // 🌟 URL 1: เซิร์ฟเวอร์ของเยอรมัน (เสถียรกว่า)
             let url1 = `https://routing.openstreetmap.de/routed-car/route/v1/driving/${coords}?overview=full&geometries=geojson`;
@@ -225,12 +237,10 @@ const OSRM = {
 
             let data;
             try {
-                // ลองเซิร์ฟเวอร์แรกก่อน
                 let res = await fetch(url1);
                 data = await res.json();
             } catch (e1) {
                 console.warn("เซิร์ฟเวอร์ 1 ล่ม, กำลังสลับไปเซิร์ฟเวอร์ 2...");
-                // ถ้าพัง สลับมาเซิร์ฟเวอร์สอง
                 let res2 = await fetch(url2);
                 data = await res2.json();
             }
@@ -239,7 +249,7 @@ const OSRM = {
 
             MapCtrl.clearRoad(false);
 
-            let color = DAY_COLORS[day].hex;
+            let color = DAY_COLORS[day] ? DAY_COLORS[day].hex : '#4F46E5';
             let routeCoords = data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
             
             let pl = L.polyline(routeCoords, { color: color, weight: 6, opacity: 0.8 }).addTo(MapCtrl.map);
@@ -299,7 +309,11 @@ const Lasso = {
         if (!Lasso.polygon || Lasso.points.length < 3) return alert('กรุณาวาดพื้นที่ให้สมบูรณ์');
         let selCount = 0;
         State.stores.forEach(s => {
-            if (Lasso.isPointInPoly(L.latLng(s.lat, s.lng), Lasso.points)) {
+            let lat = parseFloat(s.lat), lng = parseFloat(s.lng);
+            if (isNaN(lat) || isNaN(lng) || lat === 0 || lng === 0) return;
+            if (Math.abs(lat) > 90) { let t = lat; lat = lng; lng = t; }
+
+            if (Lasso.isPointInPoly(L.latLng(lat, lng), Lasso.points)) {
                 s.selected = true;
                 selCount++;
             }
