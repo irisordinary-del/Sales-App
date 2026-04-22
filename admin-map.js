@@ -38,21 +38,37 @@ const MapCtrl = {
     
     closePopups: () => { MapCtrl.map.closePopup(); },
     
-    // 🌟 พระเอกกลับมาแล้ว: หมุดรูปหยดน้ำ มีตัวเลขด้านใน + กล่อง Popup แบบเดิม
+// 🌟 พระเอกกลับมาแล้ว: หมุดรูปหยดน้ำ มีตัวเลขด้านใน + กล่อง Popup แบบเดิม (พร้อมระบบซ่อมพิกัดอัตโนมัติ)
     renderMarkers: () => {
         MapCtrl.markers.forEach(m => MapCtrl.map.removeLayer(m)); MapCtrl.markers = [];
         
         const opts = Object.keys(DAY_COLORS).map(d => `<option value="${d}">${DAY_COLORS[d].name}</option>`).join('');
 
         State.stores.forEach(s => {
-            let color = s.days.length ? DAY_COLORS[s.days[0]].hex : '#9CA3AF';
-            let dayNum = s.days.length ? s.days[0].replace('Day ', '') : '';
+            // 🛡️ 1. ระบบป้องกันและซ่อมแซมพิกัด (Auto-Fix Coordinates)
+            let lat = parseFloat(s.lat);
+            let lng = parseFloat(s.lng);
+            
+            // ถ้าค่าไม่ใช่ตัวเลข ให้ข้ามไปเลย แผนที่จะได้ไม่พัง
+            if (isNaN(lat) || isNaN(lng)) return; 
+            
+            // ถ้า Lat เกิน 90 แสดงว่าสลับคอลัมน์กันมาแน่นอน (ไทย Lng ต้องเป็นหลักร้อย) -> ให้สลับกลับอัตโนมัติ
+            if (Math.abs(lat) > 90 && Math.abs(lng) <= 90) {
+                let temp = lat;
+                lat = lng;
+                lng = temp;
+            }
+            
+            // 🛡️ 2. ป้องกันไม่ให้วาดพิกัดที่ผิดปกติสุดๆ (เช่น 0,0 ตกทะเล)
+            if (lat === 0 || lng === 0) return;
+
+            let color = s.days && s.days.length ? DAY_COLORS[s.days[0]].hex : '#9CA3AF';
+            let dayNum = s.days && s.days.length ? s.days[0].replace('Day ', '') : '';
             
             let scale = s.selected ? 'scale(1.2)' : 'scale(1)';
             let zIndex = s.selected ? 1000 : 1;
             let borderColor = s.selected ? '#000' : 'white';
 
-            // ดีไซน์หมุดหยดน้ำแบบในรูปของคุณเป๊ะๆ
             let iconHtml = `
                 <div style="position: relative; width: 28px; height: 38px; transform: ${scale}; z-index: ${zIndex};">
                     <div style="position: absolute; top: 0; left: 0; width: 28px; height: 28px; background-color: ${color}; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); border: 2px solid ${borderColor}; box-shadow: 2px 2px 5px rgba(0,0,0,0.4);"></div>
@@ -63,37 +79,40 @@ const MapCtrl = {
             `;
             
             let icon = L.divIcon({ className: 'custom-icon', html: iconHtml, iconSize: [28, 38], iconAnchor: [14, 38] });
-            let marker = L.marker([s.lat, s.lng], { icon: icon }).addTo(MapCtrl.map);
             
-            let currentDay = s.days.length ? s.days[0] : '';
-            
-            // ป้ายบอกวันสีเขียว (หรือสีตามวัน) ตรงกลางกล่อง
-            let dayBadge = currentDay ? `<div style="background:${color}; color:white; padding:6px; border-radius:8px; font-size:13px; font-weight:bold; text-align:center; margin:10px 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">📅 ${DAY_COLORS[currentDay].name}</div>` : `<div style="background:#9CA3AF; color:white; padding:6px; border-radius:8px; font-size:13px; font-weight:bold; text-align:center; margin:10px 0;">❌ ยังไม่จัดสาย</div>`;
+            try {
+                // วาดหมุดลงแผนที่ (ถ้า error ระบบจะไป catch ไม่ทำให้พังทั้งจอ)
+                let marker = L.marker([lat, lng], { icon: icon }).addTo(MapCtrl.map);
+                
+                let currentDay = s.days && s.days.length ? s.days[0] : '';
+                let dayBadge = currentDay ? `<div style="background:${color}; color:white; padding:6px; border-radius:8px; font-size:13px; font-weight:bold; text-align:center; margin:10px 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">📅 ${DAY_COLORS[currentDay].name}</div>` : `<div style="background:#9CA3AF; color:white; padding:6px; border-radius:8px; font-size:13px; font-weight:bold; text-align:center; margin:10px 0;">❌ ยังไม่จัดสาย</div>`;
 
-            // ดีไซน์ Popup แบบเดียวกับในรูปเป๊ะๆ
-            let popupContent = `
-                <div style="min-width: 180px; font-family: 'Prompt', sans-serif;">
-                    <b style="font-size:15px; color:#1F2937;">${s.name}</b><br>
-                    <span style="font-size:10px; color:#6B7280;">ID: ${s.id}</span>
-                    
-                    ${dayBadge}
+                let popupContent = `
+                    <div style="min-width: 180px; font-family: 'Prompt', sans-serif;">
+                        <b style="font-size:15px; color:#1F2937;">${s.name}</b><br>
+                        <span style="font-size:10px; color:#6B7280;">ID: ${s.id}</span>
+                        
+                        ${dayBadge}
 
-                    <div style="margin-top: 8px;">
-                        <label style="font-size:11px; font-weight:bold; color:#4B5563; display:block; margin-bottom:4px;">แก้ไขสายวิ่ง:</label>
-                        <select onchange="StoreMgr.changeDay('${s.id}', this.value)" style="width: 100%; padding: 6px; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 12px; outline: none; cursor:pointer; background-color:#F9FAFB;">
-                            <option value="remove" ${!currentDay ? 'selected' : ''}>-- ❌ รอจัด (ถอดออก) --</option>
-                            ${opts.replace(`value="${currentDay}"`, `value="${currentDay}" selected`)}
-                        </select>
+                        <div style="margin-top: 8px;">
+                            <label style="font-size:11px; font-weight:bold; color:#4B5563; display:block; margin-bottom:4px;">แก้ไขสายวิ่ง:</label>
+                            <select onchange="StoreMgr.changeDay('${s.id}', this.value)" style="width: 100%; padding: 6px; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 12px; outline: none; cursor:pointer; background-color:#F9FAFB;">
+                                <option value="remove" ${!currentDay ? 'selected' : ''}>-- ❌ รอจัด (ถอดออก) --</option>
+                                ${opts.replace(`value="${currentDay}"`, `value="${currentDay}" selected`)}
+                            </select>
+                        </div>
+
+                        <button onclick="StoreMgr.toggleSelect('${s.id}')" style="margin-top: 12px; width: 100%; padding: 8px; font-size: 12px; font-weight: bold; color: white; background: ${s.selected ? '#EF4444' : '#4F46E5'}; border-radius: 6px; border: none; cursor: pointer; transition: 0.2s; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                            ${s.selected ? '❌ ยกเลิกเลือก' : '✅ เลือกร้านนี้'}
+                        </button>
                     </div>
+                `;
 
-                    <button onclick="StoreMgr.toggleSelect('${s.id}')" style="margin-top: 12px; width: 100%; padding: 8px; font-size: 12px; font-weight: bold; color: white; background: ${s.selected ? '#EF4444' : '#4F46E5'}; border-radius: 6px; border: none; cursor: pointer; transition: 0.2s; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                        ${s.selected ? '❌ ยกเลิกเลือก' : '✅ เลือกร้านนี้'}
-                    </button>
-                </div>
-            `;
-
-            marker.bindPopup(popupContent);
-            MapCtrl.markers.push(marker);
+                marker.bindPopup(popupContent);
+                MapCtrl.markers.push(marker);
+            } catch (err) {
+                console.error("ข้ามการวาดพิกัดที่มีปัญหาของร้าน:", s.name, err);
+            }
         });
     },
     
