@@ -70,15 +70,18 @@
                     </div>
                     
                     <div class="flex-1 overflow-y-auto p-4 bg-gray-50/50">
-                        <div id="tab1" class="block space-y-5">
-                            <div class="bg-white p-4 rounded-2xl border border-gray-200 shadow-sm">
-                                <h3 class="font-bold text-sm text-gray-800 mb-2">📍 ข้อมูลพิกัดร้านค้า (Master Data)</h3>
-                                <div onclick="document.getElementById('fileUpload').click()" class="border-2 border-dashed border-indigo-300 bg-indigo-50 rounded-xl p-4 text-center cursor-pointer mb-3"><p class="text-xl mb-1">📂</p><p class="text-xs text-indigo-800 font-bold">อัปโหลดไฟล์แผนที่</p></div>
-                                <input type="file" id="fileUpload" accept=".xlsx, .xls, .csv" class="hidden">
-                                <div class="flex gap-2"><button onclick="App.clearStores()" class="flex-1 bg-red-50 text-red-600 py-2 rounded-lg text-xs font-bold border border-red-100">ล้างสายนี้</button><button onclick="StoreMgr.clearSelection()" class="flex-1 bg-gray-100 text-gray-700 py-2 rounded-lg text-xs font-bold border border-gray-200">ยกเลิกเลือก</button></div>
+                        <div id="tab1" class="block space-y-4">
+                            <div class="p-6 bg-indigo-50 border-2 border-dashed border-indigo-200 rounded-2xl text-center relative hover:bg-indigo-100 transition">
+                                <input type="file" id="fileUpload" class="absolute inset-0 opacity-0 cursor-pointer">
+                                <p class="text-xs font-bold text-indigo-700">📁 อัปโหลดไฟล์ Excel (.xlsx)</p>
                             </div>
-                            <input type="text" onkeyup="UI.filterList('list-upload', this.value)" placeholder="ค้นหาร้าน..." class="w-full p-2.5 border border-gray-300 rounded-xl text-sm outline-none shadow-inner">
-                            <div id="list-upload" class="space-y-2 mt-2"></div>
+                            
+                            <button onclick="StoreMgr.clearAllAssignments()" class="w-full py-2.5 bg-red-50 text-red-600 text-xs font-bold rounded-xl border border-red-200 hover:bg-red-100 transition shadow-sm flex justify-center items-center gap-2">
+                                🗑️ ล้างการจัดสายทั้งหมด (รีเซ็ตหมุด)
+                            </button>
+    
+                            <input type="text" onkeyup="UI.filterList('list-upload', this.value)" placeholder="ค้นหาร้าน..." class="w-full p-3 bg-gray-100 rounded-xl text-xs outline-none focus:ring-2 focus:ring-indigo-400">
+                            <div id="list-upload" class="space-y-2"></div>
                         </div>
 
                         <div id="tab2" class="hidden space-y-4">
