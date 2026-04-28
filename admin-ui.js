@@ -1,171 +1,66 @@
-// ==========================================
-// 🎨 admin-ui.js: จัดการหน้าจอแสดงผลและสี
-// ==========================================
-
-var DAY_COLORS = {
-    "Day 1": { name: "Day 1", hex: "#EF4444" }, "Day 2": { name: "Day 2", hex: "#F97316" },
-    "Day 3": { name: "Day 3", hex: "#F59E0B" }, "Day 4": { name: "Day 4", hex: "#EAB308" },
-    "Day 5": { name: "Day 5", hex: "#84CC16" }, "Day 6": { name: "Day 6", hex: "#22C55E" },
-    "Day 7": { name: "Day 7", hex: "#10B981" }, "Day 8": { name: "Day 8", hex: "#14B8A6" },
-    "Day 9": { name: "Day 9", hex: "#06B6D4" }, "Day 10": { name: "Day 10", hex: "#0EA5E9" },
-    "Day 11": { name: "Day 11", hex: "#3B82F6" }, "Day 12": { name: "Day 12", hex: "#6366F1" },
-    "Day 13": { name: "Day 13", hex: "#8B5CF6" }, "Day 14": { name: "Day 14", hex: "#A855F7" },
-    "Day 15": { name: "Day 15", hex: "#D946EF" }, "Day 16": { name: "Day 16", hex: "#EC4899" },
-    "Day 17": { name: "Day 17", hex: "#F43F5E" }, "Day 18": { name: "Day 18", hex: "#991B1B" },
-    "Day 19": { name: "Day 19", hex: "#9A3412" }, "Day 20": { name: "Day 20", hex: "#B45309" },
-    "Day 21": { name: "Day 21", hex: "#4D7C0F" }, "Day 22": { name: "Day 22", hex: "#15803D" },
-    "Day 23": { name: "Day 23", hex: "#047857" }, "Day 24": { name: "Day 24", hex: "#0F766E" },
-    "Day 25": { name: "Day 25", hex: "#0369A1" }, "Day 26": { name: "Day 26", hex: "#1D4ED8" },
-    "Day 27": { name: "Day 27", hex: "#4338CA" }, "Day 28": { name: "Day 28", hex: "#6D28D9" },
-    "Day 29": { name: "Day 29", hex: "#7E22CE" }, "Day 30": { name: "Day 30", hex: "#BE185D" }
-};
+var DAY_COLORS = {};
+for(let i=1; i<=30; i++) {
+    DAY_COLORS[`Day ${i}`] = { name: `Day ${i}`, hex: `hsl(${(i * 137) % 360}, 70%, 50%)` };
+}
 
 var Nav = {
-    go: (page) => {
-        document.querySelectorAll('.sidebar-menu').forEach(b => b.classList.remove('active', 'text-emerald-400'));
-        let navBtn = document.getElementById('nav-' + page);
-        if(navBtn) navBtn.classList.add('active');
-        
-        ['planning', 'data', 'kpi'].forEach(p => {
-            let el = document.getElementById('page-' + p);
-            if (el) el.classList.add('hidden');
-        });
-        
-        let targetPage = document.getElementById('page-' + page);
-        if (targetPage) targetPage.classList.remove('hidden');
-        
-        if(page === 'planning') setTimeout(() => { if (typeof MapCtrl !== 'undefined' && MapCtrl.map) MapCtrl.map.invalidateSize(); }, 200);
+    go: (p) => {
+        document.querySelectorAll('.sidebar-menu').forEach(x => x.classList.remove('active'));
+        document.getElementById('nav-'+p).classList.add('active');
+        document.getElementById('page-planning').classList.toggle('hidden', p !== 'planning');
+        if(p === 'planning') setTimeout(() => MapCtrl.map.invalidateSize(), 200);
     }
 };
 
 var UI = {
-    timeout: null,
-    showLoader: (text, sub) => { 
-        let lt = document.getElementById('loader-text');
-        let ls = document.getElementById('loader-subtext');
-        let l = document.getElementById('loader');
-        if(lt) lt.innerText = text; if(ls) ls.innerText = sub || ""; if(l) l.style.display = 'flex'; 
+    showLoader: (t) => { document.getElementById('loader-text').innerText = t; document.getElementById('loader').style.display = 'flex'; },
+    hideLoader: () => { document.getElementById('loader').style.display = 'none'; },
+    showStatus: (t, c) => {
+        let el = document.getElementById('db-status');
+        el.innerText = t; el.className = `p-4 text-[10px] font-bold text-center text-${c}-400`;
     },
-    hideLoader: () => { 
-        let l = document.getElementById('loader');
-        if(l) l.style.display = 'none'; 
-    },
-    showSaveToast: (msg) => { 
-        let t = document.getElementById('save-toast'), tm = document.getElementById('toast-msg');
-        if(!t || !tm) return;
-        tm.innerText = msg; t.classList.remove('translate-y-24', 'opacity-0'); 
-        setTimeout(() => t.classList.add('translate-y-24', 'opacity-0'), 2500); 
-    },
-    initDaySelector: () => { 
-        let ds = document.getElementById('assign-day'); 
-        if(ds) ds.innerHTML = Object.keys(DAY_COLORS).map(d => `<option value="${d}">${DAY_COLORS[d].name}</option>`).join(''); 
-    },
-    switchTab: (id) => { 
-        document.querySelectorAll('.tab-btn').forEach(b => { b.classList.remove('active','border-indigo-600','text-indigo-800'); b.classList.add('text-gray-500'); }); 
-        document.querySelectorAll('div[id^="tab"]').forEach(d => { d.classList.add('hidden'); d.classList.remove('block'); }); 
-        let btn = document.getElementById('btn-'+id); if(btn) { btn.classList.add('active','border-indigo-600', 'text-indigo-800'); btn.classList.remove('text-gray-500'); }
-        let tab = document.getElementById(id); if(tab) { tab.classList.remove('hidden'); tab.classList.add('block'); }
-    },
-    filterList: (id, val) => { 
-        clearTimeout(UI.timeout); 
-        UI.timeout = setTimeout(() => { 
-            let q = val.toLowerCase().trim(), c = document.getElementById(id); 
-            if(c) for(let el of c.children) el.style.display = el.textContent.toLowerCase().includes(q) ? "" : "none"; 
-        }, 200); 
+    switchTab: (id) => {
+        document.querySelectorAll('.tab-btn').forEach(x => x.classList.remove('active', 'border-sky-600', 'text-sky-800'));
+        document.getElementById('btn-'+id).classList.add('active', 'border-sky-600', 'text-sky-800');
+        document.querySelectorAll('div[id^="tab"]').forEach(x => x.classList.add('hidden'));
+        document.getElementById(id).classList.remove('hidden');
     },
     render: () => {
-        if (typeof State === 'undefined' || !State.stores) return;
-        let htmlU=[], htmlA=[], htmlP=[], sums={}, aCnt=0;
-        for(let i=1; i<=30; i++) sums[`Day ${i}`] = 0;
-        
-        State.stores.forEach(s => { 
-            if (s.days && s.days.length && !DAY_COLORS[s.days[0]]) s.days = []; 
-            if(s.days && s.days.length) { aCnt++; s.days.forEach(d => sums[d]++); } 
-        });
-        
-        let ds = document.getElementById('assign-day'), cv = ds ? ds.value : null;
-        if(ds) { ds.innerHTML = Object.keys(DAY_COLORS).map(d => `<option value="${d}">${DAY_COLORS[d].name}${sums[d]>0 ? ` (${sums[d]})` : ''}</option>`).join(''); if(cv) ds.value = cv; }
-        const opts = Object.keys(DAY_COLORS).map(d => `<option value="${d}">${DAY_COLORS[d].name}</option>`).join('');
-
-        State.stores.forEach(s => {
-            let b = s.freq === 2 ? `<span class="bg-orange-100 text-orange-600 px-1 py-0.5 rounded text-[10px] font-bold ml-1">F2</span>` : '';
-            htmlP.push(`<div class="p-3 bg-white border border-gray-200 rounded-xl shadow-sm"><div class="flex justify-between items-start"><span class="font-bold text-sm text-gray-800">${s.name} ${b}</span></div><span class="block text-[10px] text-gray-400 font-mono mt-1">ID: ${s.id}</span></div>`);
-            
-            if(!s.days || !s.days.length) {
-                htmlU.push(`
-                    <label class="flex p-3 bg-white border ${s.selected ? 'border-indigo-400 ring-1 ring-indigo-400 bg-indigo-50' : 'border-gray-200'} rounded-2xl cursor-pointer shadow-sm">
-                        <input type="checkbox" ${s.selected ? 'checked' : ''} onchange="StoreMgr.toggleSelect('${s.id}')" class="mr-3 mt-1.5 w-4 h-4 text-indigo-600 rounded">
-                        <div class="flex-1"><p class="font-bold text-sm text-gray-800">${s.name} ${b}</p><p class="text-[10px] text-gray-400 font-mono mt-0.5">ID: ${s.id}</p></div>
-                    </label>`);
+        let h1=[], h2=[], h3=[], sums={};
+        GlobalState.stores.forEach(s => {
+            let b = `<div class="p-3 bg-white border rounded-xl shadow-sm text-xs"><b>${s.name}</b><br><span class="text-gray-400">ID: ${s.id}</span></div>`;
+            h1.push(b);
+            if(!s.days.length) {
+                h2.push(`<label class="flex items-center gap-3 p-3 bg-white border rounded-xl ${s.selected?'border-sky-500 bg-sky-50':''}"><input type="checkbox" ${s.selected?'checked':''} onchange="StoreMgr.toggleSelect('${s.id}')"> <span class="text-xs"><b>${s.name}</b></span></label>`);
             } else {
-                let dTxt = s.days.join(' & '), c = DAY_COLORS[s.days[0]] ? DAY_COLORS[s.days[0]].hex : '#9CA3AF'; 
-                htmlA.push(`
-                    <div id="card-${s.id}" class="p-3 bg-white border border-gray-200 rounded-2xl flex justify-between items-center shadow-sm">
-                        <div class="flex-1 overflow-hidden mr-2">
-                            <p class="font-bold text-sm text-gray-800 truncate">${s.name} ${b}</p>
-                            <p class="text-[10px] text-gray-400 font-mono mt-0.5">ID: ${s.id}</p>
-                            <p class="text-[11px] font-bold mt-1.5 flex items-center gap-1"><span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:${c};"></span>${dTxt}</p>
-                        </div>
-                        <div class="flex gap-1.5">
-                            <select onchange="StoreMgr.changeDay('${s.id}', this.value)" class="text-xs p-1 border border-gray-200 rounded-lg outline-none bg-gray-50 cursor-pointer">
-                                ${opts.replace(`value="${s.days[0]}"`, `value="${s.days[0]}" selected`)}
-                            </select>
-                            <button onclick="StoreMgr.changeDay('${s.id}','remove')" class="bg-red-50 text-red-500 px-2 rounded-lg font-bold hover:bg-red-100 cursor-pointer">✕</button>
-                        </div>
-                    </div>`);
+                s.days.forEach(d => { sums[d] = (sums[d] || 0) + 1; });
             }
         });
-
-        let elUpload = document.getElementById('list-upload'), elUnassigned = document.getElementById('list-unassigned'), elAssigned = document.getElementById('list-assigned');
-        if(elUpload) elUpload.innerHTML = htmlP.join(''); if(elUnassigned) elUnassigned.innerHTML = htmlU.join(''); if(elAssigned) elAssigned.innerHTML = htmlA.join('');
+        document.getElementById('list-upload').innerHTML = h1.join('');
+        document.getElementById('list-unassigned').innerHTML = h2.join('');
         
-        let sumH = []; 
-        Object.keys(sums).forEach(d => { 
-            if(sums[d] > 0 && DAY_COLORS[d]) { 
-                let c = DAY_COLORS[d].hex, act = (State.activeRoadDay === d); 
-                sumH.push(`
-                    <div onclick="UI.showDayModal('${d}')" class="p-4 bg-white border ${act ? 'border-indigo-500 ring-2 ring-indigo-200' : 'border-gray-200'} rounded-2xl flex flex-col items-center cursor-pointer relative shadow-sm">
-                        <div class="absolute top-0 left-0 w-full h-1.5 rounded-t-2xl" style="background:${c}"></div>
-                        <p class="text-xs font-bold mt-1 text-gray-500">${DAY_COLORS[d].name}</p><p class="text-3xl font-black mt-1" style="color:${c}">${sums[d]}</p>
-                    </div>`); 
-            } 
-        });
+        let hSum = Object.keys(DAY_COLORS).map(d => sums[d] ? `<div onclick="UI.showDayModal('${d}')" class="p-3 bg-white border-t-4 rounded-xl shadow-sm cursor-pointer" style="border-color:${DAY_COLORS[d].hex}"><p class="text-[10px] font-bold text-gray-400">${d}</p><p class="text-xl font-black">${sums[d]}</p></div>` : '').join('');
+        document.getElementById('list-summary').innerHTML = hSum;
         
-        let elSummary = document.getElementById('list-summary');
-        if(elSummary) elSummary.innerHTML = sumH.length ? sumH.join('') : '<p class="col-span-2 text-center text-xs text-gray-400 mt-4">ยังไม่จัดสาย</p>';
-
-        let wait = State.stores.filter(s => !s.days || !s.days.length).length, tot = State.stores.length;
-        let elTotal = document.getElementById('stat-total'), elDone = document.getElementById('stat-done'), elPending = document.getElementById('stat-pending'), elProgress = document.getElementById('progress-bar');
+        let done = GlobalState.stores.filter(x => x.days.length).length;
+        let total = GlobalState.stores.length;
+        document.getElementById('progress-bar').style.width = total ? `${(done/total)*100}%` : '0%';
         
-        if(elTotal) elTotal.innerText = tot; if(elDone) elDone.innerText = aCnt; if(elPending) elPending.innerText = wait;
-        if(elProgress) elProgress.style.width = tot ? `${Math.round(((tot-wait)/tot)*100)}%` : '0%';
+        document.getElementById('assign-day').innerHTML = Object.keys(DAY_COLORS).map(d => `<option value="${d}">${d} (${sums[d]||0})</option>`).join('');
         
-        if (typeof MapCtrl !== 'undefined' && MapCtrl.renderMarkers) MapCtrl.renderMarkers(); 
+        MapCtrl.renderMarkers();
     },
     showDayModal: (d) => {
-        if(!DAY_COLORS[d]) return;
-        State.openDayModal = d; 
-        let mTitle = document.getElementById('modalTitle');
-        if(mTitle) mTitle.innerHTML = `<span class="w-4 h-4 rounded-full inline-block shadow-sm" style="background:${DAY_COLORS[d].hex}"></span> ${DAY_COLORS[d].name}`;
-        
-        let h = State.stores.filter(s => s.days && s.days.includes(d)).sort((a,b) => (a.seqs[d]||999)-(b.seqs[d]||999)).map(x => `
-            <div class="p-3 bg-white border border-gray-200 rounded-2xl flex items-center gap-3 mb-2 shadow-sm">
-                <div class="flex-1"><p class="text-sm font-bold truncate">${x.name}</p><p class="text-[10px] text-gray-400">ID: ${x.id}</p></div>
-            </div>`).join('');
-            
-        let mContent = document.getElementById('modalContent'); if(mContent) mContent.innerHTML = h; 
-        let dModal = document.getElementById('dayModal'); if(dModal) dModal.classList.remove('hidden');
+        GlobalState.openModalDay = d;
+        document.getElementById('modalTitle').innerText = d;
+        let h = GlobalState.stores.filter(x => x.days.includes(d)).map(x => `<div class="p-2 border-b text-xs">${x.name}</div>`).join('');
+        document.getElementById('modalContent').innerHTML = h;
+        document.getElementById('dayModal').classList.remove('hidden');
     },
-    closeDayModal: () => { State.openDayModal = null; let dModal = document.getElementById('dayModal'); if(dModal) dModal.classList.add('hidden'); },
-    showSummaryModal: () => {
-        if(!State.db || !State.db.routes) return;
-        let h = []; let sortedRoutes = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b, 'th', {numeric: true}));
-        for(let r of sortedRoutes) { 
-            let s = State.db.routes[r], t = s.length, a = s.filter(x => x.days && x.days.length).length; 
-            h.push(`<tr><td class="p-3 font-bold border-b">${r}</td><td class="p-3 text-center border-b">${t}</td><td class="p-3 text-center text-emerald-600 font-bold border-b">${a}</td><td class="p-3 text-center text-yellow-600 font-bold border-b">${t-a}</td><td class="p-3 text-xs font-bold text-gray-400 border-b">${t ? Math.round(a/t*100) : 0}%</td></tr>`); 
-        }
-        let oBody = document.getElementById('overallTableBody'), oModal = document.getElementById('overallModal');
-        if(oBody) oBody.innerHTML = h.join(''); if(oModal) oModal.classList.remove('hidden');
-    },
-    hideSummaryModal: () => { let oModal = document.getElementById('overallModal'); if(oModal) oModal.classList.add('hidden'); }
+    closeDayModal: () => { document.getElementById('dayModal').classList.add('hidden'); },
+    filterList: (id, v) => {
+        let q = v.toLowerCase();
+        let el = document.getElementById(id);
+        for(let child of el.children) child.style.display = child.innerText.toLowerCase().includes(q) ? '' : 'none';
+    }
 };
