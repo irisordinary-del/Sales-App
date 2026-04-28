@@ -25,38 +25,20 @@
     <aside class="w-72 bg-slate-900 text-slate-300 flex flex-col shadow-2xl z-40">
         <div class="p-6 border-b border-slate-800">
             <h1 class="text-xl font-black text-white tracking-tight flex items-center gap-2">🚚 Route Admin</h1>
-            <p class="text-[10px] text-slate-500 mt-1 uppercase font-bold tracking-widest">Management System</p>
         </div>
         
         <nav class="flex-1 mt-4">
-            <button id="nav-planning" onclick="Nav.go('planning')" class="sidebar-menu active w-full flex items-center gap-3 px-6 py-4 hover:bg-slate-800 transition">
-                📍 วางแผนคิวงาน
-            </button>
+            <button id="nav-planning" onclick="Nav.go('planning')" class="sidebar-menu active w-full flex items-center gap-3 px-6 py-4 hover:bg-slate-800 transition">📍 วางแผนคิวงาน</button>
             
-            <!-- ปุ่มหน้ารวมทุกสายวิ่ง -->
-            <button id="nav-all-routes" onclick="Nav.goAllRoutes()" class="sidebar-menu w-full flex items-center gap-3 px-6 py-4 hover:bg-slate-800 transition text-sky-400 font-bold">
-                🗺️ แผนที่รวมทุกสาย (Vans)
-            </button>
+            <button id="nav-all-routes" onclick="Nav.goAllRoutes()" class="sidebar-menu w-full flex items-center gap-3 px-6 py-4 hover:bg-slate-800 transition text-sky-400 font-bold">🗺️ แผนที่รวมทุกสาย (Vans)</button>
             
-            <button id="nav-data" onclick="Nav.go('data')" class="sidebar-menu w-full flex items-center gap-3 px-6 py-4 hover:bg-slate-800 transition">
-                📂 ข้อมูลการขาย
-            </button>
-            
-            <div class="border-t border-slate-800 my-2"></div>
-            
-            <button id="nav-kpi" onclick="Nav.go('kpi')" class="sidebar-menu w-full flex items-center gap-3 px-6 py-4 hover:bg-slate-800 transition">
-                📊 สรุปผล KPI
-            </button>
+            <button id="nav-data" onclick="Nav.go('data')" class="sidebar-menu w-full flex items-center gap-3 px-6 py-4 hover:bg-slate-800 transition">📂 ข้อมูลการขาย</button>
+            <button id="nav-kpi" onclick="Nav.go('kpi')" class="sidebar-menu w-full flex items-center gap-3 px-6 py-4 hover:bg-slate-800 transition">📊 สรุปผล KPI</button>
         </nav>
 
         <div class="p-4 bg-slate-950 border-t border-slate-800">
-            <div class="flex justify-between text-[10px] mb-2 font-bold text-slate-500">
-                <span>STATUS:</span>
-                <span id="overall-status" class="text-emerald-500">READY</span>
-            </div>
-            <button onclick="UI.showSummaryModal()" class="w-full py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-[11px] font-bold transition">
-                📊 ดูสรุปยอดรวม (All Routes)
-            </button>
+            <div class="flex justify-between text-[10px] mb-2 font-bold text-slate-500 uppercase">Status: <span id="overall-status" class="text-emerald-500">Online</span></div>
+            <button onclick="UI.showSummaryModal()" class="w-full py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-[11px] font-bold transition">📊 ดูสรุปยอดรวมทั้งหมด</button>
         </div>
     </aside>
 
@@ -64,206 +46,85 @@
         
         <div id="page-planning" class="flex-1 relative flex overflow-hidden">
             <div id="map"></div>
-            
-            <!-- ป้ายบอกสี Legend สำหรับหน้ารวม -->
+
             <div id="all-routes-legend" class="hidden absolute bottom-6 left-6 z-[1000] bg-white/95 backdrop-blur-md p-5 rounded-2xl shadow-2xl border border-gray-200 max-h-[40vh] overflow-y-auto min-w-[200px]">
                 <h3 class="text-[10px] font-black mb-3 uppercase text-gray-500 tracking-widest border-b pb-2">สีประจำสายวิ่ง (Vans)</h3>
                 <div id="legend-content" class="space-y-3"></div>
             </div>
 
             <div id="lassoPanel" class="hidden absolute top-6 left-1/2 -translate-x-1/2 z-[1000] flex gap-2">
-                <button onclick="Lasso.finish()" class="bg-indigo-600 text-white px-6 py-2 rounded-full font-bold shadow-lg hover:bg-indigo-700 transition">✅ ยืนยันการเลือก</button>
-                <button onclick="Lasso.cancel()" class="bg-white text-gray-700 px-6 py-2 rounded-full font-bold shadow-lg hover:bg-gray-100 transition border">ยกเลิก</button>
+                <button onclick="Lasso.finish()" class="bg-indigo-600 text-white px-6 py-2 rounded-full font-bold shadow-lg">✅ ยืนยันเลือก</button>
+                <button onclick="Lasso.cancel()" class="bg-white text-gray-700 px-6 py-2 rounded-full font-bold shadow-lg border">ยกเลิก</button>
             </div>
-
+            
             <div id="mapTools" class="absolute top-6 right-6 z-[500] flex flex-col gap-2">
-                <button onclick="Lasso.start()" class="bg-white/90 backdrop-blur-sm p-3 rounded-xl shadow-xl hover:bg-white transition group border border-slate-200">
-                    <span class="text-xl group-hover:scale-110 block">🎯</span>
-                    <span class="text-[9px] font-bold text-slate-500 block mt-1 uppercase">Lasso</span>
-                </button>
+                <button onclick="Lasso.start()" class="bg-white/90 p-3 rounded-xl shadow-xl hover:bg-white border border-slate-200">🎯 Lasso</button>
             </div>
         </div>
 
-        <div id="page-data" class="hidden flex-1 p-8 overflow-y-auto bg-slate-50">
+        <div id="page-data" class="hidden flex-1 p-8 bg-slate-50 overflow-y-auto">
             <div class="max-w-4xl mx-auto bg-white p-8 rounded-3xl shadow-xl border border-slate-200">
-                <h2 class="text-2xl font-black text-slate-800 mb-6 flex items-center gap-3">
-                    <span class="w-10 h-10 bg-indigo-100 text-indigo-600 rounded-xl flex items-center justify-center">📂</span>
-                    จัดการฐานข้อมูลร้านค้า
-                </h2>
+                <h2 class="text-2xl font-black text-slate-800 mb-6 flex items-center gap-3">📂 จัดการฐานข้อมูล</h2>
                 <div class="grid grid-cols-2 gap-6">
                     <div class="p-6 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200 text-center">
-                        <p class="text-sm font-bold text-slate-600 mb-4 italic">อัปโหลดไฟล์ร้านค้า (Excel)</p>
-                        <input type="file" id="fileInput" class="hidden" accept=".xlsx, .xls">
-                        <button onclick="document.getElementById('fileInput').click()" class="w-full py-4 bg-indigo-600 text-white rounded-xl font-bold shadow-lg hover:bg-indigo-700 transition">
-                            📤 เลือกไฟล์จากเครื่อง
-                        </button>
-                    </div>
-                    <div class="p-6 bg-emerald-50 rounded-2xl border border-emerald-100">
-                        <p class="text-sm font-bold text-emerald-700 mb-4 italic text-center">Backup & Sync</p>
-                        <button onclick="App.syncCloud()" class="w-full py-4 bg-emerald-600 text-white rounded-xl font-bold shadow-lg hover:bg-emerald-700 transition">
-                            ☁️ บันทึกขึ้น Cloud (Firebase)
-                        </button>
+                        <p class="text-sm font-bold text-slate-600 mb-4">อัปโหลดไฟล์ Master (Excel)</p>
+                        <input type="file" id="rawUpload" class="hidden" accept=".xlsx, .xls">
+                        <button onclick="document.getElementById('rawUpload').click()" class="w-full py-4 bg-indigo-600 text-white rounded-xl font-bold">📤 เลือกไฟล์</button>
+                        <p class="text-[10px] mt-2 font-bold uppercase">พบข้อมูล: <span id="raw-total-rows">0</span> แถว</p>
                     </div>
                 </div>
             </div>
         </div>
 
-        <div id="page-kpi" class="hidden flex-1 overflow-hidden bg-slate-100">
-             <iframe src="kpi-dashboard.html" class="w-full h-full border-none"></iframe>
+        <div id="page-kpi" class="hidden flex-1 bg-slate-100">
+            <iframe src="kpi-dashboard.html" class="w-full h-full border-none"></iframe>
         </div>
-
     </main>
 
     <section id="right-panel" class="w-[380px] bg-white border-l border-slate-200 flex flex-col shadow-inner relative z-30 transition-all">
-        
-        <div class="flex border-b">
-            <button onclick="UI.switchTab('tab1')" class="tab-btn flex-1 py-4 text-center active">📁 นำเข้าข้อมูล</button>
-            <button onclick="UI.switchTab('tab2')" class="tab-btn flex-1 py-4 text-center">⚡ จัดการหมุด</button>
-            <button onclick="UI.switchTab('tab3')" class="tab-btn flex-1 py-4 text-center">🤖 AI Builder</button>
+        <div class="flex border-b bg-gray-50">
+            <button onclick="UI.switchTab('tab1')" class="tab-btn flex-1 py-4 active">📁 นำเข้า</button>
+            <button onclick="UI.switchTab('tab2')" class="tab-btn flex-1 py-4">⚡ จัดสาย</button>
+            <button onclick="UI.switchTab('tab3')" class="tab-btn flex-1 py-4">🤖 AI</button>
         </div>
 
         <div class="flex-1 overflow-y-auto">
-            <!-- Tab 1: Upload -->
-            <div id="tab1-content" class="p-5 space-y-6">
-                <div class="bg-indigo-600 p-6 rounded-3xl text-white shadow-xl shadow-indigo-200 relative overflow-hidden group">
-                    <div class="relative z-10">
-                        <p class="text-[10px] font-black uppercase tracking-widest opacity-60">Step 1</p>
-                        <h3 class="text-lg font-bold mb-3 leading-tight">เลือกสายที่จะบริหาร<br>(Van Name)</h3>
-                        <select id="routeSelect" class="w-full p-3 bg-white/20 backdrop-blur-md rounded-xl border border-white/30 text-white font-bold outline-none focus:bg-white focus:text-indigo-600 transition">
-                            <option value="">-- เลือกสายวิ่ง --</option>
-                        </select>
-                    </div>
-                </div>
-
-                <!-- ปุ่มล้างจัดสายที่สั่งแก้ -->
-                <button onclick="StoreMgr.clearAllAssignments()" class="w-full py-3 bg-red-50 text-red-600 text-[11px] font-bold rounded-xl border border-red-200 hover:bg-red-100 transition shadow-sm flex justify-center items-center gap-2">
+            <div id="tab1-content" class="p-5 space-y-4">
+                <select id="routeSelect" class="w-full p-3 bg-slate-100 rounded-xl font-bold outline-none ring-2 ring-indigo-500/20"></select>
+                
+                <button onclick="StoreMgr.clearAllAssignments()" class="w-full py-2.5 bg-red-50 text-red-600 text-[11px] font-bold rounded-xl border border-red-200 hover:bg-red-100 transition shadow-sm">
                     🗑️ ล้างการจัดสายทั้งหมด (รีเซ็ตหมุด)
                 </button>
             </div>
 
-            <!-- Tab 2: Assign Day -->
-            <div id="tab2-content" class="hidden p-5">
-                <div class="bg-white border border-blue-100 rounded-3xl p-5 shadow-sm mb-4">
-                    <p class="text-[10px] font-black text-blue-500 uppercase mb-3 tracking-widest">Assign Selected</p>
-                    <div class="flex gap-2">
-                        <select id="assign-day" class="flex-1 p-3 bg-slate-100 rounded-xl text-sm font-bold border-none outline-none focus:ring-2 ring-blue-500 transition">
-                            <option value="Day 1">Day 1</option>
-                            <option value="Day 2">Day 2</option>
-                            <option value="Day 3">Day 3</option>
-                            <option value="Day 4">Day 4</option>
-                            <option value="Day 5">Day 5</option>
-                            <option value="Day 6">Day 6</option>
-                            <option value="Day 7">Day 7</option>
-                            <option value="Day 8">Day 8</option>
-                            <option value="Day 9">Day 9</option>
-                            <option value="Day 10">Day 10</option>
-                            <option value="Day 11">Day 11</option>
-                            <option value="Day 12">Day 12</option>
-                            <option value="Day 13">Day 13</option>
-                            <option value="Day 14">Day 14</option>
-                            <option value="Day 15">Day 15</option>
-                            <option value="Day 16">Day 16</option>
-                            <option value="Day 17">Day 17</option>
-                            <option value="Day 18">Day 18</option>
-                            <option value="Day 19">Day 19</option>
-                            <option value="Day 20">Day 20</option>
-                            <option value="Day 21">Day 21</option>
-                            <option value="Day 22">Day 22</option>
-                            <option value="Day 23">Day 23</option>
-                            <option value="Day 24">Day 24</option>
-                            <option value="Day 25">Day 25</option>
-                            <option value="Day 26">Day 26</option>
-                            <option value="Day 27">Day 27</option>
-                            <option value="Day 28">Day 28</option>
-                            <option value="Day 29">Day 29</option>
-                            <option value="Day 30">Day 30</option>
-                        </select>
-                        <button onclick="StoreMgr.assignSelected()" class="px-6 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition shadow-lg shadow-blue-200">
-                            ตกลง
-                        </button>
-                    </div>
-                </div>
-                <div id="storeList" class="space-y-2"></div>
-            </div>
-
-            <!-- Tab 3: AI -->
             <div id="tab3-content" class="hidden p-5">
-                <div class="bg-slate-900 p-6 rounded-3xl text-white shadow-2xl space-y-5 border border-white/10">
-                    <div class="flex justify-between items-center bg-white/5 p-3 rounded-xl border border-white/10">
-                        <label class="text-xs font-bold text-slate-400">จำนวนวันทั้งหมด:</label>
-                        <input type="number" id="ai-days" value="24" class="w-16 p-1 bg-white/10 border-none rounded text-center font-black text-emerald-400">
+                <div class="bg-slate-900 p-6 rounded-3xl text-white space-y-4">
+                    <div class="flex justify-between items-center">
+                        <label class="text-xs font-bold">วันทั้งหมด:</label>
+                        <input type="number" id="ai-days" value="24" class="w-16 p-1 bg-white/10 rounded text-center font-black text-emerald-400">
+                    </div>
+                    
+                    <div class="flex items-center gap-2">
+                        <input type="checkbox" id="ai-lock" checked> 
+                        <label for="ai-lock" class="text-[11px] font-bold text-slate-400">ล็อคร้านที่จัดแล้ว</label>
+                    </div>
+                    
+                    <div class="flex items-center gap-2">
+                        <input type="checkbox" id="ai-outlier" checked> 
+                        <label class="text-[11px] font-bold text-slate-400">ตัดร้านโดด (กม.):</label>
+                        <input type="number" id="ai-dist" value="10" class="w-12 bg-white/10 rounded text-center text-xs text-emerald-400">
                     </div>
 
-                    <div class="flex items-center gap-3 px-1">
-                        <input type="checkbox" id="ai-lock" class="w-4 h-4 rounded border-gray-300 text-emerald-500 focus:ring-emerald-500" checked>
-                        <label for="ai-lock" class="text-xs font-bold text-slate-300 cursor-pointer select-none">ล็อคร้านที่จัดสายแล้ว</label>
-                    </div>
-
-                    <div class="space-y-3 pt-2">
-                        <div class="flex items-center gap-3 px-1">
-                            <input type="checkbox" id="ai-outlier" id="ai-outlier" class="w-4 h-4 text-emerald-500 bg-white/10 border-none rounded" checked>
-                            <label class="text-xs font-bold text-slate-300">ตัดร้านที่อยู่ไกลมาก (Outlier)</label>
-                        </div>
-                        <div class="flex items-center gap-2 px-1">
-                            <span class="text-[10px] text-slate-500 font-bold ml-7">ระยะตัดทิ้ง:</span>
-                            <input type="number" id="ai-dist" value="10" class="w-12 bg-white/10 border-none rounded text-center text-xs text-emerald-400">
-                            <span class="text-[10px] text-slate-500 font-bold uppercase">กม.</span>
-                        </div>
-                    </div>
-
-                    <button onclick="AI.run()" class="w-full py-4 bg-emerald-500 text-slate-900 rounded-2xl font-black text-sm hover:bg-emerald-400 transition shadow-xl shadow-emerald-500/20 active:scale-95">
-                        🚀 รัน AI แบ่งวันวิ่งอัตโนมัติ
-                    </button>
+                    <button onclick="AI.run()" class="w-full py-4 bg-emerald-500 text-slate-900 rounded-2xl font-black shadow-xl">🚀 รัน AI แบ่งวันวิ่ง</button>
                 </div>
             </div>
         </div>
     </section>
 
-    <!-- Modals -->
-    <div id="overallModal" class="hidden fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
-        <div class="bg-white rounded-[40px] shadow-2xl w-full max-w-2xl overflow-hidden">
-            <div class="p-6 border-b flex justify-between items-center bg-slate-50">
-                <h2 class="text-2xl font-black text-slate-800">📊 สรุปภาพรวมทุกสายวิ่ง</h2>
-                <button onclick="document.getElementById('overallModal').classList.add('hidden')" class="w-10 h-10 flex items-center justify-center rounded-full bg-white border shadow-sm hover:bg-gray-100 font-bold">✕</button>
-            </div>
-            <div class="p-6 max-h-[70vh] overflow-y-auto">
-                <table class="w-full text-left">
-                    <thead class="text-xs text-slate-400 uppercase tracking-widest border-b">
-                        <tr>
-                            <th class="pb-4">สายวิ่ง (Van)</th>
-                            <th class="pb-4 text-center">รวมร้าน</th>
-                            <th class="pb-4 text-center">จัดแล้ว</th>
-                            <th class="pb-4 text-center">รอจัด</th>
-                            <th class="pb-4 text-center">%</th>
-                        </tr>
-                    </thead>
-                    <tbody id="overallTableBody" class="text-sm font-medium"></tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-
-    <div id="dayModal" class="hidden fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
-        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col overflow-hidden">
-            <div class="p-4 bg-gray-50 border-b flex justify-between items-center">
-                <h2 id="modalTitle" class="text-xl font-black flex items-center gap-2">Day</h2>
-                <button onclick="UI.closeDayModal()" class="bg-white border w-8 h-8 rounded-full font-bold">✕</button>
-            </div>
-            <div id="modalContent" class="p-4 flex-1 overflow-y-auto"></div>
-        </div>
-    </div>
-
-    <!-- Scripts ในลำดับที่ถูกต้อง -->
     <script src="app-config.js"></script>
     <script src="admin-data.js"></script>
     <script src="admin-ui.js"></script>
     <script src="admin-map.js"></script>
     <script src="admin-ai.js"></script>
-    
-    <script>
-        window.addEventListener('DOMContentLoaded', () => { 
-            if (typeof App !== 'undefined' && App.init) App.init(); 
-        });
-    </script>
 </body>
 </html>
