@@ -21,10 +21,10 @@
 
     <aside class="w-16 md:w-56 bg-slate-900 flex flex-col shrink-0 z-[6000] shadow-2xl transition-all">
         <div class="h-16 flex items-center justify-center bg-slate-950 border-b border-slate-800"><h1 class="text-xl font-black text-indigo-400 tracking-wider hidden md:block">R<span class="text-white">Admin</span></h1></div>
-        <nav class="flex-1 py-4 space-y-1 overflow-hidden">
-            <button onclick="Nav.go('planning')" id="nav-planning" class="sidebar-menu active w-full flex items-center px-4 md:px-5 py-3.5 text-sm font-bold"><span class="text-lg md:mr-3">📍</span> <span class="hidden md:inline">วางแผนคิวงาน</span></button>
-            <button onclick="Nav.go('data')" id="nav-data" class="sidebar-menu w-full flex items-center px-4 md:px-5 py-3.5 text-sm font-bold"><span class="text-lg md:mr-3">📂</span> <span class="hidden md:inline">ข้อมูลการขาย (ดิบ)</span></button>
-            <button onclick="Nav.go('kpi')" id="nav-kpi" class="sidebar-menu w-full flex items-center px-4 md:px-5 py-3.5 text-sm font-bold text-emerald-400"><span class="text-lg md:mr-3">🎯</span> <span class="hidden md:inline">จัดการสมการ KPI</span></button>
+        <nav class="flex-1 mt-2">      
+            <button id="nav-all-routes" onclick="Nav.goAllRoutes()" class="sidebar-menu w-full flex items-center gap-3 px-6 py-4 hover:bg-slate-800 transition text-sky-400 font-bold">🗺️ แผนที่รวมทุกสาย (Vans)</button>
+            <button id="nav-planning" onclick="Nav.go('planning')" class="sidebar-menu active w-full flex items-center gap-3 px-6 py-4 hover:bg-slate-800 transition">📍 วางแผนคิวงาน</button>
+            <button id="nav-data" onclick="Nav.go('data')" class="sidebar-menu w-full flex items-center gap-3 px-6 py-4 hover:bg-slate-800 transition">📂 ข้อมูลการขาย</button>
         </nav>
     </aside>
 
