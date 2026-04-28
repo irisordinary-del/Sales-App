@@ -1,31 +1,23 @@
 const StoreMgr = {
-    // ฟังก์ชันเดิมที่พี่มีอยู่แล้ว
     toggleSelect: (id) => { let s = State.stores.find(x=>x.id===String(id)); if(s){ s.selected = !s.selected; UI.switchTab('tab2'); UI.render(); App.saveDB(); } },
     clearSelection: () => { State.stores.forEach(s=>s.selected=false); UI.render(); App.saveDB(); },
-    
-    // 🌟 ฟังก์ชันใหม่: เอาไว้ล้างการจัดสายทั้งหมด 🌟
-    clearAllAssignments: () => {
-        let count = State.stores.filter(s => s.days && s.days.length > 0).length;
-        if(count === 0) return alert("ยังไม่มีร้านไหนถูกจัดสายเลยครับ");
-        
-        if(!confirm(`⚠️ ยืนยันที่จะล้างการจัดวันวิ่งของร้านทั้ง ${count} ร้านใช่หรือไม่?\n(หมุดทั้งหมดจะถูกถอดสี และกลับไปอยู่โหมด 'รอจัด')`)) return;
-        
-        // ล้างข้อมูลวันที่ออกให้เกลี้ยง
-        State.stores.forEach(s => {
-            s.days = [];
-            s.seqs = {};
-        });
-        
-        MapCtrl.closePopups(); // ปิดป๊อปอัปบนแผนที่ถ้าเปิดอยู่
-        App.saveDB();          // เซฟขึ้นคลาวด์
-        UI.render();           // วาดหน้าจอและแผนที่ใหม่
-    },
-
-    // ฟังก์ชันเดิมที่พี่มีอยู่แล้ว
     changeDay: (id, d) => { let s = State.stores.find(x=>x.id===String(id)); if(s) { if(d === 'remove') s.days = []; else if(s.freq === 2) { let mK = State.db.cycleDays/2; let num = parseInt(d.replace('Day ','')); let pair = num<=mK ? num+mK : num-mK; s.days=[d, `Day ${pair}`]; } else s.days = [d]; s.seqs = {}; MapCtrl.closePopups(); UI.render(); App.saveDB(); } },
     assignSelected: () => { let d = document.getElementById('assign-day').value; let h = false; State.stores.forEach(s => { if(s.selected) { if(s.freq === 2) { let mK = State.db.cycleDays/2; let num = parseInt(d.replace('Day ','')); let pair = num<=mK ? num+mK : num-mK; s.days=[d, `Day ${pair}`]; } else s.days = [d]; s.selected = false; h = true; } }); if(!h) alert("กรุณาเลือกร้านค้าก่อนจัดวัน"); else { App.saveDB(); UI.render(); } },
-    getDistSq: (a, b) => Math.pow(a.lat - b.lat, 2) + Math.pow(a.lng - b.lng, 2)
+    getDistSq: (a, b) => Math.pow(a.lat - b.lat, 2) + Math.pow(a.lng - b.lng, 2),
+    
+    // 🌟 ระบบล้างการจัดสายทั้งหมด 🌟
+    clearAllAssignments: () => {
+        let count = State.stores.filter(s => s.days && s.days.length > 0).length;
+        if(count === 0) return alert("ไม่มีร้านที่จัดสายไว้ครับ");
+        if(!confirm(`⚠️ ยืนยันล้างการจัดวันวิ่งของร้านทั้ง ${count} ร้าน?`)) return;
+        
+        State.stores.forEach(s => { s.days = []; s.seqs = {}; });
+        MapCtrl.closePopups(); 
+        App.saveDB(); 
+        UI.render();
+    }
 };
+
 
 // ==========================================
 // 📂 ระบบหน้าข้อมูลดิบ (Raw Data)
