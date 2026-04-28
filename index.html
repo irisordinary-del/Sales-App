@@ -84,7 +84,11 @@
                                 <h3 class="font-bold text-sm text-gray-800 mb-2">📍 ข้อมูลพิกัดร้านค้า (Master Data)</h3>
                                 <div onclick="document.getElementById('fileUpload').click()" class="border-2 border-dashed border-indigo-300 bg-indigo-50 rounded-xl p-4 text-center cursor-pointer mb-3"><p class="text-xl mb-1">📂</p><p class="text-xs text-indigo-800 font-bold">อัปโหลดไฟล์แผนที่</p></div>
                                 <input type="file" id="fileUpload" accept=".xlsx, .xls, .csv" class="hidden">
-                                <div class="flex gap-2"><button onclick="App.clearStores()" class="flex-1 bg-red-50 text-red-600 py-2 rounded-lg text-xs font-bold border border-red-100">ล้างสายนี้</button><button onclick="StoreMgr.clearSelection()" class="flex-1 bg-gray-100 text-gray-700 py-2 rounded-lg text-xs font-bold border border-gray-200">ยกเลิกเลือก</button></div>
+                                <div class="flex gap-2">
+                                    <button onclick="App.clearStores()" class="flex-1 bg-red-50 text-red-600 py-2 rounded-lg text-xs font-bold border border-red-100">ล้างสายนี้</button>
+                                    <button onclick="StoreMgr.clearSelection()" class="flex-1 bg-gray-100 text-gray-700 py-2 rounded-lg text-xs font-bold border border-gray-200">ยกเลิกเลือก</button>
+                                </div>
+                                <button onclick="StoreMgr.clearAllAssignments()" class="w-full mt-2 py-2 bg-red-100 text-red-700 rounded-lg text-xs font-bold border border-red-200 shadow-sm">🗑️ ล้างการจัดสายทั้งหมด (รีเซ็ตหมุด)</button>
                             </div>
                             <input type="text" onkeyup="UI.filterList('list-upload', this.value)" placeholder="ค้นหาร้าน..." class="w-full p-2.5 border border-gray-300 rounded-xl text-sm outline-none shadow-inner">
                             <div id="list-upload" class="space-y-2 mt-2"></div>
