@@ -1,14 +1,7 @@
-var DAY_COLORS = {};
-for(let i=1; i<=30; i++) DAY_COLORS[`Day ${i}`] = { name: `Day ${i}`, hex: `hsl(${(i * 137) % 360}, 65%, 45%)` };
-
-var Nav = {
-    go: (p) => {
-        document.querySelectorAll('.sidebar-menu').forEach(x => x.classList.remove('active', 'bg-slate-800'));
-        document.getElementById('nav-'+p).classList.add('bg-slate-800');
-        document.getElementById('page-planning').classList.toggle('hidden', p !== 'planning');
-        if(p === 'planning') setTimeout(() => { if(MapCtrl.map) MapCtrl.map.invalidateSize(); }, 300);
-    }
-};
+if (typeof window.DAY_COLORS === 'undefined') {
+    window.DAY_COLORS = {};
+    for(let i=1; i<=30; i++) DAY_COLORS[`Day ${i}`] = { name: `Day ${i}`, hex: `hsl(${(i * 137) % 360}, 65%, 45%)` };
+}
 
 var UI = {
     showLoader: (t) => { let el = document.getElementById('loader'); if(el){ document.getElementById('loader-text').innerText = t; el.style.display = 'flex'; } },
