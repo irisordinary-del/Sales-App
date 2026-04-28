@@ -1,98 +1,44 @@
-var MapCtrl = {
-    map: null, markers: [], roadLines: [],
-    init: () => {
-        if(MapCtrl.map) return;
-        MapCtrl.map = L.map('map').setView([13.75, 100.5], 10);
-        L.tileLayer('https://{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', { maxZoom: 20, subdomains:['mt0','mt1','mt2','mt3'] }).addTo(MapCtrl.map);
-    },
+const MapCtrl = {
+    map: null, markers: {}, roadLayer: null, polylines: [],
+    init: () => { MapCtrl.map = L.map('map').setView([14.4745, 100.1222], 10); L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(MapCtrl.map); },
+    clearAll: () => { for (let id in MapCtrl.markers) MapCtrl.map.removeLayer(MapCtrl.markers[id]); MapCtrl.markers = {}; MapCtrl.clearRoad(true); },
+    closePopups: () => { for(let id in MapCtrl.markers) if(MapCtrl.markers[id].getPopup()) MapCtrl.markers[id].closePopup(); },
+    clearRoad: (skipRender = false) => { if(MapCtrl.roadLayer) MapCtrl.map.removeLayer(MapCtrl.roadLayer); MapCtrl.roadLayer = null; State.activeRoadDay = null; document.getElementById('clearRoadBtn').classList.add('hidden'); if(!skipRender) UI.render(); },
+    drawLines: () => { MapCtrl.polylines.forEach(l => MapCtrl.map.removeLayer(l)); MapCtrl.polylines = []; if(!document.getElementById('toggleLines').checked) return; let byDay = {}; State.stores.forEach(s => { if(s.days.length && !s.days.includes(State.activeRoadDay)) { let d = s.days[0]; if(!byDay[d]) byDay[d]=[]; byDay[d].push([s.lat, s.lng]); } }); Object.keys(byDay).forEach(d => { let c = DAY_COLORS[d] ? DAY_COLORS[d].hex : '#999'; if(byDay[d].length > 1) MapCtrl.polylines.push(L.polyline(byDay[d], {color: c, weight: 3, opacity: 0.5, dashArray: '5, 10'}).addTo(MapCtrl.map)); }); },
+    fitToStores: () => { if(State.stores.length > 0) { try { MapCtrl.map.fitBounds(L.latLngBounds(State.stores.map(s => [s.lat, s.lng])), {padding: [30, 30]}); } catch(e){} } },
     renderMarkers: () => {
-        if(!MapCtrl.map) return;
-        MapCtrl.markers.forEach(m => MapCtrl.map.removeLayer(m));
-        MapCtrl.markers = [];
-        let opts = Object.keys(DAY_COLORS).map(d => `<option value="${d}">${DAY_COLORS[d].name}</option>`).join('');
-
-        State.stores.forEach(s => {
-            let lat = s.lat, lng = s.lng;
-            if(Math.abs(lat) > 90) { let t=lat; lat=lng; lng=t; }
-            let dKey = s.days[0];
-            let color = (dKey && DAY_COLORS[dKey]) ? DAY_COLORS[dKey].hex : '#9CA3AF';
-            
-            let iconHtml = `
-                <div style="position: relative; width: 28px; height: 38px; z-index: ${s.selected ? 1000 : 1};">
-                    <div style="position: absolute; top: 0; left: 0; width: 28px; height: 28px; background-color: ${color}; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); border: 2px solid ${s.selected?'#000':'#fff'}; box-shadow: 2px 2px 5px rgba(0,0,0,0.4);"></div>
-                    <div style="position: absolute; top: 0; left: 0; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; color: white; font-size: 12px; font-weight: 900; z-index: 2;">${dKey?dKey.replace('Day ',''):''}</div>
-                </div>`;
-                
-            let icon = L.divIcon({ html: iconHtml, className: '', iconSize: [28,38], iconAnchor: [14,38] });
-            let m = L.marker([lat, lng], {icon:icon}).addTo(MapCtrl.map);
-            m.bindPopup(`
-                <div style="min-width: 150px; font-family: sans-serif;">
-                    <b>${s.name}</b><br><small>ID: ${s.id}</small>
-                    <select onchange="StoreMgr.changeDay('${s.id}', this.value)" style="width:100%; margin-top:8px; padding:4px;">
-                        <option value="remove">-- ถอดออก --</option>
-                        ${opts.replace(`value="${dKey}"`, `value="${dKey}" selected`)}
-                    </select>
-                </div>`);
-            MapCtrl.markers.push(m);
-        });
-    },
-    fit: () => {
-        if(!MapCtrl.markers.length) return;
-        let bounds = L.featureGroup(MapCtrl.markers).getBounds();
-        if(bounds.isValid()) MapCtrl.map.fitBounds(bounds, {padding:[40,40]});
-    }
-};
-
-var Lasso = {
-    active: false, poly: null, pts: [],
-    toggle: () => {
-        Lasso.active = !Lasso.active;
-        if(Lasso.active) { MapCtrl.map.dragging.disable(); document.getElementById('lassoPanel').classList.remove('hidden'); MapCtrl.map.on('mousedown', Lasso.down); } 
-        else Lasso.cancel();
-    },
-    down: (e) => {
-        Lasso.pts = [e.latlng];
-        if(Lasso.poly) MapCtrl.map.removeLayer(Lasso.poly);
-        Lasso.poly = L.polyline(Lasso.pts, {color:'#3b82f6', dashArray:'5,5', weight:3}).addTo(MapCtrl.map);
-        MapCtrl.map.on('mousemove', Lasso.move); MapCtrl.map.on('mouseup', Lasso.up);
-    },
-    move: (e) => { Lasso.pts.push(e.latlng); Lasso.poly.setLatLngs(Lasso.pts); },
-    up: () => { MapCtrl.map.off('mousemove', Lasso.move); MapCtrl.map.off('mouseup', Lasso.up); Lasso.poly.addLatLng(Lasso.pts[0]); },
-    finish: () => {
-        State.stores.forEach(s => { 
-            let lat = s.lat, lng = s.lng;
-            if(Math.abs(lat) > 90) { let t=lat; lat=lng; lng=t; }
-            if(Lasso.isPtInPoly(L.latLng(lat, lng), Lasso.pts)) s.selected = true; 
-        });
-        Lasso.cancel(); UI.render(); UI.switchTab('tab2');
-    },
-    cancel: () => {
-        Lasso.active = false; MapCtrl.map.dragging.enable(); document.getElementById('lassoPanel').classList.add('hidden');
-        if(Lasso.poly) MapCtrl.map.removeLayer(Lasso.poly); MapCtrl.map.off('mousedown', Lasso.down);
-    },
-    isPtInPoly: (pt, poly) => {
-        let inside = false;
-        for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-            if (((poly[i].lat > pt.lat) != (poly[j].lat > pt.lat)) && (pt.lng < (poly[j].lng - poly[i].lng) * (pt.lat - poly[i].lat) / (poly[j].lat - poly[i].lat) + poly[i].lng)) inside = !inside;
-        }
-        return inside;
-    }
-};
-
-var OSRM = {
-    generate: async () => {
-        let ss = State.stores.filter(x => x.days.includes(State.openModalDay));
-        if(ss.length < 2) return alert("ต้องมีอย่างน้อย 2 ร้าน");
-        UI.showLoader("กำลังวาดเส้นถนน...");
-        try {
-            let res = await fetch(`https://router.project-osrm.org/route/v1/driving/${ss.map(x=>`${x.lng},${x.lat}`).join(';')}?overview=full&geometries=geojson`);
-            let data = await res.json();
-            if(data.code === 'Ok') {
-                MapCtrl.roadLines.forEach(l => MapCtrl.map.removeLayer(l));
-                let line = L.polyline(data.routes[0].geometry.coordinates.map(x=>[x[1],x[0]]), {color: DAY_COLORS[State.openModalDay].hex, weight:5, opacity:0.8}).addTo(MapCtrl.map);
-                MapCtrl.roadLines.push(line); MapCtrl.map.fitBounds(line.getBounds());
+        const dayOpts = Object.keys(DAY_COLORS).map(d => `<option value="${d}">${DAY_COLORS[d].name}</option>`).join('');
+        State.stores.forEach(store => {
+            let isAssigned = store.days.length > 0; let pDay = isAssigned ? store.days[0] : null; let fill = '#cbd5e1', border = '#fff', stroke = '2', zIdx = 1000;
+            if (store.selected) { fill = '#facc15'; border = '#ca8a04'; stroke = '3'; zIdx = 2000; } else if (isAssigned && DAY_COLORS[pDay]) { fill = DAY_COLORS[pDay].hex; zIdx = 500; }
+            let isR = isAssigned && store.days.includes(State.activeRoadDay); let seq = isR && store.seqs ? store.seqs[State.activeRoadDay] : null;
+            let svgW = isR ? 30 : (isAssigned ? 26 : 30); let svgH = isR ? 44 : (isAssigned ? 36 : 44); if (isR) zIdx = 1500;
+            let kpi = State.sales[store.id]; let kpiStar = (kpi && kpi.active) ? `<circle cx="20" cy="5" r="5" fill="#10b981" stroke="#fff" stroke-width="1.5"/>` : '';
+            let iconTxt = isR && seq ? `<circle cx="12" cy="10" r="8" fill="#fff" /><text x="12" y="14" font-size="11" font-weight="900" fill="#000" text-anchor="middle">${seq}</text>` : (isAssigned ? `<text x="12" y="12" font-size="10" font-family="sans-serif" font-weight="bold" fill="#fff" text-anchor="middle">${String(pDay).replace('Day ','')}</text>` : `<circle cx="12" cy="9" r="3.5" fill="#fff" />`);
+            let icon = L.divIcon({ html: `<svg viewBox="0 0 24 24" width="${svgW}" height="${svgH}" style="filter: drop-shadow(0px 3px 4px rgba(0,0,0,0.3)); overflow:visible;"><path d="M12 0C7.5 0 4 3.5 4 8c0 5.25 8 16 8 16s8-10.75 8-16c0-4.42-3.58-8-8-8z" fill="${fill}" stroke="${border}" stroke-width="${stroke}"/>${iconTxt}${kpiStar}</svg>`, className: 'custom-svg-icon', iconSize: [svgW, svgH], iconAnchor: [svgW/2, svgH], popupAnchor: [0, -svgH] });
+            if (!MapCtrl.markers[store.id]) { MapCtrl.markers[store.id] = L.marker([store.lat, store.lng]).addTo(MapCtrl.map); MapCtrl.markers[store.id].on('popupopen', function() { if (this.customAssigned) UI.focusOnEditTab(this.customId); }); MapCtrl.markers[store.id].on('click', function() { if (!this.customAssigned && !Lasso.active) StoreMgr.toggleSelect(this.customId); }); }
+            let m = MapCtrl.markers[store.id]; m.customId = store.id; m.customAssigned = isAssigned; m.setIcon(icon); m.setZIndexOffset(zIdx);
+            let badge = store.freq === 2 ? `<span class="f2-badge">F2</span>` : '';
+            let kpiHtml = kpi ? (kpi.active ? `<div class="bg-emerald-50 text-emerald-700 px-2 py-1.5 rounded-lg text-[10px] font-bold mt-2 border border-emerald-100 flex justify-between"><span>📦 ${kpi.vpo} ลัง</span><span>🏷️ ${kpi.skuCount} SKU</span></div>` : `<div class="bg-gray-100 text-gray-500 px-2 py-1 rounded-lg text-[10px] font-bold mt-2 text-center border border-gray-200">❌ Inactive</div>`) : '';
+            if (isAssigned) {
+                let dTxt = store.days.join(' & '); let drop = dayOpts.replace(`value="${pDay}"`, `value="${pDay}" selected`);
+                let html = `<div class="text-sm min-w-[170px]"><b class="text-[14px] text-gray-800 block leading-tight mb-0.5">${store.name} ${badge}</b><span class="text-gray-400 text-[10px] font-mono block mb-2">ID: ${store.id}</span><div class="inline-block px-2 py-1 rounded text-white text-[11px] font-bold w-full text-center" style="background:${fill};">📅 ${dTxt}</div>${kpiHtml}<div class="mt-2 pt-2 border-t border-gray-100"><span class="text-[10px] text-gray-500 font-bold mb-1 block">แก้ไขสายวิ่ง:</span><select onchange="StoreMgr.changeDay('${store.id}', this.value)" class="w-full text-xs p-1.5 border border-gray-200 rounded-lg bg-gray-50 focus:outline-none">${drop}<option disabled>---</option><option value="remove" class="text-red-500 font-bold">❌ ยกเลิกจัดสาย</option></select></div></div>`;
+                if (!m.getPopup()) m.bindPopup(html, {autoPan: false, className: 'custom-popup'}); else m.setPopupContent(html);
+            } else {
+                if (m.getPopup()) m.unbindPopup();
+                if (!m.getTooltip()) m.bindTooltip(`<b>${store.name}</b> ${badge}<br><span class="text-[10px] font-mono text-gray-400">${store.id}</span>${kpiHtml}`, {direction: 'top', offset: [0, -svgH]}); 
+                else m.setTooltipContent(`<b>${store.name}</b> ${badge}<br><span class="text-[10px] font-mono text-gray-400">${store.id}</span>${kpiHtml}`);
             }
-        } catch(e) { alert("เกิดข้อผิดพลาดจากเซิร์ฟเวอร์ถนน"); }
-        UI.hideLoader(); UI.closeDayModal();
+        });
     }
+};
+
+const Lasso = {
+    active: false, pts: [], poly: null, mkrs: [],
+    toggle: () => { Lasso.active = !Lasso.active; Lasso.active ? Lasso.start() : Lasso.cancel(); },
+    start: () => { document.getElementById('lassoPanel').classList.remove('hidden'); document.getElementById('mapTools').classList.add('hidden'); document.getElementById('map').classList.add('draw-cursor'); MapCtrl.map.on('click', Lasso.addPt); },
+    addPt: (e) => { Lasso.pts.push([e.latlng.lat, e.latlng.lng]); Lasso.mkrs.push(L.circleMarker(e.latlng, {radius: 4, color: '#ef4444'}).addTo(MapCtrl.map)); if(Lasso.poly) MapCtrl.map.removeLayer(Lasso.poly); Lasso.poly = L.polyline(Lasso.pts, {color: '#4f46e5', weight:4, dashArray:'5, 8'}).addTo(MapCtrl.map); },
+    cancel: () => { Lasso.active = false; Lasso.pts = []; if(Lasso.poly) MapCtrl.map.removeLayer(Lasso.poly); Lasso.poly = null; Lasso.mkrs.forEach(m => MapCtrl.map.removeLayer(m)); Lasso.mkrs = []; document.getElementById('lassoPanel').classList.add('hidden'); document.getElementById('mapTools').classList.remove('hidden'); document.getElementById('map').classList.remove('draw-cursor'); MapCtrl.map.off('click', Lasso.addPt); },
+    finish: () => { if(Lasso.pts.length < 3) return alert("วาดอย่างน้อย 3 จุด"); let c = 0; State.stores.forEach(s => { if(Lasso.isInside([s.lat, s.lng], Lasso.pts)) { s.selected = true; c++; } }); c > 0 ? UI.switchTab('tab2') : alert(`⚠️ ไม่พบร้านในพื้นที่`); Lasso.cancel(); UI.render(); App.saveDB(); },
+    isInside: (pt, vs) => { let x=pt[0], y=pt[1], ins=false; for(let i=0, j=vs.length-1; i<vs.length; j=i++) { let xi=vs[i][0], yi=vs[i][1], xj=vs[j][0], yj=vs[j][1]; if(((yi>y)!=(yj>y)) && (x<(xj-xi)*(y-yi)/(yj-yi)+xi)) ins=!ins; } return ins; }
 };
