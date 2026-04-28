@@ -87,8 +87,9 @@
                         <div id="tab2" class="hidden space-y-4">
                             <div class="bg-indigo-50 p-4 rounded-2xl shadow-sm border border-indigo-100">
                                 <h3 class="font-black text-indigo-900 text-sm mb-3">🤖 AI Route Builder</h3>
-                                <div class="flex justify-between mb-2"><label class="text-xs font-bold">จำนวนวันทั้งหมด:</label><input type="number" id="ai-days" value="24" class="w-16 p-1 border rounded-lg text-center font-bold"></div>
-                                <div class="flex justify-between mb-3 border-b border-indigo-200 pb-3"><label class="text-xs font-bold"><input type="checkbox" id="ai-outlier" checked> ตัดร้านโดด (กม.):</label><input type="number" id="ai-dist" value="5" class="w-16 p-1 border rounded-lg text-center font-bold text-red-600"></div>
+                                        <div class="flex justify-between mb-2"><label class="text-xs font-bold">จำนวนวันทั้งหมด:</label><input type="number" id="ai-days" value="24" class="w-16 p-1 border rounded-lg text-center font-bold"></div>
+                                        <div class="flex justify-between mb-2"><label class="text-xs font-bold text-gray-700"><input type="checkbox" id="ai-lock" class="mr-1"> ล็อคร้านที่จัดแล้ว (ไม่จัดทับ)</label></div>
+                                        <div class="flex justify-between mb-3 border-b border-indigo-200 pb-3"><label class="text-xs font-bold"><input type="checkbox" id="ai-outlier" checked class="mr-1"> ตัดร้านโดด (กม.):</label><input type="number" id="ai-dist" value="5" class="w-16 p-1 border rounded-lg text-center font-bold text-red-600"></div>
                                 <button onclick="AI.run()" class="w-full bg-gray-900 text-white py-2.5 rounded-xl font-bold text-sm shadow-md">✨ เริ่มคำนวณ AI</button>
                             </div>
                             <div class="flex gap-2 sticky top-0 bg-gray-50 pb-2 pt-2 z-10 border-b"><select id="assign-day" class="flex-1 p-2 border rounded-xl text-sm font-bold"></select><button onclick="StoreMgr.assignSelected()" class="bg-indigo-600 text-white px-4 rounded-xl text-sm font-bold">จัดลงวัน</button></div>
