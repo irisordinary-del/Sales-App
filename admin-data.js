@@ -1,103 +1,110 @@
-if (typeof GlobalState === 'undefined') {
-    var GlobalState = { stores: [], db: { routes: {} }, currentRoute: "402V02", openModalDay: null };
-}
+var State = { stores: [], db: { routes: {} }, currentRoute: "402V02", openModalDay: null };
 
 var App = {
     dbRef: null,
     init: () => {
         if (typeof MapCtrl !== 'undefined') MapCtrl.init();
-        if (typeof firebase === 'undefined' || !firebase.apps.length) return;
+        if (typeof firebase === 'undefined' || !firebase.apps.length) {
+            UI.showStatus("❌ ไม่พบ Firebase Config", "red");
+            return;
+        }
         App.dbRef = firebase.firestore().collection('sales_app').doc('main_data');
         App.loadDB();
-        if (typeof ExcelIO !== 'undefined') ExcelIO.init();
+        ExcelIO.init();
     },
     loadDB: () => {
-        if (typeof UI !== 'undefined') UI.showLoader("กำลังเชื่อมคลาวด์...");
+        UI.showLoader("กำลังเชื่อมต่อข้อมูล...");
         App.dbRef.get().then(doc => {
             if (doc.exists) {
-                GlobalState.db = doc.data();
-                let keys = Object.keys(GlobalState.db.routes || {});
-                if (!keys.length) { GlobalState.db.routes = {"Default":[]}; keys=["Default"]; }
-                if (!keys.includes(GlobalState.currentRoute)) GlobalState.currentRoute = keys[0];
+                State.db = doc.data();
+                let keys = Object.keys(State.db.routes || {});
+                if (!keys.length) { State.db.routes = {"Default":[]}; keys=["Default"]; }
+                if (!keys.includes(State.currentRoute)) State.currentRoute = keys[0];
                 App.updateSelector();
-                App.switchRoute(GlobalState.currentRoute);
+                App.switchRoute(State.currentRoute);
+            } else {
+                State.db = { routes: {"Default":[]} };
+                App.updateSelector(); App.switchRoute("Default");
             }
-            if (typeof UI !== 'undefined') UI.hideLoader();
-        });
+            UI.hideLoader();
+        }).catch(() => { UI.hideLoader(); UI.showStatus("❌ โหลดข้อมูลล้มเหลว", "red"); });
     },
     saveDB: () => {
-        GlobalState.db.routes[GlobalState.currentRoute] = GlobalState.stores;
-        App.dbRef.set(GlobalState.db).then(() => { if (typeof UI !== 'undefined') UI.showStatus("✅ บันทึกแล้ว", "emerald"); });
+        State.db.routes[State.currentRoute] = State.stores;
+        App.dbRef.set(State.db).then(() => UI.showStatus("✅ บันทึกแล้ว", "emerald")).catch(() => UI.showStatus("❌ บันทึกพลาด", "red"));
     },
     switchRoute: (name) => {
-        GlobalState.currentRoute = name;
-        GlobalState.stores = GlobalState.db.routes[name] || [];
-        GlobalState.stores.forEach(s => s.selected = false);
-        if (typeof UI !== 'undefined') UI.render();
+        State.currentRoute = name;
+        State.stores = State.db.routes[name] || [];
+        State.stores.forEach(s => s.selected = false);
+        UI.render();
         if (typeof MapCtrl !== 'undefined') MapCtrl.fit();
     },
     updateSelector: () => {
         let el = document.getElementById('routeSelector');
         if(!el) return;
-        let r = Object.keys(GlobalState.db.routes).sort();
+        let r = Object.keys(State.db.routes).sort();
         el.innerHTML = r.map(x => `<option value="${x}">${x}</option>`).join('');
-        el.value = GlobalState.currentRoute;
+        el.value = State.currentRoute;
     },
     addRoute: () => {
-        let n = prompt("ชื่อสายใหม่:");
-        if (n) { GlobalState.db.routes[n] = []; App.updateSelector(); App.switchRoute(n); App.saveDB(); }
+        let n = prompt("ตั้งชื่อสายวิ่งใหม่:");
+        if (n && n.trim() !== "") { 
+            if(State.db.routes[n]) return alert("ชื่อซ้ำครับ");
+            State.db.routes[n] = []; App.updateSelector(); App.switchRoute(n); App.saveDB(); 
+        }
+    }
+};
+
+var StoreMgr = {
+    toggleSelect: (id) => {
+        let s = State.stores.find(x => x.id === id);
+        if(s) s.selected = !s.selected;
+        UI.render();
+    },
+    assignSelected: () => {
+        let d = document.getElementById('assign-day').value;
+        let count = 0;
+        State.stores.forEach(s => { if(s.selected) { s.days = [d]; s.selected = false; count++; } });
+        if(count > 0) { App.saveDB(); UI.render(); } else alert("กรุณาเลือกร้านค้าก่อนจัดวัน");
+    },
+    changeDay: (id, day) => {
+        let s = State.stores.find(x => x.id === id);
+        if(!s) return;
+        s.days = day === 'remove' ? [] : [day];
+        App.saveDB(); UI.render();
     }
 };
 
 var ExcelIO = {
     init: () => {
         let el = document.getElementById('fileUpload');
-        if (el) el.onchange = (e) => {
+        if(el) el.onchange = (e) => {
             let reader = new FileReader();
             reader.onload = (evt) => {
                 let wb = XLSX.read(new Uint8Array(evt.target.result), {type:'array'});
                 let rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
-                GlobalState.stores = rows.map(r => {
-                    let dRaw = r['Day'] || r['day'] || r['วัน'] || '';
-                    let days = [];
-                    let m = String(dRaw).match(/\d+/);
-                    if(m) days = [`Day ${m[0]}`];
+                State.stores = rows.map(r => {
+                    let dRaw = r['Day'] || r['day'] || r['วันวิ่งคิว'] || '';
+                    let days = []; let m = String(dRaw).match(/\d+/); if(m) days = [`Day ${m[0]}`];
                     return {
-                        id: String(r['ID'] || r['id'] || ''),
-                        name: String(r['Name'] || r['name'] || 'ไม่มีชื่อ'),
+                        id: String(r['ID'] || r['id'] || r['รหัสร้านค้า'] || ''),
+                        name: String(r['Name'] || r['name'] || r['ชื่อร้านค้า'] || 'ไม่ระบุชื่อ'),
                         lat: parseFloat(r['Lat'] || r['lat']),
                         lng: parseFloat(r['Lng'] || r['lng']),
                         days: days, selected: false
                     };
-                });
-                App.saveDB(); if (typeof UI !== 'undefined') UI.render();
+                }).filter(s => s.id && s.name && !isNaN(s.lat) && !isNaN(s.lng));
+                App.saveDB(); UI.render(); MapCtrl.fit();
             };
             reader.readAsArrayBuffer(e.target.files[0]);
+            e.target.value = '';
         };
     },
     export: () => {
-        let data = GlobalState.stores.map(s => ({ "ID": s.id, "Name": s.name, "Lat": s.lat, "Lng": s.lng, "Day": s.days[0] }));
+        if(!State.stores.length) return alert("ไม่มีข้อมูล");
+        let data = State.stores.map(s => ({ "ID": s.id, "Name": s.name, "Lat": s.lat, "Lng": s.lng, "Day": s.days.length ? s.days[0].replace('Day ','') : '' }));
         let ws = XLSX.utils.json_to_sheet(data), wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, "Data");
-        XLSX.writeFile(wb, `Export_${GlobalState.currentRoute}.xlsx`);
-    }
-};
-
-var StoreMgr = {
-    toggleSelect: (id) => {
-        let s = GlobalState.stores.find(x => x.id === id);
-        if(s) s.selected = !s.selected;
-        if (typeof UI !== 'undefined') UI.render();
-    },
-    assignSelected: () => {
-        let d = document.getElementById('assign-day').value;
-        GlobalState.stores.forEach(s => { if(s.selected) { s.days = [d]; s.selected = false; } });
-        App.saveDB(); if (typeof UI !== 'undefined') UI.render();
-    },
-    changeDay: (id, day) => {
-        let s = GlobalState.stores.find(x => x.id === id);
-        if(!s) return;
-        s.days = (day === 'remove') ? [] : [day];
-        App.saveDB(); if (typeof UI !== 'undefined') UI.render();
+        XLSX.utils.book_append_sheet(wb, ws, "Route"); XLSX.writeFile(wb, `Export_${State.currentRoute}.xlsx`);
     }
 };
