@@ -9,21 +9,38 @@ var MapCtrl = {
         if(!MapCtrl.map) return;
         MapCtrl.markers.forEach(m => MapCtrl.map.removeLayer(m));
         MapCtrl.markers = [];
-        GlobalState.stores.forEach(s => {
-            if(!s.lat || !s.lng) return;
+        let opts = Object.keys(DAY_COLORS).map(d => `<option value="${d}">${DAY_COLORS[d].name}</option>`).join('');
+
+        State.stores.forEach(s => {
             let lat = s.lat, lng = s.lng;
             if(Math.abs(lat) > 90) { let t=lat; lat=lng; lng=t; }
-            let color = (s.days[0] && typeof DAY_COLORS !== 'undefined') ? DAY_COLORS[s.days[0]].hex : '#94a3b8';
-            let icon = L.divIcon({
-                html: `<div style="background:${color}; width:22px; height:22px; border-radius:50%; border:2px solid ${s.selected?'#000':'#fff'}; display:flex; align-items:center; justify-content:center; color:white; font-size:9px; font-weight:bold; box-shadow:0 2px 4px rgba(0,0,0,0.3)">${s.days[0]?s.days[0].replace('Day ',''):''}</div>`,
-                className: '', iconSize:[22,22], iconAnchor:[11,11]
-            });
+            let dKey = s.days[0];
+            let color = (dKey && DAY_COLORS[dKey]) ? DAY_COLORS[dKey].hex : '#9CA3AF';
+            
+            let iconHtml = `
+                <div style="position: relative; width: 28px; height: 38px; z-index: ${s.selected ? 1000 : 1};">
+                    <div style="position: absolute; top: 0; left: 0; width: 28px; height: 28px; background-color: ${color}; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); border: 2px solid ${s.selected?'#000':'#fff'}; box-shadow: 2px 2px 5px rgba(0,0,0,0.4);"></div>
+                    <div style="position: absolute; top: 0; left: 0; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; color: white; font-size: 12px; font-weight: 900; z-index: 2;">${dKey?dKey.replace('Day ',''):''}</div>
+                </div>`;
+                
+            let icon = L.divIcon({ html: iconHtml, className: '', iconSize: [28,38], iconAnchor: [14,38] });
             let m = L.marker([lat, lng], {icon:icon}).addTo(MapCtrl.map);
-            m.bindPopup(`<b>${s.name}</b><br>ID: ${s.id}`);
+            m.bindPopup(`
+                <div style="min-width: 150px; font-family: sans-serif;">
+                    <b>${s.name}</b><br><small>ID: ${s.id}</small>
+                    <select onchange="StoreMgr.changeDay('${s.id}', this.value)" style="width:100%; margin-top:8px; padding:4px;">
+                        <option value="remove">-- ถอดออก --</option>
+                        ${opts.replace(`value="${dKey}"`, `value="${dKey}" selected`)}
+                    </select>
+                </div>`);
             MapCtrl.markers.push(m);
         });
     },
-    fit: () => { if(MapCtrl.markers.length) L.featureGroup(MapCtrl.markers).getBounds().isValid() && MapCtrl.map.fitBounds(L.featureGroup(MapCtrl.markers).getBounds(), {padding:[40,40]}); }
+    fit: () => {
+        if(!MapCtrl.markers.length) return;
+        let bounds = L.featureGroup(MapCtrl.markers).getBounds();
+        if(bounds.isValid()) MapCtrl.map.fitBounds(bounds, {padding:[40,40]});
+    }
 };
 
 var Lasso = {
@@ -42,12 +59,12 @@ var Lasso = {
     move: (e) => { Lasso.pts.push(e.latlng); Lasso.poly.setLatLngs(Lasso.pts); },
     up: () => { MapCtrl.map.off('mousemove', Lasso.move); MapCtrl.map.off('mouseup', Lasso.up); Lasso.poly.addLatLng(Lasso.pts[0]); },
     finish: () => {
-        GlobalState.stores.forEach(s => { 
+        State.stores.forEach(s => { 
             let lat = s.lat, lng = s.lng;
             if(Math.abs(lat) > 90) { let t=lat; lat=lng; lng=t; }
             if(Lasso.isPtInPoly(L.latLng(lat, lng), Lasso.pts)) s.selected = true; 
         });
-        Lasso.cancel(); if (typeof UI !== 'undefined') { UI.render(); UI.switchTab('tab2'); }
+        Lasso.cancel(); UI.render(); UI.switchTab('tab2');
     },
     cancel: () => {
         Lasso.active = false; MapCtrl.map.dragging.enable(); document.getElementById('lassoPanel').classList.add('hidden');
@@ -64,18 +81,18 @@ var Lasso = {
 
 var OSRM = {
     generate: async () => {
-        let ss = GlobalState.stores.filter(x => x.days.includes(GlobalState.openModalDay));
-        if(ss.length < 2) return alert("ต้องการ 2 ร้านขึ้นไป");
-        if (typeof UI !== 'undefined') UI.showLoader("กำลังวาดเส้นถนน...");
+        let ss = State.stores.filter(x => x.days.includes(State.openModalDay));
+        if(ss.length < 2) return alert("ต้องมีอย่างน้อย 2 ร้าน");
+        UI.showLoader("กำลังวาดเส้นถนน...");
         try {
             let res = await fetch(`https://router.project-osrm.org/route/v1/driving/${ss.map(x=>`${x.lng},${x.lat}`).join(';')}?overview=full&geometries=geojson`);
             let data = await res.json();
             if(data.code === 'Ok') {
                 MapCtrl.roadLines.forEach(l => MapCtrl.map.removeLayer(l));
-                let line = L.polyline(data.routes[0].geometry.coordinates.map(x=>[x[1],x[0]]), {color: DAY_COLORS[GlobalState.openModalDay].hex, weight:5, opacity:0.7}).addTo(MapCtrl.map);
+                let line = L.polyline(data.routes[0].geometry.coordinates.map(x=>[x[1],x[0]]), {color: DAY_COLORS[State.openModalDay].hex, weight:5, opacity:0.8}).addTo(MapCtrl.map);
                 MapCtrl.roadLines.push(line); MapCtrl.map.fitBounds(line.getBounds());
             }
-        } catch(e) {}
-        if (typeof UI !== 'undefined') { UI.hideLoader(); UI.closeDayModal(); }
+        } catch(e) { alert("เกิดข้อผิดพลาดจากเซิร์ฟเวอร์ถนน"); }
+        UI.hideLoader(); UI.closeDayModal();
     }
 };
