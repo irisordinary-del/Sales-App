@@ -3,185 +3,103 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Route Planner Admin - Smart Sales</title>
-    
+    <title>Route Planner Admin</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;600;700&display=swap" rel="stylesheet">
-    
     <style>
-        body { font-family: 'Prompt', sans-serif; background-color: #f8fafc; }
+        body { font-family: 'Prompt', sans-serif; background-color: #f1f5f9; }
         #map { height: 100%; width: 100%; z-index: 1; }
         .sidebar-menu.active { background-color: #1e293b; color: #38bdf8; border-right: 4px solid #38bdf8; }
-        /* ซ่อน Scrollbar ของ Chrome/Safari */
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
     </style>
 </head>
 <body class="h-screen flex overflow-hidden">
 
     <aside class="w-64 bg-[#0f172a] text-slate-300 flex flex-col shadow-2xl z-50">
-        <div class="p-6">
-            <h1 class="text-2xl font-black text-white tracking-tighter">R<span class="text-indigo-400">Admin</span></h1>
-            <p class="text-[10px] text-slate-500 uppercase tracking-widest mt-1">Sales Logistics System</p>
-        </div>
-        
-        <nav class="flex-1 mt-4">
-            <button id="nav-planning" onclick="Nav.go('planning')" class="sidebar-menu active w-full flex items-center gap-3 px-6 py-4 hover:bg-slate-800 transition">
-                📍 วางแผนคิวงาน
-            </button>
-            <button id="nav-data" onclick="Nav.go('data')" class="sidebar-menu w-full flex items-center gap-3 px-6 py-4 hover:bg-slate-800 transition">
-                📂 ข้อมูลการขาย (ดิบ)
-            </button>
-            <button id="nav-kpi" onclick="Nav.go('kpi')" class="sidebar-menu w-full flex items-center gap-3 px-6 py-4 hover:bg-slate-800 transition text-sm">
-                🎯 จัดการสมการ KPI
-            </button>
+        <div class="p-6"><h1 class="text-2xl font-black text-white">R<span class="text-sky-400">Admin</span></h1></div>
+        <nav class="flex-1">
+            <button id="nav-planning" onclick="Nav.go('planning')" class="sidebar-menu active w-full flex items-center gap-3 px-6 py-4 hover:bg-slate-800 transition">📍 วางแผนคิวงาน</button>
+            <button id="nav-data" onclick="Nav.go('data')" class="sidebar-menu w-full flex items-center gap-3 px-6 py-4 hover:bg-slate-800 transition">📂 ข้อมูลดิบ</button>
         </nav>
-
-        <div class="p-4 border-t border-slate-800">
-            <div id="db-save-status" class="hidden items-center gap-2 text-[10px] font-bold p-2 rounded-lg"></div>
-        </div>
+        <div id="db-status" class="p-4 text-[10px] font-bold text-center"></div>
     </aside>
 
     <main class="flex-1 flex flex-col relative overflow-hidden">
-        
-        <header class="h-16 bg-[#0f172a] border-b border-slate-800 flex items-center justify-between px-6 shadow-md z-40">
+        <header class="h-16 bg-[#0f172a] flex items-center justify-between px-6 z-40 text-white">
             <div class="flex items-center gap-4">
-                <h2 class="text-white font-bold">RoutePlan</h2>
-                <div class="flex items-center bg-slate-800 rounded-xl px-2">
-                    <select id="routeSelector" onchange="App.switchRoute(this.value)" class="bg-transparent text-white text-sm p-2 outline-none cursor-pointer font-bold"></select>
-                    <button onclick="App.renameRoute()" class="p-2 hover:bg-slate-700 text-slate-400">✏️</button>
-                    <button onclick="App.deleteRoute()" class="p-2 hover:bg-slate-700 text-slate-400">🗑️</button>
-                </div>
-                <button onclick="App.addRoute()" class="bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-bold px-3 py-2 rounded-lg transition">+ เพิ่มสาย</button>
+                <span class="font-bold">Route:</span>
+                <select id="routeSelector" onchange="App.switchRoute(this.value)" class="bg-slate-800 p-2 rounded-lg text-sm font-bold outline-none"></select>
+                <button onclick="App.addRoute()" class="text-[10px] bg-sky-600 px-3 py-2 rounded-lg">+ เพิ่มสาย</button>
             </div>
-            <button onclick="UI.showSummaryModal()" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-2 rounded-xl text-xs flex items-center gap-2 transition border border-slate-700">
-                📊 ภาพรวม
-            </button>
+            <button onclick="UI.showSummaryModal()" class="text-xs bg-slate-800 px-4 py-2 rounded-xl border border-slate-700">📊 ภาพรวม</button>
         </header>
 
         <div class="flex-1 flex overflow-hidden">
-            
-            <div id="page-planning" class="flex-1 relative flex overflow-hidden">
+            <div id="page-planning" class="flex-1 relative flex">
                 <div id="map"></div>
-                
                 <div id="lassoPanel" class="hidden absolute top-6 left-1/2 -translate-x-1/2 z-[1000] flex gap-2">
-                    <button onclick="Lasso.finish()" class="bg-emerald-600 text-white px-6 py-2.5 rounded-full font-bold shadow-2xl hover:bg-emerald-500">✨ ตกลงเลือกพื้นที่</button>
-                    <button onclick="Lasso.cancel()" class="bg-white text-gray-700 px-6 py-2.5 rounded-full font-bold shadow-2xl hover:bg-gray-100">ยกเลิก</button>
+                    <button onclick="Lasso.finish()" class="bg-emerald-600 text-white px-6 py-2 rounded-full font-bold shadow-xl">✨ ตกลง</button>
+                    <button onclick="Lasso.cancel()" class="bg-white text-gray-700 px-6 py-2 rounded-full font-bold shadow-xl">ยกเลิก</button>
                 </div>
-
-                <div class="absolute top-6 right-6 z-[1000] flex flex-col gap-3">
-                    <div class="bg-white/90 backdrop-blur p-1 rounded-2xl shadow-xl border border-white flex flex-col">
-                        <label class="flex items-center gap-2 p-3 cursor-pointer hover:bg-gray-50 rounded-xl">
-                            <input type="checkbox" id="toggleLines" onchange="MapCtrl.renderMarkers()" class="w-4 h-4 text-indigo-600">
-                            <span class="text-xs font-bold text-gray-600">เส้นโยงร้าน</span>
-                        </label>
-                        <button onclick="Lasso.toggle()" class="w-full flex items-center justify-center gap-2 p-3 bg-gray-900 text-white rounded-xl font-bold text-xs hover:bg-black transition">
-                            🖌️ วาดเลือกพื้นที่
-                        </button>
-                    </div>
-                    <button id="clearRoadBtn" onclick="MapCtrl.clearRoad(true)" class="hidden bg-red-600 text-white px-4 py-3 rounded-xl font-bold shadow-xl text-xs">❌ ล้างเส้นถนน</button>
+                <div class="absolute top-6 right-6 z-[1000] flex flex-col gap-2">
+                    <button onclick="Lasso.toggle()" class="bg-gray-900 text-white p-3 rounded-xl font-bold text-xs shadow-xl">🖌️ วาดเลือกพื้นที่</button>
                 </div>
             </div>
 
-            <section class="w-[420px] bg-white border-l border-gray-200 flex flex-col shadow-inner z-30">
-                <div class="flex border-b border-gray-100 p-2 gap-1 bg-gray-50">
-                    <button id="btn-tab1" onclick="UI.switchTab('tab1')" class="tab-btn active flex-1 py-2 text-xs font-bold rounded-lg transition border-b-2 border-indigo-600 text-indigo-800">1. ข้อมูล</button>
-                    <button id="btn-tab2" onclick="UI.switchTab('tab2')" class="tab-btn flex-1 py-2 text-xs font-bold text-gray-500 rounded-lg">2. จัดสาย</button>
-                    <button id="btn-tab3" onclick="UI.switchTab('tab3')" class="tab-btn flex-1 py-2 text-xs font-bold text-gray-500 rounded-lg">3. แก้ไข</button>
-                    <button id="btn-tab4" onclick="UI.switchTab('tab4')" class="tab-btn flex-1 py-2 text-xs font-bold text-gray-500 rounded-lg">4. สรุป</button>
+            <section class="w-[400px] bg-white border-l flex flex-col shadow-xl z-30">
+                <div class="flex border-b bg-gray-50 p-1">
+                    <button id="btn-tab1" onclick="UI.switchTab('tab1')" class="tab-btn active flex-1 py-3 text-xs font-bold border-b-2 border-sky-600 text-sky-800">1. ข้อมูล</button>
+                    <button id="btn-tab2" onclick="UI.switchTab('tab2')" class="tab-btn flex-1 py-3 text-xs font-bold text-gray-400">2. จัดสาย</button>
+                    <button id="btn-tab3" onclick="UI.switchTab('tab3')" class="tab-btn flex-1 py-3 text-xs font-bold text-gray-400">3. สรุป</button>
                 </div>
 
                 <div class="flex-1 overflow-y-auto p-4 no-scrollbar">
                     <div id="tab1" class="block space-y-4">
-                        <div class="p-6 bg-indigo-50 border-2 border-dashed border-indigo-200 rounded-2xl text-center relative group">
+                        <div class="p-8 bg-sky-50 border-2 border-dashed border-sky-200 rounded-2xl text-center relative">
                             <input type="file" id="fileUpload" class="absolute inset-0 opacity-0 cursor-pointer">
-                            <div class="text-indigo-600 group-hover:scale-110 transition duration-300">📁</div>
-                            <p class="text-xs font-bold text-indigo-700 mt-2">อัปโหลดไฟล์แผนที่ (.xlsx)</p>
+                            <p class="text-xs font-bold text-sky-700">📁 อัปโหลดไฟล์ Excel (.xlsx)</p>
                         </div>
-                        <div class="flex gap-2">
-                            <button onclick="App.clearStores()" class="flex-1 py-2 bg-red-50 text-red-500 text-[10px] font-bold rounded-lg border border-red-100">ล้างสายนี้</button>
-                            <button onclick="StoreMgr.clearSelection()" class="flex-1 py-2 bg-gray-50 text-gray-500 text-[10px] font-bold rounded-lg border border-gray-100">ยกเลิกเลือก</button>
-                        </div>
-                        <input type="text" onkeyup="UI.filterList('list-upload', this.value)" placeholder="ค้นหาร้าน..." class="w-full p-3 bg-gray-100 rounded-xl text-xs border-none outline-none focus:ring-2 focus:ring-indigo-400">
+                        <input type="text" onkeyup="UI.filterList('list-upload', this.value)" placeholder="ค้นหาร้าน..." class="w-full p-3 bg-gray-100 rounded-xl text-xs outline-none">
                         <div id="list-upload" class="space-y-2"></div>
                     </div>
 
                     <div id="tab2" class="hidden space-y-4">
-                        <div class="p-4 bg-indigo-600 rounded-2xl shadow-lg">
-                            <label class="text-white/70 text-[10px] font-bold uppercase mb-2 block">จัดลงวันวิ่ง:</label>
+                        <div class="p-4 bg-sky-600 rounded-2xl shadow-lg text-white">
+                            <p class="text-[10px] font-bold mb-2 uppercase">จัดลงวันวิ่ง:</p>
                             <div class="flex gap-2">
-                                <select id="assign-day" class="flex-1 p-3 rounded-xl bg-white text-sm font-bold outline-none"></select>
-                                <button onclick="StoreMgr.assignSelected()" class="bg-emerald-400 text-emerald-900 px-6 rounded-xl font-black hover:bg-white transition">GO!</button>
+                                <select id="assign-day" class="flex-1 p-2 rounded-lg bg-white text-gray-800 text-sm font-bold"></select>
+                                <button onclick="StoreMgr.assignSelected()" class="bg-emerald-400 text-emerald-900 px-4 rounded-lg font-bold">GO</button>
                             </div>
                         </div>
-                        <input type="text" onkeyup="UI.filterList('list-unassigned', this.value)" placeholder="กรองร้านรอจัด..." class="w-full p-3 bg-gray-100 rounded-xl text-xs outline-none">
-                        <div id="list-unassigned" class="space-y-3"></div>
+                        <div id="list-unassigned" class="space-y-2"></div>
                     </div>
 
-                    <div id="tab3" class="hidden space-y-4">
-                        <input type="text" onkeyup="UI.filterList('list-assigned', this.value)" placeholder="ค้นหาร้านที่จัดแล้ว..." class="w-full p-3 bg-gray-100 rounded-xl text-xs outline-none">
-                        <div id="list-assigned" class="space-y-2"></div>
-                    </div>
-
-                    <div id="tab4" class="hidden">
-                        <div id="list-summary" class="grid grid-cols-2 gap-3 pb-20"></div>
-                    </div>
+                    <div id="tab3" class="hidden"><div id="list-summary" class="grid grid-cols-2 gap-2"></div></div>
                 </div>
 
-                <div class="p-4 bg-gray-50 border-t border-gray-200">
-                    <div class="flex justify-between items-end mb-2">
-                        <div class="flex gap-4">
-                            <div class="text-center"><p class="text-[9px] text-gray-400 font-bold uppercase">รวม</p><p id="stat-total" class="font-black text-lg">0</p></div>
-                            <div class="text-center"><p class="text-[9px] text-gray-400 font-bold uppercase">รอจัด</p><p id="stat-pending" class="font-black text-lg text-yellow-600">0</p></div>
-                            <div class="text-center"><p class="text-[9px] text-gray-400 font-bold uppercase">จัดแล้ว</p><p id="stat-done" class="font-black text-lg text-emerald-600">0</p></div>
-                        </div>
-                        <button onclick="ExcelIO.export()" class="bg-emerald-600 text-white px-4 py-2.5 rounded-xl font-bold text-[10px] flex items-center gap-2 hover:bg-emerald-500 shadow-lg transition">📥 โหลดไฟล์ออก</button>
+                <div class="p-4 bg-gray-50 border-t">
+                    <div class="flex justify-between items-center">
+                        <span class="text-xs font-bold text-gray-400">PROGRESS</span>
+                        <button onclick="ExcelIO.export()" class="bg-emerald-600 text-white px-3 py-2 rounded-lg text-[10px] font-bold">📥 Export Excel</button>
                     </div>
-                    <div class="w-full h-1.5 bg-gray-200 rounded-full overflow-hidden"><div id="progress-bar" class="h-full bg-emerald-500 transition-all duration-500" style="width: 0%"></div></div>
+                    <div class="w-full h-1.5 bg-gray-200 rounded-full mt-2"><div id="progress-bar" class="h-full bg-emerald-500 w-0 transition-all"></div></div>
                 </div>
             </section>
         </div>
     </main>
 
-    <div id="loader" class="hidden fixed inset-0 z-[9999] bg-slate-900/80 backdrop-blur-sm flex-col items-center justify-center text-white">
-        <div class="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-        <p id="loader-text" class="font-bold">กำลังประมวลผล...</p>
-        <p id="loader-subtext" class="text-xs text-slate-400 mt-1"></p>
+    <div id="loader" class="hidden fixed inset-0 z-[9999] bg-slate-900/80 flex flex-col items-center justify-center text-white">
+        <div class="w-10 h-10 border-4 border-sky-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+        <p id="loader-text" class="text-sm font-bold"></p>
     </div>
 
-    <div id="save-toast" class="fixed bottom-8 left-1/2 -translate-x-1/2 z-[9999] bg-slate-900 text-white px-6 py-4 rounded-2xl shadow-2xl border border-slate-700 flex items-center gap-3 transition-all duration-500 translate-y-24 opacity-0">
-        <span class="bg-emerald-500 p-1 rounded-full text-[10px]">✅</span>
-        <span id="toast-msg" class="text-sm font-bold">บันทึกเรียบร้อย</span>
-    </div>
-
-    <div id="dayModal" class="hidden fixed inset-0 z-[2000] bg-black/60 backdrop-blur flex items-center justify-center p-4">
-        <div class="bg-gray-50 w-full max-w-md rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
-            <div class="p-6 bg-white border-b flex justify-between items-center">
-                <h3 id="modalTitle" class="font-black text-lg flex items-center gap-2"></h3>
-                <button onclick="UI.closeDayModal()" class="text-gray-400 hover:text-black text-2xl">✕</button>
-            </div>
-            <div id="modalContent" class="flex-1 overflow-y-auto p-4 no-scrollbar"></div>
-            <div class="p-4 bg-white border-t flex gap-2">
-                <button onclick="OSRM.generate()" class="flex-1 bg-indigo-600 text-white py-4 rounded-2xl font-black shadow-lg hover:bg-indigo-500">🚗 วาดเส้นถนนจริง</button>
-                <button onclick="UI.closeDayModal()" class="px-6 py-4 bg-gray-100 text-gray-500 rounded-2xl font-bold">ปิด</button>
-            </div>
-        </div>
-    </div>
-
-    <div id="overallModal" class="hidden fixed inset-0 z-[2000] bg-black/60 backdrop-blur flex items-center justify-center p-4">
-        <div class="bg-white w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
-            <div class="p-6 border-b flex justify-between items-center">
-                <h3 class="font-black text-xl italic">Overall Route Summary</h3>
-                <button onclick="UI.hideSummaryModal()" class="text-gray-400 text-2xl">✕</button>
-            </div>
-            <div class="flex-1 overflow-y-auto p-0">
-                <table class="w-full text-left border-collapse">
-                    <thead class="bg-gray-50 sticky top-0">
-                        <tr><th class="p-4 text-[10px] uppercase text-gray-400">สายวิ่ง</th><th class="p-4 text-center text-[10px] uppercase text-gray-400">ร้านทั้งหมด</th><th class="p-4 text-center text-[10px] uppercase text-gray-400">จัดแล้ว</th><th class="p-4 text-center text-[10px] uppercase text-gray-400">คงเหลือ</th><th class="p-4 text-center text-[10px] uppercase text-gray-400">%</th></tr>
-                    </thead>
-                    <tbody id="overallTableBody"></tbody>
-                </table>
+    <div id="dayModal" class="hidden fixed inset-0 z-[2000] bg-black/60 flex items-center justify-center p-4">
+        <div class="bg-white w-full max-w-sm rounded-3xl overflow-hidden shadow-2xl">
+            <div id="modalTitle" class="p-6 border-b font-bold text-lg"></div>
+            <div id="modalContent" class="p-4 max-h-96 overflow-y-auto"></div>
+            <div class="p-4 bg-gray-50 flex gap-2">
+                <button onclick="OSRM.generate()" class="flex-1 bg-sky-600 text-white py-3 rounded-xl font-bold">🚗 วาดเส้นถนนจริง</button>
+                <button onclick="UI.closeDayModal()" class="px-6 py-3 bg-white border rounded-xl font-bold">ปิด</button>
             </div>
         </div>
     </div>
@@ -190,18 +108,15 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
-
+    
     <script src="app-config.js"></script>
-    <script src="admin-data.js?v=4"></script>
-    <script src="admin-map.js?v=4"></script>
-    <script src="admin-ui.js?v=4"></script>
+    <script src="admin-data.js?v=99"></script>
+    <script src="admin-map.js?v=99"></script>
+    <script src="admin-ui.js?v=99"></script>
 
     <script>
-        // เริ่มต้นการทำงานของแอป
         window.addEventListener('DOMContentLoaded', () => {
-            if (typeof App !== 'undefined' && App.init) {
-                App.init();
-            }
+            if (typeof App !== 'undefined' && App.init) App.init();
         });
     </script>
 </body>
