@@ -673,5 +673,25 @@ const App = {
             if (inp) inp.value = '';
         };
         reader.readAsArrayBuffer(file);
+    },
+    
+    // เคลียร์การจัดสายทั้งหมด
+    clearAllAssignments: () => {
+        if (!confirm('🗑️ ยืนยันการเคลียร์การจัดสายทั้งหมด?\n(ร้านทั้งหมดจะกลับไปอยู่ในสถานะ "รอจัดสาย")')) {
+            return;
+        }
+        
+        State.stores.forEach(s => {
+            s.days = [];
+            s.seqs = {};
+            s.selected = false;
+        });
+        
+        MapCtrl.clearRoad(true);
+        MapCtrl.clearAll();
+        UI.render();
+        App.saveDB();
+        
+        UI.showSaveToast('✅ เคลียร์การจัดสายเสร็จ');
     }
 };

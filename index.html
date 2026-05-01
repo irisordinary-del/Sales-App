@@ -81,6 +81,7 @@
                     </button>
                 </div>
                 <div class="flex items-center gap-3">
+                    <button onclick="StoreMgr.clearAllAssignments()" class="bg-red-50 border border-red-200 hover:bg-red-100 text-red-600 px-4 py-1.5 rounded-lg text-sm font-bold shadow-md transition flex items-center gap-2">🗑️ เคลียร์จัดสาย</button>
                     <button onclick="UI.showSummaryModal()" class="bg-gray-800 border border-gray-600 hover:bg-gray-700 px-4 py-1.5 rounded-lg text-sm font-bold shadow-md transition flex items-center gap-2 text-white">
                         📊 ภาพรวม
                     </button>
@@ -392,6 +393,7 @@
     <script src="admin-data.js"></script>
     <!-- 5. AI (ต้องหลัง StoreMgr) -->
     <script src="admin-ai.js"></script>
+    <script src="file-manager.js"></script>
     <!-- 6. Init -->
     <script>
         document.addEventListener('DOMContentLoaded', () => { App.init(); });
