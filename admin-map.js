@@ -1,4 +1,4 @@
-const MapCtrl = {
+window.MapCtrl = {
     map: null, markers: {}, roadLayer: null, polylines: [],
     init: () => { MapCtrl.map = L.map('map').setView([14.4745, 100.1222], 10); L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(MapCtrl.map); },
     clearAll: () => { for (let id in MapCtrl.markers) MapCtrl.map.removeLayer(MapCtrl.markers[id]); MapCtrl.markers = {}; MapCtrl.clearRoad(true); },
@@ -33,7 +33,7 @@ const MapCtrl = {
     }
 };
 
-const Lasso = {
+window.Lasso = {
     active: false, pts: [], poly: null, mkrs: [],
     toggle: () => { Lasso.active = !Lasso.active; Lasso.active ? Lasso.start() : Lasso.cancel(); },
     start: () => { document.getElementById('lassoPanel').classList.remove('hidden'); document.getElementById('mapTools').classList.add('hidden'); document.getElementById('map').classList.add('draw-cursor'); MapCtrl.map.on('click', Lasso.addPt); },
