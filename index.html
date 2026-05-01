@@ -234,15 +234,16 @@
     <script src="app-config.js"></script>
     <script src="admin-data.js"></script>
     <script src="admin-map.js"></script>
-    <script src="app-savedb-fixed.js"></script>
     <script src="admin-ai.js"></script>
     <script src="admin-ui.js"></script>
     <script src="FEATURES_IMPLEMENTATION.js"></script>
     <script src="map-init.js"></script>
     
-    <!-- App Upload Function -->
+    <!-- Built-in App Functions -->
     <script>
         if (!window.App) window.App = {};
+        
+        // App.uploadAndParseFile
         if (!window.App.uploadAndParseFile) {
             window.App.uploadAndParseFile = async function(file) {
                 if (!file) return;
@@ -274,10 +275,9 @@
                     UI.showSaveToast('❌ อ่านไฟล์ไม่สำเร็จ');
                 }
             };
-            console.log('✅ uploadAndParseFile ready');
         }
         
-        // Add helper functions
+        // App.refreshRouteSelector
         if (!window.App.refreshRouteSelector) {
             window.App.refreshRouteSelector = function() {
                 const selector = document.getElementById('routeSelector');
@@ -289,35 +289,103 @@
             };
         }
         
+        // App.saveDB
         if (!window.App.saveDB) {
             window.App.saveDB = async function() {
                 try {
+                    console.log('💾 Saving to Firestore...');
                     const db = firebase.firestore();
-                    const docRef = db.collection('appData').doc('v1_main');
-                    
-                    // Ensure document exists first
-                    await docRef.set({ initialized: true }, { merge: true });
-                    
-                    // Save each route
                     for (let routeName in State.db.routes) {
-                        const routeRef = docRef.collection('routes').doc(routeName);
+                        const stores = State.db.routes[routeName];
+                        const routeRef = db.collection('appData').doc('v1_main').collection('routes').doc(routeName);
                         await routeRef.set({
                             routeName: routeName,
-                            stores: State.db.routes[routeName],
+                            storeCount: stores.length,
+                            stores: stores,
                             updatedAt: new Date(),
-                            storeCount: State.db.routes[routeName].length
+                            createdAt: new Date()
                         }, { merge: true });
+                        console.log(`✅ ${routeName} saved (${stores.length} stores)`);
                     }
-                    console.log('✅ DB Saved');
+                    console.log('✅ All saved!');
                 } catch(err) {
-                    console.error('❌ Save DB error:', err);
+                    console.error('❌ saveDB error:', err);
                 }
             };
         }
+        
+        // App.switchRoute
+        if (!window.App.switchRoute) {
+            window.App.switchRoute = function(routeName) {
+                if (!routeName || !State.db.routes[routeName]) return;
+                State.localActiveRoute = routeName;
+                State.stores = State.db.routes[routeName];
+                UI.render();
+                if (MapCtrl && MapCtrl.map) setTimeout(() => MapCtrl.fitToStores(), 100);
+            };
+        }
+        
+        // App.addRoute
+        if (!window.App.addRoute) {
+            window.App.addRoute = function() {
+                const name = prompt('ชื่อสาย (เช่น Route_402):');
+                if (!name) return;
+                if (State.db.routes[name]) { alert('สายนี้มีอยู่แล้ว'); return; }
+                State.db.routes[name] = [];
+                State.localActiveRoute = name;
+                State.stores = [];
+                App.refreshRouteSelector();
+                App.saveDB();
+                UI.render();
+            };
+        }
+        
+        // App.renameRoute
+        if (!window.App.renameRoute) {
+            window.App.renameRoute = function() {
+                if (!State.localActiveRoute) return;
+                const newName = prompt('ชื่อสายใหม่:', State.localActiveRoute);
+                if (!newName || newName === State.localActiveRoute) return;
+                if (State.db.routes[newName]) { alert('ชื่อนี้มีอยู่แล้ว'); return; }
+                State.db.routes[newName] = State.db.routes[State.localActiveRoute];
+                delete State.db.routes[State.localActiveRoute];
+                State.localActiveRoute = newName;
+                App.refreshRouteSelector();
+                App.saveDB();
+            };
+        }
+        
+        // App.deleteRoute
+        if (!window.App.deleteRoute) {
+            window.App.deleteRoute = function() {
+                if (!State.localActiveRoute) return;
+                if (!confirm(`ลบ ${State.localActiveRoute} ใช่ไหม?`)) return;
+                delete State.db.routes[State.localActiveRoute];
+                const routes = Object.keys(State.db.routes);
+                State.localActiveRoute = routes.length > 0 ? routes[0] : null;
+                State.stores = State.localActiveRoute ? State.db.routes[routes[0]] : [];
+                App.refreshRouteSelector();
+                App.saveDB();
+                UI.render();
+            };
+        }
+        
+        // App.clearStores
+        if (!window.App.clearStores) {
+            window.App.clearStores = function() {
+                if (!confirm(`ล้างร้านค้าทั้งหมดใน ${State.localActiveRoute} ใช่ไหม?`)) return;
+                State.db.routes[State.localActiveRoute] = [];
+                State.stores = [];
+                App.saveDB();
+                UI.render();
+            };
+        }
+        
+        console.log('✅ All App functions loaded!');
     </script>
 
+    <!-- File Upload Handler -->
     <script>
-        // Handle file uploads
         document.getElementById('fileUpload')?.addEventListener('change', (e) => {
             if(e.target.files[0]) {
                 App.uploadAndParseFile(e.target.files[0]);
