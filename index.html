@@ -275,6 +275,38 @@
             };
             console.log('✅ uploadAndParseFile ready');
         }
+        
+        // Add helper functions
+        if (!window.App.refreshRouteSelector) {
+            window.App.refreshRouteSelector = function() {
+                const selector = document.getElementById('routeSelector');
+                if (!selector) return;
+                selector.innerHTML = Object.keys(State.db.routes)
+                    .sort((a, b) => a.localeCompare(b, 'th', { numeric: true }))
+                    .map(r => `<option value="${r}" ${r === State.localActiveRoute ? 'selected' : ''}>${r}</option>`)
+                    .join('');
+            };
+        }
+        
+        if (!window.App.saveDB) {
+            window.App.saveDB = async function() {
+                try {
+                    const docRef = firebase.firestore().collection('appData').doc('v1_main');
+                    for (let routeName in State.db.routes) {
+                        const routeRef = docRef.collection('routes').doc(routeName);
+                        await routeRef.set({
+                            routeName: routeName,
+                            stores: State.db.routes[routeName],
+                            updatedAt: new Date(),
+                            storeCount: State.db.routes[routeName].length
+                        }, { merge: true });
+                    }
+                    console.log('✅ DB Saved');
+                } catch(err) {
+                    console.error('❌ Save DB error:', err);
+                }
+            };
+        }
     </script>
 
     <script>
