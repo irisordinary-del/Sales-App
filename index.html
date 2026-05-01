@@ -239,6 +239,41 @@
     <script src="FEATURES_IMPLEMENTATION.js"></script>
 
     <script>
+        // Initialize components on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('✅ DOM Loaded - Initializing components');
+            
+            // Initialize Map
+            if (MapCtrl && !MapCtrl.map) {
+                try {
+                    MapCtrl.init();
+                    console.log('✅ Map initialized successfully');
+                } catch(err) {
+                    console.error('❌ Map init error:', err);
+                }
+            }
+            
+            // Initialize Auth
+            if (Auth) {
+                try {
+                    Auth.init();
+                    console.log('✅ Auth initialized');
+                } catch(err) {
+                    console.error('❌ Auth init error:', err);
+                }
+            }
+            
+            // Initialize Mobile
+            if (Mobile) {
+                try {
+                    Mobile.init();
+                    console.log('✅ Mobile initialized');
+                } catch(err) {
+                    console.error('❌ Mobile init error:', err);
+                }
+            }
+        });
+
         // Handle file uploads
         document.getElementById('fileUpload')?.addEventListener('change', (e) => {
             if(e.target.files[0]) {
