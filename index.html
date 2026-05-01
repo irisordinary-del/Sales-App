@@ -291,7 +291,13 @@
         if (!window.App.saveDB) {
             window.App.saveDB = async function() {
                 try {
-                    const docRef = firebase.firestore().collection('appData').doc('v1_main');
+                    const db = firebase.firestore();
+                    const docRef = db.collection('appData').doc('v1_main');
+                    
+                    // Ensure document exists first
+                    await docRef.set({ initialized: true }, { merge: true });
+                    
+                    // Save each route
                     for (let routeName in State.db.routes) {
                         const routeRef = docRef.collection('routes').doc(routeName);
                         await routeRef.set({
