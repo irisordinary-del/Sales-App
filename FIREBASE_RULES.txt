@@ -1,0 +1,146 @@
+/**
+ * ===================================================================
+ * FIREBASE SECURITY RULES - USER ROLES & ACCESS CONTROL
+ * ===================================================================
+ * 
+ * Roles:
+ * - Admin: Full access to all data and operations
+ * - Manager Region: Can see and manage all warehouses (6 ศูนย์กระจาย)
+ * - District Manager: Can manage own district
+ * - Sales: Can only see and manage own warehouse data
+ * 
+ * Apply this in Firebase Console → Firestore Security Rules
+ * ===================================================================
+ */
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // =============== USER COLLECTION ===============
+    match /users/{userId} {
+      allow read, write: if request.auth.uid == userId || isAdmin();
+      allow list: if isAdmin() || isManager();
+    }
+    
+    // =============== ROUTE PLANNING DATA ===============
+    match /appData/v1_main/routes/{routeName} {
+      // Admin: full access
+      allow read, write: if isAdmin();
+      
+      // Manager Region: read/write all
+      allow read, write: if isManagerRegion();
+      
+      // District Manager: read/write own warehouse
+      allow read, write: if isDistrictManager() && 
+        routeName.contains(getUserWarehouse());
+      
+      // Sales: read own warehouse only
+      allow read: if isSales() && 
+        routeName.contains(getUserWarehouse());
+    }
+    
+    // =============== SALES DATA COLLECTION ===============
+    match /appData/v1_main/sales_data/{docId} {
+      // Admin: full access
+      allow read, write: if isAdmin();
+      
+      // Manager Region: read all
+      allow read: if isManagerRegion();
+      
+      // District Manager: read own warehouse
+      allow read: if isDistrictManager();
+      
+      // Sales: can upload and read
+      allow read: if isSales();
+      allow create: if isSales();
+      allow update, delete: if false; // Cannot modify sales data
+    }
+    
+    // =============== USER PROFILE & SETTINGS ===============
+    match /users/{userId}/preferences/{docId=**} {
+      allow read, write: if request.auth.uid == userId;
+    }
+    
+    // =============== ROUTE VERSIONS (HISTORY) ===============
+    match /appData/v1_main/route_versions/{routeName}/{version} {
+      allow read: if isAdmin() || isManagerRegion() || 
+        (isDistrictManager() && routeName.contains(getUserWarehouse()));
+      
+      allow write: if isAdmin() || isManagerRegion() || 
+        (isDistrictManager() && routeName.contains(getUserWarehouse()));
+    }
+    
+    // =============== ACTIVITY LOG ===============
+    match /appData/v1_main/activity_log/{docId=**} {
+      allow read: if isAdmin() || isManagerRegion();
+      
+      allow create: if request.auth != null; // Anyone can log activity
+    }
+    
+    // =============== HELPER FUNCTIONS ===============
+    
+    // Check if current user is Admin
+    function isAdmin() {
+      return getUserRole() == 'Admin';
+    }
+    
+    // Check if current user is Manager Region
+    function isManagerRegion() {
+      return getUserRole() == 'Manager Region';
+    }
+    
+    // Check if current user is District Manager
+    function isDistrictManager() {
+      return getUserRole() == 'District Manager';
+    }
+    
+    // Check if current user is Sales
+    function isSales() {
+      return getUserRole() == 'Sales';
+    }
+    
+    // Get user role from Firestore
+    function getUserRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid))
+        .data.role;
+    }
+    
+    // Get user's assigned warehouse
+    function getUserWarehouse() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid))
+        .data.warehouse;
+    }
+    
+    // Authenticated user check
+    function isAuth() {
+      return request.auth != null;
+    }
+  }
+}
+
+/*
+ * ===================================================================
+ * FIREBASE AUTH SETUP (Cloud Functions)
+ * ===================================================================
+ * 
+ * Run this Cloud Function when new user is created:
+ * 
+ * exports.createUserProfile = functions.auth.user().onCreate((user) => {
+ *   return admin.firestore().collection('users').doc(user.uid).set({
+ *     email: user.email,
+ *     role: 'Sales', // Default role
+ *     warehouse: null, // Set manually in console
+ *     createdAt: admin.firestore.FieldValue.serverTimestamp(),
+ *     lastLogin: admin.firestore.FieldValue.serverTimestamp()
+ *   });
+ * });
+ * 
+ * Then manually set role and warehouse for each user:
+ * - Admin role
+ * - Manager Region role, warehouse: null (can see all)
+ * - District Manager role, warehouse: "402" or "403"
+ * - Sales role, warehouse: "402"
+ * 
+ * ===================================================================
+ */

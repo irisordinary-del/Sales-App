@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Route Planner Admin - Dashboard & Planning</title>
+    
+    <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-auth-compat.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="admin-style.css">
+</head>
+<body class="flex h-screen relative bg-slate-50 font-['Prompt']">
+
+    <!-- ================== LOGIN SCREEN ================== -->
+    <div id="login-container" class="w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-600 to-purple-700">
+        <div class="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full mx-4">
+            <h1 class="text-3xl font-black text-gray-900 mb-2 text-center">🚗 RouteAdmin</h1>
+            <p class="text-center text-gray-500 text-sm mb-8">ระบบจัดการสายวิ่งขาย</p>
+            
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-bold text-gray-700 mb-2">อีเมล</label>
+                    <input type="email" id="login-email" placeholder="example@company.com" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-600 outline-none">
+                </div>
+                
+                <div>
+                    <label class="block text-sm font-bold text-gray-700 mb-2">รหัสผ่าน</label>
+                    <input type="password" id="login-password" placeholder="••••••••" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-600 outline-none">
+                </div>
+                
+                <button onclick="Auth.login(document.getElementById('login-email').value, document.getElementById('login-password').value)" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-lg transition shadow-md">
+                    เข้าสู่ระบบ
+                </button>
+            </div>
+            
+            <p class="text-center text-xs text-gray-400 mt-6">ติดต่อผู้ดูแลระบบสำหรับการสมัครสมาชิก</p>
+        </div>
+    </div>
+
+    <!-- ================== MAIN APP ================== -->
+    <div id="app-container" class="hidden w-full h-full flex">
+        
+        <!-- LOADER -->
+        <div id="loader" class="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-[9999] hidden">
+            <div class="spinner"></div>
+            <p id="loader-text" class="text-indigo-700 font-bold text-lg absolute">กำลังประมวลผล...</p>
+            <p id="loader-subtext" class="text-gray-500 text-sm mt-2 font-medium absolute top-1/2 mt-12"></p>
+        </div>
+
+        <!-- TOAST NOTIFICATION -->
+        <div id="save-toast" class="fixed bottom-8 left-1/2 transform -translate-x-1/2 translate-y-24 opacity-0 bg-gray-900 text-white px-5 py-2.5 rounded-full shadow-2xl transition-all duration-300 z-[9999] text-sm font-bold flex items-center gap-2 pointer-events-none">
+            <span id="toast-msg">บันทึกเรียบร้อย</span>
+        </div>
+
+        <!-- SIDEBAR -->
+        <aside class="w-16 md:w-56 bg-slate-900 flex flex-col shrink-0 z-[6000] shadow-2xl transition-all">
+            <div class="h-16 flex items-center justify-center bg-slate-950 border-b border-slate-800">
+                <h1 class="text-xl font-black text-indigo-400 tracking-wider hidden md:block">R<span class="text-white">Admin</span></h1>
+            </div>
+            
+            <nav class="flex-1 py-4 space-y-1 overflow-hidden">
+                <button onclick="Nav.go('dashboard')" id="nav-dashboard" class="sidebar-menu active w-full flex items-center px-4 md:px-5 py-3.5 text-sm font-bold">
+                    <span class="text-lg md:mr-3">📊</span> <span class="hidden md:inline">Dashboard</span>
+                </button>
+                <button onclick="Nav.go('planning')" id="nav-planning" class="sidebar-menu w-full flex items-center px-4 md:px-5 py-3.5 text-sm font-bold">
+                    <span class="text-lg md:mr-3">📍</span> <span class="hidden md:inline">วางแผนคิวงาน</span>
+                </button>
+                <button onclick="Nav.go('sales-data')" id="nav-sales" class="sidebar-menu w-full flex items-center px-4 md:px-5 py-3.5 text-sm font-bold">
+                    <span class="text-lg md:mr-3">📦</span> <span class="hidden md:inline">ข้อมูลการขาย</span>
+                </button>
+            </nav>
+            
+            <div class="border-t border-slate-800 p-4">
+                <div id="user-header-info" class="text-xs text-gray-400 mb-3"></div>
+                <button onclick="Auth.logout()" class="w-full bg-red-600 hover:bg-red-700 text-white py-2 rounded text-xs font-bold transition">
+                    ออกจากระบบ
+                </button>
+            </div>
+        </aside>
+
+        <!-- MAIN CONTENT -->
+        <div class="flex-1 flex flex-col overflow-hidden relative">
+
+            <!-- ==================== PAGE: DASHBOARD ================== -->
+            <div id="page-dashboard" class="flex-1 flex flex-col absolute inset-0 overflow-y-auto">
+                <div class="h-16 bg-gray-900 text-white flex items-center px-6 shadow-md z-[5000] shrink-0 border-b-4 border-indigo-600">
+                    <h1 class="text-xl font-black tracking-wide">📊 Dashboard</h1>
+                </div>
+                <div id="dashboard-content" class="flex-1 overflow-y-auto p-6"></div>
+            </div>
+
+            <!-- ==================== PAGE: PLANNING ================== -->
+            <div id="page-planning" class="flex-1 flex flex-col absolute inset-0 hidden">
+                <div class="h-16 bg-gray-900 text-white flex items-center justify-between px-6 shadow-md z-[5000] relative shrink-0 border-b-4 border-indigo-600">
+                    <div class="flex items-center gap-3">
+                        <h1 class="text-xl font-black tracking-wide text-indigo-400 mr-2 hidden sm:block">Route<span class="text-white">Plan</span></h1>
+                        <div class="flex items-center bg-gray-800 rounded-lg p-1 border border-gray-700">
+                            <select id="routeSelector" onchange="App.switchRoute(this.value)" class="bg-gray-900 text-white border-none text-sm focus:ring-0 outline-none font-bold py-1 px-2 rounded cursor-pointer max-w-[120px] sm:max-w-[200px]"></select>
+                            <div class="flex items-center border-l border-gray-700 ml-1 pl-1">
+                                <button onclick="App.renameRoute()" class="text-gray-400 hover:text-white px-2 py-1 transition">✏️</button>
+                                <button onclick="App.deleteRoute()" class="text-gray-400 hover:text-red-400 px-2 py-1 transition">🗑️</button>
+                            </div>
+                        </div>
+                        <button onclick="App.addRoute()" class="bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-md text-xs font-bold shadow-sm transition">+ เพิ่มสาย</button>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <div id="db-save-status" class="hidden items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-lg border transition-all duration-300"></div>
+                        <button onclick="UI.showSummaryModal()" class="bg-gray-800 border border-gray-600 hover:bg-gray-700 px-4 py-1.5 rounded-lg text-sm font-bold shadow-md transition ml-2 flex items-center gap-2 text-white">📊 ภาพรวม</button>
+                    </div>
+                </div>
+
+                <div class="flex-1 flex overflow-hidden">
+                    <div class="w-2/3 relative h-full max-md:w-full">
+                        <div id="map"></div>
+                        <button onclick="MapCtrl.fitToStores()" class="absolute bottom-6 right-6 z-[400] bg-white p-3 rounded-xl shadow-lg border border-gray-200 text-indigo-600 hover:bg-indigo-50 transition">🗺️</button>
+                        <button id="clearRoadBtn" onclick="MapCtrl.clearRoad()" class="hidden absolute top-4 left-4 z-[400] bg-white text-red-600 font-bold px-4 py-2 rounded-xl shadow-lg border border-red-200">✕ ซ่อนเส้นทาง</button>
+                        <div id="mapTools" class="absolute top-4 right-4 z-[400] flex flex-col gap-3 items-end">
+                            <div class="bg-white px-3 py-2 rounded-xl shadow-lg border border-gray-200 flex items-center gap-2"><input type="checkbox" id="toggleLines" onchange="MapCtrl.drawLines()" class="w-5 h-5 text-indigo-600"><label for="toggleLines" class="text-sm font-bold text-gray-800">🔗 เส้นโยงร้าน</label></div>
+                            <button onclick="Lasso.toggle()" class="bg-gray-900 hover:bg-black text-white px-4 py-2.5 rounded-xl shadow-lg text-sm font-bold">✏️ วาดเลือกพื้นที่</button>
+                        </div>
+                        <div id="lassoPanel" class="hidden absolute top-4 right-4 z-[400] bg-white p-4 rounded-2xl shadow-2xl border-2 border-gray-900 flex flex-col gap-3 w-64">
+                            <button onclick="Lasso.finish()" class="bg-emerald-500 text-white py-2.5 rounded-xl text-sm font-bold shadow-md">✅ ยืนยัน</button>
+                            <button onclick="Lasso.cancel()" class="bg-red-50 text-red-600 py-2 rounded-xl text-sm font-bold">❌ ยกเลิก</button>
+                        </div>
+                    </div>
+
+                    <div class="w-1/3 bg-white shadow-[-5px_0_15px_rgba(0,0,0,0.05)] flex flex-col h-full z-10 border-l border-gray-200 max-md:hidden">
+                        <div class="flex border-b border-gray-200 text-sm bg-gray-50 shrink-0">
+                            <button onclick="UI.switchTab('tab1')" id="btn-tab1" class="tab-btn active flex-1 py-3 px-1">1. ข้อมูล</button>
+                            <button onclick="UI.switchTab('tab2')" id="btn-tab2" class="tab-btn flex-1 py-3 px-1">2. จัดสาย</button>
+                            <button onclick="UI.switchTab('tab3')" id="btn-tab3" class="tab-btn flex-1 py-3 px-1">3. แก้ไข</button>
+                            <button onclick="UI.switchTab('tab4')" id="btn-tab4" class="tab-btn flex-1 py-3 px-1">4. สรุป</button>
+                        </div>
+                        
+                        <div class="flex-1 overflow-y-auto p-4 bg-gray-50/50">
+                            <!-- TAB 1: Upload Data -->
+                            <div id="tab1" class="block space-y-5">
+                                <div class="bg-white p-4 rounded-2xl border border-gray-200 shadow-sm">
+                                    <h3 class="font-bold text-sm text-gray-800 mb-2">📍 ข้อมูลพิกัดร้านค้า (Master Data)</h3>
+                                    <div onclick="document.getElementById('fileUpload').click()" class="border-2 border-dashed border-indigo-300 bg-indigo-50 rounded-xl p-4 text-center cursor-pointer mb-3">
+                                        <p class="text-xl mb-1">📂</p>
+                                        <p class="text-xs text-indigo-800 font-bold">อัปโหลดไฟล์แผนที่</p>
+                                    </div>
+                                    <input type="file" id="fileUpload" accept=".xlsx, .xls, .csv" class="hidden">
+                                    <div class="flex gap-2">
+                                        <button onclick="App.clearStores()" class="flex-1 bg-red-50 text-red-600 py-2 rounded-lg text-xs font-bold border border-red-100">ล้างสายนี้</button>
+                                        <button onclick="ResetMgr.confirmReset()" class="flex-1 bg-orange-50 text-orange-600 py-2 rounded-lg text-xs font-bold border border-orange-100">🔄 รีเซ็ต</button>
+                                    </div>
+                                </div>
+                                <input type="text" onkeyup="UI.filterList('list-upload', this.value)" placeholder="ค้นหาร้าน..." class="w-full p-2.5 border border-gray-300 rounded-xl text-sm outline-none shadow-inner">
+                                <div id="list-upload" class="space-y-2 mt-2"></div>
+                            </div>
+
+                            <!-- TAB 2: Assign -->
+                            <div id="tab2" class="hidden space-y-4">
+                                <div class="bg-indigo-50 p-4 rounded-2xl shadow-sm border border-indigo-100">
+                                    <h3 class="font-black text-indigo-900 text-sm mb-3">🤖 AI Route Builder</h3>
+                                    <div class="flex justify-between mb-2"><label class="text-xs font-bold">จำนวนวันทั้งหมด:</label><input type="number" id="ai-days" value="24" class="w-16 p-1 border rounded-lg text-center font-bold"></div>
+                                    <div class="flex justify-between mb-3 border-b border-indigo-200 pb-3"><label class="text-xs font-bold"><input type="checkbox" id="ai-outlier" checked> ตัดร้านโดด (กม.):</label><input type="number" id="ai-dist" value="5" class="w-16 p-1 border rounded-lg text-center font-bold text-red-600"></div>
+                                    <button onclick="AI.run()" class="w-full bg-gray-900 text-white py-2.5 rounded-xl font-bold text-sm shadow-md">✨ เริ่มคำนวณ AI</button>
+                                </div>
+                                <div class="flex gap-2 sticky top-0 bg-gray-50 pb-2 pt-2 z-10 border-b"><select id="assign-day" class="flex-1 p-2 border rounded-xl text-sm font-bold"></select><button onclick="StoreMgr.assignSelected()" class="bg-indigo-600 text-white px-4 rounded-xl text-sm font-bold">จัดลงวัน</button></div>
+                                <div id="list-unassigned" class="space-y-2 mt-2 pb-10"></div>
+                            </div>
+
+                            <!-- TAB 3: Edit -->
+                            <div id="tab3" class="hidden space-y-4">
+                                <div class="sticky top-0 bg-gray-50 pb-2 pt-1 z-10 border-b"><input type="text" id="search-edit" onkeyup="UI.filterList('list-assigned', this.value)" placeholder="ค้นหาร้าน..." class="w-full p-2.5 border border-gray-300 rounded-xl text-sm"></div>
+                                <div id="list-assigned" class="space-y-2 mt-2 pb-10"></div>
+                            </div>
+
+                            <!-- TAB 4: Summary -->
+                            <div id="tab4" class="hidden space-y-4"><div id="list-summary" class="grid grid-cols-2 gap-3 mt-2 pb-10"></div></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ==================== PAGE: SALES DATA ================== -->
+            <div id="page-sales-data" class="flex-1 flex flex-col absolute inset-0 hidden overflow-y-auto">
+                <div class="h-16 bg-gray-900 text-white flex items-center justify-between px-6 shadow-md z-[5000] shrink-0 border-b-4 border-indigo-600">
+                    <h1 class="text-xl font-black tracking-wide">📦 ข้อมูลการขาย</h1>
+                    <button onclick="SalesDataMgr.exportToExcel()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-bold">💾 Export Excel</button>
+                </div>
+                
+                <div class="flex-1 overflow-hidden flex flex-col p-6 space-y-4">
+                    <div class="flex gap-4">
+                        <input type="file" id="salesFileUpload" accept=".xlsx, .xls" class="hidden">
+                        <button onclick="document.getElementById('salesFileUpload').click()" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-bold">📂 อัพโหลดไฟล์</button>
+                        <input type="text" id="sales-search" placeholder="ค้นหา..." onkeyup="SalesDataMgr.filter(this.value)" class="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-600">
+                    </div>
+                    
+                    <div id="sales-data-table-container" class="flex-1 overflow-x-auto border border-gray-200 rounded-lg bg-white">
+                        <p class="p-4 text-gray-500 text-center">อัพโหลดไฟล์เพื่อดูข้อมูล</p>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- ==================== MODALS ================== -->
+    
+    <!-- Day Modal -->
+    <div id="dayModal" class="hidden fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-[8000] p-4">
+        <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 max-h-[80vh] overflow-y-auto">
+            <h2 id="modalTitle" class="text-lg font-bold text-gray-800 mb-4"></h2>
+            <div id="modalContent" class="space-y-2 mb-4"></div>
+            <button onclick="UI.closeDayModal()" class="w-full bg-gray-200 hover:bg-gray-300 text-gray-800 py-2 rounded-lg font-bold">ปิด</button>
+        </div>
+    </div>
+
+    <!-- Overall Summary Modal -->
+    <div id="overallModal" class="hidden fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-[8000] p-4">
+        <div class="bg-white rounded-2xl shadow-2xl max-w-2xl w-full p-6 max-h-[80vh] overflow-y-auto">
+            <h2 class="text-lg font-bold text-gray-800 mb-4">📊 ภาพรวมสาย</h2>
+            <table class="w-full text-sm border-collapse">
+                <thead class="bg-gray-100">
+                    <tr><th class="p-3 text-left">สาย</th><th class="p-3 text-center">ร้านทั้งหมด</th><th class="p-3 text-center">จัดแล้ว</th><th class="p-3 text-center">ยังไม่จัด</th><th class="p-3 text-center">%</th></tr>
+                </thead>
+                <tbody id="overallTableBody"></tbody>
+            </table>
+            <button onclick="UI.hideSummaryModal()" class="w-full mt-4 bg-gray-200 hover:bg-gray-300 text-gray-800 py-2 rounded-lg font-bold">ปิด</button>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="app-config.js"></script>
+    <script src="admin-data.js"></script>
+    <script src="admin-map.js"></script>
+    <script src="admin-ai.js"></script>
+    <script src="admin-ui.js"></script>
+    <script src="FEATURES_IMPLEMENTATION.js"></script>
+
+    <script>
+        // Handle file uploads
+        document.getElementById('fileUpload')?.addEventListener('change', (e) => {
+            if(e.target.files[0]) {
+                App.uploadAndParseFile(e.target.files[0]);
+            }
+        });
+        
+        document.getElementById('salesFileUpload')?.addEventListener('change', (e) => {
+            if(e.target.files[0]) {
+                SalesDataMgr.uploadFile(e.target.files[0]);
+            }
+        });
+    </script>
+
+</body>
+</html>
