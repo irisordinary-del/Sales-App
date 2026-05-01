@@ -107,7 +107,8 @@ const FileManager = {
             
             UI.showLoader('💾 กำลังสร้างไฟล์ Excel...', 'กำลังเตรียมข้อมูล');
             
-            // Create export data array
+            // Create export data array - MATCH UPLOADED STRUCTURE EXACTLY
+            // ใช้ DAY_COLORS format: "Day 1", "Day 2" ... "Day 30"
             const exportData = State.stores.map(store => ({
                 'A': '', // CY (skip)
                 'B': store.code || store.id,
@@ -122,7 +123,7 @@ const FileManager = {
                 'K': store.marketName || '',
                 'L': store.dayOriginal || '', // Original day history (keep as is)
                 'M': '', // Day 05 (DELETE - ให้ว่าง)
-                'N': store.days.length > 0 ? store.days[0] : '' // New planned day (can edit)
+                'N': store.days && store.days.length > 0 ? store.days[0] : '' // New planned day (e.g. "Day 1")
             }));
             
             // Create worksheet
@@ -130,7 +131,7 @@ const FileManager = {
                 header: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N']
             });
             
-            // Add header row
+            // Add header row with Thai labels matching upload format
             ws['A1'] = 'CY';
             ws['B1'] = 'Store Code';
             ws['C1'] = 'Store Name';
@@ -144,7 +145,7 @@ const FileManager = {
             ws['K1'] = 'Market Name';
             ws['L1'] = 'Day (Original)';
             ws['M1'] = 'Day 05 (DELETE)';
-            ws['N1'] = 'Day (New Result)';
+            ws['N1'] = 'Day (New)';
             
             // Set column widths
             ws['!cols'] = [
