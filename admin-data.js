@@ -677,21 +677,35 @@ const App = {
     
     // เคลียร์การจัดสายทั้งหมด
     clearAllAssignments: () => {
-        if (!confirm('🗑️ ยืนยันการเคลียร์การจัดสายทั้งหมด?\n(ร้านทั้งหมดจะกลับไปอยู่ในสถานะ "รอจัดสาย")')) {
-            return;
+        try {
+            if (!confirm('🗑️ ยืนยันการเคลียร์การจัดสายทั้งหมด?\n(ร้านทั้งหมดจะกลับไปอยู่ในสถานะ "รอจัดสาย")')) {
+                return;
+            }
+            
+            if (!State.stores || State.stores.length === 0) {
+                alert('⚠️ ไม่มีข้อมูลร้านค้า');
+                return;
+            }
+            
+            State.stores.forEach(s => {
+                s.days = [];
+                s.seqs = {};
+                s.selected = false;
+            });
+            
+            if (MapCtrl && MapCtrl.clearRoad) MapCtrl.clearRoad(true);
+            if (MapCtrl && MapCtrl.clearAll) MapCtrl.clearAll();
+            if (UI && UI.render) UI.render();
+            if (App && App.saveDB) App.saveDB();
+            
+            if (UI && UI.showSaveToast) {
+                UI.showSaveToast('✅ เคลียร์การจัดสายเสร็จ');
+            } else {
+                alert('✅ เคลียร์การจัดสายเสร็จ');
+            }
+        } catch(err) {
+            console.error('❌ Clear error:', err);
+            alert('❌ เกิดข้อผิดพลาด: ' + err.message);
         }
-        
-        State.stores.forEach(s => {
-            s.days = [];
-            s.seqs = {};
-            s.selected = false;
-        });
-        
-        MapCtrl.clearRoad(true);
-        MapCtrl.clearAll();
-        UI.render();
-        App.saveDB();
-        
-        UI.showSaveToast('✅ เคลียร์การจัดสายเสร็จ');
     }
 };
