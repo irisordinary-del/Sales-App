@@ -12,6 +12,16 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const cloudDB = firebase.firestore();
 
+// Enable offline persistence
+cloudDB.enablePersistence()
+    .catch((err) => {
+        if (err.code === 'failed-precondition') {
+            console.warn('⚠️ Multiple tabs open - offline persistence disabled');
+        } else if (err.code === 'unimplemented') {
+            console.warn('⚠️ Browser doesn\'t support offline persistence');
+        }
+    });
+
 // ==========================================
 // 🎨 Color / Day Config
 // ==========================================
