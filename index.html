@@ -44,14 +44,6 @@
                 <span class="text-lg md:mr-3">📍</span>
                 <span class="hidden md:inline">วางแผนคิวงาน</span>
             </button>
-            <button onclick="Nav.go('data')" id="nav-data" class="sidebar-menu w-full flex items-center px-4 md:px-5 py-3.5 text-sm font-bold">
-                <span class="text-lg md:mr-3">📂</span>
-                <span class="hidden md:inline">ข้อมูลการขาย (ดิบ)</span>
-            </button>
-            <button onclick="Nav.go('kpi')" id="nav-kpi" class="sidebar-menu w-full flex items-center px-4 md:px-5 py-3.5 text-sm font-bold text-emerald-400">
-                <span class="text-lg md:mr-3">🎯</span>
-                <span class="hidden md:inline">จัดการสมการ KPI</span>
-            </button>
         </nav>
     </aside>
 
@@ -242,112 +234,10 @@
             </div>
         </div>
 
-        <!-- ===== PAGE: Raw Data ===== -->
-        <div id="page-data" class="hidden absolute inset-0 bg-gray-50 flex flex-col h-full overflow-hidden">
-            <div class="h-16 bg-white text-gray-800 flex items-center justify-between px-6 md:px-8 shadow-sm shrink-0 border-b border-gray-200">
-                <div>
-                    <h2 class="text-lg font-black flex items-center gap-2">📂 ฐานข้อมูลการขาย (Raw Data)</h2>
-                    <p class="text-[10px] text-gray-500">ตารางนี้แสดงข้อมูลดิบตามคอลัมน์ที่คุณเลือกไว้เท่านั้น</p>
-                </div>
-                <div class="flex gap-3">
-                    <button onclick="RawDataMgr.clearAll()" class="bg-red-50 text-red-600 border border-red-200 px-4 py-2 rounded-xl text-sm font-bold hover:bg-red-100 transition">
-                        🗑️ ล้างตาราง
-                    </button>
-                    <button onclick="document.getElementById('rawUpload').click()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 md:px-5 py-2 rounded-xl text-sm font-bold shadow-md transition">
-                        + นำเข้า Excel (ข้อมูลดิบ)
-                    </button>
-                    <input type="file" id="rawUpload" class="hidden" accept=".xlsx,.xls,.csv">
-                </div>
-            </div>
-            <div class="flex-1 p-4 md:p-8 overflow-hidden flex flex-col">
-                <div class="bg-white rounded-3xl shadow-sm border border-gray-200 flex-1 flex flex-col overflow-hidden">
-                    <div class="flex-1 overflow-auto relative">
-                        <table class="w-full text-left text-sm min-w-max border-collapse">
-                            <thead id="raw-table-head" class="bg-gray-100 text-gray-600 sticky top-0 z-10 shadow-sm border-b border-gray-200"></thead>
-                            <tbody id="raw-table-body" class="text-gray-700"></tbody>
-                        </table>
-                    </div>
-                    <div class="p-3 border-t bg-gray-50 text-right text-xs font-bold text-gray-500">
-                        รวมทั้งหมด <span id="raw-total-rows" class="text-blue-600 text-sm">0</span> แถว
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- ===== PAGE: KPI ===== -->
-        <div id="page-kpi" class="hidden absolute inset-0 bg-gray-50 flex flex-col h-full overflow-y-auto">
-            <div class="h-16 bg-white text-gray-800 flex items-center justify-between px-6 md:px-8 shadow-sm shrink-0 border-b border-gray-200 sticky top-0 z-50">
-                <h2 class="text-lg font-black flex items-center gap-2 text-emerald-600">🎯 จัดการสมการ KPI (ส่งให้ Sales)</h2>
-                <div class="flex gap-2">
-                    <button onclick="KPIMgr.calculatePreview()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-xl text-sm font-bold shadow-md transition">
-                        🔄 ทดสอบคำนวณ KPI
-                    </button>
-                    <button onclick="KPIMgr.deployToSales()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2 rounded-xl text-sm font-bold shadow-md transition">
-                        🚀 บันทึกและส่งให้ Sales App
-                    </button>
-                </div>
-            </div>
-            <div class="p-4 md:p-8 max-w-6xl mx-auto w-full space-y-6">
-                <!-- Column mapping -->
-                <div class="bg-white p-6 rounded-3xl shadow-sm border border-gray-200">
-                    <h3 class="font-black text-gray-800 mb-4 border-b pb-2">1. จับคู่คอลัมน์ (ดึงจากหน้าข้อมูลดิบ)</h3>
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4" id="kpi-selectors"></div>
-                    <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div class="bg-pink-50 p-3 rounded-xl border border-pink-100">
-                            <label class="text-xs font-bold text-pink-700 block mb-1">คำค้นหา สินค้าโฟกัส 1 (เช่น เจลลี่)</label>
-                            <input type="text" id="kpi-focus-1" class="w-full p-2 border border-pink-200 rounded-lg text-sm outline-none bg-white">
-                        </div>
-                        <div class="bg-amber-50 p-3 rounded-xl border border-amber-100">
-                            <label class="text-xs font-bold text-amber-700 block mb-1">คำค้นหา สินค้าโฟกัส 2 (เช่น กลมกล่อม)</label>
-                            <input type="text" id="kpi-focus-2" class="w-full p-2 border border-amber-200 rounded-lg text-sm outline-none bg-white">
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Preview Table -->
-                <div class="bg-white p-6 rounded-3xl shadow-sm border border-gray-200">
-                    <div class="flex justify-between items-center mb-4 border-b pb-2">
-                        <h3 class="font-black text-gray-800">2. ตัวอย่างผลลัพธ์ (Preview สำหรับ Sales)</h3>
-                        <span class="text-xs font-bold bg-emerald-100 text-emerald-700 px-3 py-1 rounded-lg">
-                            สรุปยอดรวม <span id="kpi-preview-count" class="text-base">0</span> ร้านค้า
-                        </span>
-                    </div>
-                    <div class="overflow-x-auto max-h-[400px] border border-gray-200 rounded-xl">
-                        <table class="w-full text-left text-sm border-collapse">
-                            <thead id="kpi-preview-head" class="bg-gray-100 text-gray-600 sticky top-0 shadow-sm border-b"></thead>
-                            <tbody id="kpi-preview-body" class="text-gray-700"></tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-        </div>
 
     </div><!-- end main -->
 
     <!-- ===== MODALS ===== -->
-
-    <!-- Column Select Modal (Raw Data) -->
-    <div id="columnSelectModal" class="hidden fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-[99999] flex items-center justify-center p-4">
-        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-lg flex flex-col overflow-hidden max-h-[85vh]">
-            <div class="p-5 border-b bg-gray-50 flex justify-between items-center shrink-0">
-                <h2 class="text-lg font-black text-gray-800">⚙️ เลือกคอลัมน์ที่ต้องการนำเข้า</h2>
-            </div>
-            <div class="p-5 bg-white overflow-y-auto flex-1">
-                <p class="text-xs text-gray-500 mb-4 bg-blue-50 p-3 rounded-lg border border-blue-100">
-                    ติ๊กเลือกคอลัมน์จาก Excel ที่คุณต้องการนำเข้ามาเก็บในฐานข้อมูลดิบ (ระบบจะจำค่าที่คุณติ๊กไว้ใช้ครั้งต่อไป)
-                </p>
-                <div id="column-checkboxes" class="grid grid-cols-2 gap-3"></div>
-            </div>
-            <div class="p-4 bg-gray-50 border-t border-gray-100 flex gap-3 shrink-0">
-                <button onclick="document.getElementById('columnSelectModal').classList.add('hidden')" class="flex-1 bg-white border border-gray-300 text-gray-700 py-2.5 rounded-xl text-sm font-bold shadow-sm hover:bg-gray-50 transition">
-                    ยกเลิก
-                </button>
-                <button onclick="RawDataMgr.applyImport()" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-xl text-sm font-bold shadow-md transition">
-                    ✅ นำเข้าข้อมูล
-                </button>
-            </div>
-        </div>
-    </div>
 
     <!-- Overall Summary Modal -->
     <div id="overallModal" class="hidden fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
@@ -391,7 +281,7 @@
     <script src="admin-ui.js"></script>
     <!-- 3. Map + Lasso -->
     <script src="admin-map.js"></script>
-    <!-- 4. Data: StoreMgr, RawDataMgr, KPIMgr, ExcelIO, App -->
+    <!-- 4. Data: StoreMgr, App, FileManager -->
     <script src="admin-data.js"></script>
     <!-- 5. AI (ต้องหลัง StoreMgr) -->
     <script src="admin-ai.js"></script>
