@@ -288,6 +288,146 @@
     <script src="file-manager.js"></script>
     <!-- 6. Init -->
     <script>
+        // ==========================================
+        // 🎯 Main App Controller
+        // ==========================================
+        const App = {
+            init: async () => {
+                console.log('✅ App initializing...');
+                Auth.init();
+                MapCtrl.init();
+                UI.initDaySelector();
+                if (typeof Dashboard !== 'undefined') Dashboard.init();
+            },
+
+            loadRoutes: async () => {
+                try {
+                    const snap = await cloudDB.collection('appData/v1_main/routes').get();
+                    State.db.routes = {};
+                    snap.forEach(doc => {
+                        const data = doc.data();
+                        if (data && data.stores && Array.isArray(data.stores)) {
+                            State.db.routes[doc.id] = data.stores;
+                        }
+                    });
+                    
+                    const selector = document.getElementById('routeSelector');
+                    if (selector) {
+                        selector.innerHTML = Object.keys(State.db.routes)
+                            .map(r => `<option value="${r}">${r}</option>`)
+                            .join('');
+                    }
+                    
+                    if (Object.keys(State.db.routes).length > 0) {
+                        App.switchRoute(Object.keys(State.db.routes)[0]);
+                    }
+                } catch(err) {
+                    console.warn('⚠️ Load routes error (offline?):', err);
+                    // Work offline - State.db.routes stays in memory
+                }
+            },
+
+            switchRoute: (routeName) => {
+                State.localActiveRoute = routeName;
+                State.stores = State.db.routes[routeName] || [];
+                UI.render();
+                if (MapCtrl && MapCtrl.map) {
+                    setTimeout(() => MapCtrl.fitToStores(), 200);
+                }
+            },
+
+            saveDB: async () => {
+                try {
+                    if (!State.localActiveRoute) return;
+                    
+                    const stores = State.stores.filter(s => s && s.id);
+                    if (stores.length === 0) return;
+                    
+                    State.db.routes[State.localActiveRoute] = stores;
+                    
+                    await cloudDB.doc(`appData/v1_main/routes/${State.localActiveRoute}`).set(
+                        { routeName: State.localActiveRoute, storeCount: stores.length, stores, updatedAt: new Date() },
+                        { merge: true }
+                    );
+                    
+                    console.log('✅ Saved:', State.localActiveRoute);
+                } catch(err) {
+                    console.warn('⚠️ Save error (offline - data in memory):', err);
+                    // Data saved in State even if Firestore fails
+                }
+            },
+
+            addRoute: () => {
+                const name = prompt('ชื่อสาย (เช่น Route_402):');
+                if (!name) return;
+                if (State.db.routes[name]) {
+                    alert('⚠️ สายนี้มีอยู่แล้ว');
+                    return;
+                }
+                State.db.routes[name] = [];
+                App.saveDB();
+                const selector = document.getElementById('routeSelector');
+                if (selector) {
+                    selector.innerHTML = Object.keys(State.db.routes)
+                        .map(r => `<option value="${r}" ${r === name ? 'selected' : ''}>${r}</option>`)
+                        .join('');
+                }
+            },
+
+            deleteRoute: () => {
+                if (!State.localActiveRoute) {
+                    alert('⚠️ กรุณาเลือกสายวิ่ง');
+                    return;
+                }
+                if (!confirm(`ลบ ${State.localActiveRoute}?`)) return;
+                
+                delete State.db.routes[State.localActiveRoute];
+                const keys = Object.keys(State.db.routes);
+                State.localActiveRoute = keys[0] || null;
+                State.stores = keys[0] ? State.db.routes[keys[0]] : [];
+                
+                const selector = document.getElementById('routeSelector');
+                if (selector) {
+                    selector.innerHTML = keys.map(r => `<option value="${r}">${r}</option>`).join('');
+                    if (keys[0]) selector.value = keys[0];
+                }
+                
+                UI.render();
+                App.saveDB();
+            },
+
+            renameRoute: () => {
+                if (!State.localActiveRoute) return;
+                const newName = prompt(`ชื่อใหม่ (เดิม: ${State.localActiveRoute}):`);
+                if (!newName || newName === State.localActiveRoute) return;
+                
+                State.db.routes[newName] = State.db.routes[State.localActiveRoute];
+                delete State.db.routes[State.localActiveRoute];
+                State.localActiveRoute = newName;
+                
+                const selector = document.getElementById('routeSelector');
+                if (selector) {
+                    selector.innerHTML = Object.keys(State.db.routes)
+                        .map(r => `<option value="${r}" ${r === newName ? 'selected' : ''}>${r}</option>`)
+                        .join('');
+                }
+                App.saveDB();
+            },
+
+            clearStores: () => {
+                if (!confirm('ล้างร้านค้าทั้งหมดในสายนี้?')) return;
+                State.stores = [];
+                State.db.routes[State.localActiveRoute] = [];
+                UI.render();
+                MapCtrl.clearAll();
+                App.saveDB();
+            },
+
+            sync: () => {
+                UI.render();
+            }
+        };
+
         document.addEventListener('DOMContentLoaded', () => { App.init(); });
     </script>
 </body>
