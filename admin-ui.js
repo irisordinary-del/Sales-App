@@ -8,21 +8,13 @@ const Nav = {
         });
         const navEl = document.getElementById('nav-' + page);
         if (navEl) navEl.classList.add('active');
-        if (page === 'kpi') navEl && navEl.classList.add('text-emerald-400');
 
-        ['planning', 'data', 'kpi'].forEach(p => {
-            const el = document.getElementById('page-' + p);
-            if (el) el.classList.add('hidden');
-        });
-
+        // Only hide planning page (others deleted)
         const pageEl = document.getElementById('page-' + page);
         if (pageEl) pageEl.classList.remove('hidden');
 
         if (page === 'planning') {
             setTimeout(() => { if (MapCtrl.map) MapCtrl.map.invalidateSize(); }, 200);
-        }
-        if (page === 'kpi') {
-            KPIMgr.renderSetup();
         }
     }
 };
