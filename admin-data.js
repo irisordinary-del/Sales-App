@@ -399,7 +399,7 @@ const ExcelIO = {
         const ed = [];
 
         State.stores.forEach(s => {
-            const kpi = State.sales[s.id];
+            const kpi = State.sales[s.id]; const rawRow = (State.rawData || []).find(r => String(r['\u0e23\u0e2b\u0e31\u0e2a'] || '').trim() === String(s.id)) || {};
             const baseData = {
                 'รหัส': s.id,
                 'ชื่อ': s.name,
