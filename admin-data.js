@@ -455,7 +455,6 @@ const ExcelIO = {
                 const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
                 XLSX.writeFile(wb, `Route_${State.localActiveRoute}_${dateStr}.xlsx`);
     }
-    }
 };
 
 // ==========================================
