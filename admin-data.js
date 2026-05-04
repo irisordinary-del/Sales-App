@@ -116,9 +116,9 @@ const RawDataMgr = {
     },
 
     applyImport: () => {
-        const selectedCols = [];
-        document.querySelectorAll('.raw-col-cb:checked').forEach(cb => selectedCols.push(cb.value));
-        if (selectedCols.length === 0) return alert('กรุณาเลือกอย่างน้อย 1 คอลัมน์');
+        const REQUIRED_COLS = ['CY', 'รหัส', 'ชื่อ', 'Sales', 'ประเภทร้าน1', 'Sold To City', 'Sold To State', 'Address 5', 'Latitude', 'Longitude', 'ชื่อสาย', 'Day']; const selectedCols = (RawDataMgr.tempJson[0] ? Object.keys(RawDataMgr.tempJson[0]) : []).filter(c => REQUIRED_COLS.includes(c));
+        // [ROLLBACK] document.querySelectorAll('.raw-col-cb:checked').forEach(cb => selectedCols.push(cb.value));
+        // [ROLLBACK] if (selectedCols.length === 0) return alert('กรุณาเลือกอย่างน้อย 1 คอลัมน์');
 
         const modal = document.getElementById('columnSelectModal');
         if (modal) modal.classList.add('hidden');
@@ -403,12 +403,12 @@ const ExcelIO = {
             const baseData = {
                 'รหัส': s.id,
                 'ชื่อ': s.name,
-                'Lat': s.lat,
-                'Lng': s.lng,
-                'ความถี่': s.freq,
-                'สถานะ': (kpi && kpi.active) ? 'Active' : 'Inactive',
-                'VPO': kpi ? kpi.vpo : 0,
-                'SKU': kpi ? kpi.skuCount : 0
+                'Latitude': s.lat,
+                'Longitude': s.lng,
+                // [ROLLBACK] 'ความถี่': s.freq,
+                // [ROLLBACK] 'สถานะ': (kpi && kpi.active) ? 'Active' : 'Inactive',
+                // [ROLLBACK] 'VPO': kpi ? kpi.vpo : 0,
+                // [ROLLBACK] // [ROLLBACK] 'ความถี่': s.freq, 'สถานะ': (kpi && kpi.active) ? 'Active' : 'Inactive', 'VPO': kpi ? kpi.vpo : 0, 'SKU': kpi ? kpi.skuCount : 0
             };
             if (!s.days || !s.days.length) {
                 ed.push({ ...baseData, 'สายวิ่ง': 'ยังไม่จัด', 'คิว': '-', 'Map': `https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}` });
