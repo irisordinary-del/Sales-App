@@ -395,43 +395,66 @@ const KPIMgr = {
 // ==========================================
 const ExcelIO = {
     export: () => {
-        if (!State.stores.length) return alert('ไม่มีข้อมูลให้โหลดครับ');
-        const ed = [];
+                if (!State.stores.length) return alert('ไม่มีข้อมูลให้โหลดครับ');
 
-        State.stores.forEach(s => {
-            const kpi = State.sales[s.id]; const rawRow = (State.rawData || []).find(r => String(r['\u0e23\u0e2b\u0e31\u0e2a'] || '').trim() === String(s.id)) || {};
-            const baseData = {
-                'รหัส': s.id,
-                'ชื่อ': s.name,
-                'Latitude': s.lat,
-                'Longitude': s.lng,
-                // [ROLLBACK] 'ความถี่': s.freq,
-                // [ROLLBACK] 'สถานะ': (kpi && kpi.active) ? 'Active' : 'Inactive',
-                // [ROLLBACK] 'VPO': kpi ? kpi.vpo : 0,
-                // [ROLLBACK] // [ROLLBACK] 'ความถี่': s.freq, 'สถานะ': (kpi && kpi.active) ? 'Active' : 'Inactive', 'VPO': kpi ? kpi.vpo : 0, 'SKU': kpi ? kpi.skuCount : 0
-            };
-            if (!s.days || !s.days.length) {
-                ed.push({ ...baseData, 'สายวิ่ง': 'ยังไม่จัด', 'คิว': '-', 'Map': `https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}` });
-            } else {
-                s.days.forEach(d => {
-                    ed.push({ ...baseData, 'สายวิ่ง': d, 'คิว': (s.seqs && s.seqs[d]) || '-', 'Map': `https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}` });
+                // Export 12 columns (A-L) matching uploaded file format exactly
+                const exportData = State.stores.map(s => {
+                                // Try to get original row data from rawData
+                                const rawRow = (State.rawData || []).find(r =>
+                                                    String(r['รหัส'] || r['B'] || '').trim() === String(s.id)
+                                                                                      ) || {};
+
+                                return {
+                                                    'CY': rawRow['CY'] || rawRow['A'] || '',
+                                                    'รหัส': s.id,
+                                                    'ชื่อ': s.name,
+                                                    'Sales': rawRow['Sales'] || rawRow['D'] || '',
+                                                    'ประเภทร้านค้า1': rawRow['ประเภทร้านค้า1'] || rawRow['E'] || '',
+                                                    'Sold To City': rawRow['Sold To City'] || rawRow['F'] || '',
+                                                    'Sold To State': rawRow['Sold To State'] || rawRow['G'] || '',
+                                                    'Address 5': rawRow['Address 5'] || rawRow['H'] || '',
+                                                    'Latitude': s.lat,
+                                                    'Longtitude': s.lng,
+                                                    'ชื่อตลาด': rawRow['ชื่อตลาด'] || rawRow['K'] || '',
+                                                    'Day': s.days && s.days.length > 0 ? s.days[0] : (rawRow['Day'] || rawRow['L'] || '')
+                                };
                 });
-            }
-        });
 
-        ed.sort((a, b) => {
-            const da = a['สายวิ่ง'] !== 'ยังไม่จัด' ? parseInt(a['สายวิ่ง'].replace('Day ', '')) : 999;
-            const db = b['สายวิ่ง'] !== 'ยังไม่จัด' ? parseInt(b['สายวิ่ง'].replace('Day ', '')) : 999;
-            if (da !== db) return da - db;
-            const sa = a['คิว'] !== '-' ? parseInt(a['คิว']) : 999;
-            const sb = b['คิว'] !== '-' ? parseInt(b['คิว']) : 999;
-            return sa - sb;
-        });
+                // Sort by Day number
+                exportData.sort((a, b) => {
+                                const da = a['Day'] && a['Day'] !== '' ? parseInt(String(a['Day']).replace('Day ', '')) : 999;
+                                const db = b['Day'] && b['Day'] !== '' ? parseInt(String(b['Day']).replace('Day ', '')) : 999;
+                                return da - db;
+                });
 
-        const ws = XLSX.utils.json_to_sheet(ed);
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, 'RoutePlan');
-        XLSX.writeFile(wb, `Route_${State.localActiveRoute}.xlsx`);
+                // Create worksheet with 12 columns matching upload format
+                const ws = XLSX.utils.json_to_sheet(exportData, {
+                                header: ['CY', 'รหัส', 'ชื่อ', 'Sales', 'ประเภทร้านค้า1', 'Sold To City', 'Sold To State', 'Address 5', 'Latitude', 'Longtitude', 'ชื่อตลาด', 'Day']
+                });
+
+                // Set column widths
+                ws['!cols'] = [
+                    { wch: 14 }, // CY
+                    { wch: 12 }, // รหัส
+                    { wch: 40 }, // ชื่อ
+                    { wch: 10 }, // Sales
+                    { wch: 8  }, // ประเภทร้านค้า1
+                    { wch: 18 }, // Sold To City
+                    { wch: 18 }, // Sold To State
+                    { wch: 14 }, // Address 5
+                    { wch: 14 }, // Latitude
+                    { wch: 14 }, // Longtitude
+                    { wch: 30 }, // ชื่อตลาด
+                    { wch: 6  }  // Day
+                            ];
+
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, 'RoutePlan');
+
+                const now = new Date();
+                const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+                XLSX.writeFile(wb, `Route_${State.localActiveRoute}_${dateStr}.xlsx`);
+    }
     }
 };
 
