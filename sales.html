@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Sales App V79.5 (Resizable Layout)</title>
+    
+    <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore-compat.js"></script>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <link rel="stylesheet" href="sales-style.css">
+</head>
+<body>
+
+    <div id="login-screen">
+        <div class="bg-white p-8 rounded-3xl shadow-2xl w-full max-w-sm text-center">
+            <h1 class="text-2xl font-black text-gray-800 mb-1">Sales<span class="text-blue-600">Nav</span></h1>
+            <p class="text-xs text-gray-500 mb-6 font-medium text-blue-600">รหัสสายวิ่ง = รหัสผ่าน</p>
+            <input type="text" id="login-input" placeholder="กรอกรหัสสาย (เช่น V01)" class="w-full bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-xl block p-4 outline-none font-bold uppercase text-center mb-4">
+            <button onclick="App.login()" class="w-full text-white bg-blue-600 hover:bg-blue-700 font-bold rounded-xl text-sm px-5 py-4 shadow-lg active:scale-95 transition-transform">เข้าสู่ระบบ 🚀</button>
+        </div>
+    </div>
+
+    <div id="loader">
+        <div class="spinner"></div>
+        <p class="text-blue-600 font-bold text-lg">กำลังซิงค์ข้อมูลล่าสุด...</p>
+    </div>
+
+    <header id="main-header" class="bg-white text-gray-900 px-4 py-3 shrink-0 shadow-sm relative z-50 hidden border-b">
+        <div class="flex justify-between items-center">
+            <div class="bg-blue-600 text-white text-xs font-black px-2.5 py-1 rounded-lg shadow-sm">สาย: <span id="user-route-label">V00</span></div>
+            <div id="sync-status" class="text-[10px] bg-emerald-100 px-2 py-0.5 rounded-full text-emerald-600 font-bold">🟢 อัปเดตล่าสุด</div>
+            <button onclick="App.logout()" class="text-[10px] text-gray-400 font-bold">เปลี่ยนสาย</button>
+        </div>
+    </header>
+
+    <div id="main-content" class="hidden">
+        
+        <div id="tab-dashboard" class="app-tab bg-gray-50">
+            <div class="flex-1 overflow-y-auto p-4 pb-24 space-y-3">
+                <h2 class="font-black text-lg text-gray-800">สรุปยอดสายวิ่ง 📊</h2>
+                <div class="grid grid-cols-2 gap-2">
+                    <div class="bg-white p-3 rounded-2xl shadow-sm border"><p class="text-[9px] text-gray-400 font-bold mb-0.5 uppercase">ยอดรวมเดือนนี้</p><p class="text-xl font-black text-gray-800 leading-tight" id="dash-sales">0</p></div>
+                    <div class="bg-white p-3 rounded-2xl shadow-sm border border-blue-100"><p class="text-[9px] text-blue-400 font-bold mb-0.5 uppercase">VPO (เฉลี่ยบิล)</p><p class="text-xl font-black text-blue-600 leading-tight" id="dash-vpo">0</p></div>
+                    <div class="bg-white p-3 rounded-2xl shadow-sm border border-indigo-100"><p class="text-[9px] text-indigo-400 font-bold mb-0.5 uppercase">Avg SKU / ร้าน</p><p class="text-xl font-black text-indigo-600 leading-tight" id="dash-sku">0</p></div>
+                    <div class="bg-white p-3 rounded-2xl shadow-sm border border-emerald-100"><p class="text-[9px] text-emerald-500 font-bold mb-0.5 uppercase">ร้านที่ซื้อจริง</p><p class="text-xl font-black text-emerald-600 leading-tight" id="dash-active">0</p></div>
+                </div>
+                <div class="space-y-2 pt-2">
+                    <div class="bg-white p-3 rounded-2xl shadow-sm border border-pink-100 flex justify-between items-center"><div><p class="text-xs font-bold text-gray-500">การกระจาย เจลลี่</p><p class="text-lg font-black text-pink-500 leading-tight" id="dash-dist-jelly">0%</p></div><div class="text-right"><p class="text-[9px] font-bold text-gray-400">ครอบคลุม <span id="cnt-jelly">0</span> ร้าน</p></div></div>
+                    <div class="bg-white p-3 rounded-2xl shadow-sm border border-amber-100 flex justify-between items-center"><div><p class="text-xs font-bold text-gray-500">การกระจาย กลมกล่อม</p><p class="text-lg font-black text-amber-500 leading-tight" id="dash-dist-klom">0%</p></div><div class="text-right"><p class="text-[9px] font-bold text-gray-400">ครอบคลุม <span id="cnt-klom">0</span> ร้าน</p></div></div>
+                </div>
+            </div>
+        </div>
+
+        <div id="tab-stores" class="app-tab bg-gray-50">
+            <div class="p-4 shrink-0 bg-white border-b shadow-sm z-10">
+                <h2 class="font-black text-lg text-gray-800 mb-3">รายชื่อร้านค้าทั้งหมด</h2>
+                <input type="text" id="search-input" onkeyup="UI.searchStores(this.value)" placeholder="ค้นหารหัสหรือชื่อร้าน..." class="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500">
+            </div>
+            <div class="flex-1 overflow-y-auto p-4 pb-24"><div id="all-store-list" class="space-y-3"></div></div>
+        </div>
+
+        <div id="tab-route" class="app-tab bg-gray-50">
+            <div class="bg-white p-2 shrink-0 border-b z-20 shadow-sm relative">
+                <select id="day-select" class="w-full bg-gray-50 text-gray-900 text-sm font-bold outline-none px-3 py-2 rounded-lg border border-gray-300 text-center appearance-none"></select>
+            </div>
+            
+            <div id="split-container" class="flex-1 flex flex-col lg:flex-row min-h-0 w-full relative">
+                
+                <div id="map-container" class="relative bg-gray-200 flex items-center justify-center z-10 transition-none">
+                    <button id="btn-load-map" onclick="MapCtrl.initAndDraw()" class="bg-blue-600 text-white px-5 py-2 rounded-full text-sm font-bold shadow-lg active:scale-95 transition">📍 เปิดแผนที่นำทาง</button>
+                    <div id="map" class="w-full h-full hidden"></div>
+                    <button id="btn-fit-map" onclick="MapCtrl.fitBounds()" class="hidden absolute bottom-3 right-3 z-[400] bg-white p-2 rounded-full shadow-lg border text-blue-600 active:scale-95 transition">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" /></svg>
+                    </button>
+                </div>
+                
+                <div id="resizer" class="bg-white border-y lg:border-y-0 lg:border-x border-gray-200 flex items-center justify-center z-20 cursor-row-resize lg:cursor-col-resize hover:bg-gray-100 transition-colors shadow-[0_0_10px_rgba(0,0,0,0.05)]" style="flex: 0 0 16px; touch-action: none;">
+                    <div class="w-12 h-1.5 bg-gray-300 rounded-full lg:w-1.5 lg:h-12"></div>
+                </div>
+                
+                <div id="route-side-panel" class="flex-1 flex flex-col overflow-hidden bg-gray-50 relative z-10">
+                    <div class="flex justify-between items-center p-3 shrink-0 bg-white border-b shadow-sm">
+                        <h3 class="font-bold text-sm text-gray-800" id="route-title">คิวงาน</h3>
+                        <span class="text-[9px] text-gray-500 font-medium bg-gray-100 px-2 py-0.5 rounded border">ลาก ≡ สลับคิว</span>
+                    </div>
+                    <div id="route-store-list" class="flex-1 overflow-y-auto px-3 py-3 pb-24 space-y-2"></div>
+                </div>
+
+            </div>
+        </div>
+
+    </div>
+
+    <nav id="bottom-nav" class="fixed bottom-0 w-full bg-white border-t flex justify-around items-center pt-2 pb-6 px-2 z-[1000] hidden shadow-[0_-5px_15px_rgba(0,0,0,0.05)]">
+        <button onclick="UI.switchTab('dashboard')" id="nav-dashboard" class="nav-item active flex flex-col items-center w-1/3"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg><span class="text-[10px] font-bold mt-1">ภาพรวม</span></button>
+        <button onclick="UI.switchTab('stores')" id="nav-stores" class="nav-item flex flex-col items-center w-1/3"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg><span class="text-[10px] font-bold mt-1">ร้านค้า</span></button>
+        <button onclick="UI.switchTab('route')" id="nav-route" class="nav-item flex flex-col items-center w-1/3"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/></svg><span class="text-[10px] font-bold mt-1">คิวงาน</span></button>
+    </nav>
+
+    <div id="store-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-[99999] flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden transform transition-all">
+            <div class="bg-gray-50 p-4 border-b flex justify-between items-start">
+                <div><h2 id="m-name" class="text-lg font-black text-gray-800 leading-tight">...</h2><p id="m-id" class="text-xs text-blue-600 font-mono mt-0.5 uppercase">ID: ...</p></div>
+                <button onclick="UI.closeModal()" class="bg-white border w-8 h-8 rounded-full text-gray-400 font-bold shadow-sm">✕</button>
+            </div>
+            <div class="p-4 space-y-4">
+                <div class="grid grid-cols-2 gap-2 text-center">
+                    <div class="bg-blue-50 p-2 rounded-xl border border-blue-100"><p class="text-[9px] text-blue-500 font-bold mb-1 uppercase">ยอดซื้อ (EA)</p><p id="m-sales" class="text-lg font-black text-blue-700">0</p></div>
+                    <div class="bg-indigo-50 p-2 rounded-xl border border-indigo-100"><p class="text-[9px] text-indigo-500 font-bold mb-1 uppercase">จำนวนบิล</p><p id="m-bills" class="text-lg font-black text-indigo-700">0</p></div>
+                    <div class="bg-teal-50 p-2 rounded-xl border border-teal-100"><p class="text-[9px] text-teal-500 font-bold mb-1 uppercase">VPO รายร้าน</p><p id="m-vpo" class="text-lg font-black text-teal-700">0</p></div>
+                    <div class="bg-purple-50 p-2 rounded-xl border border-purple-100"><p class="text-[9px] text-purple-500 font-bold mb-1 uppercase">SKU ที่ซื้อ</p><p id="m-sku" class="text-lg font-black text-purple-700">0</p></div>
+                </div>
+                <div class="space-y-2">
+                    <div id="m-j-box" class="flex justify-between items-center p-2 rounded-lg border text-xs font-bold"><span>เจลลี่</span><span id="m-j-status">...</span></div>
+                    <div id="m-k-box" class="flex justify-between items-center p-2 rounded-lg border text-xs font-bold"><span>กลมกล่อม</span><span id="m-k-status">...</span></div>
+                </div>
+            </div>
+            <div class="p-3 bg-gray-50 border-t"><button id="m-nav-btn" class="w-full bg-blue-600 text-white py-3 rounded-xl font-black shadow-md active:scale-95 transition">🚗 นำทางไปร้านนี้</button></div>
+        </div>
+    </div>
+
+    <script src="sales-app.js"></script>
+</body>
+</html>
