@@ -405,17 +405,17 @@ const ExcelIO = {
                                                                                       ) || {};
 
                                 return {
-                                                    'CY': rawRow['CY'] || rawRow['A'] || '',
+                                                    'CY': s.cy || '',
                                                     'รหัส': s.id,
                                                     'ชื่อ': s.name,
-                                                    'Sales': rawRow['Sales'] || rawRow['D'] || '',
-                                                    'ประเภทร้านค้า1': rawRow['ประเภทร้านค้า1'] || rawRow['E'] || '',
-                                                    'Sold To City': rawRow['Sold To City'] || rawRow['F'] || '',
-                                                    'Sold To State': rawRow['Sold To State'] || rawRow['G'] || '',
-                                                    'Address 5': rawRow['Address 5'] || rawRow['H'] || '',
+                                                    'Sales': s.salesCode || '',
+                                                    'ประเภทร้านค้า1': s.shopType || '',
+                                                    'Sold To City': s.subDistrict || '',
+                                                    'Sold To State': s.district || '',
+                                                    'Address 5': s.province || '',
                                                     'Latitude': s.lat,
                                                     'Longtitude': s.lng,
-                                                    'ชื่อตลาด': rawRow['ชื่อตลาด'] || rawRow['K'] || '',
+                                                    'ชื่อตลาด': s.marketName || '',
                                                     'Day': s.days && s.days.length > 0 ? s.days[0] : (rawRow['Day'] || rawRow['L'] || '')
                                 };
                 });
