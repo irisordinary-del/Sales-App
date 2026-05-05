@@ -154,7 +154,7 @@ const UI = {
                         <span class="font-bold text-sm text-gray-800">${s.name} ${b}</span>
                         ${kpiBadge}
                     </div>
-                    <span class="block text-[10px] text-gray-400 font-mono mt-1">ID: ${s.id}</span>
+                    <span class="block text-[10px] text-gray-400 font-mono mt-1">${s.marketName ? `<span class="block text-[10px] text-blue-400 font-mono mt-0.5">${s.marketName}</span>` : ''}ID: ${s.id}</span>
                 </div>`);
 
             if (!s.days || !s.days.length) {
