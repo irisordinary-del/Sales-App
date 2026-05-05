@@ -83,7 +83,8 @@ const FileManager = {
                                     }
 
                         // Switch to planning tab
-                        Nav.go('planning');
+                        App.saveDB(); // Save full store data to Firestore
+                                                    Nav.go('planning');
 
                     } catch(err) {
                                     UI.hideLoader();
