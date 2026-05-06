@@ -230,7 +230,7 @@ const KPIMgr = {
 
         const fields = [
             { id: 'kpi-id', label: 'คอลัมน์ "รหัสร้าน" (อ้างอิง)', val: saved.idCol || cols.find(h => h.toLowerCase().includes('id') || h.includes('รหัส')) },
-            { id: 'kpi-name', label: 'คอลัมน์ "ชื่อร้าน" (ไว้โชว์)', val: saved.nameCol || cols.find(h => h.toLowerCase().includes('name') || h.includes('ชื่อ')) },
+            { id: 'kpi-name', label: 'คอลัมน์ "ชื่อร้าน" (ไว้โชว์)', val: saved.nameCol || cols.find(h => h.toLowerCase().includes('name') || (h.includes('ชื่อ') && !h.includes('ตลาด'))) },
             { id: 'kpi-vpo', label: 'คอลัมน์ "ยอดขาย" (บวกเลข)', val: saved.vpoCol || cols.find(h => h.toLowerCase().includes('qty') || h.includes('จำนวน')) },
             { id: 'kpi-bill', label: 'คอลัมน์ "เลขที่บิล" (นับจำนวน)', val: saved.billCol || cols.find(h => h.toLowerCase().includes('invoice') || h.includes('บิล')) },
             { id: 'kpi-sku', label: 'คอลัมน์ "รหัสสินค้า" (นับจำนวน)', val: saved.skuCol || cols.find(h => h.toLowerCase().includes('sku') || h.includes('product')) }
