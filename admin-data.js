@@ -613,7 +613,7 @@ const App = {
         const file = e.target.files[0];
         if (!file) return;
 
-        if (State.stores.length > 0 && !confirm(`ข้อมูลเดิมของ "${State.localActiveRoute}" จะถูกแทนที่\nยืนยันการอัปโหลด?`)) {
+        if (!confirm('ยืนยันการอัปโหลด?\nระบบจะแยกร้านค้าตามคอลัมน์ Day และใส่เข้าสายต่างๆ โดยอัตโนมัติ\nสายที่ยังไม่มีจะถูกสร้างขึ้นใหม่')) {
             this.value = '';
             return;
         }
@@ -661,9 +661,11 @@ const App = {
                     if (isNaN(lat) || isNaN(lng)) continue;
 
                     const freq = (freqCol !== -1 && String(row[freqCol] || '').trim().toUpperCase().includes('2')) ? 2 : 1;
-                    const assignedDay = (dayCol !== -1 && row[dayCol]) ? String(row[dayCol]).trim() : '';
+                    const rawDay = (dayCol !== -1 && row[dayCol]) ? String(row[dayCol]).trim() : '';
+                    const dayNum = rawDay ? parseInt(rawDay.replace(/[^0-9]/g, '')) : NaN;
+                    const assignedDay = !isNaN(dayNum) ? 'Day ' + dayNum : '';
                     const assignedSeq = (seqCol !== -1 && row[seqCol]) ? parseInt(String(row[seqCol]).replace(/[^0-9]/g, '')) : NaN;
-                    const isValidDay = assignedDay.toLowerCase().includes('day');
+                    const isValidDay = !!assignedDay;
 
                     if (storeMap[idStr]) {
                         if (isValidDay && !storeMap[idStr].days.includes(assignedDay)) {
@@ -697,13 +699,42 @@ const App = {
                 const finalArray = Object.values(storeMap);
                 if (finalArray.length === 0) return alert('ไม่พบพิกัด (Lat, Lng) ในไฟล์ครับ');
 
-                // แก้บัค: clearAll markers เก่าก่อน load ใหม่
+                // แยกร้านตาม Day → ใส่เข้า routes
+                const routeGroups = {};
+                finalArray.forEach(s => {
+                    const dayKeys = s.days.length > 0 ? s.days : ['ไม่มีสาย'];
+                    dayKeys.forEach(dk => {
+                        if (!routeGroups[dk]) routeGroups[dk] = [];
+                        routeGroups[dk].push(s);
+                    });
+                });
+                const dayKeysList = Object.keys(routeGroups);
+                if (dayKeysList.length === 0) return alert('ไม่พบข้อมูล Day ในไฟล์ครับ');
+
+                // ใส่เข้า State.db.routes
+                dayKeysList.forEach(dk => {
+                    State.db.routes[dk] = routeGroups[dk];
+                });
+
+                // Switch ไปสายแรกที่ import
+                const sortedDays = dayKeysList.filter(d => d !== 'ไม่มีสาย')
+                    .sort((a, b) => {
+                        const na = parseInt(a.replace(/[^0-9]/g, '')) || 0;
+                        const nb = parseInt(b.replace(/[^0-9]/g, '')) || 0;
+                        return na - nb;
+                    });
+                const firstDay = sortedDays[0] || dayKeysList[0];
+                State.localActiveRoute = firstDay;
+                localStorage.setItem('last_viewed_route', firstDay);
+                State.stores = State.db.routes[firstDay];
+
                 MapCtrl.clearAll();
-                State.stores = finalArray;
                 App.sync();
                 App.saveDB();
                 MapCtrl.fitToStores();
-                UI.showSaveToast(`✅ โหลด ${finalArray.length} ร้านสำเร็จ`);
+                const totalStores = finalArray.length;
+                const totalRoutes = dayKeysList.length;
+                UI.showSaveToast(`✅ โหลด ${totalStores} ร้าน / ${totalRoutes} สาย สำเร็จ`);
 
             } catch (err) {
                 alert('ขัดข้อง: ' + err.message);
