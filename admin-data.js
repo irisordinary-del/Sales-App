@@ -416,7 +416,8 @@ const ExcelIO = {
                                                     'Latitude': s.lat,
                                                     'Longtitude': s.lng,
                                                     'ชื่อตลาด': s.marketName || '',
-                                                    'Day': s.days && s.days.length > 0 ? s.days[0] : (rawRow['Day'] || rawRow['L'] || '')
+                                                    'Day': s.days && s.days.length > 0 ? s.days[0] : (rawRow['Day'] || rawRow['L'] || ''),
+                                    'seq': (() => { const d0 = s.days && s.days.length > 0 ? s.days[0] : (rawRow['Day'] || rawRow['L'] || ''); return (s.seqs && d0 && s.seqs[d0] !== undefined) ? s.seqs[d0] : ''; })()
                                 };
                 });
 
@@ -429,7 +430,7 @@ const ExcelIO = {
 
                 // Create worksheet with 12 columns matching upload format
                 const ws = XLSX.utils.json_to_sheet(exportData, {
-                                header: ['CY', 'รหัส', 'ชื่อ', 'Sales', 'ประเภทร้านค้า1', 'Sold To City', 'Sold To State', 'Address 5', 'Latitude', 'Longtitude', 'ชื่อตลาด', 'Day']
+                                header: ['CY', 'รหัส', 'ชื่อ', 'Sales', 'ประเภทร้านค้า1', 'Sold To City', 'Sold To State', 'Address 5', 'Latitude', 'Longtitude', 'ชื่อตลาด', 'Day', 'seq']
                 });
 
                 // Set column widths
@@ -445,7 +446,8 @@ const ExcelIO = {
                     { wch: 14 }, // Latitude
                     { wch: 14 }, // Longtitude
                     { wch: 30 }, // ชื่อตลาด
-                    { wch: 6  }  // Day
+                    { wch: 6  }, // Day
+                    { wch: 6  }  // seq
                             ];
 
                 const wb = XLSX.utils.book_new();
