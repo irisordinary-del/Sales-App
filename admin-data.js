@@ -613,7 +613,7 @@ const App = {
         const file = e.target.files[0];
         if (!file) return;
 
-        if (!confirm('ยืนยันการอัปโหลด?\nระบบจะแยกร้านค้าตามคอลัมน์ Day และใส่เข้าสายต่างๆ โดยอัตโนมัติ\nสายที่ยังไม่มีจะถูกสร้างขึ้นใหม่')) {
+        if (State.stores.length > 0 && !confirm(`ข้อมูลเดิมของ "${State.localActiveRoute}" จะถูกแทนที่\nยืนยันการอัปโหลด?`)) {
             this.value = '';
             return;
         }
@@ -699,42 +699,13 @@ const App = {
                 const finalArray = Object.values(storeMap);
                 if (finalArray.length === 0) return alert('ไม่พบพิกัด (Lat, Lng) ในไฟล์ครับ');
 
-                // แยกร้านตาม Day → ใส่เข้า routes
-                const routeGroups = {};
-                finalArray.forEach(s => {
-                    const dayKeys = s.days.length > 0 ? s.days : ['ไม่มีสาย'];
-                    dayKeys.forEach(dk => {
-                        if (!routeGroups[dk]) routeGroups[dk] = [];
-                        routeGroups[dk].push(s);
-                    });
-                });
-                const dayKeysList = Object.keys(routeGroups);
-                if (dayKeysList.length === 0) return alert('ไม่พบข้อมูล Day ในไฟล์ครับ');
-
-                // ใส่เข้า State.db.routes
-                dayKeysList.forEach(dk => {
-                    State.db.routes[dk] = routeGroups[dk];
-                });
-
-                // Switch ไปสายแรกที่ import
-                const sortedDays = dayKeysList.filter(d => d !== 'ไม่มีสาย')
-                    .sort((a, b) => {
-                        const na = parseInt(a.replace(/[^0-9]/g, '')) || 0;
-                        const nb = parseInt(b.replace(/[^0-9]/g, '')) || 0;
-                        return na - nb;
-                    });
-                const firstDay = sortedDays[0] || dayKeysList[0];
-                State.localActiveRoute = firstDay;
-                localStorage.setItem('last_viewed_route', firstDay);
-                State.stores = State.db.routes[firstDay];
-
+                // แก้บัค: clearAll markers เก่าก่อน load ใหม่
                 MapCtrl.clearAll();
+                State.stores = finalArray;
                 App.sync();
                 App.saveDB();
                 MapCtrl.fitToStores();
-                const totalStores = finalArray.length;
-                const totalRoutes = dayKeysList.length;
-                UI.showSaveToast(`✅ โหลด ${totalStores} ร้าน / ${totalRoutes} สาย สำเร็จ`);
+                UI.showSaveToast(`✅ โหลด ${finalArray.length} ร้าน พร้อมการจัดวันวิ่งสำเร็จ`);
 
             } catch (err) {
                 alert('ขัดข้อง: ' + err.message);
