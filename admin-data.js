@@ -675,7 +675,16 @@ const App = {
                         const newStore = {
                             id: idStr,
                             name: row[nameCol] ? String(row[nameCol]).trim() : `Store_${idStr}`,
-                            lat, lng, freq, days: [], seqs: {}, selected: false,                    code: idStr,                    salesCode: salesCodeCol !== -1 ? (String(row[salesCodeCol] || '')).trim() : '',                    shopType: shopTypeCol !== -1 ? (String(row[shopTypeCol] || '')).trim() : '',                    subDistrict: subDistrictCol !== -1 ? (String(row[subDistrictCol] || '')).trim() : '',                    district: districtCol !== -1 ? (String(row[districtCol] || '')).trim() : '',                    province: provinceCol !== -1 ? (String(row[provinceCol] || '')).trim() : '',                    marketName: marketNameCol !== -1 ? (String(row[marketNameCol] || '')).trim() : '',                    cy: cyCol !== -1 ? (String(row[cyCol] || '')).trim() : '',                    dayOriginal: dayCol !== -1 ? (String(row[dayCol] || '')).trim() : '',                    code: idStr,                    salesCode: salesCodeCol !== -1 ? (String(row[salesCodeCol] || '')).trim() : '',                    shopType: shopTypeCol !== -1 ? (String(row[shopTypeCol] || '')).trim() : '',                    subDistrict: subDistrictCol !== -1 ? (String(row[subDistrictCol] || '')).trim() : '',                    district: districtCol !== -1 ? (String(row[districtCol] || '')).trim() : '',                    province: provinceCol !== -1 ? (String(row[provinceCol] || '')).trim() : '',                    marketName: marketNameCol !== -1 ? (String(row[marketNameCol] || '')).trim() : '',,                    code: idStr,                    salesCode: salesCodeCol !== -1 ? (String(row[salesCodeCol] || '')).trim() : '',                    shopType: shopTypeCol !== -1 ? (String(row[shopTypeCol] || '')).trim() : '',                    subDistrict: subDistrictCol !== -1 ? (String(row[subDistrictCol] || '')).trim() : '',                    district: districtCol !== -1 ? (String(row[districtCol] || '')).trim() : '',,                    code: idStr,                    salesCode: salesCodeCol !== -1 ? (String(row[salesCodeCol] || '')).trim() : '',                    shopType: shopTypeCol !== -1 ? (String(row[shopTypeCol] || '')).trim() : '',,                    code: idStr,
+                            lat, lng, freq, days: [], seqs: {}, selected: false,
+                            code: idStr,
+                            salesCode: salesCodeCol !== -1 ? (String(row[salesCodeCol] || '')).trim() : '',
+                            shopType: shopTypeCol !== -1 ? (String(row[shopTypeCol] || '')).trim() : '',
+                            subDistrict: subDistrictCol !== -1 ? (String(row[subDistrictCol] || '')).trim() : '',
+                            district: districtCol !== -1 ? (String(row[districtCol] || '')).trim() : '',
+                            province: provinceCol !== -1 ? (String(row[provinceCol] || '')).trim() : '',
+                            marketName: marketNameCol !== -1 ? (String(row[marketNameCol] || '')).trim() : '',
+                            cy: cyCol !== -1 ? (String(row[cyCol] || '')).trim() : '',
+                            dayOriginal: dayCol !== -1 ? (String(row[dayCol] || '')).trim() : ''
                         };
                         if (isValidDay) {
                             newStore.days.push(assignedDay);
