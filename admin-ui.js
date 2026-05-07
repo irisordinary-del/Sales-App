@@ -343,28 +343,26 @@ const UI = {
         const totalEl = document.getElementById('allroutes-total');
         if (totalEl) totalEl.textContent = totalStores + ' ร้านค้า';
 
-        // Render table - accumulate HTML string first for performance
+        // Render table with minimal HTML to avoid freeze (1719 rows)
         const tbody = document.getElementById('allroutes-table-body');
         if (tbody) {
-            const rows = [];
-            routeKeys.forEach(routeName => {
-                const stores = routes[routeName] || [];
-                stores.forEach(store => {
-                    const dayText = store.days && store.days.length > 0 ? store.days.join(',') : (store.dayOriginal || '-');
-                    rows.push(`<tr class="hover:bg-gray-50 cursor-pointer">
-                        <td class="px-4 py-2.5">
-                            <span class="inline-block bg-indigo-100 text-indigo-700 text-xs font-bold px-2 py-0.5 rounded-full">${routeName}</span>
-                        </td>
-                        <td class="px-4 py-2.5 text-gray-600 text-xs">${store.code || ''}</td>
-                        <td class="px-4 py-2.5 font-medium text-gray-800">${store.name || ''}</td>
-                        <td class="px-4 py-2.5 text-gray-500 text-xs">${store.salesCode || ''}</td>
-                        <td class="px-4 py-2.5 text-center">
-                            <span class="text-xs text-blue-600 font-medium">${dayText}</span>
-                        </td>
-                    </tr>`);
+            // Defer table render to next frame so UI stays responsive
+            tbody.innerHTML = '<tr><td colspan="5" class="px-4 py-4 text-center text-gray-400">กำลังโหลด...</td></tr>';
+            setTimeout(() => {
+                const rows = [];
+                routeKeys.forEach(routeName => {
+                    const stores = routes[routeName] || [];
+                    stores.forEach(store => {
+                        const dayText = store.days && store.days.length > 0 ? store.days.join(',') : (store.dayOriginal || '-');
+                        rows.push('<tr><td class="px-3 py-2"><span class="badge">' + routeName + '</span></td>' +
+                            '<td class="px-3 py-2 text-xs text-gray-600">' + (store.code || '') + '</td>' +
+                            '<td class="px-3 py-2 text-gray-800">' + (store.name || '') + '</td>' +
+                            '<td class="px-3 py-2 text-xs text-gray-500">' + (store.salesCode || '') + '</td>' +
+                            '<td class="px-3 py-2 text-center text-xs text-blue-600">' + dayText + '</td></tr>');
+                    });
                 });
-            });
-            tbody.innerHTML = rows.join('');
+                tbody.innerHTML = rows.join('');
+            }, 50);
         }
     },
 };
