@@ -325,12 +325,10 @@ const UI = {
                     <div class="text-2xl font-black text-emerald-600">${totalStores}</div>
                     <div class="text-sm text-gray-500 mt-1">ร้านค้าทั้งหมด</div>
                 </div>`;
-
             routeKeys.forEach(r => {
                 const storeCount = (routes[r] || []).length;
                 const assigned = (routes[r] || []).filter(s => s.days && s.days.length > 0).length;
-                summaryHTML += `
-                <div class="bg-white rounded-xl shadow-sm p-4 flex flex-col border-l-4 border-indigo-400">
+                summaryHTML += `<div class="bg-white rounded-xl shadow-sm p-4 flex flex-col border-l-4 border-indigo-400">
                     <div class="text-sm font-black text-gray-800">${r}</div>
                     <div class="text-xl font-black text-indigo-500 mt-1">${storeCount}</div>
                     <div class="text-xs text-gray-400">ร้านค้า / จัดแล้ว: ${assigned}</div>
@@ -343,26 +341,33 @@ const UI = {
         const totalEl = document.getElementById('allroutes-total');
         if (totalEl) totalEl.textContent = totalStores + ' ร้านค้า';
 
-        // Render table with minimal HTML to avoid freeze (1719 rows)
+        // Render table - show all rows using chunked batches via setTimeout
         const tbody = document.getElementById('allroutes-table-body');
-        if (tbody) {
-            // Defer table render to next frame so UI stays responsive
-            tbody.innerHTML = '<tr><td colspan="5" class="px-4 py-4 text-center text-gray-400">กำลังโหลด...</td></tr>';
-            setTimeout(() => {
-                const rows = [];
-                routeKeys.forEach(routeName => {
-                    const stores = routes[routeName] || [];
-                    stores.forEach(store => {
-                        const dayText = store.days && store.days.length > 0 ? store.days.join(',') : (store.dayOriginal || '-');
-                        rows.push('<tr><td class="px-3 py-2"><span class="badge">' + routeName + '</span></td>' +
-                            '<td class="px-3 py-2 text-xs text-gray-600">' + (store.code || '') + '</td>' +
-                            '<td class="px-3 py-2 text-gray-800">' + (store.name || '') + '</td>' +
-                            '<td class="px-3 py-2 text-xs text-gray-500">' + (store.salesCode || '') + '</td>' +
-                            '<td class="px-3 py-2 text-center text-xs text-blue-600">' + dayText + '</td></tr>');
-                    });
-                });
-                tbody.innerHTML = rows.join('');
-            }, 50);
+        if (!tbody) return;
+
+        // Build all rows data first (fast)
+        const allRows = [];
+        routeKeys.forEach(routeName => {
+            (routes[routeName] || []).forEach(store => {
+                const dayText = store.days && store.days.length > 0 ? store.days.join(',') : (store.dayOriginal || '-');
+                allRows.push('<tr><td class="px-3 py-2 text-indigo-700 font-bold text-xs">' + routeName + '</td>' +
+                    '<td class="px-3 py-2 text-xs text-gray-600">' + (store.code || '') + '</td>' +
+                    '<td class="px-3 py-2 text-gray-800">' + (store.name || '') + '</td>' +
+                    '<td class="px-3 py-2 text-xs text-gray-500">' + (store.salesCode || '') + '</td>' +
+                    '<td class="px-3 py-2 text-center text-xs text-blue-600">' + dayText + '</td></tr>');
+            });
+        });
+
+        // Render in batches of 300 rows to avoid UI freeze
+        tbody.innerHTML = '';
+        const BATCH = 300;
+        let idx = 0;
+        function renderBatch() {
+            const chunk = allRows.slice(idx, idx + BATCH).join('');
+            tbody.insertAdjacentHTML('beforeend', chunk);
+            idx += BATCH;
+            if (idx < allRows.length) setTimeout(renderBatch, 0);
         }
+        renderBatch();
     },
 };
