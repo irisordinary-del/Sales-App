@@ -90,6 +90,11 @@
 
             </button>
 
+            <button onclick="Nav.go('allroutes')" id="nav-allroutes" class="sidebar-menu w-full flex items-center px-4 md:px-5 py-3.5 text-left text-gray-300 hover:text-white hover:bg-slate-700 transition-all rounded-lg mx-1">
+                <span class="text-lg md:mr-3">📦</span>
+                <span class="hidden md:inline">ภาพรวมทุกสาย</span>
+            </button>
+
         </nav>
 
     </aside>
@@ -547,6 +552,54 @@
         </div>
 
     </div>
+
+
+        <!-- ===== PAGE: AllRoutes ===== -->
+
+        <div id="page-allroutes" class="flex-1 flex flex-col absolute inset-0 hidden">
+
+            <!-- Header -->
+            <div class="h-16 bg-gray-900 text-white flex items-center justify-between px-6 shadow-md z-[5000] relative shrink-0 border-b-4 border-indigo-500">
+                <div class="flex items-center gap-3">
+                    <h1 class="text-xl font-black tracking-wide text-indigo-400 mr-2 hidden sm:block">Route<span class="text-white">Plan</span></h1>
+                    <span class="text-lg font-bold">📦 ภาพรวมทุกสาย</span>
+                </div>
+                <button onclick="FileManager.exportAllRoutes()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2 rounded-lg text-sm font-bold shadow-md transition flex items-center gap-2">
+                    💾 Export ทุกสาย
+                </button>
+            </div>
+
+            <!-- Content -->
+            <div class="flex-1 overflow-y-auto p-6 bg-slate-50">
+
+                <!-- Summary Cards -->
+                <div id="allroutes-summary" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6"></div>
+
+                <!-- Route Table -->
+                <div class="bg-white rounded-2xl shadow-md overflow-hidden">
+                    <div class="p-4 border-b flex items-center justify-between bg-gray-50">
+                        <h2 class="font-black text-gray-800">📋 รายการร้านค้าทุกสาย</h2>
+                        <span id="allroutes-total" class="text-sm text-gray-500"></span>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead class="text-xs text-gray-500 bg-gray-50 border-b">
+                                <tr>
+                                    <th class="px-4 py-3 text-left">สายวิ่ง</th>
+                                    <th class="px-4 py-3 text-left">รหัส</th>
+                                    <th class="px-4 py-3 text-left">ชื่อร้าน</th>
+                                    <th class="px-4 py-3 text-left">Sales</th>
+                                    <th class="px-4 py-3 text-center">Day</th>
+                                </tr>
+                            </thead>
+                            <tbody id="allroutes-table-body" class="divide-y divide-gray-100"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+            </div>
+
+        </div>
 
 
 
