@@ -344,7 +344,7 @@ const UI = {
         if (totalEl) totalEl.textContent = totalStores + ' ร้านค้า';
 
         // Render table - accumulate HTML string first for performance
-        const tbody = document.getElementById('allroutes-tbody');
+        const tbody = document.getElementById('allroutes-table-body');
         if (tbody) {
             const rows = [];
             routeKeys.forEach(routeName => {
