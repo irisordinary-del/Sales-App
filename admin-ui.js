@@ -314,59 +314,57 @@ const UI = {
 
         // Update summary cards
         const summaryEl = document.getElementById('allroutes-summary');
+        const totalStores = routeKeys.reduce((sum, r) => sum + (routes[r] || []).length, 0);
         if (summaryEl) {
-            let totalStores = 0;
-            routeKeys.forEach(r => totalStores += (routes[r] || []).length);
-
-            summaryEl.innerHTML = `
-                <div class="bg-white rounded-xl shadow-sm p-4 flex flex-col items-center border">
+            let summaryHTML = `
+                <div class="bg-white rounded-xl shadow-sm p-4 flex flex-col items-center">
                     <div class="text-2xl font-black text-indigo-600">${routeKeys.length}</div>
                     <div class="text-sm text-gray-500 mt-1">สายวิ่งทั้งหมด</div>
                 </div>
-                <div class="bg-white rounded-xl shadow-sm p-4 flex flex-col items-center border">
+                <div class="bg-white rounded-xl shadow-sm p-4 flex flex-col items-center">
                     <div class="text-2xl font-black text-emerald-600">${totalStores}</div>
                     <div class="text-sm text-gray-500 mt-1">ร้านค้าทั้งหมด</div>
-                </div>
-            `;
+                </div>`;
+
             routeKeys.forEach(r => {
-                const stores = routes[r] || [];
-                const assigned = stores.filter(s => s.days && s.days.length > 0).length;
-                summaryEl.innerHTML += `
-                <div class="bg-white rounded-xl shadow-sm p-4 flex flex-col border">
+                const storeCount = (routes[r] || []).length;
+                const assigned = (routes[r] || []).filter(s => s.days && s.days.length > 0).length;
+                summaryHTML += `
+                <div class="bg-white rounded-xl shadow-sm p-4 flex flex-col border-l-4 border-indigo-400">
                     <div class="text-sm font-black text-gray-800">${r}</div>
-                    <div class="text-xl font-black text-indigo-500 mt-1">${stores.length}</div>
+                    <div class="text-xl font-black text-indigo-500 mt-1">${storeCount}</div>
                     <div class="text-xs text-gray-400">ร้านค้า / จัดแล้ว: ${assigned}</div>
                 </div>`;
             });
+            summaryEl.innerHTML = summaryHTML;
         }
 
         // Update total counter
         const totalEl = document.getElementById('allroutes-total');
-        let totalAll = 0;
-        routeKeys.forEach(r => totalAll += (routes[r] || []).length);
-        if (totalEl) totalEl.textContent = `${totalAll} ร้านค้า | ${routeKeys.length} สาย`;
+        if (totalEl) totalEl.textContent = totalStores + ' ร้านค้า';
 
-        // Render table
-        const tbody = document.getElementById('allroutes-table-body');
+        // Render table - accumulate HTML string first for performance
+        const tbody = document.getElementById('allroutes-tbody');
         if (tbody) {
-            tbody.innerHTML = '';
+            const rows = [];
             routeKeys.forEach(routeName => {
                 const stores = routes[routeName] || [];
                 stores.forEach(store => {
-                    const day = store.days && store.days.length > 0 ? store.days[0] : (store.dayOriginal || '-');
-                    tbody.innerHTML += `<tr class="hover:bg-gray-50 cursor-pointer">
+                    const dayText = store.days && store.days.length > 0 ? store.days.join(',') : (store.dayOriginal || '-');
+                    rows.push(`<tr class="hover:bg-gray-50 cursor-pointer">
                         <td class="px-4 py-2.5">
-                            <span class="inline-block bg-indigo-100 text-indigo-700 text-xs font-bold px-2 py-0.5 rounded">${routeName}</span>
+                            <span class="inline-block bg-indigo-100 text-indigo-700 text-xs font-bold px-2 py-0.5 rounded-full">${routeName}</span>
                         </td>
                         <td class="px-4 py-2.5 text-gray-600 text-xs">${store.code || ''}</td>
                         <td class="px-4 py-2.5 font-medium text-gray-800">${store.name || ''}</td>
                         <td class="px-4 py-2.5 text-gray-500 text-xs">${store.salesCode || ''}</td>
                         <td class="px-4 py-2.5 text-center">
-                            <span class="inline-block ${day && day !== '-' ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-400'} text-xs font-bold px-2 py-0.5 rounded">${day}</span>
+                            <span class="text-xs text-blue-600 font-medium">${dayText}</span>
                         </td>
-                    </tr>`;
+                    </tr>`);
                 });
             });
+            tbody.innerHTML = rows.join('');
         }
     },
 };
