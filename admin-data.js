@@ -472,7 +472,14 @@ const App = {
         App.dbRef.onSnapshot((doc) => {
             const d = doc.exists ? doc.data() : {};
             State.db = { ...State.db, ...d };
-            State.db.routes = State.db.routes || { 'สายที่ 1': [] };
+            
+            if (d.routeList) {
+                const newRoutes = {};
+                d.routeList.forEach(r => { newRoutes[r] = []; });
+                State.db.routes = newRoutes;
+            } else {
+                State.db.routes = d.routes || { 'สายที่ 1': [] };
+            }
             State.db.cycleDays = State.db.cycleDays || 24;
 
             const sortedKeys = Object.keys(State.db.routes)
@@ -481,10 +488,21 @@ const App = {
             if (!State.localActiveRoute || !State.db.routes[State.localActiveRoute]) {
                 State.localActiveRoute = localStorage.getItem('last_viewed_route') || sortedKeys[0];
             }
-            State.stores = State.db.routes[State.localActiveRoute] || [];
 
-            App.fetchRawData();
-            App.fetchSalesData();
+            if (!State.initialLoadDone) {
+                State.initialLoadDone = true;
+                App.loadRouteStores(State.localActiveRoute);
+                App.fetchRawData();
+                App.fetchSalesData();
+            } else {
+                const rs = document.getElementById('routeSelector');
+                if (rs) {
+                    const sortedRoutes = Object.keys(State.db.routes).sort((a, b) => a.localeCompare(b, 'th', { numeric: true }));
+                    const newHTML = sortedRoutes.map(r => `<option value="${r}">${r}</option>`).join('');
+                    if (rs.innerHTML !== newHTML) rs.innerHTML = newHTML;
+                    rs.value = State.localActiveRoute;
+                }
+            }
         }, (err) => {
             console.error('Firestore error:', err);
             UI.hideLoader();
@@ -503,6 +521,25 @@ const App = {
         if (fileUpload) {
             fileUpload.addEventListener('change', App.handleMapUpload);
         }
+    },
+
+    loadRouteStores: (routeName) => {
+        UI.showLoader('กำลังโหลดข้อมูลสาย...', '');
+        App.dbRef.collection('routes').doc(routeName).get().then(doc => {
+            if (doc.exists) {
+                State.stores = doc.data().stores || [];
+            } else {
+                State.stores = (State.db.routes && State.db.routes[routeName]) ? State.db.routes[routeName] : [];
+            }
+            State.localActiveRoute = routeName;
+            App.sync();
+            MapCtrl.fitToStores();
+            UI.hideLoader();
+        }).catch(err => {
+            console.error('loadRouteStores error:', err);
+            UI.hideLoader();
+            alert('โหลดข้อมูลสายไม่สำเร็จ');
+        });
     },
 
     fetchRawData: () => {
@@ -530,15 +567,22 @@ const App = {
 
     // แก้บัค: เพิ่ม error handling และ toast แจ้งผล
     saveDB: () => {
-        State.db.routes[State.localActiveRoute] = State.stores;
-        App.dbRef.update({ routes: State.db.routes })
-            .then(() => {
-                UI.showSaveToast('💾 บันทึกเรียบร้อย');
-            })
-            .catch(err => {
-                console.error('saveDB error:', err);
-                UI.showErrorToast('❌ บันทึกไม่สำเร็จ — ตรวจสอบอินเทอร์เน็ต');
-            });
+        if (!State.db.routes[State.localActiveRoute]) {
+            State.db.routes[State.localActiveRoute] = [];
+        }
+        const routeList = Object.keys(State.db.routes);
+
+        Promise.all([
+            App.dbRef.update({ routeList: routeList }),
+            App.dbRef.collection('routes').doc(State.localActiveRoute).set({ stores: State.stores })
+        ])
+        .then(() => {
+            UI.showSaveToast('💾 บันทึกเรียบร้อย');
+        })
+        .catch(err => {
+            console.error('saveDB error:', err);
+            UI.showErrorToast('❌ บันทึกไม่สำเร็จ — ตรวจสอบอินเทอร์เน็ต');
+        });
     },
 
     // แก้บัค: reset tab กลับ tab1 ทุกครั้งที่ sync
@@ -559,11 +603,8 @@ const App = {
 
     switchRoute: (name) => {
         if (State.localActiveRoute === name) return;
-        State.localActiveRoute = name;
         localStorage.setItem('last_viewed_route', name);
-        State.stores = State.db.routes[name] || [];
-        App.sync();
-        MapCtrl.fitToStores();
+        App.loadRouteStores(name);
     },
 
     addRoute: () => {
@@ -580,9 +621,13 @@ const App = {
     renameRoute: () => {
         const n = prompt('ชื่อใหม่:', State.localActiveRoute);
         if (n && n.trim()) {
-            State.db.routes[n.trim()] = State.db.routes[State.localActiveRoute];
-            delete State.db.routes[State.localActiveRoute];
-            State.localActiveRoute = n.trim();
+            const oldName = State.localActiveRoute;
+            const newName = n.trim();
+            State.db.routes[newName] = [];
+            delete State.db.routes[oldName];
+            State.localActiveRoute = newName;
+            
+            App.dbRef.collection('routes').doc(oldName).delete().catch(e => console.error(e));
             App.sync();
             App.saveDB();
         }
@@ -593,14 +638,21 @@ const App = {
             return alert('ห้ามลบสายสุดท้ายครับ');
         }
         if (!confirm('ยืนยันลบสายนี้?')) return;
-        delete State.db.routes[State.localActiveRoute];
+        
+        const oldName = State.localActiveRoute;
+        delete State.db.routes[oldName];
+        
+        App.dbRef.collection('routes').doc(oldName).delete().catch(e => console.error(e));
+
         const sortedKeys = Object.keys(State.db.routes)
             .sort((a, b) => a.localeCompare(b, 'th', { numeric: true }));
-        State.localActiveRoute = sortedKeys[0];
-        State.stores = State.db.routes[State.localActiveRoute];
-        App.sync();
-        App.saveDB();
-        MapCtrl.fitToStores();
+        const newActive = sortedKeys[0];
+        localStorage.setItem('last_viewed_route', newActive);
+        
+        App.dbRef.update({ routeList: Object.keys(State.db.routes) })
+            .then(() => {
+                App.switchRoute(newActive);
+            });
     },
 
     clearStores: () => {
