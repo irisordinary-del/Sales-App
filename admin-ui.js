@@ -303,7 +303,7 @@ const UI = {
     hideSummaryModal: () => {
         const modal = document.getElementById('overallModal');
         if (modal) modal.classList.add('hidden');
-    }
+    },
 
     // ==========================================
     // 📦 Render All Routes Summary Page
