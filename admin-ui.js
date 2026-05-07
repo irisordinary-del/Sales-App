@@ -9,9 +9,15 @@ const Nav = {
         const navEl = document.getElementById('nav-' + page);
         if (navEl) navEl.classList.add('active');
 
-        // Only hide planning page (others deleted)
-        const pageEl = document.getElementById('page-' + page);
-        if (pageEl) pageEl.classList.remove('hidden');
+        // // Hide all pages, show target page
+            document.querySelectorAll('[id^="page-"]').forEach(p => p.classList.add('hidden'));
+            const pageEl = document.getElementById('page-' + page);
+            if (pageEl) pageEl.classList.remove('hidden');
+
+            // Render page-specific content
+            if (page === 'allroutes') {
+                if (typeof UI !== 'undefined' && UI.renderAllRoutes) UI.renderAllRoutes();
+            }
 
         if (page === 'planning') {
             setTimeout(() => { if (MapCtrl.map) MapCtrl.map.invalidateSize(); }, 200);
@@ -298,4 +304,69 @@ const UI = {
         const modal = document.getElementById('overallModal');
         if (modal) modal.classList.add('hidden');
     }
+
+    // ==========================================
+    // 📦 Render All Routes Summary Page
+    // ==========================================
+    renderAllRoutes: () => {
+        const routes = State.db.routes;
+        const routeKeys = Object.keys(routes);
+
+        // Update summary cards
+        const summaryEl = document.getElementById('allroutes-summary');
+        if (summaryEl) {
+            let totalStores = 0;
+            routeKeys.forEach(r => totalStores += (routes[r] || []).length);
+
+            summaryEl.innerHTML = `
+                <div class="bg-white rounded-xl shadow-sm p-4 flex flex-col items-center border">
+                    <div class="text-2xl font-black text-indigo-600">${routeKeys.length}</div>
+                    <div class="text-sm text-gray-500 mt-1">สายวิ่งทั้งหมด</div>
+                </div>
+                <div class="bg-white rounded-xl shadow-sm p-4 flex flex-col items-center border">
+                    <div class="text-2xl font-black text-emerald-600">${totalStores}</div>
+                    <div class="text-sm text-gray-500 mt-1">ร้านค้าทั้งหมด</div>
+                </div>
+            `;
+            routeKeys.forEach(r => {
+                const stores = routes[r] || [];
+                const assigned = stores.filter(s => s.days && s.days.length > 0).length;
+                summaryEl.innerHTML += `
+                <div class="bg-white rounded-xl shadow-sm p-4 flex flex-col border">
+                    <div class="text-sm font-black text-gray-800">${r}</div>
+                    <div class="text-xl font-black text-indigo-500 mt-1">${stores.length}</div>
+                    <div class="text-xs text-gray-400">ร้านค้า / จัดแล้ว: ${assigned}</div>
+                </div>`;
+            });
+        }
+
+        // Update total counter
+        const totalEl = document.getElementById('allroutes-total');
+        let totalAll = 0;
+        routeKeys.forEach(r => totalAll += (routes[r] || []).length);
+        if (totalEl) totalEl.textContent = `${totalAll} ร้านค้า | ${routeKeys.length} สาย`;
+
+        // Render table
+        const tbody = document.getElementById('allroutes-table-body');
+        if (tbody) {
+            tbody.innerHTML = '';
+            routeKeys.forEach(routeName => {
+                const stores = routes[routeName] || [];
+                stores.forEach(store => {
+                    const day = store.days && store.days.length > 0 ? store.days[0] : (store.dayOriginal || '-');
+                    tbody.innerHTML += `<tr class="hover:bg-gray-50 cursor-pointer">
+                        <td class="px-4 py-2.5">
+                            <span class="inline-block bg-indigo-100 text-indigo-700 text-xs font-bold px-2 py-0.5 rounded">${routeName}</span>
+                        </td>
+                        <td class="px-4 py-2.5 text-gray-600 text-xs">${store.code || ''}</td>
+                        <td class="px-4 py-2.5 font-medium text-gray-800">${store.name || ''}</td>
+                        <td class="px-4 py-2.5 text-gray-500 text-xs">${store.salesCode || ''}</td>
+                        <td class="px-4 py-2.5 text-center">
+                            <span class="inline-block ${day && day !== '-' ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-400'} text-xs font-bold px-2 py-0.5 rounded">${day}</span>
+                        </td>
+                    </tr>`;
+                });
+            });
+        }
+    },
 };
