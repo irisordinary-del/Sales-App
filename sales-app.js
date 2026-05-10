@@ -1,4 +1,22 @@
-// 1. ตั้งค่า Firebase
+// === sales-app.js ===
+
+// ✅ Inline toast สำหรับ Sales App (แทน alert)
+function showSalesToast(msg, isError) {
+    let t = document.getElementById('sales-toast');
+    if (!t) {
+        t = document.createElement('div');
+        t.id = 'sales-toast';
+        t.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(80px);background:#1f2937;color:#fff;padding:10px 20px;border-radius:10px;font-size:13px;z-index:9999;transition:transform 0.3s,opacity 0.3s;opacity:0;';
+        document.body.appendChild(t);
+    }
+    t.style.background = isError ? '#dc2626' : '#1f2937';
+    t.innerText = msg;
+    t.style.transform = 'translateX(-50%) translateY(0)';
+    t.style.opacity = '1';
+    setTimeout(() => { t.style.transform = 'translateX(-50%) translateY(80px)'; t.style.opacity = '0'; }, 3000);
+}
+
+
 const firebaseConfig = { 
     apiKey: "AIzaSyDCYxJf0eHryjVJ8_INoWw_uTN14UMaEWE", 
     authDomain: "route-plan-71e2e.firebaseapp.com", 
@@ -60,7 +78,7 @@ const UI = {
 
 const App = {
     checkAuth: () => { let saved = localStorage.getItem('route_code'); if(saved) { State.myRoute = saved; App.start(); } else document.getElementById('login-screen').style.display='flex'; },
-    login: () => { let u = document.getElementById('login-input').value.trim().toUpperCase(); if(!u) return alert("กรุณาระบุรหัสสาย"); State.myRoute = u; localStorage.setItem('route_code', u); App.start(); },
+    login: () => { let u = document.getElementById('login-input').value.trim().toUpperCase(); if(!u) return showSalesToast("กรุณาระบุรหัสสาย", true); State.myRoute = u; localStorage.setItem('route_code', u); App.start(); },
     logout: () => { localStorage.clear(); window.location.reload(); },
     start: () => {
         document.getElementById('login-screen').style.display = 'none';

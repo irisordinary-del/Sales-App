@@ -59,7 +59,7 @@ const StoreMgr = {
         });
 
         if (!changed) {
-            alert('กรุณาเลือกร้านค้าก่อนครับ');
+            UI.showErrorToast('กรุณาเลือกร้านค้าก่อนครับ');
         } else {
             UI.render();
             App.saveDB();
@@ -107,7 +107,7 @@ const RawDataMgr = {
                 if (modal) modal.classList.remove('hidden');
             } catch (error) {
                 UI.hideLoader();
-                alert('อ่านไฟล์ไม่ได้: ' + error.message);
+                UI.showErrorToast('อ่านไฟล์ไม่ได้: ' + error.message);
             }
             const inp = document.getElementById('rawUpload');
             if (inp) inp.value = '';
@@ -118,7 +118,7 @@ const RawDataMgr = {
     applyImport: () => {
         const REQUIRED_COLS = ['CY', 'รหัส', 'ชื่อ', 'Sales', 'ประเภทร้าน1', 'Sold To City', 'Sold To State', 'Address 5', 'Latitude', 'Longitude', 'ชื่อสาย', 'Day']; const selectedCols = (RawDataMgr.tempJson[0] ? Object.keys(RawDataMgr.tempJson[0]) : []).filter(c => REQUIRED_COLS.includes(c));
         // [ROLLBACK] document.querySelectorAll('.raw-col-cb:checked').forEach(cb => selectedCols.push(cb.value));
-        // [ROLLBACK] if (selectedCols.length === 0) return alert('กรุณาเลือกอย่างน้อย 1 คอลัมน์');
+        // [ROLLBACK] if (selectedCols.length === 0) return UI.showErrorToast('กรุณาเลือกอย่างน้อย 1 คอลัมน์');
 
         const modal = document.getElementById('columnSelectModal');
         if (modal) modal.classList.add('hidden');
@@ -157,7 +157,7 @@ const RawDataMgr = {
                 UI.showSaveToast('✅ อัปโหลดข้อมูลดิบสำเร็จ!');
             }).catch(err => {
                 UI.hideLoader();
-                alert('อัปโหลดไม่สำเร็จ: ' + err.message);
+                UI.showErrorToast('อัปโหลดไม่สำเร็จ: ' + err.message);
             });
         }, 100);
     },
@@ -194,7 +194,7 @@ const RawDataMgr = {
     },
 
     clearAll: () => {
-        if (!confirm('ล้างข้อมูลดิบทั้งหมด?')) return;
+        UI.showConfirm('ล้างข้อมูลดิบทั้งหมด? ข้อมูลที่ลบจะไม่สามารถกู้คืนได้', () => {
         UI.showLoader('กำลังลบ...');
         cloudDB.collection('v1_raw_chunks').get().then(snap => {
             const delBatch = cloudDB.batch();
@@ -207,7 +207,7 @@ const RawDataMgr = {
             UI.showSaveToast('🗑️ ล้างข้อมูลดิบเรียบร้อย');
         }).catch(err => {
             UI.hideLoader();
-            alert('ลบไม่สำเร็จ: ' + err.message);
+            UI.showErrorToast('ลบไม่สำเร็จ: ' + err.message);
         });
     }
 };
@@ -255,10 +255,10 @@ const KPIMgr = {
     },
 
     calculatePreview: () => {
-        if (!State.rawData || State.rawData.length === 0) return alert('ไม่มีข้อมูลดิบ');
+        if (!State.rawData || State.rawData.length === 0) return UI.showErrorToast('ไม่มีข้อมูลดิบ');
 
         const idColEl = document.getElementById('kpi-id');
-        if (!idColEl || !idColEl.value) return alert('จำเป็นต้องระบุคอลัมน์ รหัสร้าน ครับ');
+        if (!idColEl || !idColEl.value) return UI.showErrorToast('จำเป็นต้องระบุคอลัมน์ รหัสร้าน ครับ');
 
         const conf = {
             idCol: idColEl.value,
@@ -359,7 +359,7 @@ const KPIMgr = {
     },
 
     deployToSales: () => {
-        if (!State.previewSales) return alert('กรุณากด "ทดสอบคำนวณ KPI" ให้เห็นตารางตัวอย่างก่อนส่งครับ');
+        if (!State.previewSales) return UI.showErrorToast('กรุณากด "ทดสอบคำนวณ KPI" ให้เห็นตารางตัวอย่างก่อนส่งครับ');
         UI.showLoader('กำลังอัปโหลดส่งให้ Sales...', 'กำลังแบ่งกล่องข้อมูล...');
 
         cloudDB.collection('v1_sales_chunks').get().then(snap => {
@@ -385,7 +385,7 @@ const KPIMgr = {
             UI.showSaveToast('🚀 ส่งข้อมูลให้ Sales App สำเร็จ!');
         }).catch(err => {
             UI.hideLoader();
-            alert('อัปโหลดไม่สำเร็จ: ' + err.message);
+            UI.showErrorToast('อัปโหลดไม่สำเร็จ: ' + err.message);
         });
     }
 };
@@ -395,7 +395,7 @@ const KPIMgr = {
 // ==========================================
 const ExcelIO = {
     export: () => {
-                if (!State.stores.length) return alert('ไม่มีข้อมูลให้โหลดครับ');
+                if (!State.stores.length) return UI.showErrorToast('ไม่มีข้อมูลให้โหลดครับ');
 
                 // Export 12 columns (A-L) matching uploaded file format exactly
                 const exportData = State.stores.map(s => {
@@ -488,7 +488,7 @@ const App = {
         }, (err) => {
             console.error('Firestore error:', err);
             UI.hideLoader();
-            alert('⚠️ ไม่สามารถเชื่อมต่อฐานข้อมูลได้ กรุณาตรวจสอบอินเทอร์เน็ตครับ');
+            UI.showErrorToast('⚠️ ไม่สามารถเชื่อมต่อฐานข้อมูลได้ กรุณาตรวจสอบอินเทอร์เน็ตครับ');
         });
 
         const rawUpload = document.getElementById('rawUpload');
@@ -590,7 +590,7 @@ const App = {
 
     deleteRoute: () => {
         if (Object.keys(State.db.routes).length <= 1) {
-            return alert('ห้ามลบสายสุดท้ายครับ');
+            return UI.showErrorToast('ห้ามลบสายสุดท้ายครับ');
         }
         if (!confirm('ยืนยันลบสายนี้?')) return;
         delete State.db.routes[State.localActiveRoute];
@@ -628,7 +628,7 @@ const App = {
                 const json = XLSX.utils.sheet_to_json(
                     workbook.Sheets[workbook.SheetNames[0]], { header: 1, defval: '' }
                 );
-                if (json.length < 2) return alert('ไฟล์ว่างเปล่า');
+                if (json.length < 2) return UI.showErrorToast('ไฟล์ว่างเปล่า');
 
                 const headers = json[0];
                 let idCol = -1, nameCol = -1, latCol = -1, lngCol = -1, freqCol = -1, dayCol = -1, seqCol = -1, salesCodeCol = -1, shopTypeCol = -1, subDistrictCol = -1, districtCol = -1, provinceCol = -1, marketNameCol = -1, cyCol = -1;
@@ -699,7 +699,7 @@ const App = {
                 }
 
                 const finalArray = Object.values(storeMap);
-                if (finalArray.length === 0) return alert('ไม่พบพิกัด (Lat, Lng) ในไฟล์ครับ');
+                if (finalArray.length === 0) return UI.showErrorToast('ไม่พบพิกัด (Lat, Lng) ในไฟล์ครับ');
 
                 // แก้บัค: clearAll markers เก่าก่อน load ใหม่
                 MapCtrl.clearAll();
@@ -710,7 +710,7 @@ const App = {
                 UI.showSaveToast(`✅ โหลด ${finalArray.length} ร้าน พร้อมการจัดวันวิ่งสำเร็จ`);
 
             } catch (err) {
-                alert('ขัดข้อง: ' + err.message);
+                UI.showErrorToast('ขัดข้อง: ' + err.message);
             }
             const inp = document.getElementById('fileUpload');
             if (inp) inp.value = '';
@@ -726,7 +726,7 @@ const App = {
             }
             
             if (!State.stores || State.stores.length === 0) {
-                alert('⚠️ ไม่มีข้อมูลร้านค้า');
+                UI.showErrorToast('⚠️ ไม่มีข้อมูลร้านค้า');
                 return;
             }
             
@@ -744,11 +744,11 @@ const App = {
             if (UI && UI.showSaveToast) {
                 UI.showSaveToast('✅ เคลียร์การจัดสายเสร็จ');
             } else {
-                alert('✅ เคลียร์การจัดสายเสร็จ');
+                UI.showSaveToast('✅ เคลียร์การจัดสายเสร็จ');
             }
         } catch(err) {
             console.error('❌ Clear error:', err);
-            alert('❌ เกิดข้อผิดพลาด: ' + err.message);
+            UI.showErrorToast('❌ เกิดข้อผิดพลาด: ' + err.message);
         }
     }
 };

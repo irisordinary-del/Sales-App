@@ -243,7 +243,7 @@ const Lasso = {
     },
 
     finish: () => {
-        if (Lasso.pts.length < 3) return alert('วาดอย่างน้อย 3 จุดครับ');
+        if (Lasso.pts.length < 3) return UI.showErrorToast('⚠️ วาดอย่างน้อย 3 จุดครับ');
         let c = 0;
         State.stores.forEach(s => {
             if (Lasso.isInside([s.lat, s.lng], Lasso.pts)) {
@@ -255,7 +255,7 @@ const Lasso = {
         if (c > 0) {
             UI.switchTab('tab2');
         } else {
-            alert('⚠️ ไม่พบร้านในพื้นที่ที่วาดครับ');
+            UI.showErrorToast('⚠️ ไม่พบร้านในพื้นที่ที่วาดครับ');
         }
         UI.render();
         App.saveDB();
