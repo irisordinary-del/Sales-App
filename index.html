@@ -144,6 +144,10 @@
                     </div>
 
                     <button onclick="App.addRoute()" class="bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-md text-xs font-bold shadow-sm transition">
+                    <button onclick="document.getElementById('bulkUpload').click()" class="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg text-sm font-bold flex items-center gap-1">
+                        📦 อัปโหลดทุกสาย
+                    </button>
+                    <input type="file" id="bulkUpload" accept=".xlsx,.xls" class="hidden" onchange="FileManager.bulkImport(event)">
 
                         + เพิ่มสาย
 
@@ -631,8 +635,6 @@
     <script src="file-manager.js"></script>
 
     <!-- 6. Init -->
-
-	<script src="firebase-chunks.js"></script>
 
     <script>
 
