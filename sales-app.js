@@ -31,7 +31,7 @@ const db = firebase.firestore();
 // 🚀 เทคนิค 1: Cache โหลดไว ไม่รอเน็ต
 db.enablePersistence({ synchronizeTabs: true }).catch(function(err) { console.warn("Cache Warning: ", err); });
 
-const docMain = db.collection('appData').doc('v1_main');
+let docMain = db.collection('appData').doc('v1_main'); // จะถูก override ใน App.start()
 const colSales = db.collection('v1_sales_chunks');
 
 // 🌟 State ควบคุมแอป (มี isLoaded ไว้กันเด้ง และ mapNeedsFit ไว้กันแผนที่ซูมมั่ว)
@@ -104,7 +104,32 @@ const App = {
             } 
         };
 
-        docMain.onSnapshot(doc => { State.allStores = doc.exists && doc.data().routes ? doc.data().routes[State.myRoute] || [] : []; isMainLoaded = true; checkReady(); });
+        // ✅ รองรับทั้ง format เก่า (routes map) และใหม่ (subcollection)
+        // ✅ หา center จาก route code: "402V08" → "402" → "402_main"
+        const _centerMatch = State.myRoute.match(/^(\d+)/);
+        const _centerDocId = _centerMatch ? (_centerMatch[1] + '_main') : 'v1_main';
+        docMain     = db.collection('appData').doc(_centerDocId); // override global
+        const routeColRef = db.collection('appData').doc(_centerDocId).collection('routes');
+        docMain.onSnapshot(async doc => {
+            if (!doc.exists) { State.allStores = []; isMainLoaded = true; checkReady(); return; }
+            const data = doc.data();
+            if (data.routes && data.routes[State.myRoute]) {
+                State.allStores = data.routes[State.myRoute] || []; // format เก่า
+                isMainLoaded = true; checkReady();
+            } else {
+                try {
+                    const rd = await routeColRef.doc(State.myRoute).get();
+                    State.allStores = rd.exists ? (rd.data().stores || []) : [];
+                } catch(e) { State.allStores = []; }
+                isMainLoaded = true; checkReady();
+            }
+        });
+        // ✅ Realtime listener บน subcollection doc — รับอัปเดตจาก Admin ทันที
+        routeColRef.doc(State.myRoute).onSnapshot(rd => {
+            if (!rd.exists) return;
+            State.allStores = rd.data().stores || [];
+            if (isMainLoaded) Processor.run();
+        });
         colSales.onSnapshot(snap => {
             let merged = {};
             snap.forEach(doc => { Object.assign(merged, doc.data()); });
@@ -172,7 +197,8 @@ const Processor = {
         items.forEach((item, index) => { let id = item.getAttribute('data-id'), target = updated.find(s => s.id === id); if(target) { if(!target.seqs) target.seqs = {}; target.seqs[State.currentDay] = index + 1; } });
         
         // เซฟลงคลาวด์ (ซึ่งมันจะกระตุ้น onSnapshot ให้ทำงานอีกรอบ)
-        docMain.update({ [`routes.${State.myRoute}`]: updated });
+        // ✅ เขียนไปยัง subcollection (ไม่ติด 1MB limit)
+        docMain.collection('routes').doc(State.myRoute).set({ stores: updated }); // ✅ center-aware
     }
 };
 
