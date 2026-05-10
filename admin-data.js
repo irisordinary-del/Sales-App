@@ -209,6 +209,7 @@ const RawDataMgr = {
             UI.hideLoader();
             UI.showErrorToast('ลบไม่สำเร็จ: ' + err.message);
         });
+        });
     }
 };
 
