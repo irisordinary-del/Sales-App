@@ -60,3 +60,18 @@ const State = {
     activeRoadDay: null,
     openDayModal: null
 };
+
+// ==========================================
+// 🏢 Center Selector — อ่านศูนย์จาก URL param
+// ==========================================
+(function () {
+    const params = new URLSearchParams(window.location.search);
+    const center = params.get('center');
+    if (!center) {
+        // ถ้าไม่มี ?center= → redirect ไปหน้าเลือกศูนย์
+        window.location.replace('center-select.html');
+    } else {
+        window.CENTER_DOC = center + '_main'; // เช่น "402" → "402_main"
+        window.CENTER_ID  = center;           // เช่น "402"
+    }
+})();

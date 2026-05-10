@@ -464,8 +464,8 @@ const ExcelIO = {
 // 🚀 App Controller
 // ==========================================
 const App = {
-    dbRef:      cloudDB.collection('appData').doc('v1_main'),
-    routesCol:  () => cloudDB.collection('appData').doc('v1_main').collection('routes'),
+    dbRef:      cloudDB.collection('appData').doc(window.CENTER_DOC || 'v1_main'),
+    routesCol:  () => cloudDB.collection('appData').doc(window.CENTER_DOC || 'v1_main').collection('routes'),
 
     // Migrate: ข้อมูลเก่า (routes map ใน v1_main) → subcollection
     _migrate: async (oldRoutes) => {
