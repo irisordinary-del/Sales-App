@@ -6,6 +6,7 @@ const FileManager = {
             uploadRouteFile: async (file) => {
                             try {
                                                 if (!file) return;
+                                if (file.size > 15 * 1024 * 1024) return UI.showErrorToast('⚠️ ไฟล์ใหญ่เกิน 15MB กรุณาแยกไฟล์ก่อนอัปโหลด');
 
                                 UI.showLoader('📂 กำลังอ่านไฟล์...', file.name);
 
@@ -97,12 +98,12 @@ const FileManager = {
             exportTemplate: async () => {
                             try {
                                                 if (!State.localActiveRoute) {
-                                                                        alert('⚠️ กรุณาเลือกสายวิ่งก่อนครับ');
+                                                                        UI.showErrorToast('⚠️ กรุณาเลือกสายวิ่งก่อนครับ');
                                                                         return;
                                                 }
 
                                 if (State.stores.length === 0) {
-                                                        alert('⚠️ ไม่มีข้อมูลร้านค้าในสายนี้');
+                                                        UI.showErrorToast('⚠️ ไม่มีข้อมูลร้านค้าในสายนี้');
                                                         return;
                                 }
 
@@ -190,7 +191,7 @@ const FileManager = {
                                                 const routeKeys = Object.keys(routes);
 
                                 if (routeKeys.length === 0) {
-                                                        alert('⚠️ ไม่มีข้อมูลสายวิ่งในระบบ กรุณาอัพโหลดไฟล์ก่อน');
+                                                        UI.showErrorToast('⚠️ ไม่มีข้อมูลสายวิ่งในระบบ กรุณาอัพโหลดไฟล์ก่อน');
                                                         return;
                                 }
 

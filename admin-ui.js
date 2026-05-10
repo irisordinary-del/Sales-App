@@ -65,6 +65,26 @@ const UI = {
         }, 3000);
     },
 
+
+    // ✅ ใหม่: Custom Confirm Dialog แทน browser confirm()
+    showConfirm: (message, onConfirm, onCancel) => {
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.55);z-index:9999;display:flex;align-items:center;justify-content:center;';
+        const box = document.createElement('div');
+        box.style.cssText = 'background:#fff;border-radius:16px;padding:24px 24px 20px;max-width:360px;width:90%;font-family:inherit;box-shadow:0 20px 60px rgba(0,0,0,0.3);';
+        box.innerHTML = '<p style="font-size:14px;color:#374151;white-space:pre-line;margin-bottom:20px;line-height:1.6;">' + message + '</p>'
+            + '<div style="display:flex;gap:8px;justify-content:flex-end;">'
+            + '<button id="cw-cancel" style="padding:8px 18px;border-radius:8px;border:1px solid #d1d5db;background:#fff;color:#6b7280;cursor:pointer;font-size:13px;font-weight:600;">ยกเลิก</button>'
+            + '<button id="cw-ok" style="padding:8px 18px;border-radius:8px;border:none;background:#ef4444;color:#fff;cursor:pointer;font-size:13px;font-weight:700;">ยืนยัน</button>'
+            + '</div>';
+        overlay.appendChild(box);
+        document.body.appendChild(overlay);
+        const close = () => { if (document.body.contains(overlay)) document.body.removeChild(overlay); };
+        box.querySelector('#cw-cancel').onclick = () => { close(); if (onCancel) onCancel(); };
+        box.querySelector('#cw-ok').onclick    = () => { close(); if (onConfirm) onConfirm(); };
+        overlay.onclick = (e) => { if (e.target === overlay) { close(); if (onCancel) onCancel(); } };
+    },
+
     initDaySelector: () => {
         const ds = document.getElementById('assign-day');
         if (ds) {
