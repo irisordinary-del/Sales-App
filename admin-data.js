@@ -625,11 +625,21 @@ const App = {
     renameRoute: () => {
         const n = prompt('ชื่อใหม่:', State.localActiveRoute);
         if (n && n.trim()) {
-            State.db.routes[n.trim()] = State.db.routes[State.localActiveRoute];
-            delete State.db.routes[State.localActiveRoute];
-            State.localActiveRoute = n.trim();
+            const oldName = State.localActiveRoute;
+            const newName = n.trim();
+            State.db.routes[newName] = State.db.routes[oldName];
+            delete State.db.routes[oldName];
+            State.localActiveRoute = newName;
             App.sync();
-            App.saveDB();
+            const routeList = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
+            // ✅ ลบ doc เก่า + สร้าง doc ใหม่ + อัปเดต routeList
+            Promise.all([
+                App.routesCol().doc(oldName).delete(),
+                App.routesCol().doc(newName).set({ stores: State.db.routes[newName] || [] }),
+                App.dbRef.update({ routeList })
+            ])
+            .then(() => UI.showSaveToast('💾 เปลี่ยนชื่อสายเรียบร้อย'))
+            .catch(err => UI.showErrorToast('❌ เปลี่ยนชื่อไม่สำเร็จ: ' + err.message));
         }
     },
 
@@ -637,15 +647,22 @@ const App = {
         if (Object.keys(State.db.routes).length <= 1) {
             return UI.showErrorToast('ห้ามลบสายสุดท้ายครับ');
         }
-        if (!confirm('ยืนยันลบสายนี้?')) return;
-        delete State.db.routes[State.localActiveRoute];
-        const sortedKeys = Object.keys(State.db.routes)
-            .sort((a, b) => a.localeCompare(b, 'th', { numeric: true }));
-        State.localActiveRoute = sortedKeys[0];
-        State.stores = State.db.routes[State.localActiveRoute];
-        App.sync();
-        App.saveDB();
-        MapCtrl.fitToStores();
+        UI.showConfirm('ยืนยันลบสาย "' + State.localActiveRoute + '"?', () => {
+            const deletedName = State.localActiveRoute;
+            delete State.db.routes[deletedName];
+            const sortedKeys = Object.keys(State.db.routes)
+                .sort((a, b) => a.localeCompare(b, 'th', { numeric: true }));
+            State.localActiveRoute = sortedKeys[0];
+            State.stores = State.db.routes[State.localActiveRoute] || [];
+            App.sync(); MapCtrl.fitToStores();
+            // ✅ ลบ subcollection doc + อัปเดต routeList
+            Promise.all([
+                App.routesCol().doc(deletedName).delete(),
+                App.dbRef.update({ routeList: sortedKeys })
+            ])
+            .then(() => UI.showSaveToast('🗑️ ลบสายเรียบร้อย'))
+            .catch(err => UI.showErrorToast('❌ ลบไม่สำเร็จ: ' + err.message));
+        });
     },
 
     clearStores: () => {
