@@ -3,7 +3,7 @@
 // ==========================================
 
 const db = firebase.firestore();
-const CENTERS_DOC = db.collection('appData').doc('__centers__');
+const CENTERS_DOC = db.collection('appData').doc('app_centers');
 
 const App = {
     centers: {},
