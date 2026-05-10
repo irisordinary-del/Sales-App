@@ -122,12 +122,13 @@ const FileManager = {
                                                         'I': store.lat,
                                                         'J': store.lng,
                                                         'K': store.marketName || '',
-                                                        'L': store.days && store.days.length > 0 ? store.days[0] : (store.dayOriginal || '') // New planned day (fallback to original)
+                                                        'L': store.days && store.days.length > 0 ? store.days[0] : (store.dayOriginal || ''),
+                                                                                                                                    'M': (store.seqs && store.days && store.days.length > 0) ? (store.seqs[store.days[0]] || '') : '' // New planned day (fallback to original)
                                 }));
 
                                 // Create worksheet with exactly 12 columns (A-L) matching upload format
                                 const ws = XLSX.utils.json_to_sheet(exportData, {
-                                                        header: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L']
+                                                        header: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M']
                                 });
 
                                 // Add header row matching upload file column names exactly
@@ -143,6 +144,7 @@ const FileManager = {
                                                 ws['J1'] = { v: 'Longtitude', t: 's' };
                                                 ws['K1'] = { v: 'ชื่อตลาด', t: 's' };
                                                 ws['L1'] = { v: 'Day', t: 's' };
+                                                ws['M1'] = { v: 'ลำดับ', t: 's' };
 
                                 // Set column widths
                                 ws['!cols'] = [
@@ -217,13 +219,14 @@ const FileManager = {
                                                                                                                                     'I': store.lat,
                                                                                                                                     'J': store.lng,
                                                                                                                                     'K': store.marketName || '',
-                                                                                                                                    'L': store.days && store.days.length > 0 ? store.days[0] : (store.dayOriginal || '')
+                                                                                                                                    'L': store.days && store.days.length > 0 ? store.days[0] : (store.dayOriginal || ''),
+                                                                                                                                    'M': (store.seqs && store.days && store.days.length > 0) ? (store.seqs[store.days[0]] || '') : ''
                                                                                                             });
                                                                         });
                                                 });
 
                                 const wsAll = XLSX.utils.json_to_sheet(allStores, {
-                                                        header: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L']
+                                                        header: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M']
                                 });
 
                                 // Header row for combined sheet
@@ -239,6 +242,7 @@ const FileManager = {
                                                 wsAll['J1'] = { v: 'Longtitude', t: 's' };
                                                 wsAll['K1'] = { v: 'ชื่อตลาด', t: 's' };
                                                 wsAll['L1'] = { v: 'Day', t: 's' };
+                                                wsAll['M1'] = { v: 'ลำดับ', t: 's' };
 
                                 wsAll['!cols'] = [
                                         { wch: 18 }, // A - สายวิ่ง
@@ -274,11 +278,12 @@ const FileManager = {
                                                                                               'I': store.lat,
                                                                                               'J': store.lng,
                                                                                               'K': store.marketName || '',
-                                                                                              'L': store.days && store.days.length > 0 ? store.days[0] : (store.dayOriginal || '')
+                                                                                              'L': store.days && store.days.length > 0 ? store.days[0] : (store.dayOriginal || ''),
+                                                                                                                                    'M': (store.seqs && store.days && store.days.length > 0) ? (store.seqs[store.days[0]] || '') : ''
                                                                   }));
 
                                                                   const ws = XLSX.utils.json_to_sheet(exportData, {
-                                                                                              header: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L']
+                                                                                              header: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M']
                                                                   });
 
                                                                   ws['A1'] = { v: 'CY', t: 's' };
@@ -293,6 +298,7 @@ const FileManager = {
                                                         ws['J1'] = { v: 'Longtitude', t: 's' };
                                                         ws['K1'] = { v: 'ชื่อตลาด', t: 's' };
                                                         ws['L1'] = { v: 'Day', t: 's' };
+                                                ws['M1'] = { v: 'ลำดับ', t: 's' };
 
                                                                   ws['!cols'] = [
                                                                           { wch: 14 }, { wch: 12 }, { wch: 40 }, { wch: 10 },
@@ -322,6 +328,167 @@ const FileManager = {
                                                 UI.showErrorToast('❌ Export ไม่สำเร็จ: ' + err.message);
                             }
             }
+    // ==========================================
+    // 📦 Bulk Import — อัปโหลดทุกสายพร้อมกัน
+    // แยกสาย/Route ตาม salesCode อัตโนมัติ
+    // ==========================================
+    bulkImport: (event) => {
+        const file = event.target.files[0];
+        event.target.value = ''; // reset input
+        if (!file) return;
+
+        if (file.size > 20 * 1024 * 1024) {
+            return UI.showErrorToast('⚠️ ไฟล์ใหญ่เกิน 20MB');
+        }
+
+        UI.showLoader('📦 กำลังอ่านไฟล์...', 'รอสักครู่');
+
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+            try {
+                const data     = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, { type: 'array' });
+                const json     = XLSX.utils.sheet_to_json(
+                    workbook.Sheets[workbook.SheetNames[0]], { header: 1, defval: '' }
+                );
+                if (json.length < 2) return UI.showErrorToast('⚠️ ไฟล์ว่างเปล่า');
+
+                const headers = json[0];
+                let idCol=-1, nameCol=-1, latCol=-1, lngCol=-1, freqCol=-1,
+                    dayCol=-1, seqCol=-1, salesCodeCol=-1, shopTypeCol=-1,
+                    subDistrictCol=-1, districtCol=-1, provinceCol=-1,
+                    marketNameCol=-1, cyCol=-1;
+
+                for (let i = 0; i < headers.length; i++) {
+                    const h = String(headers[i]).toLowerCase();
+                    if (h.includes('รหัส') || h.includes('customer code') || h.includes('id')) idCol = i;
+                    else if ((h.includes('ชื่อ') && !h.includes('ตลาด')) || h.includes('name')) nameCol = i;
+                    else if (h.includes('lat') || h.includes('ละติจูด')) latCol = i;
+                    else if (h.includes('lng') || h.includes('lon') || h.includes('ลองจิจูด')) lngCol = i;
+                    else if (h.includes('freq') || h.includes('ความถี่') || h.includes('f2')) freqCol = i;
+                    else if (h.includes('สายวิ่ง') || h.includes('day')) dayCol = i;
+                    else if (h.includes('คิว') || h.includes('seq')) seqCol = i;
+                    else if (h.includes('salescode') || h.includes('รหัสเซลล์')) salesCodeCol = i;
+                    else if (h.includes('sales') && !h.includes('salescode')) salesCodeCol = i;
+                    else if (h.includes('ประเภท') || h.includes('type') || h.includes('shoptype')) shopTypeCol = i;
+                    else if (h.includes('sold to city') || h.includes('subdistrict') || h.includes('ตำบล')) subDistrictCol = i;
+                    else if (h.includes('sold to state') || h.includes('district') || h.includes('อำเภอ')) districtCol = i;
+                    else if (h.includes('address 5') || h.includes('province') || h.includes('จังหวัด')) provinceCol = i;
+                    else if (h.includes('ตลาด') || h.includes('market')) marketNameCol = i;
+                    else if (h === 'cy' || h.includes('cy')) cyCol = i;
+                }
+
+                if (salesCodeCol === -1) {
+                    UI.hideLoader();
+                    return UI.showErrorToast('⚠️ ไม่พบ column "Sales Code" ในไฟล์ กรุณาตรวจสอบ header');
+                }
+
+                // ─── Parse ทุก row แล้วจัดกลุ่มตาม salesCode ───────────────
+                const byRoute = {}; // { "402V01": { id1: storeObj, ... }, ... }
+
+                for (let i = 1; i < json.length; i++) {
+                    const row = json[i];
+                    if (!row || row.length === 0) continue;
+
+                    const lat = parseFloat(String(row[latCol] || '').replace(/[^0-9.-]/g, ''));
+                    const lng = parseFloat(String(row[lngCol] || '').replace(/[^0-9.-]/g, ''));
+                    if (isNaN(lat) || isNaN(lng)) continue;
+
+                    const idStr   = row[idCol] ? String(row[idCol]).trim() : '';
+                    const scRaw   = salesCodeCol !== -1 ? String(row[salesCodeCol] || '').trim() : '';
+                    if (!idStr || !scRaw) continue;
+
+                    const routeKey = scRaw; // ใช้ salesCode เป็นชื่อ Route ตรงๆ
+                    if (!byRoute[routeKey]) byRoute[routeKey] = {};
+
+                    const freq      = (freqCol !== -1 && String(row[freqCol]||'').toUpperCase().includes('2')) ? 2 : 1;
+                    const rawDay    = (dayCol !== -1 && row[dayCol]) ? String(row[dayCol]).trim() : '';
+                    const dayNum    = rawDay ? parseInt(rawDay.replace(/[^0-9]/g, '')) : NaN;
+                    const aDay      = !isNaN(dayNum) ? 'Day ' + dayNum : '';
+                    const aSeq      = (seqCol !== -1 && row[seqCol]) ? parseInt(String(row[seqCol]).replace(/[^0-9]/g,'')) : NaN;
+
+                    if (byRoute[routeKey][idStr]) {
+                        // F2: ร้านซ้ำ → เพิ่ม day ที่สอง
+                        if (aDay && !byRoute[routeKey][idStr].days.includes(aDay)) {
+                            byRoute[routeKey][idStr].days.push(aDay);
+                            if (!isNaN(aSeq)) byRoute[routeKey][idStr].seqs[aDay] = aSeq;
+                        }
+                        byRoute[routeKey][idStr].freq = 2;
+                    } else {
+                        const store = {
+                            id: idStr, code: idStr,
+                            name: row[nameCol] ? String(row[nameCol]).trim() : ('Store_' + idStr),
+                            lat, lng, freq, days: [], seqs: {}, selected: false,
+                            salesCode:   scRaw,
+                            shopType:    shopTypeCol !== -1 ? String(row[shopTypeCol]||'').trim() : '',
+                            subDistrict: subDistrictCol !== -1 ? String(row[subDistrictCol]||'').trim() : '',
+                            district:    districtCol !== -1 ? String(row[districtCol]||'').trim() : '',
+                            province:    provinceCol !== -1 ? String(row[provinceCol]||'').trim() : '',
+                            marketName:  marketNameCol !== -1 ? String(row[marketNameCol]||'').trim() : '',
+                            cy:          cyCol !== -1 ? String(row[cyCol]||'').trim() : '',
+                            dayOriginal: rawDay
+                        };
+                        if (aDay) { store.days.push(aDay); if (!isNaN(aSeq)) store.seqs[aDay] = aSeq; }
+                        byRoute[routeKey][idStr] = store;
+                    }
+                }
+
+                const routeKeys = Object.keys(byRoute);
+                if (routeKeys.length === 0) {
+                    UI.hideLoader();
+                    return UI.showErrorToast('⚠️ ไม่พบข้อมูลในไฟล์');
+                }
+
+                // ─── Merge เข้า State.db.routes ──────────────────────────────
+                let totalNew = 0, totalRoutes = routeKeys.length;
+                const savedRoutes = [];
+
+                for (const routeKey of routeKeys) {
+                    const incoming    = Object.values(byRoute[routeKey]);
+                    const existing    = State.db.routes[routeKey] || [];
+                    const existingIds = new Set(existing.map(s => s.id));
+
+                    // เพิ่มเฉพาะร้านที่ยังไม่มี ID ในระบบ
+                    const newStores  = incoming.filter(s => !existingIds.has(s.id));
+                    const merged     = [...existing, ...newStores];
+                    State.db.routes[routeKey] = merged;
+                    totalNew += newStores.length;
+                    savedRoutes.push(routeKey);
+                }
+
+                // ─── บันทึกทุก Route ลง Firebase ────────────────────────────
+                UI.showLoader('💾 กำลังบันทึก...', `บันทึก ${totalRoutes} สายวิ่ง`);
+                const routeList = Object.keys(State.db.routes)
+                    .sort((a,b) => a.localeCompare(b, 'th', { numeric: true }));
+
+                // บันทึก routes ที่เพิ่ง import ทีละอัน
+                await Promise.all(savedRoutes.map(name =>
+                    App.routesCol().doc(name).set({ stores: State.db.routes[name] || [] })
+                ));
+                await App.dbRef.update({ routeList, cycleDays: State.db.cycleDays || 24 });
+
+                // อัปเดต State และ UI
+                if (!State.localActiveRoute || !State.db.routes[State.localActiveRoute]) {
+                    State.localActiveRoute = routeList[0];
+                }
+                State.stores = State.db.routes[State.localActiveRoute] || [];
+
+                UI.hideLoader();
+                App.sync();
+                MapCtrl.fitToStores();
+                UI.showSaveToast(
+                    `✅ Bulk Import เสร็จ! ${totalRoutes} สาย | เพิ่มร้านใหม่ ${totalNew} ร้าน`
+                );
+
+            } catch (err) {
+                UI.hideLoader();
+                console.error('bulkImport error:', err);
+                UI.showErrorToast('❌ Import ไม่สำเร็จ: ' + err.message);
+            }
+        };
+        reader.readAsArrayBuffer(file);
+    },
+
 };
 
 // ==========================================
