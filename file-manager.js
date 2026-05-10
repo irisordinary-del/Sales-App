@@ -327,7 +327,7 @@ const FileManager = {
                                                 console.error('❌ Export All error:', err);
                                                 UI.showErrorToast('❌ Export ไม่สำเร็จ: ' + err.message);
                             }
-            }
+            },
     // ==========================================
     // 📦 Bulk Import — อัปโหลดทุกสายพร้อมกัน
     // แยกสาย/Route ตาม salesCode อัตโนมัติ
@@ -462,9 +462,15 @@ const FileManager = {
                     .sort((a,b) => a.localeCompare(b, 'th', { numeric: true }));
 
                 // บันทึก routes ที่เพิ่ง import ทีละอัน
-                await Promise.all(savedRoutes.map(name =>
-                    App.routesCol().doc(name).set({ stores: State.db.routes[name] || [] })
-                ));
+                // save ทีละสาย พร้อม progress
+                for (let _si = 0; _si < savedRoutes.length; _si++) {
+                    const _n = savedRoutes[_si];
+                    UI.showLoader(
+                        '💾 กำลังบันทึก... (' + (_si + 1) + '/' + savedRoutes.length + ' สาย)',
+                        'สาย ' + _n + ' — ' + (State.db.routes[_n] ? State.db.routes[_n].length : 0) + ' ร้าน'
+                    );
+                    await App.routesCol().doc(_n).set({ stores: State.db.routes[_n] || [] });
+                }
                 await App.dbRef.update({ routeList, cycleDays: State.db.cycleDays || 24 });
 
                 // อัปเดต State และ UI
