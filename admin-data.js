@@ -464,23 +464,56 @@ const ExcelIO = {
 // 🚀 App Controller
 // ==========================================
 const App = {
-    dbRef: cloudDB.collection('appData').doc('v1_main'),
+    dbRef:      cloudDB.collection('appData').doc('v1_main'),
+    routesCol:  () => cloudDB.collection('appData').doc('v1_main').collection('routes'),
+
+    // Migrate: ข้อมูลเก่า (routes map ใน v1_main) → subcollection
+    _migrate: async (oldRoutes) => {
+        console.log('🔄 Migration: ย้ายข้อมูลไปยัง subcollection...');
+        const names = Object.keys(oldRoutes);
+        for (const name of names) {
+            await App.routesCol().doc(name).set({ stores: oldRoutes[name] || [] });
+        }
+        await App.dbRef.update({
+            routeList: names,
+            routes: firebase.firestore.FieldValue.delete()
+        });
+        console.log('✅ Migration เสร็จสิ้น');
+    },
+
+    // โหลดทุกสายจาก subcollection พร้อมกัน
+    _loadAllRoutes: async (routeList) => {
+        State.db.routes = {};
+        await Promise.all(routeList.map(name =>
+            App.routesCol().doc(name).get()
+                .then(d => { State.db.routes[name] = d.exists ? (d.data().stores || []) : []; })
+                .catch(() => { State.db.routes[name] = []; })
+        ));
+    },
 
     init: () => {
+
         MapCtrl.init();
         UI.showLoader('กำลังเชื่อมต่อ...', '');
 
-        App.dbRef.onSnapshot((doc) => {
+        App.dbRef.onSnapshot(async (doc) => {
             const d = doc.exists ? doc.data() : {};
-            State.db = { ...State.db, ...d };
-            State.db.routes = State.db.routes || { 'สายที่ 1': [] };
-            State.db.cycleDays = State.db.cycleDays || 24;
+            State.db.cycleDays = d.cycleDays || 24;
 
-            const sortedKeys = Object.keys(State.db.routes)
-                .sort((a, b) => a.localeCompare(b, 'th', { numeric: true }));
+            // ✅ ตรวจสอบ: มีข้อมูลเก่า (routes map) → migrate อัตโนมัติ
+            if (d.routes && typeof d.routes === 'object' && Object.keys(d.routes).length > 0) {
+                State.db.routeList = Object.keys(d.routes).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
+                await App._migrate(d.routes);
+                return; // รอ onSnapshot trigger รอบถัดไปหลัง migration
+            }
+
+            // โครงสร้างใหม่: routeList ใน metadata
+            State.db.routeList = (d.routeList || ['สายที่ 1'])
+                .sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
+            await App._loadAllRoutes(State.db.routeList);
 
             if (!State.localActiveRoute || !State.db.routes[State.localActiveRoute]) {
-                State.localActiveRoute = localStorage.getItem('last_viewed_route') || sortedKeys[0];
+                State.localActiveRoute = localStorage.getItem('last_viewed_route') || State.db.routeList[0];
             }
             State.stores = State.db.routes[State.localActiveRoute] || [];
 
@@ -489,7 +522,7 @@ const App = {
         }, (err) => {
             console.error('Firestore error:', err);
             UI.hideLoader();
-            UI.showErrorToast('⚠️ ไม่สามารถเชื่อมต่อฐานข้อมูลได้ กรุณาตรวจสอบอินเทอร์เน็ตครับ');
+            UI.showErrorToast('⚠️ ไม่สามารถเชื่อมต่อฐานข้อมูลได้');
         });
 
         const rawUpload = document.getElementById('rawUpload');
@@ -529,17 +562,19 @@ const App = {
         });
     },
 
-    // แก้บัค: เพิ่ม error handling และ toast แจ้งผล
+    // ✅ saveDB: บันทึกทีละสายใน subcollection (ไม่เกิน 1MB ต่อสาย)
     saveDB: () => {
         State.db.routes[State.localActiveRoute] = State.stores;
-        App.dbRef.update({ routes: State.db.routes })
-            .then(() => {
-                UI.showSaveToast('💾 บันทึกเรียบร้อย');
-            })
-            .catch(err => {
-                console.error('saveDB error:', err);
-                UI.showErrorToast('❌ บันทึกไม่สำเร็จ — ตรวจสอบอินเทอร์เน็ต');
-            });
+        const routeList = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
+        Promise.all([
+            App.routesCol().doc(State.localActiveRoute).set({ stores: State.stores }),
+            App.dbRef.update({ routeList, cycleDays: State.db.cycleDays || 24 })
+        ])
+        .then(() => UI.showSaveToast('💾 บันทึกเรียบร้อย'))
+        .catch(err => {
+            console.error('saveDB error:', err);
+            UI.showErrorToast('❌ บันทึกไม่สำเร็จ — ตรวจสอบอินเทอร์เน็ต');
+        });
     },
 
     // แก้บัค: reset tab กลับ tab1 ทุกครั้งที่ sync
@@ -562,9 +597,18 @@ const App = {
         if (State.localActiveRoute === name) return;
         State.localActiveRoute = name;
         localStorage.setItem('last_viewed_route', name);
-        State.stores = State.db.routes[name] || [];
-        App.sync();
-        MapCtrl.fitToStores();
+        // ถ้า route นี้ยังไม่ได้โหลด → ดึงจาก Firestore
+        if (State.db.routes[name] === undefined) {
+            UI.showLoader('กำลังโหลดสาย ' + name + '...');
+            App.routesCol().doc(name).get().then(d => {
+                State.db.routes[name] = d.exists ? (d.data().stores || []) : [];
+                State.stores = State.db.routes[name];
+                App.sync(); MapCtrl.fitToStores(); UI.hideLoader();
+            }).catch(() => { State.stores = []; App.sync(); UI.hideLoader(); });
+        } else {
+            State.stores = State.db.routes[name] || [];
+            App.sync(); MapCtrl.fitToStores();
+        }
     },
 
     addRoute: () => {
