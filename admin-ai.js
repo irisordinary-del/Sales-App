@@ -1,5 +1,5 @@
 // ==========================================
-// 🤖 AI Route Builder (K-Means++ + Day Balance)
+// 🤖 AI Route Builder (K-Means++ + Geo-Aware Balance)
 // ==========================================
 const AI = {
     run: () => {
@@ -24,7 +24,6 @@ const AI = {
         const limit = elLimit.checked;
         const mxD   = parseFloat(elDist.value);
 
-        // ✅ รองรับทั้งเลขคู่และเลขคี่
         if (isNaN(k) || k < 2) {
             return UI.showErrorToast('⚠️ จำนวนวันต้องมีอย่างน้อย 2 วัน');
         }
@@ -45,27 +44,20 @@ const AI = {
         setTimeout(() => { AI.calc(k, lock, limit, mxD); }, 150);
     },
 
-    // ✅ K-Means++ initialization
+    // K-Means++ initialization
     _initKMeansPP: (points, numClusters) => {
         if (points.length === 0) return [];
         const cents = [points[Math.floor(Math.random() * points.length)]];
         while (cents.length < numClusters) {
             const dists = points.map(p => {
                 let minD = Infinity;
-                for (const c of cents) {
-                    const d = StoreMgr.getDistSq(p, c);
-                    if (d < minD) minD = d;
-                }
+                for (const c of cents) { const d = StoreMgr.getDistSq(p, c); if (d < minD) minD = d; }
                 return minD;
             });
             const total = dists.reduce((a, b) => a + b, 0);
             if (total === 0) { cents.push(points[Math.floor(Math.random() * points.length)]); continue; }
-            let r = Math.random() * total;
-            let chosen = points[points.length - 1];
-            for (let i = 0; i < points.length; i++) {
-                r -= dists[i];
-                if (r <= 0) { chosen = points[i]; break; }
-            }
+            let r = Math.random() * total, chosen = points[points.length - 1];
+            for (let i = 0; i < points.length; i++) { r -= dists[i]; if (r <= 0) { chosen = points[i]; break; } }
             cents.push(chosen);
         }
         return cents;
@@ -79,29 +71,27 @@ const AI = {
         return wcss;
     },
 
-    // ✅ Day Balance Pass: ปรับจำนวนร้านแต่ละวันให้ใกล้เคียงกัน (±5)
+    // ✅ Geo-Aware Day Balance
+    // ย้ายเฉพาะร้าน "borderline" — ร้านที่อยู่ใกล้ปลายทาง ≤ 1.5x เทียบกับต้นทาง
+    // → คลัสเตอร์ยังคงอยู่ครบ, แค่ปรับขอบๆ ระหว่างโซนที่ติดกัน
     _balanceDays: (k) => {
-        const TOLERANCE = 5;      // ยอมรับ max - min <= 10 (±5)
-        const MAX_ITER  = 500;    // จำกัด loop ป้องกัน infinite
+        const TOLERANCE   = 5;    // ยอมรับ max − min ≤ 10 (±5)
+        const MAX_ITER    = 400;
+        const GEO_RATIO   = 1.5;  // ร้านต้องอยู่ใกล้ปลายทาง ≤ 1.5× ระยะห่างจากต้นทาง
 
-        // สร้าง map: วัน → [store indices ที่เป็น f1 เท่านั้น]
+        // สร้าง map วัน → [store indices] (เฉพาะ f1)
         const dayStores = {};
         for (let d = 1; d <= k; d++) dayStores[`Day ${d}`] = [];
-
         State.stores.forEach((s, idx) => {
-            if (!s.days || s.days.length !== 1) return; // ข้าม f2 และยังไม่จัด
+            if (!s.days || s.days.length !== 1) return;
             const d = s.days[0];
             if (dayStores[d] !== undefined) dayStores[d].push(idx);
         });
 
-        // นับจำนวนต่อวัน
+        const allDays = Object.keys(dayStores);
         const dayCount = {};
-        for (let d = 1; d <= k; d++) {
-            const key = `Day ${d}`;
-            dayCount[key] = dayStores[key].length;
-        }
+        allDays.forEach(d => { dayCount[d] = dayStores[d].length; });
 
-        // คำนวณ centroid แต่ละวัน (จาก lat/lng เฉลี่ยของร้านในวันนั้น)
         const calcCentroid = (dayKey) => {
             const idxs = dayStores[dayKey];
             if (!idxs.length) return null;
@@ -112,46 +102,69 @@ const AI = {
         };
 
         const dayCentroids = {};
-        for (let d = 1; d <= k; d++) {
-            const key = `Day ${d}`;
-            dayCentroids[key] = calcCentroid(key);
-        }
+        allDays.forEach(d => { dayCentroids[d] = calcCentroid(d); });
 
-        const allDays = Object.keys(dayCount);
+        let stuckCount = 0;
+        const MAX_STUCK = k * 3;
 
         for (let iter = 0; iter < MAX_ITER; iter++) {
-            // หาวันที่มีมากสุดและน้อยสุด
-            const maxDay = allDays.reduce((a, b) => dayCount[a] > dayCount[b] ? a : b);
-            const minDay = allDays.reduce((a, b) => dayCount[a] < dayCount[b] ? a : b);
+            // เรียงวันจากมาก→น้อย และน้อย→มาก
+            const byDesc = [...allDays].sort((a, b) => dayCount[b] - dayCount[a]);
+            const byAsc  = [...allDays].sort((a, b) => dayCount[a] - dayCount[b]);
 
-            if (dayCount[maxDay] - dayCount[minDay] <= TOLERANCE * 2) break; // สมดุลแล้ว
+            if (dayCount[byDesc[0]] - dayCount[byAsc[0]] <= TOLERANCE * 2) break;
 
-            const candidates = dayStores[maxDay];
-            if (!candidates.length) break;
+            let moved = false;
 
-            const minCent = dayCentroids[minDay];
-            if (!minCent) break;
+            // ลองทุกคู่ (over, under) โดยเริ่มจากคู่ที่ต่างกันมากสุด
+            outer:
+            for (const overDay of byDesc) {
+                for (const underDay of byAsc) {
+                    if (overDay === underDay) continue;
+                    if (dayCount[overDay] - dayCount[underDay] <= TOLERANCE * 2) break outer;
 
-            // หาร้านใน maxDay ที่ใกล้ centroid ของ minDay มากที่สุด
-            let bestIdx = candidates[0];
-            let bestDist = Infinity;
-            candidates.forEach(idx => {
-                const d = StoreMgr.getDistSq(State.stores[idx], minCent);
-                if (d < bestDist) { bestDist = d; bestIdx = idx; }
-            });
+                    const overCent  = dayCentroids[overDay];
+                    const underCent = dayCentroids[underDay];
+                    if (!overCent || !underCent) continue;
 
-            // ย้ายร้านจาก maxDay → minDay
-            State.stores[bestIdx].days = [minDay];
-            dayStores[maxDay] = dayStores[maxDay].filter(x => x !== bestIdx);
-            dayStores[minDay].push(bestIdx);
-            dayCount[maxDay]--;
-            dayCount[minDay]++;
+                    // ✅ Borderline check: ร้านต้องอยู่ใกล้ underDay ไม่เกิน GEO_RATIO × ระยะห่างจาก overDay
+                    const validCandidates = dayStores[overDay].filter(idx => {
+                        const s = State.stores[idx];
+                        const dToOver  = StoreMgr.getDistSq(s, overCent);
+                        const dToUnder = StoreMgr.getDistSq(s, underCent);
+                        // ย้ายได้ถ้าร้านอยู่ใกล้ underDay ไม่เกิน GEO_RATIO เท่าของระยะห่างจาก overDay
+                        return dToUnder <= dToOver * GEO_RATIO * GEO_RATIO;
+                    });
 
-            // อัปเดต centroid ของ minDay
-            dayCentroids[minDay] = calcCentroid(minDay);
+                    if (!validCandidates.length) continue;
+
+                    // หาร้านที่ใกล้ underDay มากที่สุดในบรรดา borderline stores
+                    let bestIdx = validCandidates[0];
+                    let bestDist = Infinity;
+                    validCandidates.forEach(idx => {
+                        const d = StoreMgr.getDistSq(State.stores[idx], underCent);
+                        if (d < bestDist) { bestDist = d; bestIdx = idx; }
+                    });
+
+                    // ย้าย
+                    State.stores[bestIdx].days = [underDay];
+                    dayStores[overDay]  = dayStores[overDay].filter(x => x !== bestIdx);
+                    dayStores[underDay].push(bestIdx);
+                    dayCount[overDay]--;
+                    dayCount[underDay]++;
+                    dayCentroids[underDay] = calcCentroid(underDay);
+                    moved = true;
+                    stuckCount = 0;
+                    break outer;
+                }
+            }
+
+            if (!moved) {
+                stuckCount++;
+                if (stuckCount >= MAX_STUCK) break;
+            }
         }
 
-        // คืน stats สรุป
         const counts = allDays.map(d => dayCount[d]).filter(c => c > 0);
         return {
             max: Math.max(...counts),
@@ -185,9 +198,10 @@ const AI = {
                 return UI.showErrorToast('⚠️ จำนวนร้านค้าน้อยกว่าจำนวนกลุ่ม แนะนำให้จัดสายด้วยมือครับ');
             }
 
-            const maxC = Math.ceil(tgts.length / mK) + 1;
+            // ✅ ใช้ maxC ที่แน่นขึ้น (ไม่มี +1 buffer) → cluster sizes สมดุลตั้งแต่ต้น
+            const maxC = Math.ceil(tgts.length / mK);
 
-            // รัน 3 รอบ เลือกผลดีที่สุด
+            // รัน 3 รอบ เลือกผลดีที่สุด (WCSS ต่ำสุด)
             let bestAsg = null, bestCents = null, bestWCSS = Infinity;
             for (let run = 0; run < 3; run++) {
                 let cents = AI._initKMeansPP(tgts, mK);
@@ -213,7 +227,6 @@ const AI = {
                             asg[i] = m; cnt[m]++;
                         }
                     }
-                    // Swap optimization (10 รอบ)
                     let swp = true, ls = 0;
                     while (swp && ls < 10) {
                         swp = false; ls++;
@@ -228,7 +241,6 @@ const AI = {
                             }
                         }
                     }
-                    // อัปเดต centroids
                     const sArr = Array(mK).fill(0).map(() => ({ lt: 0, ln: 0, n: 0 }));
                     tgts.forEach((s, i) => { const c = asg[i]; sArr[c].lt += s.lat; sArr[c].ln += s.lng; sArr[c].n++; });
                     sArr.forEach((s, c) => { if (s.n > 0) cents[c] = { ...cents[c], lat: s.lt / s.n, lng: s.ln / s.n }; });
@@ -238,7 +250,7 @@ const AI = {
                 if (wcss < bestWCSS) { bestWCSS = wcss; bestAsg = [...asg]; bestCents = [...cents]; }
             }
 
-            // จัดลงวันตามมุมองศา
+            // จัดวันตามมุมองศา
             let gLat = 0, gLng = 0;
             bestCents.forEach(c => { gLat += c.lat; gLng += c.lng; });
             gLat /= mK; gLng /= mK;
@@ -275,9 +287,7 @@ const AI = {
                 const f2  = vIds.filter(i => tgts[i].freq === 2);
                 const f1  = vIds.filter(i => tgts[i].freq !== 2);
                 const md  = Math.ceil(f1.length / 2);
-
-                const day1 = m + 1;
-                const day2 = m + 1 + mK;
+                const day1 = m + 1, day2 = m + 1 + mK;
                 const hasPair = day2 <= k;
 
                 f1.forEach((id, j) => {
@@ -292,8 +302,7 @@ const AI = {
                 });
             }
 
-            // ✅ Balance Pass: ปรับจำนวนร้านแต่ละวันให้สมดุล (±5)
-            UI.showLoader('AI กำลังปรับสมดุล...', 'จัดวันให้บาลานซ์ใกล้เคียงกัน');
+            // ✅ Geo-Aware Balance: ปรับเฉพาะร้านขอบโซน ไม่ข้ามคลัสเตอร์
             const stats = AI._balanceDays(k);
 
             MapCtrl.clearRoad(true);
@@ -307,7 +316,7 @@ const AI = {
                 let msg = drop > 0
                     ? `✨ AI จัดเสร็จ! (ตัดร้านโดด ${drop} ร้าน)`
                     : `✨ AI จัดโซนสำเร็จ!`;
-                msg += ` | วัน min:${stats.min} max:${stats.max} avg:${stats.avg} ร้าน`;
+                msg += ` | min:${stats.min} max:${stats.max} avg:${stats.avg} ร้าน/วัน`;
                 UI.showSaveToast(msg);
             }
 
