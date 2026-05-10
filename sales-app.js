@@ -104,28 +104,7 @@ const App = {
             } 
         };
 
-        // ✅ รองรับทั้ง format เก่า (routes map) และใหม่ (subcollection)
-        const routeColRef = db.collection('appData').doc('v1_main').collection('routes');
-        docMain.onSnapshot(async doc => {
-            if (!doc.exists) { State.allStores = []; isMainLoaded = true; checkReady(); return; }
-            const data = doc.data();
-            if (data.routes && data.routes[State.myRoute]) {
-                State.allStores = data.routes[State.myRoute] || []; // format เก่า
-                isMainLoaded = true; checkReady();
-            } else {
-                try {
-                    const rd = await routeColRef.doc(State.myRoute).get();
-                    State.allStores = rd.exists ? (rd.data().stores || []) : [];
-                } catch(e) { State.allStores = []; }
-                isMainLoaded = true; checkReady();
-            }
-        });
-        // ✅ Realtime listener บน subcollection doc — รับอัปเดตจาก Admin ทันที
-        routeColRef.doc(State.myRoute).onSnapshot(rd => {
-            if (!rd.exists) return;
-            State.allStores = rd.data().stores || [];
-            if (isMainLoaded) Processor.run();
-        });
+        docMain.onSnapshot(doc => { State.allStores = doc.exists && doc.data().routes ? doc.data().routes[State.myRoute] || [] : []; isMainLoaded = true; checkReady(); });
         colSales.onSnapshot(snap => {
             let merged = {};
             snap.forEach(doc => { Object.assign(merged, doc.data()); });
@@ -193,8 +172,7 @@ const Processor = {
         items.forEach((item, index) => { let id = item.getAttribute('data-id'), target = updated.find(s => s.id === id); if(target) { if(!target.seqs) target.seqs = {}; target.seqs[State.currentDay] = index + 1; } });
         
         // เซฟลงคลาวด์ (ซึ่งมันจะกระตุ้น onSnapshot ให้ทำงานอีกรอบ)
-        // ✅ เขียนไปยัง subcollection (ไม่ติด 1MB limit)
-        db.collection('appData').doc('v1_main').collection('routes').doc(State.myRoute).set({ stores: updated });
+        docMain.update({ [`routes.${State.myRoute}`]: updated });
     }
 };
 

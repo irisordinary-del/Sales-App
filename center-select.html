@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Route Planner — เลือกศูนย์</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore-compat.js"></script>
+    <style>
+        body { background: #0f172a; font-family: 'Segoe UI', sans-serif; min-height: 100vh; }
+        .center-card {
+            background: #1e293b; border: 1px solid #334155; border-radius: 16px;
+            padding: 28px 20px; cursor: pointer; text-align: center;
+            transition: all 0.2s; color: #e2e8f0;
+        }
+        .center-card:hover { border-color: #38bdf8; background: #1e3a5f; transform: translateY(-2px); box-shadow: 0 8px 24px rgba(56,189,248,0.15); }
+        .center-badge { font-size: 2rem; font-weight: 900; color: #38bdf8; line-height: 1; margin-bottom: 8px; }
+        .center-name  { font-size: 0.85rem; color: #94a3b8; margin-bottom: 4px; }
+        .center-routes{ font-size: 0.78rem; color: #64748b; }
+        .add-card { border: 2px dashed #334155; }
+        .add-card:hover { border-color: #22c55e; background: #0f291a; }
+        .add-icon { font-size: 2rem; font-weight: 300; color: #22c55e; line-height: 1; margin-bottom: 8px; }
+    </style>
+</head>
+<body class="flex flex-col items-center justify-center p-8">
+
+    <div class="mb-10 text-center">
+        <h1 class="text-3xl font-black text-white mb-2">🗺️ Route Planner</h1>
+        <p class="text-slate-400 text-sm">เลือกศูนย์ที่ต้องการจัดการ</p>
+    </div>
+
+    <div id="center-grid" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5 w-full max-w-3xl">
+        <!-- โหลด... -->
+        <div class="center-card" style="opacity:0.5">
+            <div class="center-badge">⏳</div>
+            <div class="center-name">กำลังโหลด...</div>
+        </div>
+    </div>
+
+    <!-- Firebase Config + App -->
+    <script src="app-config-init.js"></script>
+    <script src="center-select.js"></script>
+</body>
+</html>
