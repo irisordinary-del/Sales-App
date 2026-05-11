@@ -300,7 +300,26 @@ const MapCtrl = {
     initAndDraw: () => {
         document.getElementById('btn-load-map').classList.add('hidden'); document.getElementById('map').classList.remove('hidden'); document.getElementById('btn-fit-map').classList.remove('hidden');
         if(!map) { map = L.map('map', { zoomControl: false }).setView([14.4745, 100.1222], 10); L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map); }
-        setTimeout(() => { map.invalidateSize(); MapCtrl.drawMap(); MapCtrl.addGpsButton(); }, 200);
+        setTimeout(() => {
+            map.invalidateSize();
+            // ✅ Restore zoom/center ถ้ามีค่าเก็บไว้
+            const savedView = localStorage.getItem('sales_map_view');
+            if (savedView) {
+                try {
+                    const v = JSON.parse(savedView);
+                    map.setView([v.lat, v.lng], v.zoom, { animate: false });
+                    State.mapNeedsFit = false; // ไม่ fit อีกแล้ว
+                } catch(e) {}
+            }
+            MapCtrl.drawMap();
+            MapCtrl.addGpsButton();
+            // ✅ Save zoom/center ทุกครั้งที่ user zoom หรือ pan
+            map.on('zoomend moveend', () => {
+                const c = map.getCenter(), z = map.getZoom();
+                localStorage.setItem('sales_map_view', JSON.stringify({ lat: c.lat, lng: c.lng, zoom: z }));
+                State.mapNeedsFit = false; // หลัง user zoom เอง ไม่ refit อีก
+            });
+        }, 200);
     },
     drawMap: () => {
         if(!map) return;
