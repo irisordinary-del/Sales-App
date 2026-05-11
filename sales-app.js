@@ -202,11 +202,105 @@ const Processor = {
     }
 };
 
+
+// ==========================================
+// 📍 GPS Realtime Location Tracking
+// ==========================================
+const GPS = {
+    watchId:    null,
+    marker:     null,    // marker ตำแหน่งเซลล์
+    circle:     null,    // วงกลม accuracy
+    autoFollow: false,   // ติดตาม (pan map ตาม)
+
+    start: () => {
+        if (!navigator.geolocation) {
+            return showSalesToast('⚠️ Browser ไม่รองรับ GPS', true);
+        }
+        // ขอ permission + เริ่ม watch
+        GPS.watchId = navigator.geolocation.watchPosition(
+            GPS._onSuccess,
+            GPS._onError,
+            { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
+        );
+        GPS.autoFollow = true;
+        GPS._updateBtn(true);
+        showSalesToast('📍 เปิด GPS แล้ว');
+    },
+
+    stop: () => {
+        if (GPS.watchId !== null) {
+            navigator.geolocation.clearWatch(GPS.watchId);
+            GPS.watchId = null;
+        }
+        if (GPS.marker) { GPS.marker.remove(); GPS.marker = null; }
+        if (GPS.circle) { GPS.circle.remove(); GPS.circle = null; }
+        GPS.autoFollow = false;
+        GPS._updateBtn(false);
+        showSalesToast('GPS ปิดแล้ว');
+    },
+
+    toggle: () => { GPS.watchId !== null ? GPS.stop() : GPS.start(); },
+
+    locate: () => {
+        // กดปุ่มครั้งเดียว → pan ไปหา + เปิด GPS ถ้ายังไม่ได้เปิด
+        if (GPS.watchId === null) GPS.start();
+        GPS.autoFollow = true;
+        if (GPS.marker) map.setView(GPS.marker.getLatLng(), 16);
+    },
+
+    _onSuccess: (pos) => {
+        const { latitude: lat, longitude: lng, accuracy } = pos.coords;
+        if (!map) return;
+
+        // สร้าง marker ครั้งแรก หรืออัปเดตตำแหน่ง
+        const latlng = L.latLng(lat, lng);
+        const icon = L.divIcon({
+            html: `<div style="
+                width:18px; height:18px; border-radius:50%;
+                background:#3b82f6; border:3px solid #fff;
+                box-shadow:0 0 0 3px rgba(59,130,246,0.4),0 2px 8px rgba(0,0,0,0.3);
+            "></div>`,
+            iconSize: [18, 18], iconAnchor: [9, 9], className: ''
+        });
+
+        if (!GPS.marker) {
+            GPS.marker = L.marker(latlng, { icon, zIndexOffset: 9999 })
+                .addTo(map)
+                .bindPopup('<b>📍 ตำแหน่งของฉัน</b><br><small>แม่นยำ ~' + Math.round(accuracy) + 'm</small>');
+        } else {
+            GPS.marker.setLatLng(latlng);
+            GPS.marker.getPopup().setContent('<b>📍 ตำแหน่งของฉัน</b><br><small>แม่นยำ ~' + Math.round(accuracy) + 'm</small>');
+        }
+
+        if (!GPS.circle) {
+            GPS.circle = L.circle(latlng, { radius: accuracy, color: '#3b82f6', fillOpacity: 0.08, weight: 1 }).addTo(map);
+        } else {
+            GPS.circle.setLatLng(latlng);
+            GPS.circle.setRadius(accuracy);
+        }
+
+        if (GPS.autoFollow) { map.setView(latlng, map.getZoom() < 14 ? 15 : map.getZoom()); }
+    },
+
+    _onError: (err) => {
+        const msgs = { 1: 'ไม่ได้รับอนุญาตใช้ GPS', 2: 'หาตำแหน่งไม่ได้', 3: 'GPS หมดเวลา' };
+        showSalesToast('⚠️ ' + (msgs[err.code] || 'GPS error'), true);
+        GPS._updateBtn(false);
+    },
+
+    _updateBtn: (active) => {
+        const btn = document.getElementById('gps-btn');
+        if (!btn) return;
+        btn.innerHTML    = active ? '📍 GPS เปิดอยู่' : '📍 ดูตำแหน่งฉัน';
+        btn.style.background = active ? '#2563eb' : '#374151';
+    }
+};
+
 const MapCtrl = {
     initAndDraw: () => {
         document.getElementById('btn-load-map').classList.add('hidden'); document.getElementById('map').classList.remove('hidden'); document.getElementById('btn-fit-map').classList.remove('hidden');
         if(!map) { map = L.map('map', { zoomControl: false }).setView([14.4745, 100.1222], 10); L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map); }
-        setTimeout(() => { map.invalidateSize(); MapCtrl.drawMap(); }, 200);
+        setTimeout(() => { map.invalidateSize(); MapCtrl.drawMap(); MapCtrl.addGpsButton(); }, 200);
     },
     drawMap: () => {
         if(!map) return;
@@ -226,7 +320,20 @@ const MapCtrl = {
         }
     },
     fitBounds: () => { if(mapMarkers.length && map) map.fitBounds(new L.featureGroup(mapMarkers).getBounds(), { padding: [30, 30] }); },
-    forceFitBounds: () => { State.mapNeedsFit = true; MapCtrl.drawMap(); } // สำหรับปุ่มกดซูมบนแผนที่
+    forceFitBounds: () => { State.mapNeedsFit = true; MapCtrl.drawMap(); }, // สำหรับปุ่มกดซูมบนแผนที่
+    addGpsButton: () => {
+        // เพิ่มปุ่ม GPS บน map ถ้ายังไม่มี
+        if (document.getElementById('gps-btn')) return;
+        const btn = document.createElement('button');
+        btn.id = 'gps-btn';
+        btn.innerHTML = '📍 ดูตำแหน่งฉัน';
+        btn.style.cssText = 'position:absolute;bottom:80px;right:10px;z-index:999;background:#374151;color:#fff;' +
+            'border:none;border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;' +
+            'box-shadow:0 2px 8px rgba(0,0,0,0.3);transition:background 0.2s;';
+        btn.onclick = GPS.locate;
+        const mapEl = document.getElementById('map');
+        if (mapEl) { mapEl.style.position = 'relative'; mapEl.appendChild(btn); }
+    }
 };
 
 // 🌟 ระบบลากปรับขนาด (Resizable)
