@@ -42,6 +42,55 @@ const TAB_STORAGE_KEY = 'sales_last_tab';
 
 const UI = {
     // ✅ จำ tab ล่าสุดใน localStorage
+
+    // ✅ Hamburger menu
+    toggleMenu: () => {
+        const overlay = document.getElementById('menu-overlay');
+        if (!overlay) return;
+        const isOpen = overlay.style.display === 'flex';
+        overlay.style.display = isOpen ? 'none' : 'flex';
+    },
+    closeMenu: () => {
+        const overlay = document.getElementById('menu-overlay');
+        if (overlay) overlay.style.display = 'none';
+    },
+
+    // ✅ Edit order mode
+    _editMode: false,
+    startEditOrder: () => {
+        UI._editMode = true;
+        document.getElementById('edit-order-btn').style.display = 'none';
+        document.getElementById('confirm-order-btn').style.display = 'block';
+        // แสดง drag handles
+        document.querySelectorAll('.drag-handle').forEach(h => {
+            h.style.opacity = '1';
+            h.style.pointerEvents = 'auto';
+        });
+        // Enable sortable
+        if (typeof Sortable !== 'undefined') {
+            const c = document.getElementById('route-store-list');
+            if (c) {
+                if (window._sortableInstance) window._sortableInstance.option('disabled', false);
+            }
+        }
+        showSalesToast('ลากเพื่อสลับลำดับ แล้วกด ✓ ยืนยัน');
+    },
+    confirmEditOrder: () => {
+        UI._editMode = false;
+        document.getElementById('edit-order-btn').style.display = 'block';
+        document.getElementById('confirm-order-btn').style.display = 'none';
+        // ซ่อน drag handles
+        document.querySelectorAll('.drag-handle').forEach(h => {
+            h.style.opacity = '0';
+            h.style.pointerEvents = 'none';
+        });
+        // Disable sortable
+        if (window._sortableInstance) window._sortableInstance.option('disabled', true);
+        // Save order (trigger handleDrag)
+        Processor.handleDrag();
+        showSalesToast('✅ บันทึกลำดับเรียบร้อย');
+    },
+
     switchTab: (id) => {
         if (!VALID_TABS.includes(id)) id = DEFAULT_TAB;
 
@@ -106,12 +155,30 @@ const App = {
         else document.getElementById('login-screen').style.display = 'flex';
     },
 
-    login: () => {
+    login: async () => {
         let u = document.getElementById('login-input').value.trim().toUpperCase();
-        if (!u) return showSalesToast("กรุณาระบุรหัสสาย", true);
+        if (!u) return showSalesToast('กรุณาระบุรหัสสาย', true);
+
+        // ✅ เช็ค DB ก่อน login
+        const loginBtn = document.querySelector('#login-screen button');
+        if (loginBtn) { loginBtn.disabled = true; loginBtn.innerText = 'กำลังตรวจสอบ...'; }
+        try {
+            const centerMatch = u.match(/^(\d+)/);
+            const centerDocId = centerMatch ? (centerMatch[1] + '_main') : 'v1_main';
+            const routeDoc = await db.collection('appData').doc(centerDocId).collection('routes').doc(u).get();
+            if (!routeDoc.exists) {
+                showSalesToast('⚠️ ไม่พบรหัสสาย "' + u + '" ในฐานข้อมูล', true);
+                if (loginBtn) { loginBtn.disabled = false; loginBtn.innerText = 'เข้าสู่ระบบ 🚀'; }
+                return;
+            }
+        } catch(e) {
+            showSalesToast('⚠️ ตรวจสอบไม่ได้: ' + e.message, true);
+            if (loginBtn) { loginBtn.disabled = false; loginBtn.innerText = 'เข้าสู่ระบบ 🚀'; }
+            return;
+        }
+
         State.myRoute = u;
         localStorage.setItem('route_code', u);
-        // login ใหม่ → ล้าง tab ที่จำไว้ เริ่มที่ default
         localStorage.removeItem(TAB_STORAGE_KEY);
         App.start();
     },
@@ -120,6 +187,9 @@ const App = {
 
     start: () => {
         document.getElementById('login-screen').style.display = 'none';
+        // ✅ แสดง hamburger button
+        const hBtn = document.getElementById('hamburger-btn');
+        if (hBtn) hBtn.style.display = 'flex';
         document.getElementById('main-header').classList.remove('hidden');
         document.getElementById('main-content').classList.remove('hidden');
         document.getElementById('bottom-nav').classList.remove('hidden');
@@ -230,7 +300,19 @@ const Processor = {
         document.getElementById('route-title').innerText = `คิวงาน (${list.length} ร้าน)`;
 
         if (sortableList) sortableList.destroy();
-        sortableList = Sortable.create(c, { handle: '.drag-handle', animation: 250, onEnd: Processor.handleDrag });
+        window._sortableInstance = Sortable.create(c, {
+            handle: '.drag-handle',
+            animation: 250,
+            disabled: true,    // ✅ disabled ตอนแรก ต้องกด Edit ก่อน
+            onEnd: Processor.handleDrag
+        });
+        // ซ่อน drag handles เริ่มต้น
+        setTimeout(() => {
+            document.querySelectorAll('.drag-handle').forEach(h => {
+                h.style.opacity = '0';
+                h.style.pointerEvents = 'none';
+            });
+        }, 100);
 
         MapCtrl.drawMap();
     },
