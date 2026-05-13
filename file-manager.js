@@ -500,30 +500,9 @@ const FileManager = {
 // ==========================================
 // 🔗 File Input Event Listeners
 // ==========================================
-document.addEventListener('DOMContentLoaded', () => {
-            // File upload handler
-                              const fileUploadEl = document.getElementById('fileUpload');
-            if (fileUploadEl) {
-                            fileUploadEl.addEventListener('change', (e) => {
-                                                if (e.target.files[0]) {
-                                                                        FileManager.uploadRouteFile(e.target.files[0]);
-                                                }
-                            });
-            }
-
-                              // Export button
-                              const exportBtn = document.querySelector('button[onclick*="exportTemplate"]');
-            if (!exportBtn) {
-                            // Create export button if not exists
-                const headerBtn = document.querySelector('[class*="planning"] .h-16');
-                            if (headerBtn) {
-                                                const btn = document.createElement('button');
-                                                btn.onclick = () => FileManager.exportTemplate();
-                                                btn.className = 'bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-md transition ml-2';
-                                                btn.innerHTML = '💾 Export Template';
-                                                headerBtn.appendChild(btn);
-                            }
-            }
-});
+// หมายเหตุ: #fileUpload listener ถูก register ใน App.init() (admin-data.js) แล้ว
+// ไม่ต้อง register ซ้ำที่นี่ เพื่อป้องกัน process ไฟล์สองรอบ (แก้ไข BUG-06)
+// #bulkUpload ใช้ onchange attribute ใน HTML โดยตรง → ไม่ต้อง register ที่นี่
+document.addEventListener('DOMContentLoaded', () => {});
 
 console.log('✅ FileManager loaded');
