@@ -302,9 +302,10 @@ const Processor = {
         if (sortableList) sortableList.destroy();
         window._sortableInstance = Sortable.create(c, {
             handle: '.drag-handle',
-            animation: 250,
+            animation: 150,
             disabled: true,    // disabled ตอนแรก ต้องกด Edit ก่อน
-            onEnd: Processor._onDragEnd   // อัปเดตตัวเลขลำดับใน UI เท่านั้น ไม่ save
+            onChange: Processor._updateSeqBadges,  // อัปเดตเลขทันทีทุกครั้งที่การ์ดเปลี่ยนตำแหน่ง
+            onEnd: Processor._updateSeqBadges      // อัปเดตอีกครั้งตอนวางเสร็จ (safety net)
         });
         // ซ่อน drag handles เริ่มต้น
         setTimeout(() => {
@@ -317,15 +318,12 @@ const Processor = {
         MapCtrl.drawMap();
     },
 
-    // อัปเดตตัวเลขลำดับใน UI หลัง Sortable animation เสร็จ แต่ยังไม่ save Firestore
-    // → รอ 260ms (animation 250ms + buffer) ให้ DOM จัดเรียงเสร็จก่อน
-    _onDragEnd: () => {
-        setTimeout(() => {
-            document.querySelectorAll('#route-store-list > .store-item').forEach((item, index) => {
-                const badge = item.querySelector('[data-seq]');
-                if (badge) badge.textContent = index + 1;
-            });
-        }, 260);
+    // อัปเดตตัวเลขใน badge ทุกใบตามลำดับ DOM ปัจจุบัน — ไม่ save Firestore
+    _updateSeqBadges: () => {
+        document.querySelectorAll('#route-store-list > .store-item').forEach((item, index) => {
+            const badge = item.querySelector('[data-seq]');
+            if (badge) badge.textContent = index + 1;
+        });
     },
 
     // เรียกตอนกด "ยืนยัน" เท่านั้น — บันทึกลำดับจริงลง Firestore
