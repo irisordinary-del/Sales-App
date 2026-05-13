@@ -318,12 +318,21 @@ const Processor = {
         MapCtrl.drawMap();
     },
 
-    // อัปเดตตัวเลขใน badge ทุกใบตามลำดับ DOM ปัจจุบัน — ไม่ save Firestore
+    // อัปเดตตัวเลขใน badge (รายการ) และ marker บนแผนที่ — ไม่ save Firestore
     _updateSeqBadges: () => {
+        // 1) อัปเดตตัวเลขในรายการ
         document.querySelectorAll('#route-store-list > .store-item').forEach((item, index) => {
             const badge = item.querySelector('[data-seq]');
             if (badge) badge.textContent = index + 1;
         });
+        // 2) sync seq ลง State แล้ว redraw marker บนแผนที่
+        const items = document.querySelectorAll('#route-store-list > .store-item');
+        items.forEach((item, index) => {
+            const id = item.getAttribute('data-id');
+            const target = State.allStores.find(s => s.id === id);
+            if (target) { if (!target.seqs) target.seqs = {}; target.seqs[State.currentDay] = index + 1; }
+        });
+        MapCtrl.drawMap();
     },
 
     // เรียกตอนกด "ยืนยัน" เท่านั้น — บันทึกลำดับจริงลง Firestore
