@@ -317,13 +317,15 @@ const Processor = {
         MapCtrl.drawMap();
     },
 
-    // อัปเดตตัวเลขลำดับใน UI ทันทีหลัง drag แต่ยังไม่ save Firestore
-    // → ป้องกัน onSnapshot re-render ขณะกำลังแก้ไขลำดับอยู่
+    // อัปเดตตัวเลขลำดับใน UI หลัง Sortable animation เสร็จ แต่ยังไม่ save Firestore
+    // → รอ 260ms (animation 250ms + buffer) ให้ DOM จัดเรียงเสร็จก่อน
     _onDragEnd: () => {
-        document.querySelectorAll('#route-store-list > .store-item').forEach((item, index) => {
-            const badge = item.querySelector('[data-seq]');
-            if (badge) badge.textContent = index + 1;
-        });
+        setTimeout(() => {
+            document.querySelectorAll('#route-store-list > .store-item').forEach((item, index) => {
+                const badge = item.querySelector('[data-seq]');
+                if (badge) badge.textContent = index + 1;
+            });
+        }, 260);
     },
 
     // เรียกตอนกด "ยืนยัน" เท่านั้น — บันทึกลำดับจริงลง Firestore
