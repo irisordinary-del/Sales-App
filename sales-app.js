@@ -192,7 +192,7 @@ const App = {
         if (hBtn) hBtn.style.display = 'flex';
         document.getElementById('main-header').classList.remove('hidden');
         document.getElementById('main-content').classList.remove('hidden');
-        document.getElementById('bottom-nav').classList.remove('hidden');
+        // bottom-nav ถูกแทนด้วย hamburger-btn แล้ว (ไม่ต้องแสดง nav เดิม)
         document.getElementById('user-route-label').innerText = State.myRoute;
         document.getElementById('loader').style.display = 'flex';
 
