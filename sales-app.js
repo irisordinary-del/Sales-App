@@ -286,7 +286,7 @@ const Processor = {
             return `
             <div data-id="${s.id}" class="store-item bg-white p-2.5 rounded-xl border shadow-sm flex items-center gap-2 relative mb-2.5">
                 <div class="drag-handle text-gray-300 px-1 cursor-grab active:cursor-grabbing">≡</div>
-                <div class="w-7 h-7 rounded-full bg-blue-600 text-white flex items-center justify-center font-black text-xs shrink-0 shadow-sm">${seq}</div>
+                <div data-seq class="w-7 h-7 rounded-full bg-blue-600 text-white flex items-center justify-center font-black text-xs shrink-0 shadow-sm">${seq}</div>
                 <div class="flex-1 font-bold text-sm text-gray-800 leading-tight cursor-pointer truncate" onclick="UI.openModal('${s.id}')">${s.name}</div>
                 <div class="flex items-center gap-1.5 shrink-0">
                     <button onclick="UI.openModal('${s.id}')" class="bg-blue-50 hover:bg-blue-100 text-blue-600 px-2 py-1.5 rounded-lg font-bold text-[10px] border border-blue-100 transition active:scale-95">📊 KPI</button>
@@ -302,9 +302,10 @@ const Processor = {
         if (sortableList) sortableList.destroy();
         window._sortableInstance = Sortable.create(c, {
             handle: '.drag-handle',
-            animation: 250,
-            disabled: true,    // ✅ disabled ตอนแรก ต้องกด Edit ก่อน
-            onEnd: Processor.handleDrag
+            animation: 150,
+            disabled: true,    // disabled ตอนแรก ต้องกด Edit ก่อน
+            onChange: Processor._updateSeqBadges,  // อัปเดตเลขทันทีทุกครั้งที่การ์ดเปลี่ยนตำแหน่ง
+            onEnd: Processor._updateSeqBadges      // อัปเดตอีกครั้งตอนวางเสร็จ (safety net)
         });
         // ซ่อน drag handles เริ่มต้น
         setTimeout(() => {
@@ -317,6 +318,24 @@ const Processor = {
         MapCtrl.drawMap();
     },
 
+    // อัปเดตตัวเลขใน badge (รายการ) และ marker บนแผนที่ — ไม่ save Firestore
+    _updateSeqBadges: () => {
+        // 1) อัปเดตตัวเลขในรายการ
+        document.querySelectorAll('#route-store-list > .store-item').forEach((item, index) => {
+            const badge = item.querySelector('[data-seq]');
+            if (badge) badge.textContent = index + 1;
+        });
+        // 2) sync seq ลง State แล้ว redraw marker บนแผนที่
+        const items = document.querySelectorAll('#route-store-list > .store-item');
+        items.forEach((item, index) => {
+            const id = item.getAttribute('data-id');
+            const target = State.allStores.find(s => s.id === id);
+            if (target) { if (!target.seqs) target.seqs = {}; target.seqs[State.currentDay] = index + 1; }
+        });
+        MapCtrl.drawMap();
+    },
+
+    // เรียกตอนกด "ยืนยัน" เท่านั้น — บันทึกลำดับจริงลง Firestore
     handleDrag: () => {
         let items = document.querySelectorAll('#route-store-list > .store-item'), updated = [...State.allStores];
         items.forEach((item, index) => {

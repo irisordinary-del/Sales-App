@@ -12,14 +12,16 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const cloudDB = firebase.firestore();
 
-// Enable offline persistence
-cloudDB.enablePersistence()
+// Enable offline persistence — synchronizeTabs รองรับหลาย tab พร้อมกัน
+// window.firestoreReady เป็น Promise ที่ App.init() รอก่อนเริ่ม onSnapshot
+window.firestoreReady = cloudDB.enablePersistence({ synchronizeTabs: true })
     .catch((err) => {
         if (err.code === 'failed-precondition') {
-            console.warn('⚠️ Multiple tabs open - offline persistence disabled');
+            console.warn('⚠️ Multiple tabs: persistence disabled');
         } else if (err.code === 'unimplemented') {
-            console.warn('⚠️ Browser doesn\'t support offline persistence');
+            console.warn('⚠️ Browser does not support persistence');
         }
+        // persistence ไม่ได้ก็ไม่เป็นไร — ทำงานออนไลน์ปกติ
     });
 
 // ==========================================
