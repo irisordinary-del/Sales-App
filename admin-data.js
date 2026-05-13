@@ -491,10 +491,13 @@ const App = {
         ));
     },
 
-    init: () => {
+    init: async () => {
 
         MapCtrl.init();
         UI.showLoader('กำลังเชื่อมต่อ...', '');
+
+        // รอ Firestore persistence พร้อมก่อน — ป้องกัน cache miss ตอน network ช้า
+        if (window.firestoreReady) await window.firestoreReady;
 
         App.dbRef.onSnapshot(async (doc) => {
             const d = doc.exists ? doc.data() : {};
@@ -520,9 +523,21 @@ const App = {
             App.fetchRawData();
             App.fetchSalesData();
         }, (err) => {
-            console.error('Firestore error:', err);
+            // onSnapshot error — มักเกิดจาก permission หรือ network
+            // ถ้า persistence เปิดอยู่ Firestore จะ serve จาก cache อัตโนมัติ
+            // ถ้าไม่มี cache เลย ให้แสดง retry
+            console.error('Firestore onSnapshot error:', err);
             UI.hideLoader();
-            UI.showErrorToast('⚠️ ไม่สามารถเชื่อมต่อฐานข้อมูลได้');
+            if (err.code === 'permission-denied') {
+                UI.showErrorToast('⚠️ ไม่มีสิทธิ์เข้าถึงข้อมูล กรุณาตรวจสอบ center ID');
+            } else {
+                UI.showErrorToast('⚠️ เชื่อมต่อ Firestore ไม่ได้ — กำลังใช้ข้อมูล offline');
+                // retry อัตโนมัติหลัง 5 วิ
+                setTimeout(() => {
+                    UI.showLoader('กำลังเชื่อมต่อใหม่...', '');
+                    App.init();
+                }, 5000);
+            }
         });
 
         const rawUpload = document.getElementById('rawUpload');
