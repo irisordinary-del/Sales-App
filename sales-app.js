@@ -445,7 +445,8 @@ const MapCtrl = {
         document.getElementById('map').classList.remove('hidden');
         document.getElementById('btn-fit-map').classList.remove('hidden');
         if (!map) {
-            map = L.map('map', { zoomControl: false }).setView([14.4745, 100.1222], 10);
+            map = L.map('map', { zoomControl: false, rotate: true, rotateControl: false }).setView([14.4745, 100.1222], 10);
+            MapCtrl._initRotateUI();
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
         }
         setTimeout(() => { map.invalidateSize(); MapCtrl.drawMap(); MapCtrl.addGpsButton(); }, 200);
@@ -472,6 +473,77 @@ const MapCtrl = {
 
     fitBounds: () => { if (mapMarkers.length && map) map.fitBounds(new L.featureGroup(mapMarkers).getBounds(), { padding: [30, 30] }); },
     forceFitBounds: () => { State.mapNeedsFit = true; MapCtrl.drawMap(); },
+
+    _currentBearing: 0,
+
+    _initRotateUI: () => {
+        if (document.getElementById('rotate-ui')) return;
+        const mapEl = document.getElementById('map');
+        if (!mapEl) return;
+        mapEl.style.position = 'relative';
+
+        // Compass widget
+        const ui = document.createElement('div');
+        ui.id = 'rotate-ui';
+        ui.style.cssText = 'position:absolute;top:10px;right:10px;z-index:999;display:flex;flex-direction:column;align-items:center;gap:6px;';
+        ui.innerHTML = `
+            <!-- Compass needle -->
+            <div id="compass-ring" onclick="MapCtrl.resetBearing()"
+                style="width:44px;height:44px;border-radius:50%;background:rgba(31,41,55,0.92);border:2px solid rgba(255,255,255,0.15);display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,0.4);">
+                <svg id="compass-svg" width="28" height="28" viewBox="0 0 28 28">
+                    <polygon points="14,3 17,14 14,12 11,14" fill="#ef4444"/>
+                    <polygon points="14,25 17,14 14,16 11,14" fill="#e5e7eb"/>
+                    <circle cx="14" cy="14" r="2" fill="white"/>
+                </svg>
+            </div>
+            <!-- หมุนซ้าย/ขวา -->
+            <button onclick="MapCtrl.rotateDelta(-45)"
+                style="width:36px;height:36px;border-radius:50%;background:rgba(31,41,55,0.92);border:2px solid rgba(255,255,255,0.1);color:#fff;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.3);">↺</button>
+            <button onclick="MapCtrl.rotateDelta(45)"
+                style="width:36px;height:36px;border-radius:50%;background:rgba(31,41,55,0.92);border:2px solid rgba(255,255,255,0.1);color:#fff;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.3);">↻</button>
+        `;
+        mapEl.appendChild(ui);
+
+        // Pinch-rotate gesture (two-finger)
+        MapCtrl._initPinchRotate();
+    },
+
+    _initPinchRotate: () => {
+        const mapEl = document.getElementById('map');
+        if (!mapEl) return;
+        let t1 = null, t2 = null, startAngle = 0, startBearing = 0;
+        const getAngle = (a, b) => Math.atan2(b.clientY - a.clientY, b.clientX - a.clientX) * 180 / Math.PI;
+        mapEl.addEventListener('touchstart', e => {
+            if (e.touches.length === 2) {
+                t1 = e.touches[0]; t2 = e.touches[1];
+                startAngle  = getAngle(t1, t2);
+                startBearing = MapCtrl._currentBearing;
+                e.preventDefault();
+            }
+        }, { passive: false });
+        mapEl.addEventListener('touchmove', e => {
+            if (e.touches.length === 2 && t1 && t2) {
+                const cur = getAngle(e.touches[0], e.touches[1]);
+                const delta = cur - startAngle;
+                MapCtrl.setBearing(startBearing + delta);
+                e.preventDefault();
+            }
+        }, { passive: false });
+        mapEl.addEventListener('touchend', () => { t1 = null; t2 = null; });
+    },
+
+    rotateDelta: (deg) => { MapCtrl.setBearing(MapCtrl._currentBearing + deg); },
+
+    resetBearing: () => { MapCtrl.setBearing(0); },
+
+    setBearing: (deg) => {
+        if (!map) return;
+        MapCtrl._currentBearing = ((deg % 360) + 360) % 360;
+        map.setBearing(MapCtrl._currentBearing);
+        // หมุน compass needle ย้อนทาง
+        const svg = document.getElementById('compass-svg');
+        if (svg) svg.style.transform = `rotate(${-MapCtrl._currentBearing}deg)`;
+    },
 
     addGpsButton: () => {
         if (document.getElementById('gps-btn')) return;
