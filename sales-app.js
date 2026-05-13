@@ -246,6 +246,17 @@ const App = {
     }
 };
 
+// รวบรวมชื่อตลาด (marketName) ของร้านทั้งหมดในวันที่กำหนด
+// คืน string เช่น "ตลาดสด · ตลาดนัด" หรือ "" ถ้าไม่มีข้อมูล
+function getDayMarkets(day) {
+    const names = new Set();
+    State.allStores.forEach(s => {
+        if (s.days && s.days.includes(day) && s.marketName && s.marketName.trim())
+            names.add(s.marketName.trim());
+    });
+    return Array.from(names).join(' · ');
+}
+
 const Processor = {
     // ✅ ลบ dashboard() ออก — run แค่ stores กับ route
     run: () => { Processor.stores(); Processor.setupRoute(); },
@@ -256,7 +267,8 @@ const Processor = {
             let badge = k && k.vpo > 0
                 ? `<span class="bg-emerald-100 text-emerald-700 text-[9px] px-2 py-0.5 rounded-lg font-bold">Active</span>`
                 : `<span class="bg-gray-100 text-gray-400 text-[9px] px-2 py-0.5 rounded-lg font-bold">Inactive</span>`;
-            return `<div onclick="UI.openModal('${s.id}')" data-search="${s.id.toLowerCase()} ${s.name.toLowerCase()}" class="bg-white p-3.5 rounded-2xl border shadow-sm flex justify-between items-center transition cursor-pointer active:bg-gray-50"><div class="overflow-hidden mr-2"><p class="font-bold text-sm text-gray-800 truncate">${s.name}</p><p class="text-[10px] text-gray-400 font-mono">ID: ${s.id}</p></div>${badge}</div>`;
+            const marketTag = s.marketName ? `<p class="text-[10px] text-blue-500 font-medium truncate">${s.marketName}</p>` : '';
+            return `<div onclick="UI.openModal('${s.id}')" data-search="${s.id.toLowerCase()} ${s.name.toLowerCase()} ${(s.marketName||'').toLowerCase()}" class="bg-white p-3.5 rounded-2xl border shadow-sm flex justify-between items-center transition cursor-pointer active:bg-gray-50"><div class="overflow-hidden mr-2"><p class="font-bold text-sm text-gray-800 truncate">${s.name}</p><p class="text-[10px] text-gray-400 font-mono">ID: ${s.id}</p>${marketTag}</div>${badge}</div>`;
         }).join('');
         document.getElementById('all-store-list').innerHTML = html || '<p class="text-center text-gray-400 mt-5">ไม่พบข้อมูลร้านในสายนี้</p>';
     },
@@ -266,13 +278,21 @@ const Processor = {
         State.allStores.forEach(s => s.days.forEach(d => ds.add(d)));
         let sorted = Array.from(ds).sort((a, b) => parseInt(a.replace('Day ', '')) - parseInt(b.replace('Day ', '')));
         let el = document.getElementById('day-select');
-        el.innerHTML = sorted.map(d => `<option value="${d}">${d.replace('Day ', 'คิววันที่ ')}</option>`).join('');
+        el.innerHTML = sorted.map(d => {
+            const markets = getDayMarkets(d);
+            const label = 'สายวิ่งวันที่ ' + d.replace('Day ', '') + (markets ? '  ' + markets : '');
+            return `<option value="${d}">${label}</option>`;
+        }).join('');
 
         if (!State.currentDay) {
             State.currentDay = sorted[0];
             State.mapNeedsFit = true;
         }
         el.value = State.currentDay;
+        // อัปเดตหัว tab-stores ให้แสดงชื่อตลาดของวันที่เลือก
+        const _stM = getDayMarkets(State.currentDay);
+        const _stEl = document.getElementById('stores-title');
+        if (_stEl) _stEl.textContent = _stM ? 'สายวิ่งวันที่ ' + State.currentDay.replace('Day ','') + ' · ' + _stM : 'รายชื่อร้านค้าทั้งหมด';
         Processor.routeList();
     },
 
@@ -297,7 +317,10 @@ const Processor = {
 
         let c = document.getElementById('route-store-list');
         c.innerHTML = html || '<p class="text-center text-gray-400 mt-5">ไม่มีคิวงาน</p>';
-        document.getElementById('route-title').innerText = `คิวงาน (${list.length} ร้าน)`;
+        const _markets = getDayMarkets(State.currentDay);
+        const _dayNum  = State.currentDay.replace('Day ', '');
+        const _title   = 'สายวิ่งวันที่ ' + _dayNum + (_markets ? ' · ' + _markets : '');
+        document.getElementById('route-title').innerText = `${_title} (${list.length} ร้าน)`;
 
         if (sortableList) sortableList.destroy();
         window._sortableInstance = Sortable.create(c, {
@@ -504,6 +527,9 @@ const Resizer = {
 
 document.getElementById('day-select').addEventListener('change', (e) => {
     State.currentDay = e.target.value;
+    const _m = getDayMarkets(State.currentDay);
+    const _sEl = document.getElementById('stores-title');
+    if (_sEl) _sEl.textContent = _m ? 'สายวิ่งวันที่ ' + State.currentDay.replace('Day ','') + ' · ' + _m : 'รายชื่อร้านค้าทั้งหมด';
     State.mapNeedsFit = true;
     Processor.routeList();
 });
