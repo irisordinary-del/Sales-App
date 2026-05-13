@@ -44,7 +44,7 @@
         <!-- Tab: ร้านค้า -->
         <div id="tab-stores" class="app-tab bg-gray-50">
             <div class="p-4 shrink-0 bg-white border-b shadow-sm z-10">
-                <h2 class="font-black text-lg text-gray-800 mb-3">รายชื่อร้านค้าทั้งหมด</h2>
+                <h2 id="stores-title" class="font-black text-lg text-gray-800 mb-3">รายชื่อร้านค้าทั้งหมด</h2>
                 <input type="text" id="search-input" onkeyup="UI.searchStores(this.value)" placeholder="ค้นหารหัสหรือชื่อร้าน..." class="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500">
             </div>
             <div class="flex-1 overflow-y-auto p-4 pb-24"><div id="all-store-list" class="space-y-3"></div></div>
@@ -72,7 +72,7 @@
                 
                 <div id="route-side-panel" class="flex-1 flex flex-col overflow-hidden bg-gray-50 relative z-10">
                     <div class="flex justify-between items-center p-3 shrink-0 bg-white border-b shadow-sm">
-                        <h3 class="font-bold text-sm text-gray-800" id="route-title">คิวงาน</h3>
+                        <h3 class="font-bold text-sm text-gray-800" id="route-title">สายวิ่ง</h3>
                         <div id="edit-order-btn-wrap" style="display:flex;gap:6px;">
                         <button id="edit-order-btn" onclick="UI.startEditOrder()"
                             style="font-size:11px;font-weight:700;padding:4px 10px;border-radius:7px;border:1px solid #d1d5db;background:white;color:#374151;cursor:pointer;">
