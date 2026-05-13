@@ -303,8 +303,8 @@ const Processor = {
         window._sortableInstance = Sortable.create(c, {
             handle: '.drag-handle',
             animation: 250,
-            disabled: true,    // ✅ disabled ตอนแรก ต้องกด Edit ก่อน
-            onEnd: Processor.handleDrag
+            disabled: true,    // disabled ตอนแรก ต้องกด Edit ก่อน
+            onEnd: Processor._onDragEnd   // อัปเดตตัวเลขลำดับใน UI เท่านั้น ไม่ save
         });
         // ซ่อน drag handles เริ่มต้น
         setTimeout(() => {
@@ -317,6 +317,17 @@ const Processor = {
         MapCtrl.drawMap();
     },
 
+    // อัปเดตตัวเลขลำดับใน UI ทันทีหลัง drag แต่ยังไม่ save Firestore
+    // → ป้องกัน onSnapshot re-render ขณะกำลังแก้ไขลำดับอยู่
+    _onDragEnd: () => {
+        const items = document.querySelectorAll('#route-store-list > .store-item');
+        items.forEach((item, index) => {
+            const badge = item.querySelector('.w-7.h-7.rounded-full');
+            if (badge) badge.textContent = index + 1;
+        });
+    },
+
+    // เรียกตอนกด "ยืนยัน" เท่านั้น — บันทึกลำดับจริงลง Firestore
     handleDrag: () => {
         let items = document.querySelectorAll('#route-store-list > .store-item'), updated = [...State.allStores];
         items.forEach((item, index) => {

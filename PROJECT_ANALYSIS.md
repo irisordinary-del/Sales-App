@@ -170,6 +170,7 @@
 | 2026-05-13 | BUG-06 | `file-manager.js` | ลบ duplicate `#fileUpload` event listener ออก — ใช้ `App.init()` เป็น master | ✅ |
 | 2026-05-13 | BUG-07 | (ตรวจสอบ) | `exportAllRoutes()` มีอยู่ใน `file-manager.js` แล้ว — ปิด false alarm | ✅ |
 | 2026-05-13 | BUG-04 | (ตรวจสอบ) | `Processor` object มีอยู่ใน `sales-app.js` แล้ว — ปิด false alarm | ✅ |
+| 2026-05-13 | DRAG-FIX | `sales-app.js` | แยก onEnd → `_onDragEnd` (อัปเดต UI เท่านั้น) / `handleDrag` (save Firestore ตอนกดยืนยัน) ป้องกัน onSnapshot re-render ขณะ drag | ✅ |
 
 ---
 
