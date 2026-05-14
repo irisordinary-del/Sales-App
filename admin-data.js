@@ -486,39 +486,148 @@ const App = {
         State.db.routes = {};
         await Promise.all(routeList.map(name =>
             App.routesCol().doc(name).get()
-                .then(d => { State.db.routes[name] = d.exists ? (d.data().stores || []) : []; })
-                .catch(() => { State.db.routes[name] = []; })
+                .then(d => {
+                    const stores = d.exists ? (d.data().stores || []) : [];
+                    State.db.routes[name] = stores;
+                    App.log(`  ✅ ${name}: ${stores.length} ร้าน`);
+                })
+                .catch((e) => {
+                    App.log(`  ⚠️ ${name}: ${e.code || e.message}`);
+                    State.db.routes[name] = [];
+                })
         ));
+    },
+
+    // ─── Process Logger (แสดงใน loader ขณะโหลด) ─────────────────────────
+    _logLines: [],
+    log: (msg) => {
+        const ts = new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        const line = `[${ts}] ${msg}`;
+        App._logLines.push(line);
+        console.log('🔵', line);
+        const el = document.getElementById('loader-log');
+        if (el) {
+            el.innerHTML = App._logLines.slice(-12).join('<br>');
+            el.scrollTop = el.scrollHeight;
+        }
+    },
+
+    // ─── Force Reload: ดึงข้อมูลใหม่จาก Firestore ทั้งหมด ──────────────
+    forceReload: async () => {
+        App._logLines = [];
+        App.log('🔄 Force reload เริ่มต้น...');
+        UI.showLoader('กำลัง Force Reload...', 'ดึงข้อมูลจาก Firestore โดยตรง');
+        const btn = document.getElementById('force-reload-btn');
+        if (btn) btn.style.display = 'none';
+        clearTimeout(App._forceReloadTimer);
+
+        try {
+            App.log(`📡 ดึง metadata: ${window.CENTER_DOC}`);
+            // ดึงตรงๆ โดยไม่ผ่าน cache (source: server)
+            const doc = await App.dbRef.get({ source: 'server' });
+            const d = doc.exists ? doc.data() : {};
+            App.log(`✅ metadata OK — routeList: ${(d.routeList || []).length} สาย`);
+
+            State.db.cycleDays = d.cycleDays || 24;
+            State.db.routeList = (d.routeList || []).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
+
+            if (State.db.routeList.length === 0) {
+                App.log('⚠️ ไม่มี routeList — สร้างสายเริ่มต้น');
+                State.db.routeList = ['สายที่ 1'];
+                State.db.routes['สายที่ 1'] = [];
+            } else {
+                App.log(`📦 โหลด ${State.db.routeList.length} สาย...`);
+                await Promise.all(State.db.routeList.map(async (name) => {
+                    try {
+                        const rd = await App.routesCol().doc(name).get({ source: 'server' });
+                        const stores = rd.exists ? (rd.data().stores || []) : [];
+                        State.db.routes[name] = stores;
+                        App.log(`  ✅ ${name}: ${stores.length} ร้าน`);
+                    } catch (e) {
+                        App.log(`  ⚠️ ${name}: โหลดไม่สำเร็จ (${e.code || e.message})`);
+                        State.db.routes[name] = [];
+                    }
+                }));
+            }
+
+            if (!State.localActiveRoute || !State.db.routes[State.localActiveRoute]) {
+                State.localActiveRoute = localStorage.getItem('last_viewed_route') || State.db.routeList[0];
+            }
+            State.stores = State.db.routes[State.localActiveRoute] || [];
+            App.log(`🏪 สายปัจจุบัน: ${State.localActiveRoute} (${State.stores.length} ร้าน)`);
+
+            App.log('📊 โหลด rawData + salesData...');
+            App.fetchRawData();
+            App.fetchSalesData(); // fetchSalesData เรียก App.sync() + UI.hideLoader() ปิดท้าย
+            App.log('✅ Force reload เสร็จสิ้น');
+        } catch (err) {
+            App.log(`❌ Error: ${err.code || err.message}`);
+            UI.hideLoader();
+            UI.showErrorToast('❌ Force reload ไม่สำเร็จ: ' + err.message);
+            if (btn) btn.style.display = 'block';
+        }
+    },
+
+    // ─── Timer สำหรับแสดงปุ่ม force reload ถ้าโหลดนานเกิน 8 วิ ──────────
+    _forceReloadTimer: null,
+    _startForceReloadTimer: () => {
+        clearTimeout(App._forceReloadTimer);
+        App._forceReloadTimer = setTimeout(() => {
+            const btn = document.getElementById('force-reload-btn');
+            if (btn) btn.style.display = 'block';
+            App.log('⏰ โหลดนานผิดปกติ — กด "บังคับโหลดใหม่" ถ้ายังค้างอยู่');
+        }, 8000);
     },
 
     init: async () => {
 
         MapCtrl.init();
         UI.showLoader('กำลังเชื่อมต่อ...', '');
+        App.log(`🚀 เริ่มต้น — Center: ${window.CENTER_DOC || '(ไม่ระบุ)'}`);
+        App._startForceReloadTimer();
 
         // รอ Firestore persistence พร้อมก่อน — ป้องกัน cache miss ตอน network ช้า
-        if (window.firestoreReady) await window.firestoreReady;
+        // ใช้ Promise.race กับ timeout 3 วิ เพื่อไม่ให้ค้างบนมือถือ
+        App.log('🔌 รอ Firestore persistence...');
+        if (window.firestoreReady) {
+            await Promise.race([
+                window.firestoreReady,
+                new Promise(resolve => setTimeout(resolve, 3000))
+            ]);
+        }
+        App.log('✅ Firestore persistence พร้อม');
 
         App.dbRef.onSnapshot(async (doc) => {
+            clearTimeout(App._forceReloadTimer);
+            const btn = document.getElementById('force-reload-btn');
+            if (btn) btn.style.display = 'none';
+
             const d = doc.exists ? doc.data() : {};
             State.db.cycleDays = d.cycleDays || 24;
+            App.log(`📄 onSnapshot — doc.exists: ${doc.exists}`);
 
             // ✅ ตรวจสอบ: มีข้อมูลเก่า (routes map) → migrate อัตโนมัติ
             if (d.routes && typeof d.routes === 'object' && Object.keys(d.routes).length > 0) {
+                App.log('🔄 พบข้อมูล format เก่า → migrate...');
                 State.db.routeList = Object.keys(d.routes).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
                 await App._migrate(d.routes);
                 return; // รอ onSnapshot trigger รอบถัดไปหลัง migration
             }
 
             // โครงสร้างใหม่: routeList ใน metadata
-            State.db.routeList = (d.routeList || ['สายที่ 1'])
-                .sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
+            const routeList = (d.routeList || []).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
+            App.log(`📋 routeList: [${routeList.join(', ')}]`);
+            State.db.routeList = routeList.length > 0 ? routeList : ['สายที่ 1'];
+
+            App.log(`📦 โหลด ${State.db.routeList.length} สาย...`);
             await App._loadAllRoutes(State.db.routeList);
+            App.log(`✅ โหลดสายเสร็จ — รวม ${Object.keys(State.db.routes).reduce((s,k) => s + (State.db.routes[k]||[]).length, 0)} ร้าน`);
 
             if (!State.localActiveRoute || !State.db.routes[State.localActiveRoute]) {
                 State.localActiveRoute = localStorage.getItem('last_viewed_route') || State.db.routeList[0];
             }
             State.stores = State.db.routes[State.localActiveRoute] || [];
+            App.log(`🏪 สายปัจจุบัน: ${State.localActiveRoute} (${State.stores.length} ร้าน)`);
 
             App.fetchRawData();
             App.fetchSalesData();
@@ -527,6 +636,7 @@ const App = {
             // ถ้า persistence เปิดอยู่ Firestore จะ serve จาก cache อัตโนมัติ
             // ถ้าไม่มี cache เลย ให้แสดง retry
             console.error('Firestore onSnapshot error:', err);
+            App.log(`❌ onSnapshot error: ${err.code} — ${err.message}`);
             UI.hideLoader();
             if (err.code === 'permission-denied') {
                 UI.showErrorToast('⚠️ ไม่มีสิทธิ์เข้าถึงข้อมูล กรุณาตรวจสอบ center ID');
@@ -559,18 +669,28 @@ const App = {
             let raw = [];
             snap.forEach(doc => { raw = raw.concat(doc.data().rows || []); });
             State.rawData = raw;
+            App.log(`📊 rawData: ${raw.length} rows`);
             RawDataMgr.renderTable();
-        }).catch(err => console.warn('โหลด rawData ไม่สำเร็จ:', err));
+        }).catch(err => {
+            App.log(`⚠️ rawData: โหลดไม่สำเร็จ (${err.code || err.message})`);
+            console.warn('โหลด rawData ไม่สำเร็จ:', err);
+        });
     },
 
     fetchSalesData: () => {
+        App.log('📈 โหลด salesData...');
         cloudDB.collection('v1_sales_chunks').get().then(snap => {
             const merged = {};
             snap.forEach(doc => { Object.assign(merged, doc.data()); });
             State.sales = merged;
+            App.log(`✅ salesData: ${Object.keys(merged).length} ร้าน`);
             App.sync();
+            clearTimeout(App._forceReloadTimer);
+            const btn = document.getElementById('force-reload-btn');
+            if (btn) btn.style.display = 'none';
             UI.hideLoader();
         }).catch(err => {
+            App.log(`⚠️ salesData: โหลดไม่สำเร็จ (${err.code || err.message})`);
             console.warn('โหลด salesData ไม่สำเร็จ:', err);
             App.sync();
             UI.hideLoader();
