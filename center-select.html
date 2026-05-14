@@ -277,6 +277,13 @@
         <span class="header-icon">🗺️</span>
         <h1>Route <span>Planner</span></h1>
         <p>เลือกศูนย์ที่ต้องการจัดการ</p>
+        <!-- User info bar -->
+        <div style="margin-top:14px;display:flex;align-items:center;justify-content:center;gap:12px;font-size:0.78rem;">
+            <span style="color:#64748b;">⚙️ Admin:</span>
+            <span style="color:#e2e8f0;font-weight:600;" id="cs-username"></span>
+            <a href="users.html" style="color:#38bdf8;font-weight:700;text-decoration:none;">👥 Users</a>
+            <button onclick="Auth.logout()" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:0.78rem;font-family:inherit;font-weight:600;padding:0;transition:color 0.2s;" onmouseover="this.style.color='#ef4444'" onmouseout="this.style.color='#64748b'">ออกจากระบบ</button>
+        </div>
     </div>
     <div id="center-grid">
         <div class="skeleton"></div>
@@ -315,7 +322,12 @@
 <div id="toast"></div>
 
 <script src="app-config-init.js"></script>
+<script src="auth.js"></script>
 <script>
+// ── Guard: admin only ──────────────────────────────────
+const _session = Auth.guard(['admin']);
+if (!_session) throw new Error('Unauthorized');
+
 // ── Toast ──────────────────────────────────────────────
 const Toast = {
     _t: null,
@@ -359,6 +371,10 @@ const App = {
     _pendingDelete: null,
 
     init() {
+        // แสดงชื่อ admin
+        const el = document.getElementById('cs-username');
+        if (el) el.textContent = _session.displayName || _session.username;
+
         CENTERS_DOC.onSnapshot(doc => {
             App.centers = doc.exists ? (doc.data().centers || {}) : {};
             App.render();

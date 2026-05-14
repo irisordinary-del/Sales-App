@@ -64,16 +64,52 @@ const State = {
 };
 
 // ==========================================
-// 🏢 Center Selector — อ่านศูนย์จาก URL param
+// 🏢 Center Selector — ตรวจสอบสิทธิ์จาก session
 // ==========================================
 (function () {
+    // auth.js ต้องโหลดก่อน app-config.js เสมอ
+    const session = (typeof Auth !== 'undefined') ? Auth.getSession() : null;
+
+    // ไม่มี session → ไป login
+    if (!session) {
+        window.location.replace('login.html');
+        return;
+    }
+
+    // Sales ไม่ควรเข้า index.html
+    if (session.role === 'sales') {
+        window.location.replace('sales.html');
+        return;
+    }
+
     const params = new URLSearchParams(window.location.search);
-    const center = params.get('center');
-    if (!center) {
-        // ถ้าไม่มี ?center= → redirect ไปหน้าเลือกศูนย์
-        window.location.replace('center-select.html');
-    } else {
-        window.CENTER_DOC = center + '_main'; // เช่น "402" → "402_main"
-        window.CENTER_ID  = center;           // เช่น "402"
+    const centerParam = params.get('center');
+
+    if (session.role === 'admin') {
+        // Admin: เลือกศูนย์ได้อิสระ ถ้าไม่มี ?center= → ไป center-select
+        if (!centerParam) {
+            window.location.replace('center-select.html');
+            return;
+        }
+        window.CENTER_DOC = centerParam + '_main';
+        window.CENTER_ID  = centerParam;
+
+    } else if (session.role === 'supervisor') {
+        // Supervisor: บังคับใช้ centerId จาก session ห้ามแก้ URL
+        const allowedCenter = session.centerId;
+        if (!allowedCenter) {
+            // supervisor ไม่ได้ผูกศูนย์ → แจ้งเตือน
+            document.body.innerHTML = '<div style="font-family:sans-serif;display:flex;height:100vh;align-items:center;justify-content:center;flex-direction:column;gap:12px;background:#0f172a;color:#e2e8f0"><p style="font-size:1.1rem;font-weight:700;">⚠️ บัญชีของคุณยังไม่ได้ผูกกับศูนย์</p><p style="color:#64748b;font-size:0.85rem;">กรุณาติดต่อ Admin เพื่อกำหนดศูนย์</p><button onclick="Auth.logout()" style="margin-top:8px;background:#6366f1;color:#fff;border:none;border-radius:10px;padding:10px 24px;font-size:0.9rem;font-weight:700;cursor:pointer;">ออกจากระบบ</button></div>';
+            return;
+        }
+        // ไม่สนใจ ?center= ใน URL — ใช้ค่าจาก session เสมอ
+        window.CENTER_DOC = allowedCenter + '_main';
+        window.CENTER_ID  = allowedCenter;
+
+        // แก้ URL ให้ตรงกับ session (กันสับสน) โดยไม่ reload
+        const correctUrl = 'index.html?center=' + allowedCenter;
+        if (window.location.pathname + window.location.search !== '/' + correctUrl) {
+            history.replaceState(null, '', correctUrl);
+        }
     }
 })();

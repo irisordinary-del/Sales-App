@@ -252,8 +252,12 @@
             if (!session) return;
             if (session.role === 'sales') {
                 window.location.replace('sales.html');
-            } else {
-                window.location.replace('index.html');
+            } else if (session.role === 'admin') {
+                window.location.replace('center-select.html');
+            } else if (session.role === 'supervisor') {
+                window.location.replace(session.centerId
+                    ? 'index.html?center=' + session.centerId
+                    : 'index.html');
             }
         })();
 
@@ -282,6 +286,15 @@
                 // Redirect ตาม role
                 if (user.role === 'sales') {
                     window.location.replace('sales.html');
+                } else if (user.role === 'admin') {
+                    window.location.replace('center-select.html');
+                } else if (user.role === 'supervisor') {
+                    if (user.centerId) {
+                        window.location.replace('index.html?center=' + user.centerId);
+                    } else {
+                        // supervisor ไม่มีศูนย์ → เข้า index ปกติให้ app-config จัดการ
+                        window.location.replace('index.html');
+                    }
                 } else {
                     window.location.replace('index.html');
                 }
