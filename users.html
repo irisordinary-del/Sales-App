@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>User Management — Route Planner</title>
+    <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore-compat.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="app-config-init.js"></script>
+    <script src="auth.js"></script>
+    <style>
+        body { font-family: 'Prompt', sans-serif; }
+        .role-admin      { background:#ede9fe; color:#5b21b6; }
+        .role-supervisor { background:#dbeafe; color:#1e40af; }
+        .role-sales      { background:#d1fae5; color:#065f46; }
+        .badge-active    { background:#d1fae5; color:#065f46; }
+        .badge-inactive  { background:#fee2e2; color:#991b1b; }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+    <!-- Toast -->
+    <div id="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 translate-y-24 opacity-0 bg-gray-900 text-white px-5 py-2.5 rounded-full shadow-2xl transition-all duration-300 z-[9999] text-sm font-bold pointer-events-none">
+        <span id="toast-msg"></span>
+    </div>
+
+    <!-- Header -->
+    <header class="bg-slate-900 text-white px-6 py-4 flex items-center justify-between shadow-lg border-b border-slate-700 sticky top-0 z-50">
+        <div class="flex items-center gap-4">
+            <a href="index.html" class="text-slate-400 hover:text-white transition text-sm font-bold flex items-center gap-1.5">
+                ← กลับ Admin
+            </a>
+            <div class="w-px h-5 bg-slate-700"></div>
+            <h1 class="text-lg font-black text-indigo-400">👥 User Management</h1>
+        </div>
+        <div class="flex items-center gap-3">
+            <span id="session-info" class="text-xs text-slate-400 font-medium hidden sm:block"></span>
+            <button onclick="Auth.logout()" class="text-xs text-slate-400 hover:text-red-400 font-bold transition">ออกจากระบบ</button>
+        </div>
+    </header>
+
+    <!-- Main -->
+    <main class="max-w-5xl mx-auto p-6">
+
+        <!-- Stats row -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+            <div class="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 text-center">
+                <p class="text-2xl font-black text-gray-800" id="stat-total">—</p>
+                <p class="text-xs text-gray-500 mt-1 font-medium">User ทั้งหมด</p>
+            </div>
+            <div class="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 text-center">
+                <p class="text-2xl font-black text-violet-600" id="stat-admin">—</p>
+                <p class="text-xs text-gray-500 mt-1 font-medium">Admin</p>
+            </div>
+            <div class="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 text-center">
+                <p class="text-2xl font-black text-blue-600" id="stat-supervisor">—</p>
+                <p class="text-xs text-gray-500 mt-1 font-medium">Supervisor</p>
+            </div>
+            <div class="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 text-center">
+                <p class="text-2xl font-black text-emerald-600" id="stat-sales">—</p>
+                <p class="text-xs text-gray-500 mt-1 font-medium">Sales</p>
+            </div>
+        </div>
+
+        <!-- Toolbar -->
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 mb-4 flex flex-wrap gap-3 items-center">
+            <input type="text" id="search-input" placeholder="🔍 ค้นหา username, role, ศูนย์..." oninput="UsersApp.filter(this.value)"
+                class="flex-1 min-w-[200px] bg-gray-50 border border-gray-200 rounded-xl px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-300 font-medium">
+
+            <button onclick="UsersApp.openCreate()"
+                class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-sm font-bold transition shadow-sm flex items-center gap-1.5">
+                ＋ เพิ่ม User
+            </button>
+
+            <button onclick="UsersApp.openGenRoutes()"
+                class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl text-sm font-bold transition shadow-sm flex items-center gap-1.5">
+                ⚡ Gen จากสายวิ่ง
+            </button>
+
+            <button onclick="UsersApp.load()"
+                class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-xl text-sm font-bold transition flex items-center gap-1.5">
+                🔄 รีเฟรช
+            </button>
+        </div>
+
+        <!-- Table -->
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+            <table class="w-full text-sm">
+                <thead class="bg-gray-50 border-b border-gray-100">
+                    <tr>
+                        <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Username</th>
+                        <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Display Name</th>
+                        <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Role</th>
+                        <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">ศูนย์</th>
+                        <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase">สถานะ</th>
+                        <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">จัดการ</th>
+                    </tr>
+                </thead>
+                <tbody id="user-table-body">
+                    <tr><td colspan="6" class="text-center py-10 text-gray-400">กำลังโหลด...</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+    </main>
+
+    <!-- Modal: Create / Edit User -->
+    <div id="user-modal" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-[999] flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-md">
+            <div class="p-5 border-b flex justify-between items-center">
+                <h2 id="modal-title" class="text-lg font-black text-gray-800">เพิ่ม User</h2>
+                <button onclick="UsersApp.closeModal()" class="w-8 h-8 rounded-full border border-gray-200 text-gray-400 hover:bg-gray-100 font-bold transition">✕</button>
+            </div>
+            <div class="p-5 space-y-4">
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1.5">Username *</label>
+                    <input id="f-username" type="text" placeholder="เช่น V01 หรือ 402V01"
+                        class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-300 uppercase">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1.5">Display Name</label>
+                    <input id="f-displayname" type="text" placeholder="ชื่อที่แสดงในระบบ"
+                        class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-300">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1.5">Password <span id="pw-hint" class="text-gray-400 normal-case font-normal">(เว้นว่างถ้าไม่เปลี่ยน)</span></label>
+                    <input id="f-password" type="password" placeholder="กรอก password"
+                        class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-300">
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 uppercase mb-1.5">Role *</label>
+                        <select id="f-role" onchange="UsersApp.onRoleChange()" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-300">
+                            <option value="sales">Sales</option>
+                            <option value="supervisor">Supervisor</option>
+                            <option value="admin">Admin</option>
+                        </select>
+                    </div>
+                    <div id="center-field">
+                        <label class="block text-xs font-bold text-gray-500 uppercase mb-1.5">ศูนย์</label>
+                        <select id="f-center" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-300">
+                            <option value="">— เลือกศูนย์ —</option>
+                        </select>
+                    </div>
+                </div>
+                <div id="active-field" class="flex items-center gap-3 pt-1">
+                    <input type="checkbox" id="f-active" checked class="w-4 h-4 text-indigo-600 rounded">
+                    <label for="f-active" class="text-sm font-bold text-gray-700">บัญชีใช้งานได้ (Active)</label>
+                </div>
+            </div>
+            <div class="p-5 border-t flex gap-3">
+                <button onclick="UsersApp.closeModal()" class="flex-1 border border-gray-200 rounded-xl py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-50 transition">ยกเลิก</button>
+                <button onclick="UsersApp.saveUser()" id="btn-save" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl py-2.5 text-sm font-bold transition shadow-sm">บันทึก</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Gen from Routes -->
+    <div id="gen-modal" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-[999] flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-md">
+            <div class="p-5 border-b flex justify-between items-center">
+                <h2 class="text-lg font-black text-gray-800">⚡ Gen User จากสายวิ่ง</h2>
+                <button onclick="UsersApp.closeGenModal()" class="w-8 h-8 rounded-full border border-gray-200 text-gray-400 hover:bg-gray-100 font-bold transition">✕</button>
+            </div>
+            <div class="p-5 space-y-4">
+                <p class="text-sm text-gray-600">ระบบจะสร้าง Sales user สำหรับทุกสายวิ่งในศูนย์ที่เลือก โดยใช้รหัสสายเป็น username เฉพาะสายที่ยังไม่มี user</p>
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1.5">เลือกศูนย์</label>
+                    <select id="gen-center" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-300">
+                        <option value="">— เลือกศูนย์ —</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1.5">Default Password</label>
+                    <input id="gen-password" type="text" value="1234"
+                        class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-300">
+                    <p class="text-xs text-gray-400 mt-1">User ใหม่จะใช้ password นี้ (แนะนำให้เปลี่ยนทีหลัง)</p>
+                </div>
+                <div id="gen-preview" class="hidden bg-gray-50 rounded-xl p-3 text-xs text-gray-600 max-h-40 overflow-y-auto"></div>
+            </div>
+            <div class="p-5 border-t flex gap-3">
+                <button onclick="UsersApp.previewGen()" class="flex-1 border border-gray-200 rounded-xl py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-50 transition">ดูตัวอย่าง</button>
+                <button onclick="UsersApp.confirmGen()" class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl py-2.5 text-sm font-bold transition shadow-sm">Gen เลย</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="users.js"></script>
+</body>
+</html>

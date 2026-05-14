@@ -18,14 +18,8 @@
 </head>
 <body>
 
-    <div id="login-screen">
-        <div class="bg-white p-8 rounded-3xl shadow-2xl w-full max-w-sm text-center">
-            <h1 class="text-2xl font-black text-gray-800 mb-1">Sales<span class="text-blue-600">Nav</span></h1>
-            <p class="text-xs text-gray-500 mb-6 font-medium text-blue-600">รหัสสายวิ่ง = รหัสผ่าน</p>
-            <input type="text" id="login-input" placeholder="กรอกรหัสสาย (เช่น V01)" class="w-full bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-xl block p-4 outline-none font-bold uppercase text-center mb-4">
-            <button onclick="App.login()" class="w-full text-white bg-blue-600 hover:bg-blue-700 font-bold rounded-xl text-sm px-5 py-4 shadow-lg active:scale-95 transition-transform">เข้าสู่ระบบ 🚀</button>
-        </div>
-    </div>
+    <!-- Login screen ถูกย้ายไป login.html แล้ว — ซ่อนไว้ -->
+    <div id="login-screen" style="display:none!important"></div>
 
     <div id="loader">
         <div class="spinner"></div>
@@ -143,6 +137,7 @@
         </div>
     </div>
 
+    <script src="auth.js"></script>
     <script src="sales-app.js"></script>
 </body>
 </html>

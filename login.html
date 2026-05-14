@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>เข้าสู่ระบบ — Route Planner</title>
+    <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore-compat.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <script src="app-config-init.js"></script>
+    <script src="auth.js"></script>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Prompt', sans-serif;
+            min-height: 100dvh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #0f172a;
+            overflow: hidden;
+            position: relative;
+        }
+
+        /* Animated background grid */
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background-image:
+                linear-gradient(rgba(99,102,241,0.08) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(99,102,241,0.08) 1px, transparent 1px);
+            background-size: 48px 48px;
+            animation: gridMove 20s linear infinite;
+        }
+        @keyframes gridMove {
+            0%   { background-position: 0 0; }
+            100% { background-position: 48px 48px; }
+        }
+
+        /* Glow blobs */
+        .blob {
+            position: fixed;
+            border-radius: 50%;
+            filter: blur(80px);
+            opacity: 0.18;
+            pointer-events: none;
+        }
+        .blob-1 {
+            width: 500px; height: 500px;
+            background: #6366f1;
+            top: -150px; left: -150px;
+            animation: blobFloat 8s ease-in-out infinite;
+        }
+        .blob-2 {
+            width: 400px; height: 400px;
+            background: #0ea5e9;
+            bottom: -100px; right: -100px;
+            animation: blobFloat 10s ease-in-out infinite reverse;
+        }
+        @keyframes blobFloat {
+            0%, 100% { transform: translate(0,0) scale(1); }
+            50%       { transform: translate(30px, 20px) scale(1.05); }
+        }
+
+        /* Card */
+        .card {
+            position: relative;
+            z-index: 10;
+            width: 100%;
+            max-width: 400px;
+            margin: 20px;
+            background: rgba(15,23,42,0.85);
+            border: 1px solid rgba(99,102,241,0.25);
+            border-radius: 24px;
+            padding: 44px 40px 40px;
+            backdrop-filter: blur(20px);
+            box-shadow:
+                0 0 0 1px rgba(99,102,241,0.1),
+                0 40px 80px rgba(0,0,0,0.6),
+                inset 0 1px 0 rgba(255,255,255,0.05);
+            animation: cardIn 0.5s cubic-bezier(0.34,1.56,0.64,1) both;
+        }
+        @keyframes cardIn {
+            from { opacity: 0; transform: translateY(30px) scale(0.96); }
+            to   { opacity: 1; transform: translateY(0) scale(1); }
+        }
+
+        /* Logo */
+        .logo {
+            text-align: center;
+            margin-bottom: 36px;
+        }
+        .logo-icon {
+            width: 56px; height: 56px;
+            background: linear-gradient(135deg, #6366f1, #0ea5e9);
+            border-radius: 16px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 26px;
+            margin-bottom: 14px;
+            box-shadow: 0 8px 24px rgba(99,102,241,0.4);
+        }
+        .logo h1 {
+            font-size: 22px;
+            font-weight: 800;
+            color: #fff;
+            letter-spacing: -0.5px;
+        }
+        .logo h1 span { color: #6366f1; }
+        .logo p {
+            font-size: 12px;
+            color: #64748b;
+            margin-top: 4px;
+            font-weight: 400;
+        }
+
+        /* Form */
+        .field {
+            margin-bottom: 16px;
+        }
+        .field label {
+            display: block;
+            font-size: 11px;
+            font-weight: 700;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            margin-bottom: 8px;
+        }
+        .field input {
+            width: 100%;
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 12px;
+            padding: 14px 16px;
+            font-size: 15px;
+            font-weight: 600;
+            color: #f1f5f9;
+            font-family: 'Prompt', sans-serif;
+            outline: none;
+            transition: all 0.2s;
+        }
+        .field input::placeholder { color: #334155; font-weight: 400; }
+        .field input:focus {
+            border-color: rgba(99,102,241,0.6);
+            background: rgba(99,102,241,0.06);
+            box-shadow: 0 0 0 3px rgba(99,102,241,0.15);
+        }
+
+        /* Submit button */
+        .btn-login {
+            width: 100%;
+            background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+            border: none;
+            border-radius: 12px;
+            padding: 15px;
+            font-size: 15px;
+            font-weight: 700;
+            color: #fff;
+            cursor: pointer;
+            font-family: 'Prompt', sans-serif;
+            margin-top: 8px;
+            transition: all 0.2s;
+            box-shadow: 0 8px 20px rgba(99,102,241,0.35);
+            position: relative;
+            overflow: hidden;
+        }
+        .btn-login:hover  { transform: translateY(-1px); box-shadow: 0 12px 28px rgba(99,102,241,0.45); }
+        .btn-login:active { transform: translateY(0); }
+        .btn-login:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+        .btn-login .btn-text { transition: opacity 0.2s; }
+        .btn-login .btn-spinner {
+            display: none;
+            width: 18px; height: 18px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+            margin: 0 auto;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .btn-login.loading .btn-text    { display: none; }
+        .btn-login.loading .btn-spinner { display: block; }
+
+        /* Error */
+        .error-box {
+            display: none;
+            background: rgba(239,68,68,0.12);
+            border: 1px solid rgba(239,68,68,0.3);
+            border-radius: 10px;
+            padding: 11px 14px;
+            font-size: 13px;
+            color: #fca5a5;
+            font-weight: 500;
+            margin-top: 14px;
+            text-align: center;
+            animation: shake 0.3s ease;
+        }
+        @keyframes shake {
+            0%,100% { transform: translateX(0); }
+            25%      { transform: translateX(-6px); }
+            75%      { transform: translateX(6px); }
+        }
+        .error-box.show { display: block; }
+
+        /* Footer */
+        .footer {
+            text-align: center;
+            margin-top: 28px;
+            font-size: 11px;
+            color: #1e293b;
+        }
+    </style>
+</head>
+<body>
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+
+    <div class="card">
+        <div class="logo">
+            <div class="logo-icon">📍</div>
+            <h1>Route<span>Plan</span></h1>
+            <p>ระบบวางแผนสายวิ่ง</p>
+        </div>
+
+        <div class="field">
+            <label>Username</label>
+            <input type="text" id="inp-username" placeholder="กรอก username" autocomplete="username" autocapitalize="off">
+        </div>
+        <div class="field">
+            <label>Password</label>
+            <input type="password" id="inp-password" placeholder="กรอก password" autocomplete="current-password">
+        </div>
+
+        <button class="btn-login" id="btn-login" onclick="doLogin()">
+            <span class="btn-text">เข้าสู่ระบบ</span>
+            <div class="btn-spinner"></div>
+        </button>
+
+        <div class="error-box" id="error-box"></div>
+
+        <div class="footer">Route Planner Admin System</div>
+    </div>
+
+    <script>
+        // ─── ถ้า login อยู่แล้ว redirect ไปหน้าที่เหมาะสม ───────────────
+        (function() {
+            const session = Auth.getSession();
+            if (!session) return;
+            if (session.role === 'sales') {
+                window.location.replace('sales.html');
+            } else if (session.role === 'admin') {
+                window.location.replace('center-select.html');
+            } else if (session.role === 'supervisor') {
+                window.location.replace(session.centerId
+                    ? 'index.html?center=' + session.centerId
+                    : 'index.html');
+            }
+        })();
+
+        // ─── Seed admin ครั้งแรก (ถ้ายังไม่มี users) ─────────────────────
+        Auth.seedAdmin().catch(e => console.warn('Seed admin:', e));
+
+        // ─── Login handler ────────────────────────────────────────────────
+        async function doLogin() {
+            const username = document.getElementById('inp-username').value.trim();
+            const password = document.getElementById('inp-password').value;
+            const btn      = document.getElementById('btn-login');
+            const errBox   = document.getElementById('error-box');
+
+            errBox.classList.remove('show');
+
+            if (!username || !password) {
+                showError('กรุณากรอก Username และ Password');
+                return;
+            }
+
+            btn.classList.add('loading');
+            btn.disabled = true;
+
+            try {
+                const user = await Auth.login(username, password);
+                // Redirect ตาม role
+                if (user.role === 'sales') {
+                    window.location.replace('sales.html');
+                } else if (user.role === 'admin') {
+                    window.location.replace('center-select.html');
+                } else if (user.role === 'supervisor') {
+                    if (user.centerId) {
+                        window.location.replace('index.html?center=' + user.centerId);
+                    } else {
+                        // supervisor ไม่มีศูนย์ → เข้า index ปกติให้ app-config จัดการ
+                        window.location.replace('index.html');
+                    }
+                } else {
+                    window.location.replace('index.html');
+                }
+            } catch (err) {
+                showError(err.message);
+                btn.classList.remove('loading');
+                btn.disabled = false;
+            }
+        }
+
+        function showError(msg) {
+            const el = document.getElementById('error-box');
+            el.textContent = '⚠️ ' + msg;
+            el.classList.remove('show');
+            void el.offsetWidth; // retrigger animation
+            el.classList.add('show');
+        }
+
+        // Enter key
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Enter') doLogin();
+        });
+    </script>
+</body>
+</html>

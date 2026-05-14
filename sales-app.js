@@ -150,43 +150,31 @@ const UI = {
 
 const App = {
     checkAuth: () => {
-        let saved = localStorage.getItem('route_code');
-        if (saved) { State.myRoute = saved; App.start(); }
-        else document.getElementById('login-screen').style.display = 'flex';
+        // ถ้า session มีอยู่และเป็น sales → เข้าได้เลย
+        const session = Auth.getSession();
+        if (session && session.role === 'sales') {
+            State.myRoute = session.username;
+            App.start();
+        } else if (session && (session.role === 'admin' || session.role === 'supervisor')) {
+            // admin/supervisor เข้า sales.html → redirect ไป admin
+            window.location.replace('index.html');
+        } else {
+            // ไม่มี session → ไป login
+            window.location.replace('login.html');
+        }
     },
 
     login: async () => {
-        let u = document.getElementById('login-input').value.trim().toUpperCase();
-        if (!u) return showSalesToast('กรุณาระบุรหัสสาย', true);
-
-        // ✅ เช็ค DB ก่อน login
-        const loginBtn = document.querySelector('#login-screen button');
-        if (loginBtn) { loginBtn.disabled = true; loginBtn.innerText = 'กำลังตรวจสอบ...'; }
-        try {
-            const centerMatch = u.match(/^(\d+)/);
-            const centerDocId = centerMatch ? (centerMatch[1] + '_main') : 'v1_main';
-            const routeDoc = await db.collection('appData').doc(centerDocId).collection('routes').doc(u).get();
-            if (!routeDoc.exists) {
-                showSalesToast('⚠️ ไม่พบรหัสสาย "' + u + '" ในฐานข้อมูล', true);
-                if (loginBtn) { loginBtn.disabled = false; loginBtn.innerText = 'เข้าสู่ระบบ 🚀'; }
-                return;
-            }
-        } catch(e) {
-            showSalesToast('⚠️ ตรวจสอบไม่ได้: ' + e.message, true);
-            if (loginBtn) { loginBtn.disabled = false; loginBtn.innerText = 'เข้าสู่ระบบ 🚀'; }
-            return;
-        }
-
-        State.myRoute = u;
-        localStorage.setItem('route_code', u);
-        localStorage.removeItem(TAB_STORAGE_KEY);
-        App.start();
+        // login.html จัดการให้แล้ว — ฟังก์ชันนี้ไม่ถูกเรียกอีกต่อไป
+        window.location.replace('login.html');
     },
 
-    logout: () => { localStorage.clear(); window.location.reload(); },
+    logout: () => {
+        Auth.logout(); // clear session + redirect login
+    },
 
     start: () => {
-        document.getElementById('login-screen').style.display = 'none';
+        // login-screen ถูกซ่อนใน HTML แล้ว
         // ✅ แสดง hamburger button
         const hBtn = document.getElementById('hamburger-btn');
         if (hBtn) hBtn.style.display = 'flex';

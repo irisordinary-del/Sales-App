@@ -43,43 +43,15 @@
 
 
     <!-- Loader -->
+
     <div id="loader">
+
         <div class="spinner"></div>
+
         <p id="loader-text" class="text-indigo-700 font-bold text-lg">กำลังประมวลผล...</p>
+
         <p id="loader-subtext" class="text-gray-500 text-sm mt-2 font-medium"></p>
 
-        <!-- Process Log (แสดงขณะโหลด) -->
-        <div id="loader-log" style="
-            margin-top: 20px;
-            width: 90%;
-            max-width: 360px;
-            max-height: 180px;
-            overflow-y: auto;
-            background: #f1f5f9;
-            border-radius: 10px;
-            padding: 10px 14px;
-            font-size: 11px;
-            font-family: monospace;
-            color: #374151;
-            text-align: left;
-            line-height: 1.8;
-            border: 1px solid #e2e8f0;
-        "></div>
-
-        <!-- Force Reload Button (แสดงหลัง 8 วิ ถ้าโหลดไม่เสร็จ) -->
-        <button id="force-reload-btn" onclick="App.forceReload()" style="
-            display: none;
-            margin-top: 16px;
-            background: #4f46e5;
-            color: white;
-            border: none;
-            border-radius: 10px;
-            padding: 10px 24px;
-            font-size: 14px;
-            font-weight: 700;
-            cursor: pointer;
-            box-shadow: 0 4px 12px rgba(79,70,229,0.35);
-        ">🔄 บังคับโหลดใหม่</button>
     </div>
 
 
@@ -189,6 +161,9 @@
                         📊 ภาพรวม
 
                     </button>
+
+                    <!-- User info + logout -->
+                    <div id="header-user-info" class="flex items-center gap-2 ml-1"></div>
 
                 </div>
 
@@ -639,6 +614,9 @@
 
     <!-- ===== SCRIPTS (ลำดับสำคัญมาก) ===== -->
 
+    <!-- 0. Auth (ต้องก่อน app-config เพราะ app-config redirect ถ้าไม่มี center) -->
+    <script src="auth.js"></script>
+
     <!-- 1. Config + Firebase + State (ต้องก่อนสุด) -->
 
     <script src="app-config.js"></script>
@@ -665,11 +643,33 @@
 
     <script>
 
+        // Guard: admin + supervisor only
+        const _session = Auth.guard(['admin', 'supervisor']);
+        if (!_session) throw new Error('Unauthorized');
+
+        // Supervisor filter: จำกัด CENTER_DOC ตาม centerId
+        if (_session.role === 'supervisor' && _session.centerDoc) {
+            window.CENTER_DOC = _session.centerDoc;
+            window.CENTER_ID  = _session.centerId;
+        }
+
         // App is defined in admin-data.js
 
         document.addEventListener('DOMContentLoaded', () => { 
 
             if (App && App.init) App.init();
+
+            // แสดงชื่อ user และ role ใน header
+            const userInfoEl = document.getElementById('header-user-info');
+            if (userInfoEl) {
+                const roleLabel = { admin: '⚙️ Admin', supervisor: '👁️ Supervisor' };
+                userInfoEl.innerHTML = `
+                    <span class="text-xs text-slate-400 font-medium hidden sm:block">${_session.displayName}</span>
+                    <span class="text-[10px] px-2 py-0.5 rounded-full font-bold ${_session.role === 'admin' ? 'bg-violet-900 text-violet-300' : 'bg-blue-900 text-blue-300'}">${roleLabel[_session.role] || _session.role}</span>
+                    ${_session.role === 'admin' ? '<a href="users.html" class="text-xs text-indigo-400 hover:text-indigo-200 font-bold transition">👥 Users</a>' : ''}
+                    <button onclick="Auth.logout()" class="text-xs text-slate-500 hover:text-red-400 font-bold transition ml-1">ออก</button>
+                `;
+            }
 
         });
 
