@@ -30,7 +30,10 @@
         <div class="flex justify-between items-center">
             <div class="bg-blue-600 text-white text-xs font-black px-2.5 py-1 rounded-lg shadow-sm">สาย: <span id="user-route-label">V00</span></div>
             <div id="sync-status" class="text-[10px] bg-emerald-100 px-2 py-0.5 rounded-full text-emerald-600 font-bold">🟢 อัปเดตล่าสุด</div>
-            <button onclick="App.logout()" class="text-[10px] text-gray-400 font-bold">เปลี่ยนสาย</button>
+            <div class="flex items-center gap-2">
+                <button onclick="showChangePwModal()" class="text-[10px] text-gray-400 font-bold">🔑 PW</button>
+                <button onclick="App.logout()" class="text-[10px] text-gray-400 font-bold">เปลี่ยนสาย</button>
+            </div>
         </div>
     </header>
 
@@ -136,6 +139,82 @@
             <div class="p-3 bg-gray-50 border-t"><button id="m-nav-btn" class="w-full bg-blue-600 text-white py-3 rounded-xl font-black shadow-md active:scale-95 transition">🚗 นำทางไปร้านนี้</button></div>
         </div>
     </div>
+
+    <!-- Modal: เปลี่ยน Password -->
+    <div id="changepw-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);z-index:99999;align-items:center;justify-content:center;padding:16px;">
+        <div style="background:#fff;border-radius:24px;width:100%;max-width:360px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+            <div style="padding:18px 20px;border-bottom:1px solid #f1f5f9;display:flex;justify-content:space-between;align-items:center;">
+                <span style="font-size:15px;font-weight:800;color:#111827;">🔑 เปลี่ยน Password</span>
+                <button onclick="closeChangePwModal()" style="width:30px;height:30px;border-radius:50%;border:1px solid #e5e7eb;background:#fff;color:#9ca3af;font-size:14px;cursor:pointer;font-weight:700;">✕</button>
+            </div>
+            <div style="padding:18px 20px;display:flex;flex-direction:column;gap:14px;">
+                <div>
+                    <label style="display:block;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:6px;">Password เดิม</label>
+                    <input type="password" id="cpw-old" placeholder="กรอก password เดิม"
+                        style="width:100%;background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;padding:12px 14px;font-size:14px;outline:none;font-family:inherit;box-sizing:border-box;">
+                </div>
+                <div>
+                    <label style="display:block;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:6px;">Password ใหม่</label>
+                    <input type="password" id="cpw-new" placeholder="อย่างน้อย 4 ตัวอักษร"
+                        style="width:100%;background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;padding:12px 14px;font-size:14px;outline:none;font-family:inherit;box-sizing:border-box;">
+                </div>
+                <div>
+                    <label style="display:block;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:6px;">ยืนยัน Password ใหม่</label>
+                    <input type="password" id="cpw-confirm" placeholder="กรอกซ้ำอีกครั้ง"
+                        style="width:100%;background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;padding:12px 14px;font-size:14px;outline:none;font-family:inherit;box-sizing:border-box;">
+                </div>
+                <div id="cpw-error" style="display:none;background:#fef2f2;border:1px solid #fecaca;color:#dc2626;font-size:12px;font-weight:700;border-radius:10px;padding:10px 14px;text-align:center;"></div>
+            </div>
+            <div style="padding:14px 20px;border-top:1px solid #f1f5f9;display:flex;gap:10px;">
+                <button onclick="closeChangePwModal()" style="flex:1;border:1px solid #e5e7eb;border-radius:12px;padding:12px;font-size:13px;font-weight:700;color:#6b7280;background:#fff;cursor:pointer;font-family:inherit;">ยกเลิก</button>
+                <button onclick="doChangePw()" id="cpw-btn" style="flex:1;border:none;border-radius:12px;padding:12px;font-size:13px;font-weight:700;color:#fff;background:#2563eb;cursor:pointer;font-family:inherit;box-shadow:0 4px 12px rgba(37,99,235,0.3);">บันทึก</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function showChangePwModal() {
+            document.getElementById('cpw-old').value     = '';
+            document.getElementById('cpw-new').value     = '';
+            document.getElementById('cpw-confirm').value = '';
+            document.getElementById('cpw-error').style.display = 'none';
+            const modal = document.getElementById('changepw-modal');
+            modal.style.display = 'flex';
+            setTimeout(() => document.getElementById('cpw-old').focus(), 100);
+        }
+        function closeChangePwModal() {
+            document.getElementById('changepw-modal').style.display = 'none';
+        }
+        async function doChangePw() {
+            const oldPw  = document.getElementById('cpw-old').value;
+            const newPw  = document.getElementById('cpw-new').value;
+            const confPw = document.getElementById('cpw-confirm').value;
+            const errEl  = document.getElementById('cpw-error');
+            const btn    = document.getElementById('cpw-btn');
+
+            errEl.style.display = 'none';
+
+            if (newPw !== confPw) {
+                errEl.textContent = '⚠️ Password ใหม่ไม่ตรงกัน';
+                errEl.style.display = 'block';
+                return;
+            }
+
+            btn.disabled = true;
+            btn.textContent = 'กำลังบันทึก...';
+            try {
+                await Auth.changePassword(oldPw, newPw);
+                closeChangePwModal();
+                showSalesToast('✅ เปลี่ยน Password เรียบร้อยแล้ว');
+            } catch (err) {
+                errEl.textContent = '⚠️ ' + err.message;
+                errEl.style.display = 'block';
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'บันทึก';
+            }
+        }
+    </script>
 
     <script src="auth.js"></script>
     <script src="sales-app.js"></script>

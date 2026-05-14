@@ -166,7 +166,6 @@
                     <div id="header-user-info" class="flex items-center gap-2 ml-1"></div>
 
                 </div>
-
             </div>
 
 
@@ -667,6 +666,7 @@
                     <span class="text-xs text-slate-400 font-medium hidden sm:block">${_session.displayName}</span>
                     <span class="text-[10px] px-2 py-0.5 rounded-full font-bold ${_session.role === 'admin' ? 'bg-violet-900 text-violet-300' : 'bg-blue-900 text-blue-300'}">${roleLabel[_session.role] || _session.role}</span>
                     ${_session.role === 'admin' ? '<a href="users.html" class="text-xs text-indigo-400 hover:text-indigo-200 font-bold transition">👥 Users</a>' : ''}
+                    <button onclick="showChangePwModal()" class="text-xs text-slate-400 hover:text-white font-bold transition">🔑 เปลี่ยน PW</button>
                     <button onclick="Auth.logout()" class="text-xs text-slate-500 hover:text-red-400 font-bold transition ml-1">ออก</button>
                 `;
             }
@@ -675,6 +675,86 @@
 
     </script>
 
-</body>
+    <!-- Modal: เปลี่ยน Password -->
+    <div id="changepw-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden">
+            <div class="p-5 border-b flex justify-between items-center bg-gray-50">
+                <h2 class="text-lg font-black text-gray-800">🔑 เปลี่ยน Password</h2>
+                <button onclick="closeChangePwModal()" class="w-8 h-8 rounded-full border border-gray-200 text-gray-400 hover:bg-gray-100 font-bold">✕</button>
+            </div>
+            <div class="p-5 space-y-4">
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1.5">Password เดิม</label>
+                    <input type="password" id="cpw-old" placeholder="กรอก password เดิม"
+                        class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-300">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1.5">Password ใหม่</label>
+                    <input type="password" id="cpw-new" placeholder="กรอก password ใหม่ (อย่างน้อย 4 ตัว)"
+                        class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-300">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1.5">ยืนยัน Password ใหม่</label>
+                    <input type="password" id="cpw-confirm" placeholder="กรอกซ้ำอีกครั้ง"
+                        class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-300">
+                </div>
+                <div id="cpw-error" class="hidden bg-red-50 border border-red-200 text-red-600 text-xs font-bold rounded-xl px-4 py-2.5 text-center"></div>
+            </div>
+            <div class="p-5 border-t flex gap-3">
+                <button onclick="closeChangePwModal()" class="flex-1 border border-gray-200 rounded-xl py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-50 transition">ยกเลิก</button>
+                <button onclick="doChangePw()" id="cpw-btn" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl py-2.5 text-sm font-bold transition shadow-sm">บันทึก</button>
+            </div>
+        </div>
+    </div>
 
+    <script>
+        function showChangePwModal() {
+            document.getElementById('cpw-old').value     = '';
+            document.getElementById('cpw-new').value     = '';
+            document.getElementById('cpw-confirm').value = '';
+            document.getElementById('cpw-error').classList.add('hidden');
+            document.getElementById('changepw-modal').classList.remove('hidden');
+            setTimeout(() => document.getElementById('cpw-old').focus(), 100);
+        }
+        function closeChangePwModal() {
+            document.getElementById('changepw-modal').classList.add('hidden');
+        }
+        async function doChangePw() {
+            const oldPw  = document.getElementById('cpw-old').value;
+            const newPw  = document.getElementById('cpw-new').value;
+            const confPw = document.getElementById('cpw-confirm').value;
+            const errEl  = document.getElementById('cpw-error');
+            const btn    = document.getElementById('cpw-btn');
+
+            errEl.classList.add('hidden');
+
+            if (newPw !== confPw) {
+                errEl.textContent = '⚠️ Password ใหม่ไม่ตรงกัน';
+                errEl.classList.remove('hidden');
+                return;
+            }
+
+            btn.disabled = true;
+            btn.textContent = 'กำลังบันทึก...';
+            try {
+                await Auth.changePassword(oldPw, newPw);
+                closeChangePwModal();
+                UI.showSaveToast('✅ เปลี่ยน Password เรียบร้อยแล้ว');
+            } catch (err) {
+                errEl.textContent = '⚠️ ' + err.message;
+                errEl.classList.remove('hidden');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'บันทึก';
+            }
+        }
+        // Enter key ใน modal
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Enter' && !document.getElementById('changepw-modal').classList.contains('hidden')) {
+                doChangePw();
+            }
+        });
+    </script>
+
+</body>
 </html>

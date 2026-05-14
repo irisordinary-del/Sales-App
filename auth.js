@@ -176,7 +176,27 @@ const Auth = {
         return { added, total: users.length };
     },
 
-    // ─── Seed super admin (เรียกครั้งเดียวตอน setup) ─────────────────────
+    // ─── Change Password (self-service) ──────────────────────────────────
+    // ตรวจ password เดิมก่อน แล้วค่อย hash + save ใหม่
+    changePassword: async (oldPassword, newPassword) => {
+        if (!oldPassword || !newPassword) throw new Error('กรุณากรอกข้อมูลให้ครบ');
+        if (newPassword.length < 4)       throw new Error('Password ใหม่ต้องมีอย่างน้อย 4 ตัวอักษร');
+
+        const session = Auth.getSession();
+        if (!session) throw new Error('ไม่พบ session กรุณา login ใหม่');
+
+        const oldHash = await Auth.sha256(oldPassword.trim());
+        const newHash = await Auth.sha256(newPassword.trim());
+
+        const users = await Auth.getAllUsers();
+        const idx   = users.findIndex(u => u.username.toUpperCase() === session.username.toUpperCase());
+        if (idx === -1) throw new Error('ไม่พบ user นี้ในระบบ');
+
+        if (users[idx].passwordHash !== oldHash) throw new Error('Password เดิมไม่ถูกต้อง');
+
+        users[idx].passwordHash = newHash;
+        await Auth.saveAllUsers(users);
+    },
     seedAdmin: async () => {
         const snap = await Auth._usersRef().get();
         // ถ้ามีข้อมูลแล้วไม่ต้อง seed
