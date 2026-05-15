@@ -9,9 +9,13 @@ const Auth = {
     STORAGE_KEY: 'sales_app_session',
     USERS_DOC:   'appData/app_users',
 
+    // Static salt — ป้องกัน rainbow table (เปลี่ยนค่านี้แล้วต้อง reset password ทุก user)
+    _SALT: 'rp-2025-#!@route',
+
     // ─── SHA-256 (Web Crypto API — native browser, no library needed) ────
     sha256: async (text) => {
-        const buf  = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+        const salted = Auth._SALT + text;
+        const buf  = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(salted));
         return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
     },
 
@@ -19,18 +23,34 @@ const Auth = {
     getSession: () => {
         try {
             const raw = localStorage.getItem(Auth.STORAGE_KEY);
-            return raw ? JSON.parse(raw) : null;
+            if (!raw) return null;
+            const s = JSON.parse(raw);
+            // ตรวจ expiry
+            if (s.expiresAt && Date.now() > s.expiresAt) {
+                Auth.clearSession();
+                return null;
+            }
+            // ตรวจ user-agent fingerprint (ป้องกัน token copy ข้าม browser)
+            if (s.ua && s.ua !== navigator.userAgent.slice(0, 80)) {
+                Auth.clearSession();
+                return null;
+            }
+            return s;
         } catch { return null; }
     },
 
+    SESSION_TTL: 8 * 60 * 60 * 1000, // 8 ชั่วโมง
+
     setSession: (user) => {
         localStorage.setItem(Auth.STORAGE_KEY, JSON.stringify({
-            username:  user.username,
-            role:      user.role,
-            centerId:  user.centerId || null,
-            centerDoc: user.centerId ? (user.centerId + '_main') : null,
+            username:    user.username,
+            role:        user.role,
+            centerId:    user.centerId || null,
+            centerDoc:   user.centerId ? (user.centerId + '_main') : null,
             displayName: user.displayName || user.username,
-            loginAt:   Date.now()
+            loginAt:     Date.now(),
+            expiresAt:   Date.now() + Auth.SESSION_TTL,
+            ua:          navigator.userAgent.slice(0, 80) // fingerprint เบื้องต้น
         }));
     },
 

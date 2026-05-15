@@ -353,7 +353,9 @@ const Processor = {
             let id = item.getAttribute('data-id'), target = updated.find(s => s.id === id);
             if (target) { if (!target.seqs) target.seqs = {}; target.seqs[State.currentDay] = index + 1; }
         });
-        docMain.collection('routes').doc(State.myRoute).set({ stores: updated });
+        const _centerMatch = State.myRoute.match(/^(\d+)/);
+        const _centerDocId = _centerMatch ? (_centerMatch[1] + '_main') : 'v1_main';
+        db.collection('appData').doc(_centerDocId).collection('routes').doc(State.myRoute).set({ stores: updated });
     }
 };
 

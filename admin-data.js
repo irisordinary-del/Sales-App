@@ -747,27 +747,65 @@ const App = {
     },
 
     addRoute: () => {
-        const n = prompt('ชื่อสายใหม่:');
-        if (n && n.trim()) {
-            State.db.routes[n.trim()] = [];
-            State.localActiveRoute = n.trim();
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.55);z-index:9999;display:flex;align-items:center;justify-content:center;';
+        const box = document.createElement('div');
+        box.style.cssText = 'background:#fff;border-radius:16px;padding:24px;max-width:340px;width:90%;font-family:inherit;box-shadow:0 20px 60px rgba(0,0,0,0.3);';
+        box.innerHTML = '<p style="font-size:14px;font-weight:700;color:#111827;margin-bottom:12px;">ชื่อสายใหม่</p>'
+            + '<input id="_add-route-inp" type="text" placeholder="เช่น 402V01" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #d1d5db;border-radius:10px;font-size:14px;font-family:inherit;outline:none;margin-bottom:16px;">'
+            + '<div style="display:flex;gap:8px;justify-content:flex-end;">'
+            + '<button id="_add-route-cancel" style="padding:8px 18px;border-radius:8px;border:1px solid #d1d5db;background:#fff;color:#6b7280;cursor:pointer;font-size:13px;font-weight:600;">ยกเลิก</button>'
+            + '<button id="_add-route-ok" style="padding:8px 18px;border-radius:8px;border:none;background:#4f46e5;color:#fff;cursor:pointer;font-size:13px;font-weight:700;">เพิ่ม</button>'
+            + '</div>';
+        overlay.appendChild(box);
+        document.body.appendChild(box);
+        document.body.appendChild(overlay);
+        overlay.appendChild(box);
+        const inp = box.querySelector('#_add-route-inp');
+        inp.focus();
+        const close = () => { if (document.body.contains(overlay)) document.body.removeChild(overlay); };
+        const confirm = () => {
+            const n = inp.value.trim();
+            close();
+            if (!n) return;
+            State.db.routes[n] = [];
+            State.localActiveRoute = n;
             State.stores = [];
             App.sync();
             App.saveDB();
-        }
+        };
+        box.querySelector('#_add-route-cancel').onclick = close;
+        box.querySelector('#_add-route-ok').onclick = confirm;
+        inp.addEventListener('keydown', e => { if (e.key === 'Enter') confirm(); if (e.key === 'Escape') close(); });
+        overlay.onclick = e => { if (e.target === overlay) close(); };
     },
 
     renameRoute: () => {
-        const n = prompt('ชื่อใหม่:', State.localActiveRoute);
-        if (n && n.trim()) {
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.55);z-index:9999;display:flex;align-items:center;justify-content:center;';
+        const box = document.createElement('div');
+        box.style.cssText = 'background:#fff;border-radius:16px;padding:24px;max-width:340px;width:90%;font-family:inherit;box-shadow:0 20px 60px rgba(0,0,0,0.3);';
+        box.innerHTML = '<p style="font-size:14px;font-weight:700;color:#111827;margin-bottom:12px;">เปลี่ยนชื่อสาย</p>'
+            + `<input id="_ren-route-inp" type="text" value="${State.localActiveRoute}" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #d1d5db;border-radius:10px;font-size:14px;font-family:inherit;outline:none;margin-bottom:16px;">`
+            + '<div style="display:flex;gap:8px;justify-content:flex-end;">'
+            + '<button id="_ren-cancel" style="padding:8px 18px;border-radius:8px;border:1px solid #d1d5db;background:#fff;color:#6b7280;cursor:pointer;font-size:13px;font-weight:600;">ยกเลิก</button>'
+            + '<button id="_ren-ok" style="padding:8px 18px;border-radius:8px;border:none;background:#4f46e5;color:#fff;cursor:pointer;font-size:13px;font-weight:700;">บันทึก</button>'
+            + '</div>';
+        overlay.appendChild(box);
+        document.body.appendChild(overlay);
+        const inp = box.querySelector('#_ren-route-inp');
+        inp.focus(); inp.select();
+        const close = () => { if (document.body.contains(overlay)) document.body.removeChild(overlay); };
+        const confirm = () => {
+            const newName = inp.value.trim();
+            close();
+            if (!newName || newName === State.localActiveRoute) return;
             const oldName = State.localActiveRoute;
-            const newName = n.trim();
             State.db.routes[newName] = State.db.routes[oldName];
             delete State.db.routes[oldName];
             State.localActiveRoute = newName;
             App.sync();
             const routeList = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
-            // ✅ ลบ doc เก่า + สร้าง doc ใหม่ + อัปเดต routeList
             Promise.all([
                 App.routesCol().doc(oldName).delete(),
                 App.routesCol().doc(newName).set({ stores: State.db.routes[newName] || [] }),
@@ -775,7 +813,11 @@ const App = {
             ])
             .then(() => UI.showSaveToast('💾 เปลี่ยนชื่อสายเรียบร้อย'))
             .catch(err => UI.showErrorToast('❌ เปลี่ยนชื่อไม่สำเร็จ: ' + err.message));
-        }
+        };
+        box.querySelector('#_ren-cancel').onclick = close;
+        box.querySelector('#_ren-ok').onclick = confirm;
+        inp.addEventListener('keydown', e => { if (e.key === 'Enter') confirm(); if (e.key === 'Escape') close(); });
+        overlay.onclick = e => { if (e.target === overlay) close(); };
     },
 
     deleteRoute: () => {
@@ -839,8 +881,8 @@ const App = {
                     else if (h.includes('freq') || h.includes('ความถี่') || h.includes('รอบ') || h.includes('f2')) freqCol = i;
                     else if (h.includes('สายวิ่ง') || h.includes('day')) dayCol = i;
                     else if (h.includes('คิว') || h.includes('seq')) seqCol = i;
-                                        else if (h.includes('sales') && !h.includes('salescode')) salesCodeCol = i;
-                                        else if (h.includes('salescode') || h.includes('รหัสเซลล์')) salesCodeCol = i;
+                    else if (h.includes('salescode') || h.includes('รหัสเซลล์')) salesCodeCol = i;
+                    else if (h.includes('sales')) salesCodeCol = i;
                                         else if (h.includes('ประเภท') || h.includes('type') || h.includes('shoptype')) shopTypeCol = i;
                                         else if (h.includes('sold to city') || h.includes('subdistrict') || h.includes('ตำบล')) subDistrictCol = i;
                                         else if (h.includes('sold to state') || h.includes('district') || h.includes('อำเภอ')) districtCol = i;
