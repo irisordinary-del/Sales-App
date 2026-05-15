@@ -33,7 +33,7 @@ let docMain = db.collection('appData').doc('v1_main');
 const colSales = db.collection('v1_sales_chunks');
 
 let State = { myRoute: "", allStores: [], routeStores: [], sales: {}, currentDay: "", isLoaded: false, mapNeedsFit: true };
-let map = null, mapMarkers = [], sortableList = null;
+let map = null, mapMarkers = [], sortableList = null, markerClusterGroup = null;
 
 // ─── Tab keys ที่ระบบรู้จัก ───────────────────────────────
 const VALID_TABS = ['stores', 'route'];
@@ -489,7 +489,27 @@ const MapCtrl = {
 
     drawMap: () => {
         if (!map) return;
-        mapMarkers.forEach(m => map.removeLayer(m)); mapMarkers = [];
+
+        // ลบ cluster group เดิมออกจากแผนที่
+        if (markerClusterGroup) { map.removeLayer(markerClusterGroup); }
+        mapMarkers = [];
+
+        // สร้าง cluster group ใหม่
+        markerClusterGroup = L.markerClusterGroup({
+            spiderfyOnMaxZoom: true,
+            showCoverageOnHover: false,
+            maxClusterRadius: 45,
+            disableClusteringAtZoom: 19,
+            spiderfyDistanceMultiplier: 1.5,
+            iconCreateFunction: (cluster) => {
+                const count = cluster.getChildCount();
+                return L.divIcon({
+                    html: `<div style="width:38px;height:38px;border-radius:50%;background:#1e40af;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:14px;border:3px solid #fff;box-shadow:0 2px 10px rgba(0,0,0,0.35);">${count}</div>`,
+                    className: '', iconSize: [38, 38], iconAnchor: [19, 19]
+                });
+            }
+        });
+
         let list = State.allStores.filter(s => s.days.includes(State.currentDay));
         list.forEach((s, i) => {
             let seq = s.seqs?.[State.currentDay] || i + 1;
@@ -497,12 +517,15 @@ const MapCtrl = {
                 html: `<svg viewBox="0 0 24 24" width="30" height="40" style="filter:drop-shadow(0px 2px 3px rgba(0,0,0,0.3));overflow:visible;"><path d="M12 0C7 0 3 4 3 9c0 7 9 15 9 15s9-8 9-15c0-5-4-9-9-9z" fill="#2563eb" stroke="#fff" stroke-width="2"/><circle cx="12" cy="9" r="7" fill="#fff"/><text x="12" y="13" font-size="10" font-weight="900" fill="#000" text-anchor="middle">${seq}</text></svg>`,
                 className: '', iconSize: [30, 40], iconAnchor: [15, 40], popupAnchor: [0, -40]
             });
-            let m = L.marker([s.lat, s.lng], { icon }).addTo(map).bindPopup(
+            let m = L.marker([s.lat, s.lng], { icon }).bindPopup(
                 `<div class="text-center pb-1"><b class="text-xs">${s.name}</b><br><button onclick="UI.openModal('${s.id}')" class="bg-gray-100 text-gray-700 px-3 py-1 rounded border mt-1 text-[10px] font-bold shadow-sm">ดูข้อมูล</button></div>`,
                 { closeButton: false }
             );
+            markerClusterGroup.addLayer(m);
             mapMarkers.push(m);
         });
+
+        map.addLayer(markerClusterGroup);
         if (State.mapNeedsFit) { MapCtrl.fitBounds(); State.mapNeedsFit = false; }
     },
 
