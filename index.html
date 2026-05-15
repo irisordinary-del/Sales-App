@@ -6,7 +6,7 @@
 
     <meta charset="UTF-8">
 
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 
     <title>Route Planner Admin</title>
 
@@ -66,41 +66,53 @@
 
 
 
-    <!-- Sidebar -->
+    <!-- Sidebar — responsive (icon-only < md, full >= md) -->
+    <aside class="w-14 md:w-56 bg-slate-900 flex flex-col shrink-0 z-[6000] shadow-2xl transition-all duration-200">
 
-    <aside class="w-16 md:w-56 bg-slate-900 flex flex-col shrink-0 z-[6000] shadow-2xl transition-all">
-
-        <div class="h-16 flex items-center justify-center bg-slate-950 border-b border-slate-800">
-
+        <!-- Logo -->
+        <div class="h-14 md:h-16 flex items-center justify-center bg-slate-950 border-b border-slate-800 shrink-0">
+            <span class="text-2xl md:hidden">🗺️</span>
             <h1 class="text-xl font-black text-indigo-400 tracking-wider hidden md:block">
-
                 R<span class="text-white">Admin</span>
-
             </h1>
-
         </div>
 
-        <nav class="flex-1 py-4 space-y-1 overflow-hidden">
-
-            <button onclick="Nav.go('dashboard')" id="nav-dashboard" class="sidebar-menu active w-full flex items-center px-4 md:px-5 py-3.5 text-sm font-bold">
-                <span class="text-lg md:mr-3">📊</span>
+        <!-- Nav items -->
+        <nav class="flex-1 py-3 space-y-1 overflow-hidden">
+            <button onclick="Nav.go('dashboard')" id="nav-dashboard" class="sidebar-menu w-full flex items-center justify-center md:justify-start px-0 md:px-5 py-3 md:py-3.5 text-sm font-bold">
+                <span class="text-xl md:text-lg md:mr-3">📊</span>
                 <span class="hidden md:inline">Dashboard</span>
             </button>
-
-            <button onclick="Nav.go('planning')" id="nav-planning" class="sidebar-menu w-full flex items-center px-4 md:px-5 py-3.5 text-sm font-bold">
-
-                <span class="text-lg md:mr-3">📍</span>
-
+            <button onclick="Nav.go('planning')" id="nav-planning" class="sidebar-menu active w-full flex items-center justify-center md:justify-start px-0 md:px-5 py-3 md:py-3.5 text-sm font-bold">
+                <span class="text-xl md:text-lg md:mr-3">📍</span>
                 <span class="hidden md:inline">วางแผนคิวงาน</span>
-
             </button>
-
-            <button onclick="Nav.go('allroutes')" id="nav-allroutes" class="sidebar-menu w-full flex items-center px-4 md:px-5 py-3.5 text-left text-gray-300 hover:text-white hover:bg-slate-700 transition-all rounded-lg mx-1">
-                <span class="text-lg md:mr-3">📦</span>
+            <button onclick="Nav.go('allroutes')" id="nav-allroutes" class="sidebar-menu w-full flex items-center justify-center md:justify-start px-0 md:px-5 py-3 md:py-3.5 text-sm font-bold">
+                <span class="text-xl md:text-lg md:mr-3">📦</span>
                 <span class="hidden md:inline">ภาพรวมทุกสาย</span>
             </button>
-
         </nav>
+
+        <!-- User info — ล่างสุด sidebar -->
+        <div class="border-t border-slate-800 p-2 md:p-3 shrink-0">
+            <!-- Mobile: icon เท่านั้น -->
+            <div class="flex flex-col items-center gap-2 md:hidden">
+                <button onclick="showChangePwModal()" title="เปลี่ยน Password"
+                    class="w-9 h-9 rounded-full bg-slate-800 text-slate-300 hover:text-white flex items-center justify-center text-base transition">🔑</button>
+                <button onclick="Auth.logout()" title="ออกจากระบบ"
+                    class="w-9 h-9 rounded-full bg-slate-800 text-slate-400 hover:text-red-400 flex items-center justify-center text-base transition">⏻</button>
+            </div>
+            <!-- Desktop: full info -->
+            <div class="hidden md:block space-y-2">
+                <div id="sidebar-user-info" class="space-y-1.5"></div>
+                <div class="flex gap-2 pt-1">
+                    <button onclick="showChangePwModal()"
+                        class="flex-1 text-[11px] text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 py-1.5 rounded-lg font-bold transition text-center">🔑 PW</button>
+                    <button onclick="Auth.logout()"
+                        class="flex-1 text-[11px] text-slate-400 hover:text-red-400 bg-slate-800 hover:bg-slate-700 py-1.5 rounded-lg font-bold transition text-center">ออก</button>
+                </div>
+            </div>
+        </div>
 
     </aside>
 
@@ -112,81 +124,50 @@
 
 
 
-    <!-- ===== PAGE: Dashboard ===== -->
-    <div id="page-dashboard" class="flex-1 flex flex-col absolute inset-0"></div>
-
         <!-- ===== PAGE: Planning ===== -->
 
-        <div id="page-planning" class="flex-1 flex flex-col absolute inset-0 hidden">
+        <div id="page-planning" class="flex-1 flex flex-col absolute inset-0">
 
 
 
-            <!-- Header -->
-
-            <div class="h-16 bg-gray-900 text-white flex items-center justify-between px-6 shadow-md z-[5000] relative shrink-0 border-b-4 border-indigo-600">
-
-                <div class="flex items-center gap-3">
-
-                    <h1 class="text-xl font-black tracking-wide text-indigo-400 mr-2 hidden sm:block">
-
-                        Route<span class="text-white">Plan</span>
-
-                    </h1>
-
-                    <div class="flex items-center bg-gray-800 rounded-lg p-1 border border-gray-700">
-
+            <!-- Header — responsive -->
+            <div class="h-14 bg-gray-900 text-white flex items-center justify-between px-3 md:px-5 shadow-md z-[5000] relative shrink-0 border-b-4 border-indigo-600">
+                <!-- Left: route selector + actions -->
+                <div class="flex items-center gap-2 min-w-0 flex-1">
+                    <div class="flex items-center bg-gray-800 rounded-lg p-1 border border-gray-700 min-w-0">
                         <select id="routeSelector" onchange="App.switchRoute(this.value)"
-
-                            class="bg-gray-900 text-white border-none text-sm focus:ring-0 outline-none font-bold py-1 px-2 rounded cursor-pointer max-w-[120px] sm:max-w-[200px]">
-
+                            class="bg-gray-900 text-white border-none text-sm focus:ring-0 outline-none font-bold py-1 px-2 rounded cursor-pointer max-w-[100px] sm:max-w-[180px]">
                         </select>
-
                         <div class="flex items-center border-l border-gray-700 ml-1 pl-1">
-
-                            <button onclick="App.renameRoute()" class="text-gray-400 hover:text-white px-2 py-1 transition">✏️</button>
-
-                            <button onclick="App.deleteRoute()" class="text-gray-400 hover:text-red-400 px-2 py-1 transition">🗑️</button>
-
+                            <button onclick="App.renameRoute()" class="text-gray-400 hover:text-white px-1.5 py-1 transition text-sm">✏️</button>
+                            <button onclick="App.deleteRoute()" class="text-gray-400 hover:text-red-400 px-1.5 py-1 transition text-sm">🗑️</button>
                         </div>
-
                     </div>
-
-                    <button onclick="App.addRoute()" class="bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-md text-xs font-bold shadow-sm transition">
-                        + เพิ่มสาย
+                    <button onclick="App.addRoute()" class="bg-indigo-600 hover:bg-indigo-500 text-white px-2.5 py-1.5 rounded-md text-xs font-bold shadow-sm transition whitespace-nowrap">
+                        + สาย
                     </button>
-
-                    <button onclick="document.getElementById('bulkUpload').click()" class="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg text-sm font-bold flex items-center gap-1">
-                        📦 อัปโหลดทุกสาย
+                    <button onclick="document.getElementById('bulkUpload').click()" class="hidden sm:flex bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold items-center gap-1 whitespace-nowrap">
+                        📦 อัปโหลด
                     </button>
                     <input type="file" id="bulkUpload" accept=".xlsx,.xls" class="hidden" onchange="FileManager.bulkImport(event)">
-
                 </div>
-
-                <div class="flex items-center gap-3">
-
-                    <button onclick="UI.showSummaryModal()" class="bg-gray-800 border border-gray-600 hover:bg-gray-700 px-4 py-1.5 rounded-lg text-sm font-bold shadow-md transition flex items-center gap-2 text-white">
-
-                        📊 ภาพรวม
-
+                <!-- Right: summary button -->
+                <div class="flex items-center gap-2 ml-2 shrink-0">
+                    <button onclick="UI.showSummaryModal()" class="bg-gray-800 border border-gray-600 hover:bg-gray-700 px-3 py-1.5 rounded-lg text-xs font-bold transition text-white whitespace-nowrap">
+                        📊 <span class="hidden sm:inline">ภาพรวม</span>
                     </button>
-
-                    <!-- User info + logout -->
-                    <div id="header-user-info" class="flex items-center gap-2 ml-1"></div>
-
                 </div>
             </div>
 
 
 
             <!-- Map + Sidebar Panel -->
-
-            <div class="flex-1 flex overflow-hidden">
+            <div class="flex-1 flex flex-col md:flex-row overflow-hidden">
 
 
 
                 <!-- Map Area -->
-
-                <div class="w-2/3 relative h-full">
+                <div class="relative h-[45vh] md:h-full md:flex-1">
 
                     <div id="map"></div>
 
@@ -251,8 +232,7 @@
 
 
                 <!-- Right Panel -->
-
-                <div class="w-1/3 bg-white shadow-[-5px_0_15px_rgba(0,0,0,0.05)] flex flex-col h-full z-10 border-l border-gray-200">
+                <div class="flex-1 md:w-80 lg:w-96 md:flex-none bg-white shadow-[-5px_0_15px_rgba(0,0,0,0.05)] flex flex-col overflow-hidden z-10 border-t md:border-t-0 md:border-l border-gray-200">
 
 
 
@@ -619,6 +599,9 @@
 
 
 
+    <!-- ===== PAGE: Dashboard ===== -->
+    <div id="page-dashboard" class="flex-1 flex flex-col absolute inset-0 hidden"></div>
+
     <!-- ===== SCRIPTS (ลำดับสำคัญมาก) ===== -->
 
     <!-- 0. Auth (ต้องก่อน app-config เพราะ app-config redirect ถ้าไม่มี center) -->
@@ -645,23 +628,14 @@
     <script src="admin-ai.js"></script>
 
     <script src="file-manager.js"></script>
-
-    <!-- 6. Dashboard -->
     <script src="dashboard.js"></script>
 
-    <!-- 7. Init -->
+    <!-- 6. Init -->
 
     <script>
 
-        // Patch Nav.go to hook Dashboard render on navigation
-        const _origNavGo = Nav.go;
-        Nav.go = (page) => {
-            _origNavGo(page);
-            if (page === 'dashboard' && typeof Dashboard !== 'undefined' && Dashboard._rows.length) {
-                Dashboard._render();
-            }
-        };
-        const _session = Auth.guard(['admin', 'supervisor', 'sales']);
+        // Guard: admin + supervisor only
+        const _session = Auth.guard(['admin', 'supervisor']);
         if (!_session) throw new Error('Unauthorized');
 
         // Supervisor filter: จำกัด CENTER_DOC ตาม centerId
@@ -672,37 +646,42 @@
 
         // App is defined in admin-data.js
 
-        document.addEventListener('DOMContentLoaded', () => { 
+        // Patch Nav.go สำหรับ dashboard
+        const _origNavGo = Nav.go;
+        Nav.go = (page) => {
+            _origNavGo(page);
+            if (page === 'dashboard' && typeof Dashboard !== 'undefined') Dashboard._render();
+        };
 
+        document.addEventListener('DOMContentLoaded', () => {
             if (App && App.init) App.init();
-
-            // Init Dashboard
             if (typeof Dashboard !== 'undefined') Dashboard.init();
 
-            // Navigate to Dashboard by default for Sales role; otherwise Planning
-            if (_session.role === 'sales') {
-                Nav.go('dashboard');
-            }
-
-            // Hide planning & allroutes nav for sales role
-            if (_session.role === 'sales') {
-                ['nav-planning', 'nav-allroutes'].forEach(id => {
-                    const el = document.getElementById(id);
-                    if (el) el.style.display = 'none';
-                });
-            }
-
-            // แสดงชื่อ user และ role ใน header
-            const userInfoEl = document.getElementById('header-user-info');
-            if (userInfoEl) {
+            // แสดง user info ใน sidebar ล่างสุด
+            const sidebarUserEl = document.getElementById('sidebar-user-info');
+            if (sidebarUserEl) {
                 const roleLabel = { admin: '⚙️ Admin', supervisor: '👁️ Supervisor' };
-                userInfoEl.innerHTML = `
-                    <span class="text-xs text-slate-400 font-medium hidden sm:block">${_session.displayName}</span>
-                    <span class="text-[10px] px-2 py-0.5 rounded-full font-bold ${_session.role === 'admin' ? 'bg-violet-900 text-violet-300' : 'bg-blue-900 text-blue-300'}">${roleLabel[_session.role] || _session.role}</span>
-                    ${_session.role === 'admin' ? '<a href="users.html" class="text-xs text-indigo-400 hover:text-indigo-200 font-bold transition">👥 Users</a>' : ''}
-                    <button onclick="showChangePwModal()" class="text-xs text-slate-400 hover:text-white font-bold transition">🔑 เปลี่ยน PW</button>
-                    <button onclick="Auth.logout()" class="text-xs text-slate-500 hover:text-red-400 font-bold transition ml-1">ออก</button>
+                const roleColor = _session.role === 'admin' ? 'bg-violet-800 text-violet-300' : 'bg-blue-800 text-blue-300';
+                sidebarUserEl.innerHTML = `
+                    <div class="flex items-center gap-2">
+                        <div class="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-white font-black text-sm shrink-0">
+                            ${_session.displayName ? _session.displayName[0].toUpperCase() : 'U'}
+                        </div>
+                        <div class="min-w-0">
+                            <div class="text-xs font-bold text-white truncate">${_session.displayName}</div>
+                            <div class="text-[10px] px-1.5 py-0.5 rounded-full font-bold inline-block mt-0.5 ${roleColor}">${roleLabel[_session.role] || _session.role}</div>
+                        </div>
+                    </div>
+                    ${_session.role === 'admin' ? '<a href="users.html" class="block w-full text-center text-[11px] text-indigo-400 hover:text-indigo-200 font-bold transition py-1 bg-slate-800 rounded-lg">👥 จัดการ Users</a>' : ''}
                 `;
+            }
+            // Center label ถ้ามี
+            const centerLabel = window.CENTER_ID ? `ศูนย์ ${window.CENTER_ID}` : '';
+            if (centerLabel) {
+                const cEl = document.getElementById('sidebar-user-info');
+                if (cEl) cEl.insertAdjacentHTML('afterbegin',
+                    `<div class="text-[10px] text-emerald-400 font-bold text-center bg-slate-800 rounded-lg py-1 mb-1">🏢 ${centerLabel}</div>`
+                );
             }
 
         });
