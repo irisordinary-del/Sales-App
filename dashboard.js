@@ -540,7 +540,7 @@ const Dashboard = {
 
         tbody.innerHTML = rowData.map(({ r, amt, tgt, pct }) => {
             const barW = Math.round((amt / maxAmt) * 100);
-            const pctStr = pct !== null ? this._pctBadgeInline(pct) : '<span class="text-gray-300 text-xs">—</span>';
+            const pctStr = pct !== null ? Dashboard._pctBadgeInline(pct) : '<span class="text-gray-300 text-xs">—</span>';
             const isActive = Dashboard._drillRoute === r;
             const rowCls = isAdmin ? 'cursor-pointer hover:bg-indigo-50 transition' : '';
             const activeCls = isActive ? 'bg-indigo-50 font-black' : '';
@@ -570,7 +570,7 @@ const Dashboard = {
             <td class="px-3 py-2.5 text-xs text-gray-600">รวมทั้งหมด</td>
             <td class="px-3 py-2.5 text-right text-xs tabular-nums text-emerald-700">${Dashboard._fmt(totalAmt)}</td>
             <td class="px-3 py-2.5 text-right text-xs tabular-nums text-gray-500">${totalTgt > 0 ? Dashboard._fmt(totalTgt) : '—'}</td>
-            <td class="px-3 py-2.5 text-right text-xs">${totalPct !== null ? this._pctBadgeInline(totalPct) : '—'}</td>
+            <td class="px-3 py-2.5 text-right text-xs">${totalPct !== null ? Dashboard._pctBadgeInline(totalPct) : '—'}</td>
             <td></td>
         </tr>`;
     },
@@ -795,5 +795,3 @@ const Dashboard = {
     }
 };
 
-// Fix 'this' reference issues in static-like object methods
-Dashboard._pctBadgeInline = Dashboard._pctBadgeInline.bind(Dashboard);
