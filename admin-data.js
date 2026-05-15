@@ -464,8 +464,12 @@ const ExcelIO = {
 // 🚀 App Controller
 // ==========================================
 const App = {
-    dbRef:      cloudDB.collection('appData').doc(window.CENTER_DOC || 'v1_main'),
+    get dbRef() {
+        return cloudDB.collection('appData').doc(window.CENTER_DOC || 'v1_main');
+    },
     routesCol:  () => cloudDB.collection('appData').doc(window.CENTER_DOC || 'v1_main').collection('routes'),
+    _snapshotUnsub: null,
+    _fileListenersReady: false,
 
     // Migrate: ข้อมูลเก่า (routes map ใน v1_main) → subcollection
     _migrate: async (oldRoutes) => {
@@ -580,8 +584,10 @@ const App = {
     },
 
     init: async () => {
+        if (!MapCtrl.map) MapCtrl.init();
 
-        MapCtrl.init();
+        if (App._snapshotUnsub) return;
+
         UI.showLoader('กำลังเชื่อมต่อ...', '');
         App.log(`🚀 เริ่มต้น — Center: ${window.CENTER_DOC || '(ไม่ระบุ)'}`);
         App._startForceReloadTimer();
@@ -597,7 +603,7 @@ const App = {
         }
         App.log('✅ Firestore persistence พร้อม');
 
-        App.dbRef.onSnapshot(async (doc) => {
+        App._snapshotUnsub = App.dbRef.onSnapshot(async (doc) => {
             clearTimeout(App._forceReloadTimer);
             const btn = document.getElementById('force-reload-btn');
             if (btn) btn.style.display = 'none';
@@ -641,26 +647,27 @@ const App = {
             if (err.code === 'permission-denied') {
                 UI.showErrorToast('⚠️ ไม่มีสิทธิ์เข้าถึงข้อมูล กรุณาตรวจสอบ center ID');
             } else {
-                UI.showErrorToast('⚠️ เชื่อมต่อ Firestore ไม่ได้ — กำลังใช้ข้อมูล offline');
-                // retry อัตโนมัติหลัง 5 วิ
-                setTimeout(() => {
-                    UI.showLoader('กำลังเชื่อมต่อใหม่...', '');
-                    App.init();
-                }, 5000);
+                UI.showErrorToast('⚠️ เชื่อมต่อ Firestore ไม่ได้ — กด "บังคับโหลดใหม่" หรือรอ retry');
+                const btn = document.getElementById('force-reload-btn');
+                if (btn) btn.style.display = 'block';
+                setTimeout(() => App.forceReload(), 5000);
             }
         });
 
-        const rawUpload = document.getElementById('rawUpload');
-        if (rawUpload) {
-            rawUpload.addEventListener('change', (e) => {
-                const f = e.target.files[0];
-                if (f) RawDataMgr.processExcel(f);
-            });
-        }
+        if (!App._fileListenersReady) {
+            App._fileListenersReady = true;
+            const rawUpload = document.getElementById('rawUpload');
+            if (rawUpload) {
+                rawUpload.addEventListener('change', (e) => {
+                    const f = e.target.files[0];
+                    if (f) RawDataMgr.processExcel(f);
+                });
+            }
 
-        const fileUpload = document.getElementById('fileUpload');
-        if (fileUpload) {
-            fileUpload.addEventListener('change', App.handleMapUpload);
+            const fileUpload = document.getElementById('fileUpload');
+            if (fileUpload) {
+                fileUpload.addEventListener('change', App.handleMapUpload);
+            }
         }
     },
 
@@ -855,7 +862,7 @@ const App = {
         if (!file) return;
 
         if (State.stores.length > 0 && !confirm(`ข้อมูลเดิมของ "${State.localActiveRoute}" จะถูกแทนที่\nยืนยันการอัปโหลด?`)) {
-            this.value = '';
+            e.target.value = '';
             return;
         }
 

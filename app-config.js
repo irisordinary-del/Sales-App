@@ -79,12 +79,13 @@ const State = {
     // Sales ไม่ควรเข้า index.html ยกเว้นเพื่อดู Dashboard
     // (ถ้าไม่มี ?center= → ส่งไป sales.html ตามเดิม; ถ้าเปิด index.html โดยตรงให้อยู่ต่อ)
     if (session.role === 'sales') {
-        // Sales สามารถอยู่ใน index.html เพื่อดู Dashboard ได้
-        // ไม่ redirect ออกอีกต่อไป
-        window.CENTER_DOC = null;
-        window.CENTER_ID  = null;
-        // ไม่ต้องทำอะไรเพิ่ม — dashboard.js จะแสดงเฉพาะข้อมูลของ sales คนนั้น
-        return; // ออกจาก IIFE
+        if (!session.centerId) {
+            document.body.innerHTML = '<div style="font-family:sans-serif;display:flex;height:100vh;align-items:center;justify-content:center;flex-direction:column;gap:12px;background:#0f172a;color:#e2e8f0"><p style="font-size:1.1rem;font-weight:700;">⚠️ บัญชี Sales ยังไม่ได้ผูกกับศูนย์</p><p style="color:#64748b;font-size:0.85rem;">กรุณาติดต่อ Admin</p><button onclick="Auth.logout()" style="margin-top:8px;background:#6366f1;color:#fff;border:none;border-radius:10px;padding:10px 24px;font-size:0.9rem;font-weight:700;cursor:pointer;">ออกจากระบบ</button></div>';
+            return;
+        }
+        window.CENTER_DOC = session.centerId + '_main';
+        window.CENTER_ID  = session.centerId;
+        return;
     }
 
     const params = new URLSearchParams(window.location.search);

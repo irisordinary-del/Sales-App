@@ -73,6 +73,14 @@
 
         <p id="loader-subtext" class="text-gray-500 text-sm mt-2 font-medium"></p>
 
+        <div id="loader-log" class="mt-3 text-[11px] text-gray-500 max-h-28 overflow-y-auto font-mono text-center px-4 leading-relaxed" style="max-width:min(90vw, 420px)"></div>
+
+        <button id="force-reload-btn" type="button" onclick="App.forceReload()"
+            style="display:none"
+            class="mt-4 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-md transition">
+            🔄 บังคับโหลดใหม่
+        </button>
+
     </div>
 
 
@@ -565,7 +573,10 @@
 
         </div>
 
-    </div><!-- end main -->
+        <!-- ===== PAGE: Dashboard ===== -->
+        <div id="page-dashboard" class="flex-1 flex flex-col absolute inset-0 hidden"></div>
+
+    </div><!-- end main-wrap -->
 
 
 
@@ -642,15 +653,6 @@
     </div>
 
 
-        <!-- ===== PAGE: AllRoutes ===== -->
-
-        
-
-
-
-    <!-- ===== PAGE: Dashboard ===== -->
-    <div id="page-dashboard" class="flex-1 flex flex-col absolute inset-0 hidden"></div>
-
     <!-- ===== SCRIPTS (ลำดับสำคัญมาก) ===== -->
 
     <!-- 0. Auth (ต้องก่อน app-config เพราะ app-config redirect ถ้าไม่มี center) -->
@@ -683,8 +685,8 @@
 
     <script>
 
-        // Guard: admin + supervisor only
-        const _session = Auth.guard(['admin', 'supervisor']);
+        // Guard: admin, supervisor, sales (dashboard)
+        const _session = Auth.guard(['admin', 'supervisor', 'sales']);
         if (!_session) throw new Error('Unauthorized');
 
         // Supervisor filter: จำกัด CENTER_DOC ตาม centerId
@@ -711,8 +713,9 @@
             // แสดง user info ใน sidebar ล่างสุด
             const sidebarUserEl = document.getElementById('sidebar-user-info');
             if (sidebarUserEl) {
-                const roleLabel = { admin: '⚙️ Admin', supervisor: '👁️ Supervisor' };
-                const roleColor = _session.role === 'admin' ? 'bg-violet-800 text-violet-300' : 'bg-blue-800 text-blue-300';
+                const roleLabel = { admin: '⚙️ Admin', supervisor: '👁️ Supervisor', sales: '🚚 Sales' };
+                const roleColor = _session.role === 'admin' ? 'bg-violet-800 text-violet-300'
+                    : _session.role === 'sales' ? 'bg-emerald-800 text-emerald-300' : 'bg-blue-800 text-blue-300';
                 sidebarUserEl.innerHTML = `
                     <div class="flex items-center gap-2">
                         <div class="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-white font-black text-sm shrink-0">
@@ -735,6 +738,13 @@
                 );
             }
 
+            if (_session.role === 'sales') {
+                ['nav-planning', 'nav-allroutes'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) el.style.display = 'none';
+                });
+                Nav.go('dashboard');
+            }
         });
 
     </script>
