@@ -82,7 +82,12 @@
 
         <nav class="flex-1 py-4 space-y-1 overflow-hidden">
 
-            <button onclick="Nav.go('planning')" id="nav-planning" class="sidebar-menu active w-full flex items-center px-4 md:px-5 py-3.5 text-sm font-bold">
+            <button onclick="Nav.go('dashboard')" id="nav-dashboard" class="sidebar-menu active w-full flex items-center px-4 md:px-5 py-3.5 text-sm font-bold">
+                <span class="text-lg md:mr-3">📊</span>
+                <span class="hidden md:inline">Dashboard</span>
+            </button>
+
+            <button onclick="Nav.go('planning')" id="nav-planning" class="sidebar-menu w-full flex items-center px-4 md:px-5 py-3.5 text-sm font-bold">
 
                 <span class="text-lg md:mr-3">📍</span>
 
@@ -107,9 +112,12 @@
 
 
 
+    <!-- ===== PAGE: Dashboard ===== -->
+    <div id="page-dashboard" class="flex-1 flex flex-col absolute inset-0"></div>
+
         <!-- ===== PAGE: Planning ===== -->
 
-        <div id="page-planning" class="flex-1 flex flex-col absolute inset-0">
+        <div id="page-planning" class="flex-1 flex flex-col absolute inset-0 hidden">
 
 
 
@@ -638,12 +646,22 @@
 
     <script src="file-manager.js"></script>
 
-    <!-- 6. Init -->
+    <!-- 6. Dashboard -->
+    <script src="dashboard.js"></script>
+
+    <!-- 7. Init -->
 
     <script>
 
-        // Guard: admin + supervisor only
-        const _session = Auth.guard(['admin', 'supervisor']);
+        // Patch Nav.go to hook Dashboard render on navigation
+        const _origNavGo = Nav.go;
+        Nav.go = (page) => {
+            _origNavGo(page);
+            if (page === 'dashboard' && typeof Dashboard !== 'undefined' && Dashboard._rows.length) {
+                Dashboard._render();
+            }
+        };
+        const _session = Auth.guard(['admin', 'supervisor', 'sales']);
         if (!_session) throw new Error('Unauthorized');
 
         // Supervisor filter: จำกัด CENTER_DOC ตาม centerId
@@ -657,6 +675,22 @@
         document.addEventListener('DOMContentLoaded', () => { 
 
             if (App && App.init) App.init();
+
+            // Init Dashboard
+            if (typeof Dashboard !== 'undefined') Dashboard.init();
+
+            // Navigate to Dashboard by default for Sales role; otherwise Planning
+            if (_session.role === 'sales') {
+                Nav.go('dashboard');
+            }
+
+            // Hide planning & allroutes nav for sales role
+            if (_session.role === 'sales') {
+                ['nav-planning', 'nav-allroutes'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) el.style.display = 'none';
+                });
+            }
 
             // แสดงชื่อ user และ role ใน header
             const userInfoEl = document.getElementById('header-user-info');

@@ -76,10 +76,15 @@ const State = {
         return;
     }
 
-    // Sales ไม่ควรเข้า index.html
+    // Sales ไม่ควรเข้า index.html ยกเว้นเพื่อดู Dashboard
+    // (ถ้าไม่มี ?center= → ส่งไป sales.html ตามเดิม; ถ้าเปิด index.html โดยตรงให้อยู่ต่อ)
     if (session.role === 'sales') {
-        window.location.replace('sales.html');
-        return;
+        // Sales สามารถอยู่ใน index.html เพื่อดู Dashboard ได้
+        // ไม่ redirect ออกอีกต่อไป
+        window.CENTER_DOC = null;
+        window.CENTER_ID  = null;
+        // ไม่ต้องทำอะไรเพิ่ม — dashboard.js จะแสดงเฉพาะข้อมูลของ sales คนนั้น
+        return; // ออกจาก IIFE
     }
 
     const params = new URLSearchParams(window.location.search);
