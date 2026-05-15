@@ -35,6 +35,21 @@
 
 
     <link rel="stylesheet" href="admin-style.css">
+    <style>
+        /* Sidebar collapse */
+        #sidebar { transition: width 0.25s cubic-bezier(0.4,0,0.2,1); }
+        #sidebar.collapsed { width: 0 !important; overflow: hidden; }
+        #sidebar-toggle-btn { transition: transform 0.25s; }
+        #sidebar.collapsed ~ #main-wrap #sidebar-toggle-btn,
+        body.sidebar-collapsed #sidebar-toggle-btn { transform: rotate(180deg); }
+        /* overlay สำหรับ mobile เมื่อ sidebar เปิด */
+        #sidebar-overlay { display:none; }
+        @media (max-width: 767px) {
+            #sidebar { position: fixed; top:0; left:0; height:100dvh; z-index:7000; }
+            #sidebar.collapsed { width: 0 !important; }
+            #sidebar-overlay { display:block; }
+        }
+    </style>
 
 </head>
 
@@ -67,14 +82,21 @@
 
 
     <!-- Sidebar — responsive (icon-only < md, full >= md) -->
-    <aside class="w-14 md:w-56 bg-slate-900 flex flex-col shrink-0 z-[6000] shadow-2xl transition-all duration-200">
+    <aside id="sidebar" class="w-14 md:w-56 bg-slate-900 flex flex-col shrink-0 z-[6000] shadow-2xl transition-all duration-200">
 
-        <!-- Logo -->
-        <div class="h-14 md:h-16 flex items-center justify-center bg-slate-950 border-b border-slate-800 shrink-0">
+        <!-- Logo + toggle -->
+        <div class="h-14 md:h-16 flex items-center justify-between bg-slate-950 border-b border-slate-800 shrink-0 px-2 md:px-3">
             <span class="text-2xl md:hidden">🗺️</span>
             <h1 class="text-xl font-black text-indigo-400 tracking-wider hidden md:block">
                 R<span class="text-white">Admin</span>
             </h1>
+            <button id="sidebar-toggle-btn" onclick="SidebarCtrl.toggle()"
+                title="ซ่อน/แสดงเมนู"
+                class="w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition shrink-0">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+                    <path d="M15 18l-6-6 6-6"/>
+                </svg>
+            </button>
         </div>
 
         <!-- Nav items -->
@@ -118,9 +140,11 @@
 
 
 
-    <!-- Main Content -->
+    <!-- Sidebar overlay (mobile) -->
+    <div id="sidebar-overlay" class="fixed inset-0 bg-black/40 z-[6999] hidden" onclick="SidebarCtrl.toggle()"></div>
 
-    <div class="flex-1 flex flex-col overflow-hidden relative">
+    <!-- Main Content -->
+    <div id="main-wrap" class="flex-1 flex flex-col overflow-hidden relative">
 
 
 
@@ -132,8 +156,14 @@
 
             <!-- Header — responsive -->
             <div class="h-14 bg-gray-900 text-white flex items-center justify-between px-3 md:px-5 shadow-md z-[5000] relative shrink-0 border-b-4 border-indigo-600">
-                <!-- Left: route selector + actions -->
+                <!-- Left: hamburger + route selector + actions -->
                 <div class="flex items-center gap-2 min-w-0 flex-1">
+                    <button onclick="SidebarCtrl.toggle()"
+                        class="w-8 h-8 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white flex items-center justify-center transition shrink-0">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+                            <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+                        </svg>
+                    </button>
                     <div class="flex items-center bg-gray-800 rounded-lg p-1 border border-gray-700 min-w-0">
                         <select id="routeSelector" onchange="App.switchRoute(this.value)"
                             class="bg-gray-900 text-white border-none text-sm focus:ring-0 outline-none font-bold py-1 px-2 rounded cursor-pointer max-w-[100px] sm:max-w-[180px]">
@@ -769,5 +799,37 @@
         });
     </script>
 
+    <script>
+        const SidebarCtrl = {
+            _collapsed: false,
+            toggle: () => {
+                const sb  = document.getElementById('sidebar');
+                const ov  = document.getElementById('sidebar-overlay');
+                SidebarCtrl._collapsed = !SidebarCtrl._collapsed;
+                sb.classList.toggle('collapsed', SidebarCtrl._collapsed);
+                // mobile overlay
+                if (window.innerWidth < 768) {
+                    ov.classList.toggle('hidden', SidebarCtrl._collapsed);
+                }
+                // invalidate map size หลัง transition
+                setTimeout(() => {
+                    if (typeof MapCtrl !== 'undefined' && MapCtrl.map) MapCtrl.map.invalidateSize();
+                }, 280);
+                localStorage.setItem('sidebar_collapsed', SidebarCtrl._collapsed ? '1' : '0');
+            },
+            restore: () => {
+                // บน mobile เริ่มต้นซ่อน sidebar ไว้ก่อน
+                const isMobile = window.innerWidth < 768;
+                const saved    = localStorage.getItem('sidebar_collapsed');
+                const collapse = isMobile ? true : (saved === '1');
+                if (collapse) {
+                    const sb = document.getElementById('sidebar');
+                    if (sb) sb.classList.add('collapsed');
+                    SidebarCtrl._collapsed = true;
+                }
+            }
+        };
+        document.addEventListener('DOMContentLoaded', SidebarCtrl.restore);
+    </script>
 </body>
 </html>
