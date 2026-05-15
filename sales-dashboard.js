@@ -7,7 +7,7 @@
 
 const SalesDashboard = {
 
-    _mode: 'gross',      // 'gross' | 'net'
+    _mode: 'net',      // 'gross' | 'net'
     _ym: '',             // 'YYYY_MM' ที่เลือกอยู่
     _rows: [],           // rows ของ sales คนนี้
     _target: 0,          // target เดือนนี้
@@ -110,14 +110,7 @@ const SalesDashboard = {
     },
 
     // ─── Toggle Gross / Net ───────────────────────────────────────────────
-    setMode: (mode) => {
-        SalesDashboard._mode = mode;
-        const btnG = document.getElementById('db-btn-gross');
-        const btnN = document.getElementById('db-btn-net');
-        if (btnG) { btnG.style.background = mode === 'gross' ? '#2563eb' : 'none'; btnG.style.color = mode === 'gross' ? '#fff' : '#6b7280'; }
-        if (btnN) { btnN.style.background = mode === 'net'   ? '#2563eb' : 'none'; btnN.style.color = mode === 'net'   ? '#fff' : '#6b7280'; }
-        SalesDashboard._render();
-    },
+    setMode: (_) => { /* ล็อคเป็น net เสมอ */ },
 
     _amt: (r) => SalesDashboard._mode === 'gross' ? (r.gross || 0) : (r.net || 0),
 
@@ -144,7 +137,7 @@ const SalesDashboard = {
 
         // ─ KPI Cards ─
         SalesDashboard._setText('db-kpi-total', SalesDashboard._fmt(total));
-        SalesDashboard._setText('db-kpi-total-sub', SalesDashboard._mode === 'gross' ? 'Invoice Gross Amount' : 'Invoice Net Amount');
+        SalesDashboard._setText('db-kpi-total-sub', 'Invoice Net Amount');
         SalesDashboard._setText('db-kpi-shops', shops.toLocaleString());
         SalesDashboard._setText('db-kpi-inv', invCount.toLocaleString());
 

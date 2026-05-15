@@ -42,7 +42,7 @@ let map = null, mapMarkers = [], sortableList = null, markerClusterGroup = null;
 
 // ─── Tab keys ที่ระบบรู้จัก ───────────────────────────────
 const VALID_TABS = ['dashboard', 'stores', 'route'];
-const DEFAULT_TAB = 'route';
+const DEFAULT_TAB = 'dashboard';
 const TAB_STORAGE_KEY = 'sales_last_tab';
 
 const UI = {
@@ -258,7 +258,7 @@ const Processor = {
                 ? `<span style="font-size:10px;color:#3b82f6;font-weight:600;">${s.marketName}</span> `
                 : '';
             const histTag = h
-                ? `<div style="margin-top:3px;font-size:10px;color:#059669;font-weight:700;">💰 ${_fmtB(h.gross)} · ${h.skuCount} SKU · ${h.invCount} บิล</div>`
+                ? `<div style="margin-top:3px;font-size:10px;color:#059669;font-weight:700;">💰 ${_fmtB(h.net)} · ${h.skuCount} SKU · ${h.invCount} บิล</div>`
                 : '';
             return `<div onclick="UI.openModal('${s.id}')"
                 data-search="${s.id.toLowerCase()} ${s.name.toLowerCase()} ${(s.marketName||'').toLowerCase()}"

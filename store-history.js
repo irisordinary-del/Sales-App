@@ -187,19 +187,19 @@ const StoreHistory = {
             if (r.invNum) byProd[key].invs.add(r.invNum);
         });
         const skuCount = Object.keys(byProd).length;
-        const sorted   = Object.values(byProd).sort((a, b) => b.gross - a.gross);
-        const maxGross = sorted[0]?.gross || 1;
+        const sorted   = Object.values(byProd).sort((a, b) => b.net - a.net);
+        const maxNet = sorted[0]?.net || 1;
 
         // ─ Fill KPI ─
-        document.getElementById('m-gross').textContent = _fmtB(gross);
+        document.getElementById('m-gross').textContent = _fmtB(net);
         document.getElementById('m-bills').textContent = invCount;
         document.getElementById('m-sku').textContent   = skuCount;
 
         // ─ SKU list ─
         const listEl = document.getElementById('m-sku-list');
         listEl.innerHTML = sorted.map(p => {
-            const barW = Math.round((p.gross / maxGross) * 100);
-            const pct  = gross > 0 ? (p.gross / gross * 100).toFixed(1) : '0.0';
+            const barW = Math.round((p.net / maxNet) * 100);
+            const pct  = net > 0 ? (p.net / net * 100).toFixed(1) : '0.0';
             return `
             <div style="background:#f9fafb;border-radius:12px;padding:10px 12px;border:1px solid #f3f4f6;">
                 <!-- Product name + pct -->
@@ -216,7 +216,7 @@ const StoreHistory = {
                 </div>
                 <!-- Stats row -->
                 <div style="display:flex;gap:12px;font-size:10px;font-weight:700;">
-                    <span style="color:#059669;">฿ ${_fmtB(p.gross)}</span>
+                    <span style="color:#059669;">฿ ${_fmtB(p.net)}</span>
                     <span style="color:#6b7280;">${p.qty.toLocaleString()} EA</span>
                     <span style="color:#8b5cf6;">${p.invs.size} บิล</span>
                 </div>
