@@ -43,9 +43,15 @@ const Dashboard = {
 
         container.innerHTML = `
         <!-- Header -->
-        <div class="h-16 bg-gray-900 text-white flex items-center justify-between px-5 shadow-md shrink-0 border-b-4 border-emerald-600 z-10">
-            <div class="flex items-center gap-3 flex-wrap">
-                <span class="text-lg font-black text-emerald-400 hidden sm:block">📊 Dashboard</span>
+        <div class="h-14 bg-gray-900 text-white flex items-center justify-between px-3 md:px-5 shadow-md shrink-0 border-b-4 border-emerald-600 z-10">
+            <div class="flex items-center gap-2 flex-wrap">
+                <button onclick="SidebarCtrl.toggle()"
+                    class="w-8 h-8 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white flex items-center justify-center transition shrink-0">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+                        <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+                    </svg>
+                </button>
+                <span class="text-base font-black text-emerald-400 hidden sm:block">📊 Dashboard</span>
 
                 <!-- Month selector -->
                 <select id="db-month-select" onchange="Dashboard._onMonthChange(this.value)"
