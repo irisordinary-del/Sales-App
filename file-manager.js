@@ -303,7 +303,7 @@ const FileManager = {
                                                                   ws['!cols'] = [
                                                                           { wch: 14 }, { wch: 12 }, { wch: 40 }, { wch: 10 },
                                                                           { wch: 8 }, { wch: 18 }, { wch: 18 }, { wch: 14 },
-                                                                          { wch: 14 }, { wch: 14 }, { wch: 30 }, { wch: 6 }
+                                                                          { wch: 14 }, { wch: 14 }, { wch: 30 }, { wch: 6 }, { wch: 6 }
                                                                                           ];
 
                                                                   // Truncate sheet name to 31 chars (Excel limit)
@@ -369,7 +369,7 @@ const FileManager = {
                     else if (h.includes('สายวิ่ง') || h.includes('day')) dayCol = i;
                     else if (h.includes('คิว') || h.includes('seq')) seqCol = i;
                     else if (h.includes('salescode') || h.includes('รหัสเซลล์')) salesCodeCol = i;
-                    else if (h.includes('sales') && !h.includes('salescode')) salesCodeCol = i;
+                    else if (h.includes('sales')) salesCodeCol = i;
                     else if (h.includes('ประเภท') || h.includes('type') || h.includes('shoptype')) shopTypeCol = i;
                     else if (h.includes('sold to city') || h.includes('subdistrict') || h.includes('ตำบล')) subDistrictCol = i;
                     else if (h.includes('sold to state') || h.includes('district') || h.includes('อำเภอ')) districtCol = i;
