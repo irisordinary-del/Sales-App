@@ -159,8 +159,13 @@ const UI = {
         document.querySelectorAll('.sort-opt-btn').forEach(b => b.classList.remove('active'));
         const active = document.querySelector(`.sort-opt-btn[onclick="UI.applySort('${mode}')"]`);
         if (active) active.classList.add('active');
-        Processor.stores();
-        UI.toggleSort(); // ปิด panel หลังเลือก
+        // ปิด sort panel
+        const p = document.getElementById('sort-panel');
+        const btn = document.getElementById('sort-btn');
+        if (p) p.style.display = 'none';
+        if (btn) { btn.style.background = '#f3f4f6'; btn.style.color = '#374151'; btn.style.borderColor = '#e5e7eb'; }
+        // re-render รายการร้าน
+        if (typeof Processor !== 'undefined') Processor.stores();
     }
 };
 
@@ -602,89 +607,30 @@ const MapCtrl = {
         if (markerClusterGroup) { map.removeLayer(markerClusterGroup); }
         mapMarkers = [];
 
-        const list = State.allStores.filter(s => s.days.includes(State.currentDay));
-
-        // ── Custom pixel-based clustering ──
-        // จัดกลุ่มตาม pixel distance ณ zoom ปัจจุบัน (threshold 40px)
-        const PIXEL_THRESHOLD = 40;
-        const zoom = map.getZoom();
-
-        // แปลง latlng → pixel point
-        const pts = list.map(s => ({
-            s,
-            px: map.project([s.lat, s.lng], zoom)
-        }));
-
-        // union-find เพื่อจัดกลุ่ม
-        const parent = pts.map((_, i) => i);
-        const find = i => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
-        const union = (a, b) => { parent[find(a)] = find(b); };
-
-        for (let i = 0; i < pts.length; i++) {
-            for (let j = i + 1; j < pts.length; j++) {
-                const dx = pts[i].px.x - pts[j].px.x;
-                const dy = pts[i].px.y - pts[j].px.y;
-                if (Math.sqrt(dx*dx + dy*dy) < PIXEL_THRESHOLD) union(i, j);
-            }
-        }
-
-        // รวมกลุ่ม
-        const groups = {};
-        pts.forEach((p, i) => {
-            const root = find(i);
-            if (!groups[root]) groups[root] = [];
-            groups[root].push(p);
-        });
-
-        // สร้าง layer group ธรรมดา (ไม่มี animation)
+        // สร้าง layer group ธรรมดา — แสดงหมุดทุกตัวแยกกัน ไม่รวมกลุ่ม
         markerClusterGroup = L.layerGroup();
 
-        Object.values(groups).forEach(group => {
-            // หา centroid ของกลุ่ม
-            const avgLat = group.reduce((s, p) => s + p.s.lat, 0) / group.length;
-            const avgLng = group.reduce((s, p) => s + p.s.lng, 0) / group.length;
+        const list = State.allStores.filter(s => s.days.includes(State.currentDay));
+        list.sort((a, b) => (a.seqs?.[State.currentDay] || 999) - (b.seqs?.[State.currentDay] || 999));
 
-            if (group.length === 1) {
-                // หมุดเดี่ยว — แสดงปกติ
-                const s = group[0].s;
-                const seq = s.seqs?.[State.currentDay] || (list.indexOf(s) + 1);
-                const icon = L.divIcon({
-                    html: `<svg viewBox="0 0 24 24" width="30" height="40" style="filter:drop-shadow(0px 2px 3px rgba(0,0,0,0.3));overflow:visible;"><path d="M12 0C7 0 3 4 3 9c0 7 9 15 9 15s9-8 9-15c0-5-4-9-9-9z" fill="#2563eb" stroke="#fff" stroke-width="2"/><circle cx="12" cy="9" r="7" fill="#fff"/><text x="12" y="13" font-size="10" font-weight="900" fill="#000" text-anchor="middle">${seq}</text></svg>`,
-                    className: '', iconSize: [30, 40], iconAnchor: [15, 40], popupAnchor: [0, -40]
-                });
-                const popupRows = `<b class="text-xs">${s.name}</b><br><button onclick="UI.openModal('${s.id}')" class="bg-gray-100 text-gray-700 px-3 py-1 rounded border mt-1 text-[10px] font-bold shadow-sm">ดูข้อมูล</button>`;
-                const m = L.marker([s.lat, s.lng], { icon })
-                    .bindPopup(`<div class="text-center pb-1">${popupRows}</div>`, { closeButton: false });
-                markerClusterGroup.addLayer(m);
-                mapMarkers.push(m);
-            } else {
-                // หมุดกลุ่ม — วงกลมแสดงจำนวน คลิกแล้ว zoom เข้า
-                const count = group.length;
-                const icon = L.divIcon({
-                    html: `<div style="width:40px;height:40px;border-radius:50%;background:#1e40af;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:15px;border:3px solid #fff;box-shadow:0 2px 10px rgba(0,0,0,0.35);">${count}</div>`,
-                    className: '', iconSize: [40, 40], iconAnchor: [20, 20]
-                });
-                // popup รายชื่อทุกร้านในกลุ่ม
-                const rows = group.map(p =>
-                    `<div style="padding:3px 0;border-bottom:1px solid #f3f4f6;cursor:pointer;" onclick="UI.openModal('${p.s.id}');"><b style="font-size:11px;">${p.s.name}</b></div>`
-                ).join('');
-                const m = L.marker([avgLat, avgLng], { icon })
-                    .bindPopup(`<div style="min-width:160px;">${rows}</div>`, { closeButton: false });
-                markerClusterGroup.addLayer(m);
-                mapMarkers.push(m);
-            }
+        list.forEach((s, i) => {
+            const seq = s.seqs?.[State.currentDay] || i + 1;
+            const icon = L.divIcon({
+                html: `<svg viewBox="0 0 24 24" width="30" height="40" style="filter:drop-shadow(0px 2px 3px rgba(0,0,0,0.3));overflow:visible;"><path d="M12 0C7 0 3 4 3 9c0 7 9 15 9 15s9-8 9-15c0-5-4-9-9-9z" fill="#2563eb" stroke="#fff" stroke-width="2"/><circle cx="12" cy="9" r="7" fill="#fff"/><text x="12" y="13" font-size="10" font-weight="900" fill="#000" text-anchor="middle">${seq}</text></svg>`,
+                className: '', iconSize: [30, 40], iconAnchor: [15, 40], popupAnchor: [0, -40]
+            });
+            const m = L.marker([s.lat, s.lng], { icon })
+                .bindPopup(
+                    `<div class="text-center pb-1"><b class="text-xs">${s.name}</b><br><button onclick="UI.openModal('${s.id}')" class="bg-gray-100 text-gray-700 px-3 py-1 rounded border mt-1 text-[10px] font-bold shadow-sm">ดูข้อมูล</button></div>`,
+                    { closeButton: false }
+                );
+            markerClusterGroup.addLayer(m);
+            mapMarkers.push(m);
         });
 
         map.addLayer(markerClusterGroup);
-
-        // re-cluster เมื่อ zoom เปลี่ยน
-        map.off('zoomend', MapCtrl._onZoomEnd);
-        map.on('zoomend', MapCtrl._onZoomEnd);
-
         if (State.mapNeedsFit) { MapCtrl.fitBounds(); State.mapNeedsFit = false; }
     },
-
-    _onZoomEnd: () => { MapCtrl.drawMap(); },
 
     fitBounds: () => { if (mapMarkers.length && map) map.fitBounds(new L.featureGroup(mapMarkers).getBounds(), { padding: [30, 30] }); },
     forceFitBounds: () => { State.mapNeedsFit = true; MapCtrl.drawMap(); },
