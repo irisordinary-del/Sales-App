@@ -97,8 +97,8 @@ let State = { myRoute: "", allStores: [], routeStores: [], sales: {}, currentDay
 let map = null, mapMarkers = [], sortableList = null, markerClusterGroup = null;
 
 // ─── Tab keys ที่ระบบรู้จัก ───────────────────────────────
-const VALID_TABS = ['stores', 'route'];
-const DEFAULT_TAB = 'route';
+const VALID_TABS = ['dashboard', 'stores', 'route'];
+const DEFAULT_TAB = 'dashboard';
 const TAB_STORAGE_KEY = 'sales_last_tab';
 
 const UI = {
@@ -253,8 +253,10 @@ const App = {
                 LoadBar.done();
                 Processor.run();
                 if (!State.isLoaded) {
-                    UI.restoreTab();
                     State.isLoaded = true;
+                    if (typeof SalesDashboard !== 'undefined') SalesDashboard.init();
+                    if (typeof StoreHistory !== 'undefined') StoreHistory.init();
+                    UI.restoreTab();
                 }
             }
         };
