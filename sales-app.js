@@ -1,11 +1,67 @@
-// === sales-app.js ===
+// ══════════════════════════════════════════
+// 📶 Progress bar โหลดข้อมูล
+// ══════════════════════════════════════════
+const LoadBar = {
+    _el: null,
+    _bar: null,
+    _lbl: null,
+    _timer: null,
 
-// ✅ Inline toast
+    _ensure: () => {
+        if (LoadBar._el) return;
+        const el = document.createElement('div');
+        el.id = 'load-bar-wrap';
+        el.style.cssText = `
+            position:fixed;bottom:0;left:0;right:0;z-index:99999;
+            background:#0f172a;padding:8px 16px 10px;
+            transform:translateY(100%);transition:transform 0.25s ease;
+            display:flex;flex-direction:column;gap:4px;
+        `;
+        el.innerHTML = `
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">
+                <span id="load-bar-label" style="font-size:11px;font-weight:700;color:#94a3b8;font-family:'Prompt',sans-serif;"></span>
+                <span id="load-bar-pct" style="font-size:11px;font-weight:900;color:#38bdf8;font-family:'Prompt',sans-serif;"></span>
+            </div>
+            <div style="background:#1e293b;border-radius:99px;height:4px;overflow:hidden;">
+                <div id="load-bar-fill" style="height:4px;border-radius:99px;background:linear-gradient(90deg,#2563eb,#38bdf8);width:0%;transition:width 0.4s ease;"></div>
+            </div>
+        `;
+        document.body.appendChild(el);
+        LoadBar._el  = el;
+        LoadBar._bar = document.getElementById('load-bar-fill');
+        LoadBar._lbl = document.getElementById('load-bar-label');
+        LoadBar._pct = document.getElementById('load-bar-pct');
+    },
+
+    show: (label, pct) => {
+        LoadBar._ensure();
+        LoadBar._lbl.textContent = label;
+        LoadBar._pct.textContent = Math.round(pct) + '%';
+        LoadBar._bar.style.width = Math.round(pct) + '%';
+        LoadBar._el.style.transform = 'translateY(0)';
+    },
+
+    done: () => {
+        if (!LoadBar._el) return;
+        LoadBar._lbl.textContent = '✅ โหลดข้อมูลเสร็จแล้ว';
+        LoadBar._pct.textContent = '100%';
+        LoadBar._bar.style.width = '100%';
+        LoadBar._bar.style.background = '#10b981';
+        clearTimeout(LoadBar._timer);
+        LoadBar._timer = setTimeout(() => {
+            LoadBar._el.style.transform = 'translateY(100%)';
+        }, 1200);
+    }
+};
+
 function _fmtB(n) {
     if (!n) return '0';
     return Math.round(n).toLocaleString('th-TH');
 }
 
+// === sales-app.js ===
+
+// ✅ Inline toast
 function showSalesToast(msg, isError) {
     let t = document.getElementById('sales-toast');
     if (!t) {
@@ -41,8 +97,8 @@ let State = { myRoute: "", allStores: [], routeStores: [], sales: {}, currentDay
 let map = null, mapMarkers = [], sortableList = null, markerClusterGroup = null;
 
 // ─── Tab keys ที่ระบบรู้จัก ───────────────────────────────
-const VALID_TABS = ['dashboard', 'stores', 'route'];
-const DEFAULT_TAB = 'dashboard';
+const VALID_TABS = ['stores', 'route'];
+const DEFAULT_TAB = 'route';
 const TAB_STORAGE_KEY = 'sales_last_tab';
 
 const UI = {
@@ -129,15 +185,24 @@ const UI = {
     },
 
     openModal: (id) => {
-        const s = State.allStores.find(x => x.id === id);
-        if (!s) return;
-        document.getElementById('m-name').textContent     = s.name;
-        document.getElementById('m-id').textContent       = 'ID: ' + s.id;
-        document.getElementById('m-shoptype').textContent = s.shopType || '';
-        document.getElementById('m-nav-btn').onclick = () =>
-            window.open(`https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}&travelmode=driving`);
-        // เปิด StoreHistory modal
-        if (typeof StoreHistory !== 'undefined') StoreHistory.openFor(id);
+        let s = State.allStores.find(x => x.id === id);
+        let k = State.sales[id] || { vpo: 0, billCount: 0, skuCount: 0, hasJelly: false, hasKlom: false };
+        document.getElementById('m-name').innerText = s.name;
+        document.getElementById('m-id').innerText = "ID: " + s.id;
+        document.getElementById('m-sales').innerText = k.vpo;
+        document.getElementById('m-bills').innerText = k.billCount;
+        document.getElementById('m-vpo').innerText = k.billCount ? (k.vpo / k.billCount).toFixed(1) : 0;
+        document.getElementById('m-sku').innerText = k.skuCount;
+
+        const setBox = (boxId, statusId, active) => {
+            let b = document.getElementById(boxId);
+            let s = document.getElementById(statusId);
+            if (active) { b.className = "flex justify-between items-center p-2 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 text-xs font-bold"; s.innerText = "✅ ซื้อแล้ว"; }
+            else { b.className = "flex justify-between items-center p-2 rounded-lg border border-red-100 bg-red-50 text-red-400 text-xs font-bold"; s.innerText = "❌ ยังไม่ซื้อ"; }
+        };
+        setBox('m-j-box', 'm-j-status', k.hasJelly);
+        setBox('m-k-box', 'm-k-status', k.hasKlom);
+        document.getElementById('m-nav-btn').onclick = () => window.open(`https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}&travelmode=driving`);
         document.getElementById('store-modal').classList.remove('hidden');
     },
 
@@ -170,24 +235,23 @@ const App = {
     },
 
     start: () => {
-        // login-screen ถูกซ่อนใน HTML แล้ว
-        // ✅ แสดง hamburger button
         const hBtn = document.getElementById('hamburger-btn');
         if (hBtn) hBtn.style.display = 'flex';
         document.getElementById('main-header').classList.remove('hidden');
         document.getElementById('main-content').classList.remove('hidden');
-        // bottom-nav ถูกแทนด้วย hamburger-btn แล้ว (ไม่ต้องแสดง nav เดิม)
         document.getElementById('user-route-label').innerText = State.myRoute;
         document.getElementById('loader').style.display = 'flex';
+
+        // ── Progress bar เริ่มต้น
+        LoadBar.show('กำลังเชื่อมต่อ Firebase...', 5);
 
         let isMainLoaded = false, isSalesLoaded = false;
 
         const checkReady = () => {
             if (isMainLoaded && isSalesLoaded) {
                 document.getElementById('loader').style.display = 'none';
+                LoadBar.done();
                 Processor.run();
-
-                // ✅ restore tab ที่ค้างไว้ (ทั้งตอนโหลดครั้งแรกและหลัง refresh)
                 if (!State.isLoaded) {
                     UI.restoreTab();
                     State.isLoaded = true;
@@ -200,6 +264,7 @@ const App = {
         docMain = db.collection('appData').doc(_centerDocId);
         const routeColRef = db.collection('appData').doc(_centerDocId).collection('routes');
 
+        LoadBar.show('กำลังโหลดข้อมูลร้านค้า...', 40);
         docMain.onSnapshot(async doc => {
             if (!doc.exists) { State.allStores = []; isMainLoaded = true; checkReady(); return; }
             const data = doc.data();
@@ -221,6 +286,7 @@ const App = {
             if (isMainLoaded) Processor.run();
         });
 
+        LoadBar.show('กำลังโหลดข้อมูล KPI...', 70);
         colSales.onSnapshot(snap => {
             let merged = {};
             snap.forEach(doc => { Object.assign(merged, doc.data()); });
@@ -245,24 +311,48 @@ const Processor = {
     // ✅ ลบ dashboard() ออก — run แค่ stores กับ route
     run: () => { Processor.stores(); Processor.setupRoute(); },
 
+    _storeSort: 'name', // 'name' | 'active' | 'amount'
+    setSort: (mode) => {
+        Processor._storeSort = mode;
+        // อัปเดต active state ปุ่ม sort
+        document.querySelectorAll('.sort-btn').forEach(b => {
+            b.style.background = b.dataset.sort === mode ? '#2563eb' : '#f3f4f6';
+            b.style.color = b.dataset.sort === mode ? '#fff' : '#374151';
+        });
+        Processor.stores();
+    },
     stores: () => {
         const hist = (typeof StoreHistory !== 'undefined') ? StoreHistory._storeMap : {};
-        let html = State.allStores.map(s => {
+        let list = [...State.allStores];
+        // sort
+        if (Processor._storeSort === 'active') {
+            list.sort((a, b) => {
+                const av = (State.sales[a.id]?.vpo || 0) > 0 ? 1 : 0;
+                const bv = (State.sales[b.id]?.vpo || 0) > 0 ? 1 : 0;
+                return bv - av || a.name.localeCompare(b.name, 'th');
+            });
+        } else if (Processor._storeSort === 'amount') {
+            list.sort((a, b) => (hist[b.id]?.net || 0) - (hist[a.id]?.net || 0));
+        } else {
+            list.sort((a, b) => a.name.localeCompare(b.name, 'th'));
+        }
+
+        const html = list.map(s => {
             const k      = State.sales[s.id];
             const active = k && k.vpo > 0;
             const h      = hist[s.id];
             const badge  = active
-                ? `<span style="background:#d1fae5;color:#065f46;font-size:9px;font-weight:800;padding:2px 8px;border-radius:8px;">Active</span>`
-                : `<span style="background:#f3f4f6;color:#9ca3af;font-size:9px;font-weight:800;padding:2px 8px;border-radius:8px;">Inactive</span>`;
+                ? `<span style="background:#d1fae5;color:#065f46;font-size:9px;font-weight:800;padding:2px 8px;border-radius:8px;white-space:nowrap;">Active</span>`
+                : `<span style="background:#f3f4f6;color:#9ca3af;font-size:9px;font-weight:800;padding:2px 8px;border-radius:8px;white-space:nowrap;">Inactive</span>`;
             const mktTag = s.marketName
-                ? `<span style="font-size:10px;color:#3b82f6;font-weight:600;">${s.marketName}</span> `
+                ? `<span style="font-size:10px;color:#3b82f6;font-weight:600;">${s.marketName} · </span>`
                 : '';
             const histTag = h
                 ? `<div style="margin-top:3px;font-size:10px;color:#059669;font-weight:700;">💰 ${_fmtB(h.net)} · ${h.skuCount} SKU · ${h.invCount} บิล</div>`
                 : '';
             return `<div onclick="UI.openModal('${s.id}')"
                 data-search="${s.id.toLowerCase()} ${s.name.toLowerCase()} ${(s.marketName||'').toLowerCase()}"
-                style="background:#fff;border-radius:14px;border:1px solid #e5e7eb;padding:11px 14px;display:flex;justify-content:space-between;align-items:flex-start;cursor:pointer;active:background:#f9fafb;">
+                style="background:#fff;border-radius:14px;border:1px solid #e5e7eb;padding:11px 14px;display:flex;justify-content:space-between;align-items:flex-start;cursor:pointer;margin-bottom:8px;">
                 <div style="flex:1;min-width:0;margin-right:10px;">
                     <div style="font-weight:800;font-size:13px;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${s.name}</div>
                     <div style="font-size:10px;color:#9ca3af;font-family:monospace;margin-top:1px;">${mktTag}${s.id}</div>
@@ -291,10 +381,7 @@ const Processor = {
             State.mapNeedsFit = true;
         }
         el.value = State.currentDay;
-        // อัปเดตหัว tab-stores ให้แสดงชื่อตลาดของวันที่เลือก
-        const _stM = getDayMarkets(State.currentDay);
-        const _stEl = document.getElementById('stores-title');
-        if (_stEl) _stEl.textContent = _stM ? 'สายวิ่งวันที่ ' + State.currentDay.replace('Day ','') + ' · ' + _stM : 'รายชื่อร้านค้าทั้งหมด';
+        // stores-title ไม่แสดงชื่อสายแล้ว — ใช้แค่ "ร้านค้า"
         Processor.routeList();
     },
 
@@ -514,14 +601,16 @@ const MapCtrl = {
         markerClusterGroup = L.markerClusterGroup({
             spiderfyOnMaxZoom: true,
             showCoverageOnHover: false,
-            maxClusterRadius: 45,
-            disableClusteringAtZoom: 19,
+            maxClusterRadius: 40,
+            disableClusteringAtZoom: 17,
             spiderfyDistanceMultiplier: 1.5,
+            animate: false,
+            animateAddingMarkers: false,
             iconCreateFunction: (cluster) => {
                 const count = cluster.getChildCount();
                 return L.divIcon({
-                    html: `<div style="width:38px;height:38px;border-radius:50%;background:#1e40af;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:14px;border:3px solid #fff;box-shadow:0 2px 10px rgba(0,0,0,0.35);">${count}</div>`,
-                    className: '', iconSize: [38, 38], iconAnchor: [19, 19]
+                    html: `<div style="width:34px;height:34px;border-radius:50%;background:#1e40af;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:13px;border:2.5px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.3);">${count}</div>`,
+                    className: '', iconSize: [34, 34], iconAnchor: [17, 17]
                 });
             }
         });
@@ -673,9 +762,7 @@ const Resizer = {
 
 document.getElementById('day-select').addEventListener('change', (e) => {
     State.currentDay = e.target.value;
-    const _m = getDayMarkets(State.currentDay);
-    const _sEl = document.getElementById('stores-title');
-    if (_sEl) _sEl.textContent = _m ? 'สายวิ่งวันที่ ' + State.currentDay.replace('Day ','') + ' · ' + _m : 'รายชื่อร้านค้าทั้งหมด';
+    // stores-title ไม่ sync กับวันที่เลือกแล้ว
     State.mapNeedsFit = true;
     Processor.routeList();
 });
