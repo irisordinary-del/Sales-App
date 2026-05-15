@@ -49,6 +49,27 @@
             #sidebar.collapsed { width: 0 !important; }
             #sidebar-overlay { display:block; }
         }
+
+        /* page-dashboard และ page-allroutes ใช้ absolute inset-0
+           ต้องเพิ่ม left เท่ากับ sidebar width เพื่อไม่ให้ทับ */
+        #page-dashboard,
+        #page-allroutes {
+            left: 3.5rem; /* w-14 = 56px */
+            transition: left 0.25s cubic-bezier(0.4,0,0.2,1);
+        }
+        @media (min-width: 768px) {
+            #page-dashboard,
+            #page-allroutes {
+                left: 14rem; /* w-56 = 224px */
+            }
+        }
+        @media (max-width: 767px) {
+            /* mobile: sidebar เป็น fixed overlay ไม่ดัน content */
+            #page-dashboard,
+            #page-allroutes {
+                left: 0 !important;
+            }
+        }
     </style>
 
 </head>
@@ -810,6 +831,16 @@
     <script>
         const SidebarCtrl = {
             _collapsed: false,
+            _updatePageOffset: (collapsed) => {
+                const isMobile = window.innerWidth < 768;
+                // mobile: sidebar เป็น fixed overlay ไม่ดัน content
+                const offset = (collapsed || isMobile) ? '0px'
+                    : (window.innerWidth >= 768 ? '14rem' : '3.5rem');
+                ['page-dashboard', 'page-allroutes'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) el.style.left = offset;
+                });
+            },
             toggle: () => {
                 const sb  = document.getElementById('sidebar');
                 const ov  = document.getElementById('sidebar-overlay');
@@ -819,6 +850,8 @@
                 if (window.innerWidth < 768) {
                     ov.classList.toggle('hidden', SidebarCtrl._collapsed);
                 }
+                // อัปเดต offset ของ page ที่ absolute
+                SidebarCtrl._updatePageOffset(SidebarCtrl._collapsed);
                 // invalidate map size หลัง transition
                 setTimeout(() => {
                     if (typeof MapCtrl !== 'undefined' && MapCtrl.map) MapCtrl.map.invalidateSize();
@@ -835,6 +868,8 @@
                     if (sb) sb.classList.add('collapsed');
                     SidebarCtrl._collapsed = true;
                 }
+                // ตั้ง offset ให้ถูกต้องตั้งแต่โหลด
+                SidebarCtrl._updatePageOffset(SidebarCtrl._collapsed);
             }
         };
         document.addEventListener('DOMContentLoaded', SidebarCtrl.restore);
