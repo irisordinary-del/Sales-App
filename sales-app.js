@@ -1,6 +1,13 @@
 // === sales-app.js ===
 
 // ✅ Inline toast
+function _fmtB(n) {
+    if (!n) return '0';
+    if (n >= 1000000) return (n/1000000).toFixed(1) + 'M';
+    if (n >= 1000)    return (n/1000).toFixed(1) + 'K';
+    return Math.round(n).toLocaleString('th-TH');
+}
+
 function showSalesToast(msg, isError) {
     let t = document.getElementById('sales-toast');
     if (!t) {
@@ -124,25 +131,33 @@ const UI = {
     },
 
     openModal: (id) => {
-        let s = State.allStores.find(x => x.id === id);
-        let k = State.sales[id] || { vpo: 0, billCount: 0, skuCount: 0, hasJelly: false, hasKlom: false };
-        document.getElementById('m-name').innerText = s.name;
-        document.getElementById('m-id').innerText = "ID: " + s.id;
-        document.getElementById('m-sales').innerText = k.vpo;
-        document.getElementById('m-bills').innerText = k.billCount;
-        document.getElementById('m-vpo').innerText = k.billCount ? (k.vpo / k.billCount).toFixed(1) : 0;
-        document.getElementById('m-sku').innerText = k.skuCount;
+        const s = State.allStores.find(x => x.id === id);
+        if (!s) return;
 
-        const setBox = (boxId, statusId, active) => {
-            let b = document.getElementById(boxId);
-            let s = document.getElementById(statusId);
-            if (active) { b.className = "flex justify-between items-center p-2 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 text-xs font-bold"; s.innerText = "✅ ซื้อแล้ว"; }
-            else { b.className = "flex justify-between items-center p-2 rounded-lg border border-red-100 bg-red-50 text-red-400 text-xs font-bold"; s.innerText = "❌ ยังไม่ซื้อ"; }
-        };
-        setBox('m-j-box', 'm-j-status', k.hasJelly);
-        setBox('m-k-box', 'm-k-status', k.hasKlom);
-        document.getElementById('m-nav-btn').onclick = () => window.open(`https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}&travelmode=driving`);
+        document.getElementById('m-name').textContent    = s.name;
+        document.getElementById('m-id').textContent      = 'ID: ' + s.id;
+        document.getElementById('m-shoptype').textContent = s.shopType || '';
+        document.getElementById('m-nav-btn').onclick = () =>
+            window.open(`https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}&travelmode=driving`);
+
+        // Build month tabs from StoreHistory
+        if (typeof StoreHistory !== 'undefined') {
+            StoreHistory.openFor(id);
+        } else {
+            // fallback: show basic KPI only
+            UI._renderModalBasic(id);
+        }
+
         document.getElementById('store-modal').classList.remove('hidden');
+    },
+
+    _renderModalBasic: (id) => {
+        const k = State.sales[id] || {};
+        document.getElementById('m-gross').textContent = k.vpo || '—';
+        document.getElementById('m-bills').textContent = k.billCount || '—';
+        document.getElementById('m-sku').textContent   = k.skuCount || '—';
+        document.getElementById('m-month-tabs').innerHTML = '';
+        document.getElementById('m-sku-list').innerHTML = '<div style="text-align:center;padding:16px;color:#9ca3af;font-size:12px;">ไม่มีข้อมูล Sellout</div>';
     },
 
     closeModal: () => document.getElementById('store-modal').classList.add('hidden')
@@ -250,15 +265,41 @@ const Processor = {
     run: () => { Processor.stores(); Processor.setupRoute(); },
 
     stores: () => {
+        const ym = (typeof StoreHistory !== 'undefined') ? StoreHistory._ym : '';
         let html = State.allStores.map(s => {
-            let k = State.sales[s.id];
-            let badge = k && k.vpo > 0
-                ? `<span class="bg-emerald-100 text-emerald-700 text-[9px] px-2 py-0.5 rounded-lg font-bold">Active</span>`
-                : `<span class="bg-gray-100 text-gray-400 text-[9px] px-2 py-0.5 rounded-lg font-bold">Inactive</span>`;
-            const marketTag = s.marketName ? `<p class="text-[10px] text-blue-500 font-medium truncate">${s.marketName}</p>` : '';
-            return `<div onclick="UI.openModal('${s.id}')" data-search="${s.id.toLowerCase()} ${s.name.toLowerCase()} ${(s.marketName||'').toLowerCase()}" class="bg-white p-3.5 rounded-2xl border shadow-sm flex justify-between items-center transition cursor-pointer active:bg-gray-50"><div class="overflow-hidden mr-2"><p class="font-bold text-sm text-gray-800 truncate">${s.name}</p><p class="text-[10px] text-gray-400 font-mono">ID: ${s.id}</p>${marketTag}</div>${badge}</div>`;
+            const k   = State.sales[s.id];
+            const active = k && k.vpo > 0;
+            // ถ้ามีข้อมูล sellout ของเดือนที่เลือก ดึงมาแสดงด้วย
+            const hist = (ym && typeof StoreHistory !== 'undefined') ? StoreHistory._storeMap[s.id] : null;
+
+            const badge = active
+                ? `<span style="background:#d1fae5;color:#065f46;font-size:9px;font-weight:800;padding:2px 8px;border-radius:8px;">Active</span>`
+                : `<span style="background:#f3f4f6;color:#9ca3af;font-size:9px;font-weight:800;padding:2px 8px;border-radius:8px;">Inactive</span>`;
+
+            const marketTag = s.marketName
+                ? `<span style="font-size:10px;color:#3b82f6;font-weight:600;">${s.marketName}</span>`
+                : '';
+
+            const histTag = hist
+                ? `<div style="margin-top:4px;font-size:10px;color:#059669;font-weight:700;">💰 ${_fmtB(hist.gross)} · ${hist.skuCount} SKU</div>`
+                : '';
+
+            return `<div onclick="UI.openModal('${s.id}')"
+                data-search="${s.id.toLowerCase()} ${s.name.toLowerCase()} ${(s.marketName||'').toLowerCase()}"
+                style="background:#fff;border-radius:14px;border:1px solid #e5e7eb;padding:12px 14px;display:flex;justify-content:space-between;align-items:flex-start;cursor:pointer;transition:background 0.15s;margin-bottom:8px;"
+                onmousedown="this.style.background='#f9fafb'" onmouseup="this.style.background='#fff'">
+                <div style="flex:1;min-width:0;margin-right:10px;">
+                    <div style="font-weight:800;font-size:13px;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${s.name}</div>
+                    <div style="font-size:10px;color:#9ca3af;font-family:monospace;margin-top:1px;">${s.id}</div>
+                    ${marketTag}
+                    ${histTag}
+                </div>
+                <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
+                    ${badge}
+                </div>
+            </div>`;
         }).join('');
-        document.getElementById('all-store-list').innerHTML = html || '<p class="text-center text-gray-400 mt-5">ไม่พบข้อมูลร้านในสายนี้</p>';
+        document.getElementById('all-store-list').innerHTML = html || '<p style="text-align:center;color:#9ca3af;margin-top:20px;font-size:13px;">ไม่พบข้อมูลร้านในสายนี้</p>';
     },
 
     setupRoute: () => {
