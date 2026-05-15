@@ -3,8 +3,6 @@
 // ✅ Inline toast
 function _fmtB(n) {
     if (!n) return '0';
-    if (n >= 1000000) return (n/1000000).toFixed(1) + 'M';
-    if (n >= 1000)    return (n/1000).toFixed(1) + 'K';
     return Math.round(n).toLocaleString('th-TH');
 }
 
@@ -133,31 +131,14 @@ const UI = {
     openModal: (id) => {
         const s = State.allStores.find(x => x.id === id);
         if (!s) return;
-
-        document.getElementById('m-name').textContent    = s.name;
-        document.getElementById('m-id').textContent      = 'ID: ' + s.id;
+        document.getElementById('m-name').textContent     = s.name;
+        document.getElementById('m-id').textContent       = 'ID: ' + s.id;
         document.getElementById('m-shoptype').textContent = s.shopType || '';
         document.getElementById('m-nav-btn').onclick = () =>
             window.open(`https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}&travelmode=driving`);
-
-        // Build month tabs from StoreHistory
-        if (typeof StoreHistory !== 'undefined') {
-            StoreHistory.openFor(id);
-        } else {
-            // fallback: show basic KPI only
-            UI._renderModalBasic(id);
-        }
-
+        // เปิด StoreHistory modal
+        if (typeof StoreHistory !== 'undefined') StoreHistory.openFor(id);
         document.getElementById('store-modal').classList.remove('hidden');
-    },
-
-    _renderModalBasic: (id) => {
-        const k = State.sales[id] || {};
-        document.getElementById('m-gross').textContent = k.vpo || '—';
-        document.getElementById('m-bills').textContent = k.billCount || '—';
-        document.getElementById('m-sku').textContent   = k.skuCount || '—';
-        document.getElementById('m-month-tabs').innerHTML = '';
-        document.getElementById('m-sku-list').innerHTML = '<div style="text-align:center;padding:16px;color:#9ca3af;font-size:12px;">ไม่มีข้อมูล Sellout</div>';
     },
 
     closeModal: () => document.getElementById('store-modal').classList.add('hidden')
@@ -265,41 +246,33 @@ const Processor = {
     run: () => { Processor.stores(); Processor.setupRoute(); },
 
     stores: () => {
-        const ym = (typeof StoreHistory !== 'undefined') ? StoreHistory._ym : '';
+        const hist = (typeof StoreHistory !== 'undefined') ? StoreHistory._storeMap : {};
         let html = State.allStores.map(s => {
-            const k   = State.sales[s.id];
+            const k      = State.sales[s.id];
             const active = k && k.vpo > 0;
-            // ถ้ามีข้อมูล sellout ของเดือนที่เลือก ดึงมาแสดงด้วย
-            const hist = (ym && typeof StoreHistory !== 'undefined') ? StoreHistory._storeMap[s.id] : null;
-
-            const badge = active
+            const h      = hist[s.id];
+            const badge  = active
                 ? `<span style="background:#d1fae5;color:#065f46;font-size:9px;font-weight:800;padding:2px 8px;border-radius:8px;">Active</span>`
                 : `<span style="background:#f3f4f6;color:#9ca3af;font-size:9px;font-weight:800;padding:2px 8px;border-radius:8px;">Inactive</span>`;
-
-            const marketTag = s.marketName
-                ? `<span style="font-size:10px;color:#3b82f6;font-weight:600;">${s.marketName}</span>`
+            const mktTag = s.marketName
+                ? `<span style="font-size:10px;color:#3b82f6;font-weight:600;">${s.marketName}</span> `
                 : '';
-
-            const histTag = hist
-                ? `<div style="margin-top:4px;font-size:10px;color:#059669;font-weight:700;">💰 ${_fmtB(hist.gross)} · ${hist.skuCount} SKU</div>`
+            const histTag = h
+                ? `<div style="margin-top:3px;font-size:10px;color:#059669;font-weight:700;">💰 ${_fmtB(h.gross)} · ${h.skuCount} SKU · ${h.invCount} บิล</div>`
                 : '';
-
             return `<div onclick="UI.openModal('${s.id}')"
                 data-search="${s.id.toLowerCase()} ${s.name.toLowerCase()} ${(s.marketName||'').toLowerCase()}"
-                style="background:#fff;border-radius:14px;border:1px solid #e5e7eb;padding:12px 14px;display:flex;justify-content:space-between;align-items:flex-start;cursor:pointer;transition:background 0.15s;margin-bottom:8px;"
-                onmousedown="this.style.background='#f9fafb'" onmouseup="this.style.background='#fff'">
+                style="background:#fff;border-radius:14px;border:1px solid #e5e7eb;padding:11px 14px;display:flex;justify-content:space-between;align-items:flex-start;cursor:pointer;active:background:#f9fafb;">
                 <div style="flex:1;min-width:0;margin-right:10px;">
                     <div style="font-weight:800;font-size:13px;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${s.name}</div>
-                    <div style="font-size:10px;color:#9ca3af;font-family:monospace;margin-top:1px;">${s.id}</div>
-                    ${marketTag}
+                    <div style="font-size:10px;color:#9ca3af;font-family:monospace;margin-top:1px;">${mktTag}${s.id}</div>
                     ${histTag}
                 </div>
-                <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
-                    ${badge}
-                </div>
+                <div style="flex-shrink:0;">${badge}</div>
             </div>`;
         }).join('');
-        document.getElementById('all-store-list').innerHTML = html || '<p style="text-align:center;color:#9ca3af;margin-top:20px;font-size:13px;">ไม่พบข้อมูลร้านในสายนี้</p>';
+        document.getElementById('all-store-list').innerHTML = html
+            || '<p style="text-align:center;color:#9ca3af;margin-top:24px;font-size:13px;">ไม่พบข้อมูลร้านในสายนี้</p>';
     },
 
     setupRoute: () => {
