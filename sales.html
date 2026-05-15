@@ -44,11 +44,22 @@
 
         <!-- Tab: ร้านค้า -->
         <div id="tab-stores" class="app-tab bg-gray-50">
-            <div class="p-4 shrink-0 bg-white border-b shadow-sm z-10">
-                <h2 id="stores-title" class="font-black text-lg text-gray-800 mb-3">รายชื่อร้านค้าทั้งหมด</h2>
-                <input type="text" id="search-input" onkeyup="UI.searchStores(this.value)" placeholder="ค้นหารหัสหรือชื่อร้าน..." class="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500">
+            <!-- Header + search + month filter -->
+            <div class="shrink-0 bg-white border-b shadow-sm z-10 px-4 pt-3 pb-3">
+                <div class="flex items-center justify-between mb-2">
+                    <h2 id="stores-title" class="font-black text-base text-gray-800">รายชื่อร้านค้า</h2>
+                    <select id="store-month-sel" onchange="StoreHistory.onMonthChange(this.value)"
+                        style="background:#f3f4f6;border:1px solid #e5e7eb;border-radius:10px;padding:5px 10px;font-size:11px;font-weight:700;outline:none;font-family:inherit;color:#374151;">
+                        <option value="">-- ข้อมูลย้อนหลัง --</option>
+                    </select>
+                </div>
+                <input type="text" id="search-input" onkeyup="UI.searchStores(this.value)"
+                    placeholder="🔍 ค้นหารหัสหรือชื่อร้าน..."
+                    class="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500">
             </div>
-            <div class="flex-1 overflow-y-auto p-4 pb-24"><div id="all-store-list" class="space-y-3"></div></div>
+            <div class="flex-1 overflow-y-auto p-3 pb-24">
+                <div id="all-store-list" class="space-y-2"></div>
+            </div>
         </div>
 
         <!-- Tab: คิวงาน -->
@@ -120,26 +131,70 @@
         </div>
     </div>
 
-    <!-- Store Modal -->
-    <div id="store-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-[99999] flex items-center justify-center p-4">
-        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden transform transition-all">
-            <div class="bg-gray-50 p-4 border-b flex justify-between items-start">
-                <div><h2 id="m-name" class="text-lg font-black text-gray-800 leading-tight">...</h2><p id="m-id" class="text-xs text-blue-600 font-mono mt-0.5 uppercase">ID: ...</p></div>
-                <button onclick="UI.closeModal()" class="bg-white border w-8 h-8 rounded-full text-gray-400 font-bold shadow-sm">✕</button>
+    <!-- Store Modal (Rich) -->
+    <div id="store-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-[99999] flex items-end justify-center sm:items-center sm:p-4">
+        <div class="bg-white w-full max-w-md rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden flex flex-col" style="max-height:90dvh;">
+
+            <!-- Handle bar (mobile) -->
+            <div class="flex justify-center pt-2 pb-1 shrink-0 sm:hidden">
+                <div class="w-10 h-1 bg-gray-300 rounded-full"></div>
             </div>
-            <div class="p-4 space-y-4">
-                <div class="grid grid-cols-2 gap-2 text-center">
-                    <div class="bg-blue-50 p-2 rounded-xl border border-blue-100"><p class="text-[9px] text-blue-500 font-bold mb-1 uppercase">ยอดซื้อ (EA)</p><p id="m-sales" class="text-lg font-black text-blue-700">0</p></div>
-                    <div class="bg-indigo-50 p-2 rounded-xl border border-indigo-100"><p class="text-[9px] text-indigo-500 font-bold mb-1 uppercase">จำนวนบิล</p><p id="m-bills" class="text-lg font-black text-indigo-700">0</p></div>
-                    <div class="bg-teal-50 p-2 rounded-xl border border-teal-100"><p class="text-[9px] text-teal-500 font-bold mb-1 uppercase">VPO รายร้าน</p><p id="m-vpo" class="text-lg font-black text-teal-700">0</p></div>
-                    <div class="bg-purple-50 p-2 rounded-xl border border-purple-100"><p class="text-[9px] text-purple-500 font-bold mb-1 uppercase">SKU ที่ซื้อ</p><p id="m-sku" class="text-lg font-black text-purple-700">0</p></div>
+
+            <!-- Header -->
+            <div class="px-5 pt-2 pb-3 border-b border-gray-100 flex items-start justify-between shrink-0">
+                <div class="flex-1 min-w-0 mr-3">
+                    <h2 id="m-name" class="text-base font-black text-gray-900 leading-tight"></h2>
+                    <p id="m-id" class="text-[11px] text-blue-500 font-mono mt-0.5"></p>
+                    <p id="m-shoptype" class="text-[11px] text-gray-400 font-medium mt-0.5"></p>
                 </div>
-                <div class="space-y-2">
-                    <div id="m-j-box" class="flex justify-between items-center p-2 rounded-lg border text-xs font-bold"><span>เจลลี่</span><span id="m-j-status">...</span></div>
-                    <div id="m-k-box" class="flex justify-between items-center p-2 rounded-lg border text-xs font-bold"><span>กลมกล่อม</span><span id="m-k-status">...</span></div>
-                </div>
+                <button onclick="UI.closeModal()"
+                    class="shrink-0 w-8 h-8 rounded-full bg-gray-100 text-gray-500 font-bold text-sm flex items-center justify-center active:bg-gray-200">✕</button>
             </div>
-            <div class="p-3 bg-gray-50 border-t"><button id="m-nav-btn" class="w-full bg-blue-600 text-white py-3 rounded-xl font-black shadow-md active:scale-95 transition">🚗 นำทางไปร้านนี้</button></div>
+
+            <!-- Month tabs (scrollable) -->
+            <div class="flex gap-2 px-4 py-2 overflow-x-auto shrink-0 border-b border-gray-100 bg-gray-50" id="m-month-tabs" style="scrollbar-width:none;"></div>
+
+            <!-- Scrollable body -->
+            <div class="flex-1 overflow-y-auto">
+
+                <!-- KPI summary row -->
+                <div class="grid grid-cols-3 gap-2 p-4 pb-2" id="m-kpi-row">
+                    <div class="bg-emerald-50 rounded-2xl p-2.5 text-center border border-emerald-100">
+                        <div class="text-[9px] font-bold text-emerald-600 uppercase mb-1">ยอดซื้อ (฿)</div>
+                        <div id="m-gross" class="text-base font-black text-emerald-700">—</div>
+                    </div>
+                    <div class="bg-blue-50 rounded-2xl p-2.5 text-center border border-blue-100">
+                        <div class="text-[9px] font-bold text-blue-600 uppercase mb-1">Invoice</div>
+                        <div id="m-bills" class="text-base font-black text-blue-700">—</div>
+                    </div>
+                    <div class="bg-violet-50 rounded-2xl p-2.5 text-center border border-violet-100">
+                        <div class="text-[9px] font-bold text-violet-600 uppercase mb-1">SKU</div>
+                        <div id="m-sku" class="text-base font-black text-violet-700">—</div>
+                    </div>
+                </div>
+
+                <!-- SKU breakdown -->
+                <div class="px-4 pb-2">
+                    <div class="text-[11px] font-black text-gray-400 uppercase tracking-wide mb-2">📦 สินค้าที่ซื้อ</div>
+                    <div id="m-sku-list" class="space-y-1.5"></div>
+                </div>
+
+                <!-- No data state -->
+                <div id="m-no-data" class="hidden py-8 text-center">
+                    <div class="text-3xl mb-2">📭</div>
+                    <div class="text-sm text-gray-400 font-medium">ไม่มีข้อมูลเดือนนี้</div>
+                </div>
+
+                <div class="h-4"></div>
+            </div>
+
+            <!-- Footer -->
+            <div class="p-4 border-t border-gray-100 shrink-0 bg-white">
+                <button id="m-nav-btn"
+                    class="w-full bg-blue-600 active:bg-blue-700 text-white py-3 rounded-2xl font-black shadow-md active:scale-95 transition text-sm">
+                    🚗 นำทางไปร้านนี้
+                </button>
+            </div>
         </div>
     </div>
 
@@ -221,5 +276,6 @@
 
     <script src="auth.js"></script>
     <script src="sales-app.js"></script>
+    <script src="store-history.js"></script>
 </body>
 </html>
