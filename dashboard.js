@@ -21,6 +21,31 @@ const Dashboard = {
     // Categories ที่ต้องแยกออก ไม่รวมยอดหลัก
     EXCLUDED_CATS: new Set(['อื่นๆ', 'กระเช้าของขวัญ']),
 
+    // SKU / Volume เฉลี่ยต่อร้าน (outlet = custCode ที่มียอดในเดือน)
+    _calcOutletMetrics: (rows, useMainOnly = true) => {
+        const filtered = useMainOnly
+            ? rows.filter(r => !Dashboard.EXCLUDED_CATS.has(r.catDesc))
+            : rows;
+        const byOutlet = {};
+        filtered.forEach(r => {
+            const key = String(r.custCode || '').trim() || String(r.custName || '').trim();
+            if (!key) return;
+            if (!byOutlet[key]) byOutlet[key] = { skus: new Set(), vol: 0 };
+            const sku = String(r.prodCode || '').trim();
+            if (sku) byOutlet[key].skus.add(sku);
+            byOutlet[key].vol += parseFloat(r.qtyEA) || 0;
+        });
+        const outlets = Object.values(byOutlet);
+        const n = outlets.length;
+        if (!n) return { outletCount: 0, avgSku: 0, avgVol: 0 };
+        const avgSku = outlets.reduce((s, o) => s + o.skus.size, 0) / n;
+        const avgVol = outlets.reduce((s, o) => s + o.vol, 0) / n;
+        return { outletCount: n, avgSku, avgVol };
+    },
+
+    _fmtSku: (n) => (n || 0).toLocaleString('th-TH', { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
+    _fmtVol: (n) => Math.round(n || 0).toLocaleString('th-TH'),
+
     // ─── Init ─────────────────────────────────────────────────────────────
     init: () => {
         Dashboard._session = Auth.getSession();
@@ -96,7 +121,7 @@ const Dashboard = {
         <div class="flex-1 overflow-y-auto bg-slate-50 p-4 space-y-4" id="db-content">
 
             <!-- KPI Cards row -->
-            <div id="db-kpi-row" class="grid grid-cols-2 sm:grid-cols-4 gap-3"></div>
+            <div id="db-kpi-row" class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3"></div>
 
             <!-- Middle row: By-Route table + ShopType pie -->
             <div class="grid grid-cols-1 lg:grid-cols-5 gap-4">
@@ -114,11 +139,13 @@ const Dashboard = {
                                     <th class="px-3 py-2 text-right text-xs font-bold text-gray-500">ยอด</th>
                                     <th class="px-3 py-2 text-right text-xs font-bold text-gray-500">Target</th>
                                     <th class="px-3 py-2 text-right text-xs font-bold text-gray-500">%</th>
+                                    <th class="px-3 py-2 text-right text-xs font-bold text-gray-500">SKU/ร้าน</th>
+                                    <th class="px-3 py-2 text-right text-xs font-bold text-gray-500">Vol/ร้าน</th>
                                     <th class="px-3 py-2 text-center text-xs font-bold text-gray-500">ดู</th>
                                 </tr>
                             </thead>
                             <tbody id="db-route-tbody">
-                                <tr><td colspan="5" class="text-center py-8 text-gray-400 text-sm">เลือกเดือนก่อนครับ</td></tr>
+                                <tr><td colspan="7" class="text-center py-8 text-gray-400 text-sm">เลือกเดือนก่อนครับ</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -511,7 +538,7 @@ const Dashboard = {
         if (Dashboard._drillRoute) targetAmt = Dashboard._targets[Dashboard._drillRoute] || 0;
 
         const pct = targetAmt > 0 ? (total / targetAmt * 100) : null;
-        const custCount = new Set(mainRows.map(r => r.custCode)).size;
+        const outletM = Dashboard._calcOutletMetrics(rows);
         const invCount  = new Set(mainRows.map(r => r.invNum)).size;
 
         const modeLabel = Dashboard._amountMode === 'gross' ? 'Gross' : 'Net';
@@ -519,7 +546,9 @@ const Dashboard = {
         el.innerHTML = [
             { icon:'💰', label: `ยอด ${modeLabel} (หลัก)`, val: Dashboard._fmt(total), sub: '', color:'emerald' },
             { icon:'🎯', label: 'MTD vs Target', val: pct !== null ? Dashboard._pctBadge(pct) : '—', sub: targetAmt > 0 ? `Target: ${Dashboard._fmt(targetAmt)}` : 'ยังไม่ตั้ง Target', color:'amber', raw:true },
-            { icon:'🏪', label: 'ร้านค้าทั้งหมด', val: custCount.toLocaleString(), sub:'ร้านที่มียอด', color:'blue' },
+            { icon:'🏪', label: 'ร้านค้าทั้งหมด', val: outletM.outletCount.toLocaleString(), sub:'ร้านที่มียอด', color:'blue' },
+            { icon:'📦', label: 'SKU เฉลี่ย/ร้าน', val: Dashboard._fmtSku(outletM.avgSku), sub:'SKU รวมเฉลี่ยต่อร้าน', color:'cyan' },
+            { icon:'📊', label: 'Vol เฉลี่ย/ร้าน', val: Dashboard._fmtVol(outletM.avgVol), sub:'หน่วย EA', color:'pink' },
             { icon:'📄', label: 'Invoice', val: invCount.toLocaleString(), sub:'ใบ', color:'violet' },
         ].map(k => `
             <div class="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
@@ -544,7 +573,7 @@ const Dashboard = {
         const isAdmin = Dashboard._session.role !== 'sales';
         const routes = Dashboard._getRoutes();
         if (!routes.length || !Dashboard._rows.length) {
-            tbody.innerHTML = `<tr><td colspan="5" class="text-center py-8 text-gray-400 text-sm">ยังไม่มีข้อมูล</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="7" class="text-center py-8 text-gray-400 text-sm">ยังไม่มีข้อมูล</td></tr>`;
             return;
         }
 
@@ -553,12 +582,13 @@ const Dashboard = {
             const amt  = rows.reduce((s,rx) => s + Dashboard._amt(rx), 0);
             const tgt  = Dashboard._targets[r] || 0;
             const pct  = tgt > 0 ? (amt / tgt * 100) : null;
-            return { r, amt, tgt, pct };
+            const om   = Dashboard._calcOutletMetrics(rows);
+            return { r, amt, tgt, pct, avgSku: om.avgSku, avgVol: om.avgVol };
         }).sort((a,b) => b.amt - a.amt);
 
         const maxAmt = Math.max(...rowData.map(d => d.amt), 1);
 
-        tbody.innerHTML = rowData.map(({ r, amt, tgt, pct }) => {
+        tbody.innerHTML = rowData.map(({ r, amt, tgt, pct, avgSku, avgVol }) => {
             const barW = Math.round((amt / maxAmt) * 100);
             const pctStr = pct !== null ? Dashboard._pctBadgeInline(pct) : '<span class="text-gray-300 text-xs">—</span>';
             const isActive = Dashboard._drillRoute === r;
@@ -575,6 +605,8 @@ const Dashboard = {
                 <td class="px-3 py-2.5 text-right font-bold text-gray-800 text-xs tabular-nums">${Dashboard._fmt(amt)}</td>
                 <td class="px-3 py-2.5 text-right text-xs text-gray-400 tabular-nums">${tgt > 0 ? Dashboard._fmt(tgt) : '—'}</td>
                 <td class="px-3 py-2.5 text-right">${pctStr}</td>
+                <td class="px-3 py-2.5 text-right text-xs font-bold text-cyan-700 tabular-nums">${Dashboard._fmtSku(avgSku)}</td>
+                <td class="px-3 py-2.5 text-right text-xs font-bold text-pink-700 tabular-nums">${Dashboard._fmtVol(avgVol)}</td>
                 <td class="px-3 py-2.5 text-center">
                     ${isAdmin ? `<button onclick="event.stopPropagation();Dashboard._drillToRoute('${r}')" class="text-[10px] text-indigo-400 hover:text-indigo-700 font-bold">▶</button>` : ''}
                 </td>
@@ -585,12 +617,16 @@ const Dashboard = {
         const totalAmt = rowData.reduce((s,d) => s + d.amt, 0);
         const totalTgt = rowData.reduce((s,d) => s + d.tgt, 0);
         const totalPct = totalTgt > 0 ? totalAmt/totalTgt*100 : null;
+        const filteredRows = Dashboard._getFilteredRows().filter(r => !Dashboard.EXCLUDED_CATS.has(r.catDesc));
+        const totalOm = Dashboard._calcOutletMetrics(filteredRows);
         tbody.innerHTML += `
         <tr class="border-t-2 border-gray-200 bg-gray-50 font-black">
             <td class="px-3 py-2.5 text-xs text-gray-600">รวมทั้งหมด</td>
             <td class="px-3 py-2.5 text-right text-xs tabular-nums text-emerald-700">${Dashboard._fmt(totalAmt)}</td>
             <td class="px-3 py-2.5 text-right text-xs tabular-nums text-gray-500">${totalTgt > 0 ? Dashboard._fmt(totalTgt) : '—'}</td>
             <td class="px-3 py-2.5 text-right text-xs">${totalPct !== null ? Dashboard._pctBadgeInline(totalPct) : '—'}</td>
+            <td class="px-3 py-2.5 text-right text-xs tabular-nums text-cyan-700">${Dashboard._fmtSku(totalOm.avgSku)}</td>
+            <td class="px-3 py-2.5 text-right text-xs tabular-nums text-pink-700">${Dashboard._fmtVol(totalOm.avgVol)}</td>
             <td></td>
         </tr>`;
     },
