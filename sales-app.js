@@ -365,13 +365,16 @@ const GPS = {
     marker: null,
     circle: null,
     autoFollow: false,
+    _mapListenerAttached: false,
+    _isSelfMoving: false,
 
     start: () => {
         if (!navigator.geolocation) return showSalesToast('⚠️ Browser ไม่รองรับ GPS', true);
         GPS.watchId = navigator.geolocation.watchPosition(GPS._onSuccess, GPS._onError, { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 });
         GPS.autoFollow = true;
-        GPS._updateBtn(true);
+        GPS._updateBtn('on');
         showSalesToast('📍 เปิด GPS แล้ว');
+        GPS._attachMapListener();
     },
 
     stop: () => {
@@ -379,16 +382,36 @@ const GPS = {
         if (GPS.marker) { GPS.marker.remove(); GPS.marker = null; }
         if (GPS.circle) { GPS.circle.remove(); GPS.circle = null; }
         GPS.autoFollow = false;
-        GPS._updateBtn(false);
+        GPS._updateBtn('off');
         showSalesToast('GPS ปิดแล้ว');
     },
 
-    toggle: () => { GPS.watchId !== null ? GPS.stop() : GPS.start(); },
+    toggle: () => {
+        if (GPS.watchId === null) {
+            GPS.start();
+        } else if (!GPS.autoFollow) {
+            GPS.autoFollow = true;
+            GPS._updateBtn('on');
+            if (GPS.marker) {
+                GPS._isSelfMoving = true;
+                map.setView(GPS.marker.getLatLng(), map.getZoom() < 14 ? 15 : map.getZoom());
+                GPS._isSelfMoving = false;
+            }
+            showSalesToast('📍 กลับมาติดตามตำแหน่งแล้ว');
+        } else {
+            GPS.stop();
+        }
+    },
 
     locate: () => {
         if (GPS.watchId === null) GPS.start();
         GPS.autoFollow = true;
-        if (GPS.marker) map.setView(GPS.marker.getLatLng(), 16);
+        GPS._updateBtn('on');
+        if (GPS.marker) {
+            GPS._isSelfMoving = true;
+            map.setView(GPS.marker.getLatLng(), 16);
+            GPS._isSelfMoving = false;
+        }
     },
 
     _onSuccess: (pos) => {
@@ -410,20 +433,44 @@ const GPS = {
         } else {
             GPS.circle.setLatLng(latlng); GPS.circle.setRadius(accuracy);
         }
-        if (GPS.autoFollow) { map.setView(latlng, map.getZoom() < 14 ? 15 : map.getZoom()); }
+        if (GPS.autoFollow) {
+            GPS._isSelfMoving = true;
+            map.setView(latlng, map.getZoom() < 14 ? 15 : map.getZoom());
+            GPS._isSelfMoving = false;
+        }
     },
 
     _onError: (err) => {
         const msgs = { 1: 'ไม่ได้รับอนุญาตใช้ GPS', 2: 'หาตำแหน่งไม่ได้', 3: 'GPS หมดเวลา' };
         showSalesToast('⚠️ ' + (msgs[err.code] || 'GPS error'), true);
-        GPS._updateBtn(false);
+        GPS._updateBtn('off');
     },
 
-    _updateBtn: (active) => {
+    _updateBtn: (state) => {
         const btn = document.getElementById('gps-btn');
         if (!btn) return;
-        btn.innerHTML = active ? '📍 GPS เปิดอยู่' : '📍 ดูตำแหน่งฉัน';
-        btn.style.background = active ? '#2563eb' : '#374151';
+        if (state === 'on') {
+            btn.innerHTML = '📍 GPS เปิดอยู่';
+            btn.style.background = '#2563eb';
+        } else if (state === 'paused') {
+            btn.innerHTML = '📍 กลับมาติดตาม';
+            btn.style.background = '#d97706';
+        } else {
+            btn.innerHTML = '📍 ดูตำแหน่งฉัน';
+            btn.style.background = '#374151';
+        }
+    },
+
+    _attachMapListener: () => {
+        if (!map || GPS._mapListenerAttached) return;
+        GPS._mapListenerAttached = true;
+        map.on('dragstart', () => {
+            if (!GPS._isSelfMoving && GPS.autoFollow) {
+                GPS.autoFollow = false;
+                GPS._updateBtn('paused');
+                showSalesToast('📍 หยุดติดตาม — กดปุ่ม GPS เพื่อกลับมา');
+            }
+        });
     }
 };
 
