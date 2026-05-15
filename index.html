@@ -50,25 +50,10 @@
             #sidebar-overlay { display:block; }
         }
 
-        /* page-dashboard และ page-allroutes ใช้ absolute inset-0
-           ต้องเพิ่ม left เท่ากับ sidebar width เพื่อไม่ให้ทับ */
+        /* page-dashboard และ page-allroutes: JS จัดการ left ผ่าน _updatePageOffset() */
         #page-dashboard,
         #page-allroutes {
-            left: 3.5rem; /* w-14 = 56px */
             transition: left 0.25s cubic-bezier(0.4,0,0.2,1);
-        }
-        @media (min-width: 768px) {
-            #page-dashboard,
-            #page-allroutes {
-                left: 14rem; /* w-56 = 224px */
-            }
-        }
-        @media (max-width: 767px) {
-            /* mobile: sidebar เป็น fixed overlay ไม่ดัน content */
-            #page-dashboard,
-            #page-allroutes {
-                left: 0 !important;
-            }
         }
     </style>
 
@@ -167,7 +152,7 @@
     <!-- Main Content -->
     <!-- Global hamburger — แสดงทุก page ไม่หายตาม page switch -->
     <button id="global-hamburger" onclick="SidebarCtrl.toggle()"
-        class="fixed top-3 left-3 z-[8000] w-8 h-8 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white flex items-center justify-center transition shadow-lg md:hidden">
+        style="display:none;" class="fixed top-3 left-3 z-[8000] w-8 h-8 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white flex items-center justify-center transition shadow-lg">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
             <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
         </svg>
@@ -533,8 +518,13 @@
 <div id="page-allroutes" class="flex-1 flex flex-col absolute inset-0 hidden">
 
             <!-- Header -->
-            <div class="h-16 bg-gray-900 text-white flex items-center justify-between px-6 shadow-md z-[5000] relative shrink-0 border-b-4 border-indigo-500">
+            <div class="h-16 bg-gray-900 text-white flex items-center justify-between px-4 shadow-md z-[5000] relative shrink-0 border-b-4 border-indigo-500">
                 <div class="flex items-center gap-3">
+                    <button onclick="SidebarCtrl.toggle()" class="w-8 h-8 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white flex items-center justify-center transition shrink-0">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+                            <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+                        </svg>
+                    </button>
                     <h1 class="text-xl font-black tracking-wide text-indigo-400 mr-2 hidden sm:block">Route<span class="text-white">Plan</span></h1>
                     <span class="text-lg font-bold">📦 ภาพรวมทุกสาย</span>
                 </div>
@@ -710,6 +700,8 @@
         Nav.go = (page) => {
             _origNavGo(page);
             if (page === 'dashboard' && typeof Dashboard !== 'undefined') Dashboard._render();
+            // sync hamburger ทุกครั้งที่เปลี่ยน page
+            if (typeof SidebarCtrl !== 'undefined') SidebarCtrl._syncHamburger(SidebarCtrl._collapsed);
         };
 
         document.addEventListener('DOMContentLoaded', () => {
@@ -833,13 +825,25 @@
             _collapsed: false,
             _updatePageOffset: (collapsed) => {
                 const isMobile = window.innerWidth < 768;
-                // mobile: sidebar เป็น fixed overlay ไม่ดัน content
-                const offset = (collapsed || isMobile) ? '0px'
-                    : (window.innerWidth >= 768 ? '14rem' : '3.5rem');
+                // mobile: sidebar fixed overlay ไม่ดัน content
+                const sbWidth = isMobile ? 0 : (window.innerWidth >= 768 ? 224 : 56); // px
+                const offset = (collapsed || isMobile) ? '0px' : sbWidth + 'px';
                 ['page-dashboard', 'page-allroutes'].forEach(id => {
                     const el = document.getElementById(id);
                     if (el) el.style.left = offset;
                 });
+                // แสดง/ซ่อน global hamburger ตาม page ปัจจุบัน
+                SidebarCtrl._syncHamburger(collapsed);
+            },
+            _syncHamburger: (collapsed) => {
+                // แสดง global-hamburger เฉพาะตอน sidebar collapse
+                const btn = document.getElementById('global-hamburger');
+                if (!btn) return;
+                const activePage = document.querySelector('[id^="page-"]:not(.hidden)');
+                const pageId = activePage ? activePage.id : '';
+                // page-planning มีปุ่มของตัวเองอยู่แล้ว
+                const needGlobal = collapsed && pageId !== 'page-planning';
+                btn.style.display = needGlobal ? 'flex' : 'none';
             },
             toggle: () => {
                 const sb  = document.getElementById('sidebar');
@@ -870,6 +874,7 @@
                 }
                 // ตั้ง offset ให้ถูกต้องตั้งแต่โหลด
                 SidebarCtrl._updatePageOffset(SidebarCtrl._collapsed);
+                SidebarCtrl._syncHamburger(SidebarCtrl._collapsed);
             }
         };
         document.addEventListener('DOMContentLoaded', SidebarCtrl.restore);
