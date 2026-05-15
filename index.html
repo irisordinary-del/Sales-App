@@ -50,10 +50,15 @@
             #sidebar-overlay { display:block; }
         }
 
-        /* page-dashboard และ page-allroutes: JS จัดการ left ผ่าน _updatePageOffset() */
-        #page-dashboard,
-        #page-allroutes {
-            transition: left 0.25s cubic-bezier(0.4,0,0.2,1);
+        /* หน้าหลักเต็มพื้นที่ main-wrap (sidebar จัด layout ผ่าน flex แล้ว ไม่ต้องดัน left ซ้ำ) */
+        #main-wrap { min-width: 0; }
+        .app-page {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            background: #f8fafc;
         }
     </style>
 
@@ -166,13 +171,13 @@
         </svg>
     </button>
 
-    <div id="main-wrap" class="flex-1 flex flex-col overflow-hidden relative">
+    <div id="main-wrap" class="flex-1 min-w-0 flex flex-col overflow-hidden relative">
 
 
 
         <!-- ===== PAGE: Planning ===== -->
 
-        <div id="page-planning" class="flex-1 flex flex-col absolute inset-0">
+        <div id="page-planning" class="app-page">
 
 
 
@@ -523,7 +528,7 @@
 
 
 
-<div id="page-allroutes" class="flex-1 flex flex-col absolute inset-0 hidden">
+        <div id="page-allroutes" class="app-page hidden">
 
             <!-- Header -->
             <div class="h-16 bg-gray-900 text-white flex items-center justify-between px-4 shadow-md z-[5000] relative shrink-0 border-b-4 border-indigo-500">
@@ -574,7 +579,7 @@
         </div>
 
         <!-- ===== PAGE: Dashboard ===== -->
-        <div id="page-dashboard" class="flex-1 flex flex-col absolute inset-0 hidden"></div>
+        <div id="page-dashboard" class="app-page hidden"></div>
 
     </div><!-- end main-wrap -->
 
@@ -703,7 +708,10 @@
             _origNavGo(page);
             if (page === 'dashboard' && typeof Dashboard !== 'undefined') Dashboard._render();
             // sync hamburger ทุกครั้งที่เปลี่ยน page
-            if (typeof SidebarCtrl !== 'undefined') SidebarCtrl._syncHamburger(SidebarCtrl._collapsed);
+            if (typeof SidebarCtrl !== 'undefined') {
+                SidebarCtrl._clearPageOffset();
+                SidebarCtrl._syncHamburger(SidebarCtrl._collapsed);
+            }
         };
 
         document.addEventListener('DOMContentLoaded', () => {
@@ -833,17 +841,11 @@
     <script>
         const SidebarCtrl = {
             _collapsed: false,
-            _updatePageOffset: (collapsed) => {
-                const isMobile = window.innerWidth < 768;
-                // mobile: sidebar fixed overlay ไม่ดัน content
-                const sbWidth = isMobile ? 0 : (window.innerWidth >= 768 ? 224 : 56); // px
-                const offset = (collapsed || isMobile) ? '0px' : sbWidth + 'px';
-                ['page-dashboard', 'page-allroutes'].forEach(id => {
-                    const el = document.getElementById(id);
-                    if (el) el.style.left = offset;
+            _clearPageOffset: () => {
+                document.querySelectorAll('.app-page').forEach(el => {
+                    el.style.left = '';
+                    el.style.right = '';
                 });
-                // แสดง/ซ่อน global hamburger ตาม page ปัจจุบัน
-                SidebarCtrl._syncHamburger(collapsed);
             },
             _syncHamburger: (collapsed) => {
                 // แสดง global-hamburger เฉพาะตอน sidebar collapse
@@ -864,8 +866,8 @@
                 if (window.innerWidth < 768) {
                     ov.classList.toggle('hidden', SidebarCtrl._collapsed);
                 }
-                // อัปเดต offset ของ page ที่ absolute
-                SidebarCtrl._updatePageOffset(SidebarCtrl._collapsed);
+                SidebarCtrl._clearPageOffset();
+                SidebarCtrl._syncHamburger(SidebarCtrl._collapsed);
                 // invalidate map size หลัง transition
                 setTimeout(() => {
                     if (typeof MapCtrl !== 'undefined' && MapCtrl.map) MapCtrl.map.invalidateSize();
@@ -882,8 +884,7 @@
                     if (sb) sb.classList.add('collapsed');
                     SidebarCtrl._collapsed = true;
                 }
-                // ตั้ง offset ให้ถูกต้องตั้งแต่โหลด
-                SidebarCtrl._updatePageOffset(SidebarCtrl._collapsed);
+                SidebarCtrl._clearPageOffset();
                 SidebarCtrl._syncHamburger(SidebarCtrl._collapsed);
             }
         };
