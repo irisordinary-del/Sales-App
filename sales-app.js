@@ -141,7 +141,69 @@ const UI = {
         document.getElementById('store-modal').classList.remove('hidden');
     },
 
-    closeModal: () => document.getElementById('store-modal').classList.add('hidden')
+    closeModal: () => document.getElementById('store-modal').classList.add('hidden'),
+
+    // ── Sort panel ──
+    _sortMode: 'seq',
+    toggleSort: () => {
+        const p = document.getElementById('sort-panel');
+        const btn = document.getElementById('sort-btn');
+        const open = p.style.display === 'flex';
+        p.style.display = open ? 'none' : 'flex';
+        btn.style.background = open ? '#f3f4f6' : '#2563eb';
+        btn.style.color      = open ? '#374151' : '#fff';
+        btn.style.borderColor = open ? '#e5e7eb' : '#2563eb';
+    },
+    applySort: (mode) => {
+        UI._sortMode = mode;
+        document.querySelectorAll('.sort-opt-btn').forEach(b => b.classList.remove('active'));
+        const active = document.querySelector(`.sort-opt-btn[onclick="UI.applySort('${mode}')"]`);
+        if (active) active.classList.add('active');
+        // ปิด sort panel
+        const p = document.getElementById('sort-panel');
+        const btn = document.getElementById('sort-btn');
+        if (p) p.style.display = 'none';
+        if (btn) { btn.style.background = '#f3f4f6'; btn.style.color = '#374151'; btn.style.borderColor = '#e5e7eb'; }
+        // re-render รายการร้าน
+        if (typeof Processor !== 'undefined') Processor.stores();
+    }
+};
+
+// ── Loading bar ──
+const LoadBar = {
+    _timer: null,
+    show: () => {
+        const wrap = document.getElementById('load-bar-wrap');
+        if (!wrap) return;
+        wrap.style.display = 'block';
+        wrap.classList.remove('hide');
+        LoadBar.setProgress(5, 'กำลังเชื่อมต่อ Firebase...');
+    },
+    setProgress: (pct, label) => {
+        const fill = document.getElementById('load-bar-fill');
+        const lbl  = document.getElementById('load-bar-label');
+        if (fill) fill.style.width = Math.min(pct, 100) + '%';
+        if (lbl)  lbl.textContent  = label || ('โหลดข้อมูล ' + Math.round(pct) + '%');
+    },
+    done: () => {
+        LoadBar.setProgress(100, '✅ โหลดข้อมูลเสร็จแล้ว');
+        if (LoadBar._timer) clearTimeout(LoadBar._timer);
+        LoadBar._timer = setTimeout(() => {
+            const wrap = document.getElementById('load-bar-wrap');
+            if (wrap) {
+                wrap.classList.add('hide');
+                setTimeout(() => { wrap.style.display = 'none'; wrap.classList.remove('hide'); }, 420);
+            }
+        }, 700);
+    },
+    error: (msg) => {
+        LoadBar.setProgress(100, '❌ ' + (msg || 'โหลดไม่สำเร็จ'));
+        if (LoadBar._timer) clearTimeout(LoadBar._timer);
+        LoadBar._timer = setTimeout(() => {
+            const wrap = document.getElementById('load-bar-wrap');
+            if (wrap) { wrap.classList.add('hide'); setTimeout(() => { wrap.style.display = 'none'; wrap.classList.remove('hide'); }, 420); }
+        }, 2000);
+    }
 };
 
 const App = {
@@ -180,10 +242,23 @@ const App = {
         document.getElementById('user-route-label').innerText = State.myRoute;
         document.getElementById('loader').style.display = 'flex';
 
+        // ── Loading bar ──
+        LoadBar.show();
+
         let isMainLoaded = false, isSalesLoaded = false;
 
         const checkReady = () => {
+            // อัปเดต % ตามสิ่งที่โหลดแล้ว
+            const pct = (isMainLoaded ? 50 : 0) + (isSalesLoaded ? 50 : 0);
+            if (!isMainLoaded && !isSalesLoaded) {
+                LoadBar.setProgress(15, 'กำลังโหลดข้อมูลร้านค้า...');
+            } else if (isMainLoaded && !isSalesLoaded) {
+                LoadBar.setProgress(60, 'โหลดข้อมูลร้านเสร็จ... กำลังโหลดยอดขาย');
+            } else if (!isMainLoaded && isSalesLoaded) {
+                LoadBar.setProgress(40, 'โหลดยอดขายเสร็จ... กำลังโหลดร้านค้า');
+            }
             if (isMainLoaded && isSalesLoaded) {
+                LoadBar.done();
                 document.getElementById('loader').style.display = 'none';
                 Processor.run();
 
@@ -200,6 +275,7 @@ const App = {
         docMain = db.collection('appData').doc(_centerDocId);
         const routeColRef = db.collection('appData').doc(_centerDocId).collection('routes');
 
+        LoadBar.setProgress(20, 'กำลังดึงข้อมูลร้านค้า...');
         docMain.onSnapshot(async doc => {
             if (!doc.exists) { State.allStores = []; isMainLoaded = true; checkReady(); return; }
             const data = doc.data();
@@ -207,6 +283,7 @@ const App = {
                 State.allStores = data.routes[State.myRoute] || [];
                 isMainLoaded = true; checkReady();
             } else {
+                LoadBar.setProgress(35, 'ดึงข้อมูลจาก subcollection...');
                 try {
                     const rd = await routeColRef.doc(State.myRoute).get();
                     State.allStores = rd.exists ? (rd.data().stores || []) : [];
@@ -221,6 +298,7 @@ const App = {
             if (isMainLoaded) Processor.run();
         });
 
+        LoadBar.setProgress(30, 'กำลังโหลดข้อมูลยอดขาย...');
         colSales.onSnapshot(snap => {
             let merged = {};
             snap.forEach(doc => { Object.assign(merged, doc.data()); });
@@ -247,7 +325,26 @@ const Processor = {
 
     stores: () => {
         const hist = (typeof StoreHistory !== 'undefined') ? StoreHistory._storeMap : {};
-        let html = State.allStores.map(s => {
+        const mode = (typeof UI !== 'undefined' && UI._sortMode) ? UI._sortMode : 'seq';
+
+        // เรียงลำดับตาม mode
+        let list = [...State.allStores];
+        if (mode === 'seq') {
+            // เรียงตามลำดับวิ่งของวันที่เลือก ถ้าไม่มีให้อยู่ท้าย
+            list.sort((a, b) => (a.seqs?.[State.currentDay] || 9999) - (b.seqs?.[State.currentDay] || 9999));
+        } else if (mode === 'name') {
+            list.sort((a, b) => a.name.localeCompare(b.name, 'th'));
+        } else if (mode === 'sales') {
+            list.sort((a, b) => ((hist[b.id]?.net || 0) - (hist[a.id]?.net || 0)));
+        } else if (mode === 'active') {
+            list.sort((a, b) => {
+                const aA = (State.sales[a.id]?.vpo > 0) ? 0 : 1;
+                const bA = (State.sales[b.id]?.vpo > 0) ? 0 : 1;
+                return aA - bA;
+            });
+        }
+
+        let html = list.map(s => {
             const k      = State.sales[s.id];
             const active = k && k.vpo > 0;
             const h      = hist[s.id];
@@ -506,37 +603,27 @@ const MapCtrl = {
     drawMap: () => {
         if (!map) return;
 
-        // ลบ cluster group เดิมออกจากแผนที่
+        // ลบ layer เดิม
         if (markerClusterGroup) { map.removeLayer(markerClusterGroup); }
         mapMarkers = [];
 
-        // สร้าง cluster group ใหม่
-        markerClusterGroup = L.markerClusterGroup({
-            spiderfyOnMaxZoom: true,
-            showCoverageOnHover: false,
-            maxClusterRadius: 45,
-            disableClusteringAtZoom: 19,
-            spiderfyDistanceMultiplier: 1.5,
-            iconCreateFunction: (cluster) => {
-                const count = cluster.getChildCount();
-                return L.divIcon({
-                    html: `<div style="width:38px;height:38px;border-radius:50%;background:#1e40af;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:14px;border:3px solid #fff;box-shadow:0 2px 10px rgba(0,0,0,0.35);">${count}</div>`,
-                    className: '', iconSize: [38, 38], iconAnchor: [19, 19]
-                });
-            }
-        });
+        // สร้าง layer group ธรรมดา — แสดงหมุดทุกตัวแยกกัน ไม่รวมกลุ่ม
+        markerClusterGroup = L.layerGroup();
 
-        let list = State.allStores.filter(s => s.days.includes(State.currentDay));
+        const list = State.allStores.filter(s => s.days.includes(State.currentDay));
+        list.sort((a, b) => (a.seqs?.[State.currentDay] || 999) - (b.seqs?.[State.currentDay] || 999));
+
         list.forEach((s, i) => {
-            let seq = s.seqs?.[State.currentDay] || i + 1;
-            let icon = L.divIcon({
+            const seq = s.seqs?.[State.currentDay] || i + 1;
+            const icon = L.divIcon({
                 html: `<svg viewBox="0 0 24 24" width="30" height="40" style="filter:drop-shadow(0px 2px 3px rgba(0,0,0,0.3));overflow:visible;"><path d="M12 0C7 0 3 4 3 9c0 7 9 15 9 15s9-8 9-15c0-5-4-9-9-9z" fill="#2563eb" stroke="#fff" stroke-width="2"/><circle cx="12" cy="9" r="7" fill="#fff"/><text x="12" y="13" font-size="10" font-weight="900" fill="#000" text-anchor="middle">${seq}</text></svg>`,
                 className: '', iconSize: [30, 40], iconAnchor: [15, 40], popupAnchor: [0, -40]
             });
-            let m = L.marker([s.lat, s.lng], { icon }).bindPopup(
-                `<div class="text-center pb-1"><b class="text-xs">${s.name}</b><br><button onclick="UI.openModal('${s.id}')" class="bg-gray-100 text-gray-700 px-3 py-1 rounded border mt-1 text-[10px] font-bold shadow-sm">ดูข้อมูล</button></div>`,
-                { closeButton: false }
-            );
+            const m = L.marker([s.lat, s.lng], { icon })
+                .bindPopup(
+                    `<div class="text-center pb-1"><b class="text-xs">${s.name}</b><br><button onclick="UI.openModal('${s.id}')" class="bg-gray-100 text-gray-700 px-3 py-1 rounded border mt-1 text-[10px] font-bold shadow-sm">ดูข้อมูล</button></div>`,
+                    { closeButton: false }
+                );
             markerClusterGroup.addLayer(m);
             mapMarkers.push(m);
         });

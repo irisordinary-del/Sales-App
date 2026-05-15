@@ -49,6 +49,17 @@
             #sidebar.collapsed { width: 0 !important; }
             #sidebar-overlay { display:block; }
         }
+
+        /* หน้าหลักเต็มพื้นที่ main-wrap (sidebar จัด layout ผ่าน flex แล้ว ไม่ต้องดัน left ซ้ำ) */
+        #main-wrap { min-width: 0; }
+        .app-page {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            background: #f8fafc;
+        }
     </style>
 
 </head>
@@ -66,6 +77,14 @@
         <p id="loader-text" class="text-indigo-700 font-bold text-lg">กำลังประมวลผล...</p>
 
         <p id="loader-subtext" class="text-gray-500 text-sm mt-2 font-medium"></p>
+
+        <div id="loader-log" class="mt-3 text-[11px] text-gray-500 max-h-28 overflow-y-auto font-mono text-center px-4 leading-relaxed" style="max-width:min(90vw, 420px)"></div>
+
+        <button id="force-reload-btn" type="button" onclick="App.forceReload()"
+            style="display:none"
+            class="mt-4 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-md transition">
+            🔄 บังคับโหลดใหม่
+        </button>
 
     </div>
 
@@ -144,13 +163,21 @@
     <div id="sidebar-overlay" class="fixed inset-0 bg-black/40 z-[6999] hidden" onclick="SidebarCtrl.toggle()"></div>
 
     <!-- Main Content -->
-    <div id="main-wrap" class="flex-1 flex flex-col overflow-hidden relative">
+    <!-- Global hamburger — แสดงทุก page ไม่หายตาม page switch -->
+    <button id="global-hamburger" onclick="SidebarCtrl.toggle()"
+        style="display:none;" class="fixed top-3 left-3 z-[8000] w-8 h-8 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white flex items-center justify-center transition shadow-lg">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+            <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+        </svg>
+    </button>
+
+    <div id="main-wrap" class="flex-1 min-w-0 flex flex-col overflow-hidden relative">
 
 
 
         <!-- ===== PAGE: Planning ===== -->
 
-        <div id="page-planning" class="flex-1 flex flex-col absolute inset-0">
+        <div id="page-planning" class="app-page">
 
 
 
@@ -501,11 +528,16 @@
 
 
 
-<div id="page-allroutes" class="flex-1 flex flex-col absolute inset-0 hidden">
+        <div id="page-allroutes" class="app-page hidden">
 
             <!-- Header -->
-            <div class="h-16 bg-gray-900 text-white flex items-center justify-between px-6 shadow-md z-[5000] relative shrink-0 border-b-4 border-indigo-500">
+            <div class="h-16 bg-gray-900 text-white flex items-center justify-between px-4 shadow-md z-[5000] relative shrink-0 border-b-4 border-indigo-500">
                 <div class="flex items-center gap-3">
+                    <button onclick="SidebarCtrl.toggle()" class="w-8 h-8 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white flex items-center justify-center transition shrink-0">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+                            <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+                        </svg>
+                    </button>
                     <h1 class="text-xl font-black tracking-wide text-indigo-400 mr-2 hidden sm:block">Route<span class="text-white">Plan</span></h1>
                     <span class="text-lg font-bold">📦 ภาพรวมทุกสาย</span>
                 </div>
@@ -546,7 +578,10 @@
 
         </div>
 
-    </div><!-- end main -->
+        <!-- ===== PAGE: Dashboard ===== -->
+        <div id="page-dashboard" class="app-page hidden"></div>
+
+    </div><!-- end main-wrap -->
 
 
 
@@ -623,15 +658,6 @@
     </div>
 
 
-        <!-- ===== PAGE: AllRoutes ===== -->
-
-        
-
-
-
-    <!-- ===== PAGE: Dashboard ===== -->
-    <div id="page-dashboard" class="flex-1 flex flex-col absolute inset-0 hidden"></div>
-
     <!-- ===== SCRIPTS (ลำดับสำคัญมาก) ===== -->
 
     <!-- 0. Auth (ต้องก่อน app-config เพราะ app-config redirect ถ้าไม่มี center) -->
@@ -664,8 +690,8 @@
 
     <script>
 
-        // Guard: admin + supervisor only
-        const _session = Auth.guard(['admin', 'supervisor']);
+        // Guard: admin, supervisor, sales (dashboard)
+        const _session = Auth.guard(['admin', 'supervisor', 'sales']);
         if (!_session) throw new Error('Unauthorized');
 
         // Supervisor filter: จำกัด CENTER_DOC ตาม centerId
@@ -681,6 +707,11 @@
         Nav.go = (page) => {
             _origNavGo(page);
             if (page === 'dashboard' && typeof Dashboard !== 'undefined') Dashboard._render();
+            // sync hamburger ทุกครั้งที่เปลี่ยน page
+            if (typeof SidebarCtrl !== 'undefined') {
+                SidebarCtrl._clearPageOffset();
+                SidebarCtrl._syncHamburger(SidebarCtrl._collapsed);
+            }
         };
 
         document.addEventListener('DOMContentLoaded', () => {
@@ -690,8 +721,9 @@
             // แสดง user info ใน sidebar ล่างสุด
             const sidebarUserEl = document.getElementById('sidebar-user-info');
             if (sidebarUserEl) {
-                const roleLabel = { admin: '⚙️ Admin', supervisor: '👁️ Supervisor' };
-                const roleColor = _session.role === 'admin' ? 'bg-violet-800 text-violet-300' : 'bg-blue-800 text-blue-300';
+                const roleLabel = { admin: '⚙️ Admin', supervisor: '👁️ Supervisor', sales: '🚚 Sales' };
+                const roleColor = _session.role === 'admin' ? 'bg-violet-800 text-violet-300'
+                    : _session.role === 'sales' ? 'bg-emerald-800 text-emerald-300' : 'bg-blue-800 text-blue-300';
                 sidebarUserEl.innerHTML = `
                     <div class="flex items-center gap-2">
                         <div class="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-white font-black text-sm shrink-0">
@@ -714,6 +746,13 @@
                 );
             }
 
+            if (_session.role === 'sales') {
+                ['nav-planning', 'nav-allroutes'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) el.style.display = 'none';
+                });
+                Nav.go('dashboard');
+            }
         });
 
     </script>
@@ -802,6 +841,22 @@
     <script>
         const SidebarCtrl = {
             _collapsed: false,
+            _clearPageOffset: () => {
+                document.querySelectorAll('.app-page').forEach(el => {
+                    el.style.left = '';
+                    el.style.right = '';
+                });
+            },
+            _syncHamburger: (collapsed) => {
+                // แสดง global-hamburger เฉพาะตอน sidebar collapse
+                const btn = document.getElementById('global-hamburger');
+                if (!btn) return;
+                const activePage = document.querySelector('[id^="page-"]:not(.hidden)');
+                const pageId = activePage ? activePage.id : '';
+                // page-planning มีปุ่มของตัวเองอยู่แล้ว
+                const needGlobal = collapsed && pageId !== 'page-planning';
+                btn.style.display = needGlobal ? 'flex' : 'none';
+            },
             toggle: () => {
                 const sb  = document.getElementById('sidebar');
                 const ov  = document.getElementById('sidebar-overlay');
@@ -811,6 +866,8 @@
                 if (window.innerWidth < 768) {
                     ov.classList.toggle('hidden', SidebarCtrl._collapsed);
                 }
+                SidebarCtrl._clearPageOffset();
+                SidebarCtrl._syncHamburger(SidebarCtrl._collapsed);
                 // invalidate map size หลัง transition
                 setTimeout(() => {
                     if (typeof MapCtrl !== 'undefined' && MapCtrl.map) MapCtrl.map.invalidateSize();
@@ -827,6 +884,8 @@
                     if (sb) sb.classList.add('collapsed');
                     SidebarCtrl._collapsed = true;
                 }
+                SidebarCtrl._clearPageOffset();
+                SidebarCtrl._syncHamburger(SidebarCtrl._collapsed);
             }
         };
         document.addEventListener('DOMContentLoaded', SidebarCtrl.restore);

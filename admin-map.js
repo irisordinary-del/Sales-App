@@ -8,6 +8,7 @@ const MapCtrl = {
     polylines: [],
 
     init: () => {
+        if (MapCtrl.map || !document.getElementById('map')) return;
         MapCtrl.map = L.map('map').setView([14.4745, 100.1222], 10);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxZoom: 18,
@@ -17,6 +18,7 @@ const MapCtrl = {
 
     // แก้บัค: clearAll ล้าง markers ทั้งหมดก่อน render ใหม่เสมอ
     clearAll: () => {
+        if (!MapCtrl.map) return;
         for (const id in MapCtrl.markers) {
             MapCtrl.map.removeLayer(MapCtrl.markers[id]);
         }

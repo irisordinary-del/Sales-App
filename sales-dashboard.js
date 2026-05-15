@@ -16,6 +16,30 @@ const SalesDashboard = {
 
     EXCLUDED_CATS: new Set(['อื่นๆ', 'กระเช้าของขวัญ']),
 
+    _calcOutletMetrics: (rows) => {
+        const filtered = rows.filter(r => !SalesDashboard.EXCLUDED_CATS.has(r.catDesc));
+        const byOutlet = {};
+        filtered.forEach(r => {
+            const key = String(r.custCode || '').trim() || String(r.custName || '').trim();
+            if (!key) return;
+            if (!byOutlet[key]) byOutlet[key] = { skus: new Set(), vol: 0 };
+            const sku = String(r.prodCode || '').trim();
+            if (sku) byOutlet[key].skus.add(sku);
+            byOutlet[key].vol += SalesDashboard._amt(r);
+        });
+        const outlets = Object.values(byOutlet);
+        const n = outlets.length;
+        if (!n) return { outletCount: 0, avgSku: 0, avgVol: 0 };
+        return {
+            outletCount: n,
+            avgSku: outlets.reduce((s, o) => s + o.skus.size, 0) / n,
+            avgVol: outlets.reduce((s, o) => s + o.vol, 0) / n
+        };
+    },
+
+    _fmtSku: (n) => (n || 0).toLocaleString('th-TH', { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
+    _fmtVol: (n) => SalesDashboard._fmt(n || 0),
+
     // ─── Init: เรียกหลัง App.start() โหลดเสร็จ ──────────────────────────
     init: () => {
         const session = Auth.getSession();
@@ -27,7 +51,27 @@ const SalesDashboard = {
         if (lbl) lbl.textContent = 'สาย: ' + SalesDashboard._username;
 
         SalesDashboard._ready = true;
+        SalesDashboard._ensureKpiCards();
         SalesDashboard._loadMonthList();
+    },
+
+    _ensureKpiCards: () => {
+        if (document.getElementById('db-kpi-avgsku')) return;
+        const invCard = document.getElementById('db-kpi-inv')?.closest('.db-card');
+        if (!invCard || !invCard.parentElement) return;
+        const parent = invCard.parentElement;
+        const mk = (border, label, id, sub, color) => {
+            const el = document.createElement('div');
+            el.className = 'db-card';
+            el.style.borderLeft = '4px solid ' + border;
+            el.innerHTML =
+                '<div style="font-size:10px;font-weight:700;color:#6b7280;margin-bottom:4px;">' + label + '</div>' +
+                '<div class="db-kpi-num" id="' + id + '" style="color:' + color + ';">—</div>' +
+                '<div style="font-size:10px;color:#9ca3af;margin-top:2px;">' + sub + '</div>';
+            return el;
+        };
+        parent.insertBefore(mk('#0ea5e9', '📦 SKU เฉลี่ย/ร้าน', 'db-kpi-avgsku', 'SKU รวมเฉลี่ยต่อร้าน', '#0284c7'), invCard);
+        parent.insertBefore(mk('#ec4899', '📊 ยอดขาย เฉลี่ย/ร้าน', 'db-kpi-avgvol', 'บาท เฉลี่ยต่อร้าน', '#db2777'), invCard);
     },
 
     // ─── โหลดรายการเดือนที่มีข้อมูล ──────────────────────────────────────
@@ -130,7 +174,7 @@ const SalesDashboard = {
         const othersRows  = rows.filter(r => r.catDesc === 'อื่นๆ');
 
         const total    = mainRows.reduce((s, r) => s + SalesDashboard._amt(r), 0);
-        const shops    = new Set(mainRows.map(r => r.custCode)).size;
+        const outletM  = SalesDashboard._calcOutletMetrics(rows);
         const invCount = new Set(mainRows.map(r => r.invNum)).size;
         const target   = SalesDashboard._target;
         const pct      = target > 0 ? (total / target * 100) : null;
@@ -138,7 +182,9 @@ const SalesDashboard = {
         // ─ KPI Cards ─
         SalesDashboard._setText('db-kpi-total', SalesDashboard._fmt(total));
         SalesDashboard._setText('db-kpi-total-sub', 'Invoice Net Amount');
-        SalesDashboard._setText('db-kpi-shops', shops.toLocaleString());
+        SalesDashboard._setText('db-kpi-shops', outletM.outletCount.toLocaleString());
+        SalesDashboard._setText('db-kpi-avgsku', SalesDashboard._fmtSku(outletM.avgSku));
+        SalesDashboard._setText('db-kpi-avgvol', SalesDashboard._fmtVol(outletM.avgVol));
         SalesDashboard._setText('db-kpi-inv', invCount.toLocaleString());
 
         if (pct !== null) {
@@ -216,7 +262,7 @@ const SalesDashboard = {
         const empty = document.getElementById('db-empty');
         if (empty) empty.style.display = 'block';
         // Clear all KPIs
-        ['db-kpi-total','db-kpi-pct','db-kpi-shops','db-kpi-inv'].forEach(id => SalesDashboard._setText(id, '—'));
+        ['db-kpi-total','db-kpi-pct','db-kpi-shops','db-kpi-avgsku','db-kpi-avgvol','db-kpi-inv'].forEach(id => SalesDashboard._setText(id, '—'));
         ['db-cat-body','db-shop-body'].forEach(id => {
             const el = document.getElementById(id);
             if (el) el.innerHTML = '<div style="text-align:center;padding:12px;color:#9ca3af;font-size:12px;">ยังไม่มีข้อมูล</div>';
