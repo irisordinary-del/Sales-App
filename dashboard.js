@@ -410,6 +410,13 @@ const Dashboard = {
         let rows = Dashboard._rows;
         const role = Dashboard._session.role;
 
+        // กรองเฉพาะ sCode ที่อยู่ในศูนย์ปัจจุบัน (admin/supervisor)
+        // State.db.routeList คือ list ของ sCode ในศูนย์นี้ เช่น ['406V01','406V02',...]
+        if (role !== 'sales' && typeof State !== 'undefined' && State.db && State.db.routeList && State.db.routeList.length > 0) {
+            const centerRoutes = new Set(State.db.routeList.map(r => r.toUpperCase()));
+            rows = rows.filter(r => centerRoutes.has((r.sCode || '').toUpperCase()));
+        }
+
         // Sales user sees only own rows
         if (role === 'sales') {
             rows = rows.filter(r => r.sCode === Dashboard._session.username.toUpperCase());
@@ -423,6 +430,14 @@ const Dashboard = {
     _getRoutes: () => {
         const role = Dashboard._session.role;
         if (role === 'sales') return [Dashboard._session.username.toUpperCase()];
+        // เอาเฉพาะ sCode ที่อยู่ใน routeList ของศูนย์นี้
+        if (typeof State !== 'undefined' && State.db && State.db.routeList && State.db.routeList.length > 0) {
+            const centerRoutes = new Set(State.db.routeList.map(r => r.toUpperCase()));
+            const codes = [...new Set(Dashboard._rows.map(r => r.sCode))]
+                .filter(c => centerRoutes.has((c || '').toUpperCase()))
+                .sort();
+            return codes;
+        }
         const codes = [...new Set(Dashboard._rows.map(r => r.sCode))].sort();
         return codes;
     },
