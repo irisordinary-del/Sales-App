@@ -33,7 +33,7 @@ const Dashboard = {
             if (!byOutlet[key]) byOutlet[key] = { skus: new Set(), vol: 0 };
             const sku = String(r.prodCode || '').trim();
             if (sku) byOutlet[key].skus.add(sku);
-            byOutlet[key].vol += parseFloat(r.qtyEA) || 0;
+            byOutlet[key].vol += Dashboard._amt(r);
         });
         const outlets = Object.values(byOutlet);
         const n = outlets.length;
@@ -44,7 +44,7 @@ const Dashboard = {
     },
 
     _fmtSku: (n) => (n || 0).toLocaleString('th-TH', { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
-    _fmtVol: (n) => Math.round(n || 0).toLocaleString('th-TH'),
+    _fmtVol: (n) => Dashboard._fmt(n || 0),
 
     // ─── Init ─────────────────────────────────────────────────────────────
     init: () => {
@@ -140,7 +140,7 @@ const Dashboard = {
                                     <th class="px-3 py-2 text-right text-xs font-bold text-gray-500">Target</th>
                                     <th class="px-3 py-2 text-right text-xs font-bold text-gray-500">%</th>
                                     <th class="px-3 py-2 text-right text-xs font-bold text-gray-500">SKU/ร้าน</th>
-                                    <th class="px-3 py-2 text-right text-xs font-bold text-gray-500">Vol/ร้าน</th>
+                                    <th class="px-3 py-2 text-right text-xs font-bold text-gray-500">ยอด/ร้าน</th>
                                     <th class="px-3 py-2 text-center text-xs font-bold text-gray-500">ดู</th>
                                 </tr>
                             </thead>
@@ -548,7 +548,7 @@ const Dashboard = {
             { icon:'🎯', label: 'MTD vs Target', val: pct !== null ? Dashboard._pctBadge(pct) : '—', sub: targetAmt > 0 ? `Target: ${Dashboard._fmt(targetAmt)}` : 'ยังไม่ตั้ง Target', color:'amber', raw:true },
             { icon:'🏪', label: 'ร้านค้าทั้งหมด', val: outletM.outletCount.toLocaleString(), sub:'ร้านที่มียอด', color:'blue' },
             { icon:'📦', label: 'SKU เฉลี่ย/ร้าน', val: Dashboard._fmtSku(outletM.avgSku), sub:'SKU รวมเฉลี่ยต่อร้าน', color:'cyan' },
-            { icon:'📊', label: 'Vol เฉลี่ย/ร้าน', val: Dashboard._fmtVol(outletM.avgVol), sub:'หน่วย EA', color:'pink' },
+            { icon:'📊', label: 'ยอดขาย เฉลี่ย/ร้าน', val: Dashboard._fmtVol(outletM.avgVol), sub:'บาท (net/gross)', color:'pink' },
             { icon:'📄', label: 'Invoice', val: invCount.toLocaleString(), sub:'ใบ', color:'violet' },
         ].map(k => `
             <div class="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">

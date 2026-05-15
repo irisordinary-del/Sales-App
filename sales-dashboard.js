@@ -25,7 +25,7 @@ const SalesDashboard = {
             if (!byOutlet[key]) byOutlet[key] = { skus: new Set(), vol: 0 };
             const sku = String(r.prodCode || '').trim();
             if (sku) byOutlet[key].skus.add(sku);
-            byOutlet[key].vol += parseFloat(r.qtyEA) || 0;
+            byOutlet[key].vol += SalesDashboard._amt(r);
         });
         const outlets = Object.values(byOutlet);
         const n = outlets.length;
@@ -38,7 +38,7 @@ const SalesDashboard = {
     },
 
     _fmtSku: (n) => (n || 0).toLocaleString('th-TH', { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
-    _fmtVol: (n) => Math.round(n || 0).toLocaleString('th-TH'),
+    _fmtVol: (n) => SalesDashboard._fmt(n || 0),
 
     // ─── Init: เรียกหลัง App.start() โหลดเสร็จ ──────────────────────────
     init: () => {
@@ -71,7 +71,7 @@ const SalesDashboard = {
             return el;
         };
         parent.insertBefore(mk('#0ea5e9', '📦 SKU เฉลี่ย/ร้าน', 'db-kpi-avgsku', 'SKU รวมเฉลี่ยต่อร้าน', '#0284c7'), invCard);
-        parent.insertBefore(mk('#ec4899', '📊 Vol เฉลี่ย/ร้าน', 'db-kpi-avgvol', 'หน่วย EA', '#db2777'), invCard);
+        parent.insertBefore(mk('#ec4899', '📊 ยอดขาย เฉลี่ย/ร้าน', 'db-kpi-avgvol', 'บาท เฉลี่ยต่อร้าน', '#db2777'), invCard);
     },
 
     // ─── โหลดรายการเดือนที่มีข้อมูล ──────────────────────────────────────
