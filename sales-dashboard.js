@@ -18,27 +18,40 @@ const SalesDashboard = {
 
     _calcOutletMetrics: (rows) => {
         const filtered = rows.filter(r => !SalesDashboard.EXCLUDED_CATS.has(r.catDesc));
-        const byOutlet = {};
+        const byOutlet = {}, byOutletV = {}, byOutletC = {};
         filtered.forEach(r => {
             const key = String(r.custCode || '').trim() || String(r.custName || '').trim();
             if (!key) return;
-            if (!byOutlet[key]) byOutlet[key] = { skus: new Set(), vol: 0 };
-            const sku = String(r.prodCode || '').trim();
-            if (sku) byOutlet[key].skus.add(sku);
-            byOutlet[key].vol += SalesDashboard._amt(r);
+            const sku   = String(r.prodCode || '').trim();
+            const amt   = SalesDashboard._amt(r);
+            const sCode = String(r.sCode || '').toUpperCase();
+            const rType = /C\d/.test(sCode) ? 'C' : /V\d/.test(sCode) ? 'V' : null;
+            [
+                [byOutlet, true],
+                [byOutletV, rType === 'V'],
+                [byOutletC, rType === 'C'],
+            ].forEach(([map, use]) => {
+                if (!use) return;
+                if (!map[key]) map[key] = { skus: new Set(), vol: 0 };
+                if (sku) map[key].skus.add(sku);
+                map[key].vol += amt;
+            });
         });
-        const outlets = Object.values(byOutlet);
-        const n = outlets.length;
-        if (!n) return { outletCount: 0, avgSku: 0, avgVol: 0 };
-        return {
-            outletCount: n,
-            avgSku: outlets.reduce((s, o) => s + o.skus.size, 0) / n,
-            avgVol: outlets.reduce((s, o) => s + o.vol, 0) / n
+        const calc = (map) => {
+            const list = Object.values(map);
+            const n = list.length;
+            if (!n) return { outletCount: 0, avgSku: 0, avgVol: 0 };
+            return {
+                outletCount: n,
+                avgSku: list.reduce((s, o) => s + o.skus.size, 0) / n,
+                avgVol: list.reduce((s, o) => s + o.vol, 0) / n,
+            };
         };
+        return { ...calc(byOutlet), v: calc(byOutletV), c: calc(byOutletC) };
     },
 
     _fmtSku: (n) => (n || 0).toLocaleString('th-TH', { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
-    _fmtVol: (n) => SalesDashboard._fmt(n || 0),
+    _fmtVol: (n) => Math.round(n || 0).toLocaleString('th-TH'),
 
     // ─── Init: เรียกหลัง App.start() โหลดเสร็จ ──────────────────────────
     init: () => {
@@ -71,7 +84,8 @@ const SalesDashboard = {
             return el;
         };
         parent.insertBefore(mk('#0ea5e9', '📦 SKU เฉลี่ย/ร้าน', 'db-kpi-avgsku', 'SKU รวมเฉลี่ยต่อร้าน', '#0284c7'), invCard);
-        parent.insertBefore(mk('#ec4899', '📊 ยอดขาย เฉลี่ย/ร้าน', 'db-kpi-avgvol', 'บาท เฉลี่ยต่อร้าน', '#db2777'), invCard);
+        parent.insertBefore(mk('#ec4899', '🚐 ยอด/ร้าน สาย V', 'db-kpi-avgvol-v', 'บาท เฉลี่ยต่อร้าน', '#db2777'), invCard);
+        parent.insertBefore(mk('#f97316', '🏪 ยอด/ร้าน สาย C', 'db-kpi-avgvol-c', 'บาท เฉลี่ยต่อร้าน', '#ea580c'), invCard);
     },
 
     // ─── โหลดรายการเดือนที่มีข้อมูล ──────────────────────────────────────
@@ -184,7 +198,8 @@ const SalesDashboard = {
         SalesDashboard._setText('db-kpi-total-sub', 'Invoice Net Amount');
         SalesDashboard._setText('db-kpi-shops', outletM.outletCount.toLocaleString());
         SalesDashboard._setText('db-kpi-avgsku', SalesDashboard._fmtSku(outletM.avgSku));
-        SalesDashboard._setText('db-kpi-avgvol', SalesDashboard._fmtVol(outletM.avgVol));
+        SalesDashboard._setText('db-kpi-avgvol-v', outletM.v.outletCount > 0 ? Math.round(outletM.v.avgVol).toLocaleString('th-TH') : '—');
+        SalesDashboard._setText('db-kpi-avgvol-c', outletM.c.outletCount > 0 ? Math.round(outletM.c.avgVol).toLocaleString('th-TH') : '—');
         SalesDashboard._setText('db-kpi-inv', invCount.toLocaleString());
 
         if (pct !== null) {
@@ -262,7 +277,7 @@ const SalesDashboard = {
         const empty = document.getElementById('db-empty');
         if (empty) empty.style.display = 'block';
         // Clear all KPIs
-        ['db-kpi-total','db-kpi-pct','db-kpi-shops','db-kpi-avgsku','db-kpi-avgvol','db-kpi-inv'].forEach(id => SalesDashboard._setText(id, '—'));
+        ['db-kpi-total','db-kpi-pct','db-kpi-shops','db-kpi-avgsku','db-kpi-avgvol-v','db-kpi-avgvol-c','db-kpi-inv'].forEach(id => SalesDashboard._setText(id, '—'));
         ['db-cat-body','db-shop-body'].forEach(id => {
             const el = document.getElementById(id);
             if (el) el.innerHTML = '<div style="text-align:center;padding:12px;color:#9ca3af;font-size:12px;">ยังไม่มีข้อมูล</div>';

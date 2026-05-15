@@ -21,30 +21,46 @@ const Dashboard = {
     // Categories ที่ต้องแยกออก ไม่รวมยอดหลัก
     EXCLUDED_CATS: new Set(['อื่นๆ', 'กระเช้าของขวัญ']),
 
-    // SKU / Volume เฉลี่ยต่อร้าน (outlet = custCode ที่มียอดในเดือน)
+    // ยอดขาย / SKU เฉลี่ยต่อร้าน แยก V-route และ C-route
+    // outlet = custCode ที่มียอดในเดือน
     _calcOutletMetrics: (rows, useMainOnly = true) => {
         const filtered = useMainOnly
             ? rows.filter(r => !Dashboard.EXCLUDED_CATS.has(r.catDesc))
             : rows;
-        const byOutlet = {};
+        const byOutlet = {}, byOutletV = {}, byOutletC = {};
         filtered.forEach(r => {
             const key = String(r.custCode || '').trim() || String(r.custName || '').trim();
             if (!key) return;
-            if (!byOutlet[key]) byOutlet[key] = { skus: new Set(), vol: 0 };
-            const sku = String(r.prodCode || '').trim();
-            if (sku) byOutlet[key].skus.add(sku);
-            byOutlet[key].vol += Dashboard._amt(r);
+            const sku  = String(r.prodCode || '').trim();
+            const amt  = Dashboard._amt(r);
+            const sCode = String(r.sCode || '').toUpperCase();
+            const rType = /C\d/.test(sCode) ? 'C' : /V\d/.test(sCode) ? 'V' : null;
+            [
+                [byOutlet, true],
+                [byOutletV, rType === 'V'],
+                [byOutletC, rType === 'C'],
+            ].forEach(([map, use]) => {
+                if (!use) return;
+                if (!map[key]) map[key] = { skus: new Set(), vol: 0 };
+                if (sku) map[key].skus.add(sku);
+                map[key].vol += amt;
+            });
         });
-        const outlets = Object.values(byOutlet);
-        const n = outlets.length;
-        if (!n) return { outletCount: 0, avgSku: 0, avgVol: 0 };
-        const avgSku = outlets.reduce((s, o) => s + o.skus.size, 0) / n;
-        const avgVol = outlets.reduce((s, o) => s + o.vol, 0) / n;
-        return { outletCount: n, avgSku, avgVol };
+        const calc = (map) => {
+            const list = Object.values(map);
+            const n = list.length;
+            if (!n) return { outletCount: 0, avgSku: 0, avgVol: 0 };
+            return {
+                outletCount: n,
+                avgSku: list.reduce((s, o) => s + o.skus.size, 0) / n,
+                avgVol: list.reduce((s, o) => s + o.vol, 0) / n,
+            };
+        };
+        return { ...calc(byOutlet), v: calc(byOutletV), c: calc(byOutletC) };
     },
 
     _fmtSku: (n) => (n || 0).toLocaleString('th-TH', { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
-    _fmtVol: (n) => Dashboard._fmt(n || 0),
+    _fmtVol: (n) => Math.round(n || 0).toLocaleString('th-TH'),
 
     // ─── Init ─────────────────────────────────────────────────────────────
     init: () => {
@@ -140,12 +156,13 @@ const Dashboard = {
                                     <th class="px-3 py-2 text-right text-xs font-bold text-gray-500">Target</th>
                                     <th class="px-3 py-2 text-right text-xs font-bold text-gray-500">%</th>
                                     <th class="px-3 py-2 text-right text-xs font-bold text-gray-500">SKU/ร้าน</th>
-                                    <th class="px-3 py-2 text-right text-xs font-bold text-gray-500">ยอด/ร้าน</th>
+                                    <th class="px-3 py-2 text-right text-xs font-bold text-gray-500">ยอด/ร้าน V</th>
+                                    <th class="px-3 py-2 text-right text-xs font-bold text-gray-500">ยอด/ร้าน C</th>
                                     <th class="px-3 py-2 text-center text-xs font-bold text-gray-500">ดู</th>
                                 </tr>
                             </thead>
                             <tbody id="db-route-tbody">
-                                <tr><td colspan="7" class="text-center py-8 text-gray-400 text-sm">เลือกเดือนก่อนครับ</td></tr>
+                                <tr><td colspan="8" class="text-center py-8 text-gray-400 text-sm">เลือกเดือนก่อนครับ</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -543,12 +560,21 @@ const Dashboard = {
 
         const modeLabel = Dashboard._amountMode === 'gross' ? 'Gross' : 'Net';
 
+        const fmtFull = (n) => Math.round(n || 0).toLocaleString('th-TH');
+        const volVsub = outletM.v.outletCount > 0
+            ? `V: ${fmtFull(outletM.v.avgVol)} (${outletM.v.outletCount} ร้าน)`
+            : 'ไม่มีสาย V';
+        const volCsub = outletM.c.outletCount > 0
+            ? `C: ${fmtFull(outletM.c.avgVol)} (${outletM.c.outletCount} ร้าน)`
+            : 'ไม่มีสาย C';
+
         el.innerHTML = [
             { icon:'💰', label: `ยอด ${modeLabel} (หลัก)`, val: Dashboard._fmt(total), sub: '', color:'emerald' },
             { icon:'🎯', label: 'MTD vs Target', val: pct !== null ? Dashboard._pctBadge(pct) : '—', sub: targetAmt > 0 ? `Target: ${Dashboard._fmt(targetAmt)}` : 'ยังไม่ตั้ง Target', color:'amber', raw:true },
             { icon:'🏪', label: 'ร้านค้าทั้งหมด', val: outletM.outletCount.toLocaleString(), sub:'ร้านที่มียอด', color:'blue' },
             { icon:'📦', label: 'SKU เฉลี่ย/ร้าน', val: Dashboard._fmtSku(outletM.avgSku), sub:'SKU รวมเฉลี่ยต่อร้าน', color:'cyan' },
-            { icon:'📊', label: 'ยอดขาย เฉลี่ย/ร้าน', val: Dashboard._fmtVol(outletM.avgVol), sub:'บาท (net/gross)', color:'pink' },
+            { icon:'🚐', label: 'ยอด/ร้าน สาย V', val: fmtFull(outletM.v.avgVol), sub: volVsub, color:'pink' },
+            { icon:'🏪', label: 'ยอด/ร้าน สาย C', val: fmtFull(outletM.c.avgVol), sub: volCsub, color:'orange' },
             { icon:'📄', label: 'Invoice', val: invCount.toLocaleString(), sub:'ใบ', color:'violet' },
         ].map(k => `
             <div class="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
@@ -583,12 +609,13 @@ const Dashboard = {
             const tgt  = Dashboard._targets[r] || 0;
             const pct  = tgt > 0 ? (amt / tgt * 100) : null;
             const om   = Dashboard._calcOutletMetrics(rows);
-            return { r, amt, tgt, pct, avgSku: om.avgSku, avgVol: om.avgVol };
+            return { r, amt, tgt, pct, avgSku: om.avgSku, avgVolV: om.v.avgVol, avgVolC: om.c.avgVol };
         }).sort((a,b) => b.amt - a.amt);
 
         const maxAmt = Math.max(...rowData.map(d => d.amt), 1);
 
-        tbody.innerHTML = rowData.map(({ r, amt, tgt, pct, avgSku, avgVol }) => {
+        const fmtFull = (n) => Math.round(n || 0).toLocaleString('th-TH');
+        tbody.innerHTML = rowData.map(({ r, amt, tgt, pct, avgSku, avgVolV, avgVolC }) => {
             const barW = Math.round((amt / maxAmt) * 100);
             const pctStr = pct !== null ? Dashboard._pctBadgeInline(pct) : '<span class="text-gray-300 text-xs">—</span>';
             const isActive = Dashboard._drillRoute === r;
@@ -606,7 +633,8 @@ const Dashboard = {
                 <td class="px-3 py-2.5 text-right text-xs text-gray-400 tabular-nums">${tgt > 0 ? Dashboard._fmt(tgt) : '—'}</td>
                 <td class="px-3 py-2.5 text-right">${pctStr}</td>
                 <td class="px-3 py-2.5 text-right text-xs font-bold text-cyan-700 tabular-nums">${Dashboard._fmtSku(avgSku)}</td>
-                <td class="px-3 py-2.5 text-right text-xs font-bold text-pink-700 tabular-nums">${Dashboard._fmtVol(avgVol)}</td>
+                <td class="px-3 py-2.5 text-right text-xs font-bold text-pink-700 tabular-nums">${avgVolV > 0 ? fmtFull(avgVolV) : '—'}</td>
+                <td class="px-3 py-2.5 text-right text-xs font-bold text-orange-600 tabular-nums">${avgVolC > 0 ? fmtFull(avgVolC) : '—'}</td>
                 <td class="px-3 py-2.5 text-center">
                     ${isAdmin ? `<button onclick="event.stopPropagation();Dashboard._drillToRoute('${r}')" class="text-[10px] text-indigo-400 hover:text-indigo-700 font-bold">▶</button>` : ''}
                 </td>
@@ -626,7 +654,8 @@ const Dashboard = {
             <td class="px-3 py-2.5 text-right text-xs tabular-nums text-gray-500">${totalTgt > 0 ? Dashboard._fmt(totalTgt) : '—'}</td>
             <td class="px-3 py-2.5 text-right text-xs">${totalPct !== null ? Dashboard._pctBadgeInline(totalPct) : '—'}</td>
             <td class="px-3 py-2.5 text-right text-xs tabular-nums text-cyan-700">${Dashboard._fmtSku(totalOm.avgSku)}</td>
-            <td class="px-3 py-2.5 text-right text-xs tabular-nums text-pink-700">${Dashboard._fmtVol(totalOm.avgVol)}</td>
+            <td class="px-3 py-2.5 text-right text-xs tabular-nums text-pink-700">${Math.round(totalOm.v.avgVol||0).toLocaleString('th-TH')}</td>
+            <td class="px-3 py-2.5 text-right text-xs tabular-nums text-orange-600">${Math.round(totalOm.c.avgVol||0).toLocaleString('th-TH')}</td>
             <td></td>
         </tr>`;
     },
