@@ -245,10 +245,16 @@
                     <span id="draft-banner-label" class="text-xs font-bold text-amber-800">กำลังแก้ไข Draft</span>
                     <span class="text-xs text-amber-600">— การเปลี่ยนแปลงนี้จะไม่กระทบ Sales จนกว่าจะ Activate</span>
                 </div>
-                <button onclick="PlanUI.confirmActivate()"
-                    class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-1.5 rounded-lg text-xs font-bold transition shadow-sm">
-                    ✅ Activate
-                </button>
+                <div class="flex items-center gap-2">
+                    <button onclick="CalendarAdmin.open(App._planMode)"
+                        class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition shadow-sm">
+                        📅 ตั้งค่าปฏิทิน
+                    </button>
+                    <button onclick="PlanUI.confirmActivate()"
+                        class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-1.5 rounded-lg text-xs font-bold transition shadow-sm">
+                        ✅ Activate
+                    </button>
+                </div>
             </div>
 
             <!-- History mode banner -->
@@ -1120,6 +1126,242 @@
                 await App.activateDraft(PlanUI._pendingActivateYm);
                 PlanUI._pendingActivateYm = null;
                 await PlanUI.refresh();
+            }
+        };
+    </script>
+
+    <!-- Calendar Config Modal -->
+    <div id="calendar-config-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden" style="max-height:90dvh;display:flex;flex-direction:column;">
+            <div class="p-5 border-b flex justify-between items-center bg-gray-50 flex-shrink-0">
+                <div>
+                    <h2 class="text-base font-black text-gray-900">📅 ตั้งค่าปฏิทิน</h2>
+                    <p id="cal-modal-plan-label" class="text-xs text-gray-500 mt-0.5"></p>
+                </div>
+                <button onclick="CalendarAdmin.close()" class="w-8 h-8 rounded-full border border-gray-200 text-gray-400 hover:bg-gray-100 font-bold">✕</button>
+            </div>
+
+            <div class="overflow-y-auto flex-1 p-5 space-y-4">
+                <!-- โหมด -->
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-2">โหมดปฏิทิน</label>
+                    <div class="grid grid-cols-2 gap-2">
+                        <button id="cal-mode-cycle" onclick="CalendarAdmin.setMode('cycle')"
+                            class="border-2 border-indigo-500 bg-indigo-50 rounded-xl p-3 text-center cursor-pointer transition">
+                            <div class="text-xl mb-1">🔄</div>
+                            <div class="text-xs font-black text-indigo-800">Cycle D1-24</div>
+                            <div class="text-[10px] text-indigo-600 mt-0.5">ต่อเนื่องนับวัน</div>
+                        </button>
+                        <button id="cal-mode-fixed" onclick="CalendarAdmin.setMode('fixed')"
+                            class="border-2 border-gray-200 bg-gray-50 rounded-xl p-3 text-center cursor-pointer transition">
+                            <div class="text-xl mb-1">📌</div>
+                            <div class="text-xs font-black text-gray-700">กำหนดวันที่เอง</div>
+                            <div class="text-[10px] text-gray-500 mt-0.5">ระบุวันที่ = Day</div>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Cycle settings -->
+                <div id="cal-cycle-section" class="space-y-3">
+                    <div class="bg-indigo-50 border border-indigo-100 rounded-xl p-4 space-y-3">
+                        <div class="flex items-center justify-between">
+                            <label class="text-xs font-bold text-gray-700">Day 1 เริ่มวันที่:</label>
+                            <input type="number" id="cal-start-date" min="1" max="28" value="1"
+                                class="w-16 border border-gray-200 rounded-lg px-2 py-1.5 text-sm font-bold text-center outline-none focus:ring-2 focus:ring-indigo-300">
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <label class="text-xs font-bold text-gray-700">Day เริ่มต้น (ที่วันที่นั้น):</label>
+                            <input type="number" id="cal-start-day-num" min="1" max="24" value="1"
+                                class="w-16 border border-gray-200 rounded-lg px-2 py-1.5 text-sm font-bold text-center outline-none focus:ring-2 focus:ring-indigo-300">
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <label class="text-xs font-bold text-gray-700">จำนวนวัน Cycle:</label>
+                            <input type="number" id="cal-cycle-days" min="1" max="31" value="24"
+                                class="w-16 border border-gray-200 rounded-lg px-2 py-1.5 text-sm font-bold text-center outline-none focus:ring-2 focus:ring-indigo-300">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-gray-700 mb-2">วันหยุด (กดเลือกวันที่):</label>
+                        <div id="cal-holiday-grid" class="grid grid-cols-7 gap-1"></div>
+                        <p class="text-[10px] text-gray-400 mt-1">วันที่เลือกจะข้าม cycle</p>
+                    </div>
+                </div>
+
+                <!-- Fixed settings -->
+                <div id="cal-fixed-section" class="hidden space-y-3">
+                    <div class="bg-blue-50 border border-blue-100 rounded-xl p-3">
+                        <p class="text-xs text-blue-700 font-bold mb-2">กำหนดวันที่ของเดือน = Day ที่เท่าไหร่</p>
+                        <div id="cal-fixed-rows" class="space-y-2"></div>
+                        <button onclick="CalendarAdmin.addFixedRow()"
+                            class="mt-2 w-full border border-dashed border-blue-300 rounded-lg py-2 text-xs font-bold text-blue-600 hover:bg-blue-50 transition">
+                            + เพิ่มวัน
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="p-5 border-t flex gap-3 flex-shrink-0">
+                <button onclick="CalendarAdmin.close()"
+                    class="flex-1 border border-gray-200 rounded-xl py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-50 transition">ยกเลิก</button>
+                <button onclick="CalendarAdmin.save()"
+                    class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl py-2.5 text-sm font-bold transition shadow-sm">💾 บันทึก</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ==========================================
+        // 📅 Calendar Admin Controller
+        // ==========================================
+        const CalendarAdmin = {
+            _mode: 'cycle',
+            _holidays: [],
+            _fixedRows: [],
+            _targetRef: null, // Firestore ref ที่จะ save
+
+            open: async (planMode) => {
+                // planMode: 'active' | 'draft:YYYY_MM'
+                const modal = document.getElementById('calendar-config-modal');
+                modal.classList.remove('hidden');
+
+                const lbl = document.getElementById('cal-modal-plan-label');
+                if (planMode === 'active') {
+                    lbl.textContent = 'Plan ปัจจุบัน';
+                    CalendarAdmin._targetRef = App.dbRef;
+                } else {
+                    const ym = planMode.replace('draft:', '');
+                    const [y, m] = ym.split('_');
+                    const lbStr = new Date(+y, +m-1, 1).toLocaleDateString('th-TH', { year:'numeric', month:'long' });
+                    lbl.textContent = `Draft ${lbStr}`;
+                    CalendarAdmin._targetRef = App.draftsCol().doc(ym);
+                }
+
+                // โหลด config ที่มีอยู่
+                try {
+                    const snap = await CalendarAdmin._targetRef.get();
+                    const cfg = snap.exists ? (snap.data().calendarConfig || null) : null;
+                    CalendarAdmin._holidays = [];
+                    CalendarAdmin._fixedRows = [];
+                    if (cfg) {
+                        CalendarAdmin.setMode(cfg.mode || 'cycle');
+                        if (cfg.mode === 'cycle') {
+                            document.getElementById('cal-start-date').value    = cfg.startDay    || 1;
+                            document.getElementById('cal-start-day-num').value = cfg.startDayNum || 1;
+                            document.getElementById('cal-cycle-days').value    = cfg.cycleDays   || 24;
+                            CalendarAdmin._holidays = cfg.holidays || [];
+                        } else {
+                            const mapping = cfg.mapping || {};
+                            CalendarAdmin._fixedRows = Object.entries(mapping).map(([d, day]) => ({ date: d, day }));
+                        }
+                    } else {
+                        CalendarAdmin.setMode('cycle');
+                    }
+                } catch(e) {
+                    CalendarAdmin.setMode('cycle');
+                }
+                CalendarAdmin._renderHolidayGrid();
+                CalendarAdmin._renderFixedRows();
+            },
+
+            close: () => document.getElementById('calendar-config-modal').classList.add('hidden'),
+
+            setMode: (mode) => {
+                CalendarAdmin._mode = mode;
+                const cycleBtn = document.getElementById('cal-mode-cycle');
+                const fixedBtn = document.getElementById('cal-mode-fixed');
+                const cycleSec = document.getElementById('cal-cycle-section');
+                const fixedSec = document.getElementById('cal-fixed-section');
+                if (mode === 'cycle') {
+                    cycleBtn.className = 'border-2 border-indigo-500 bg-indigo-50 rounded-xl p-3 text-center cursor-pointer transition';
+                    fixedBtn.className = 'border-2 border-gray-200 bg-gray-50 rounded-xl p-3 text-center cursor-pointer transition';
+                    cycleSec.classList.remove('hidden');
+                    fixedSec.classList.add('hidden');
+                } else {
+                    cycleBtn.className = 'border-2 border-gray-200 bg-gray-50 rounded-xl p-3 text-center cursor-pointer transition';
+                    fixedBtn.className = 'border-2 border-indigo-500 bg-indigo-50 rounded-xl p-3 text-center cursor-pointer transition';
+                    cycleSec.classList.add('hidden');
+                    fixedSec.classList.remove('hidden');
+                }
+            },
+
+            _renderHolidayGrid: () => {
+                const grid = document.getElementById('cal-holiday-grid');
+                if (!grid) return;
+                let html = '';
+                for (let d = 1; d <= 31; d++) {
+                    const isHol = CalendarAdmin._holidays.includes(d);
+                    html += `<button onclick="CalendarAdmin.toggleHoliday(${d})" id="hol-${d}"
+                        style="border-radius:6px;border:1px solid ${isHol ? '#fecaca' : '#e5e7eb'};
+                               background:${isHol ? '#fee2e2' : '#f9fafb'};
+                               color:${isHol ? '#dc2626' : '#374151'};
+                               font-size:11px;font-weight:700;padding:4px 2px;cursor:pointer;
+                               font-family:inherit;">${d}</button>`;
+                }
+                grid.innerHTML = html;
+            },
+
+            toggleHoliday: (d) => {
+                const idx = CalendarAdmin._holidays.indexOf(d);
+                if (idx >= 0) CalendarAdmin._holidays.splice(idx, 1);
+                else CalendarAdmin._holidays.push(d);
+                CalendarAdmin._renderHolidayGrid();
+            },
+
+            addFixedRow: () => {
+                CalendarAdmin._fixedRows.push({ date: '', day: 'Day 1' });
+                CalendarAdmin._renderFixedRows();
+            },
+
+            _renderFixedRows: () => {
+                const container = document.getElementById('cal-fixed-rows');
+                if (!container) return;
+                const dayOptions = Array.from({length: 24}, (_, i) => `<option>Day ${i+1}</option>`).join('');
+                container.innerHTML = CalendarAdmin._fixedRows.map((row, i) => `
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <span style="font-size:12px;color:#6b7280;white-space:nowrap;">วันที่</span>
+                        <input type="number" min="1" max="31" value="${row.date}"
+                            onchange="CalendarAdmin._fixedRows[${i}].date=this.value"
+                            style="width:52px;border:1px solid #e5e7eb;border-radius:8px;padding:6px;font-size:12px;font-weight:700;text-align:center;outline:none;">
+                        <span style="font-size:12px;color:#6b7280;">=</span>
+                        <select onchange="CalendarAdmin._fixedRows[${i}].day=this.value"
+                            style="flex:1;border:1px solid #e5e7eb;border-radius:8px;padding:6px;font-size:12px;font-weight:700;outline:none;">
+                            ${dayOptions}
+                        </select>
+                        <button onclick="CalendarAdmin._fixedRows.splice(${i},1);CalendarAdmin._renderFixedRows()"
+                            style="color:#dc2626;border:none;background:none;cursor:pointer;font-size:16px;padding:2px;">✕</button>
+                    </div>
+                `).join('');
+                // set select values
+                setTimeout(() => {
+                    container.querySelectorAll('select').forEach((sel, i) => {
+                        sel.value = CalendarAdmin._fixedRows[i]?.day || 'Day 1';
+                    });
+                }, 0);
+            },
+
+            save: async () => {
+                if (!CalendarAdmin._targetRef) return;
+                let cfg;
+                if (CalendarAdmin._mode === 'cycle') {
+                    cfg = {
+                        mode:        'cycle',
+                        startDay:    parseInt(document.getElementById('cal-start-date').value) || 1,
+                        startDayNum: parseInt(document.getElementById('cal-start-day-num').value) || 1,
+                        cycleDays:   parseInt(document.getElementById('cal-cycle-days').value) || 24,
+                        holidays:    [...CalendarAdmin._holidays].sort((a,b)=>a-b)
+                    };
+                } else {
+                    const mapping = {};
+                    CalendarAdmin._fixedRows.forEach(r => { if (r.date && r.day) mapping[r.date] = r.day; });
+                    cfg = { mode: 'fixed', mapping };
+                }
+                try {
+                    await CalendarAdmin._targetRef.set({ calendarConfig: cfg }, { merge: true });
+                    CalendarAdmin.close();
+                    UI.showSaveToast('✅ บันทึกตั้งค่าปฏิทินเรียบร้อย');
+                } catch(e) {
+                    UI.showErrorToast('❌ บันทึกไม่สำเร็จ: ' + e.message);
+                }
             }
         };
     </script>

@@ -37,11 +37,11 @@ db.enablePersistence({ synchronizeTabs: true }).catch(function(err) { console.wa
 let docMain = db.collection('appData').doc('v1_main');
 const colSales = db.collection('v1_sales_chunks');
 
-let State = { myRoute: "", allStores: [], routeStores: [], sales: {}, currentDay: "", isLoaded: false, mapNeedsFit: true };
+let State = { myRoute: "", allStores: [], routeStores: [], sales: {}, currentDay: "", isLoaded: false, mapNeedsFit: true, calendarConfig: null, activePlanYM: null, activePlanMode: 'active' };
 let map = null, mapMarkers = [], sortableList = null, markerClusterGroup = null;
 
 // ─── Tab keys ที่ระบบรู้จัก ───────────────────────────────
-const VALID_TABS = ['dashboard', 'stores', 'route'];
+const VALID_TABS = ['dashboard', 'stores', 'route', 'calendar'];
 const DEFAULT_TAB = 'dashboard';
 const TAB_STORAGE_KEY = 'sales_last_tab';
 
@@ -99,7 +99,7 @@ const UI = {
     switchTab: (id) => {
         if (!VALID_TABS.includes(id)) id = DEFAULT_TAB;
 
-        document.querySelectorAll('.bnav-item').forEach(el => el.classList.remove('active'));
+        document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
         const navEl = document.getElementById('nav-' + id);
         if (navEl) navEl.classList.add('active');
 
@@ -169,6 +169,43 @@ const UI = {
     }
 };
 
+// ── Loading bar ──
+const LoadBar = {
+    _timer: null,
+    show: () => {
+        const wrap = document.getElementById('load-bar-wrap');
+        if (!wrap) return;
+        wrap.style.display = 'block';
+        wrap.classList.remove('hide');
+        LoadBar.setProgress(5, 'กำลังเชื่อมต่อ Firebase...');
+    },
+    setProgress: (pct, label) => {
+        const fill = document.getElementById('load-bar-fill');
+        const lbl  = document.getElementById('load-bar-label');
+        if (fill) fill.style.width = Math.min(pct, 100) + '%';
+        if (lbl)  lbl.textContent  = label || ('โหลดข้อมูล ' + Math.round(pct) + '%');
+    },
+    done: () => {
+        LoadBar.setProgress(100, '✅ โหลดข้อมูลเสร็จแล้ว');
+        if (LoadBar._timer) clearTimeout(LoadBar._timer);
+        LoadBar._timer = setTimeout(() => {
+            const wrap = document.getElementById('load-bar-wrap');
+            if (wrap) {
+                wrap.classList.add('hide');
+                setTimeout(() => { wrap.style.display = 'none'; wrap.classList.remove('hide'); }, 420);
+            }
+        }, 700);
+    },
+    error: (msg) => {
+        LoadBar.setProgress(100, '❌ ' + (msg || 'โหลดไม่สำเร็จ'));
+        if (LoadBar._timer) clearTimeout(LoadBar._timer);
+        LoadBar._timer = setTimeout(() => {
+            const wrap = document.getElementById('load-bar-wrap');
+            if (wrap) { wrap.classList.add('hide'); setTimeout(() => { wrap.style.display = 'none'; wrap.classList.remove('hide'); }, 420); }
+        }, 2000);
+    }
+};
+
 const App = {
     checkAuth: () => {
         // ถ้า session มีอยู่และเป็น sales → เข้าได้เลย
@@ -191,17 +228,38 @@ const App = {
     },
 
     logout: () => {
-        Auth.logout(); // clear session + redirect login
+        Auth.logout();
     },
 
-    start: () => {
+    // โหลด calendarConfig จาก Firestore
+    loadCalendarConfig: async (centerDocId, ym, mode) => {
+        try {
+            let cfgRef;
+            if (mode === 'drafts') {
+                cfgRef = db.collection('appData').doc(centerDocId)
+                    .collection('drafts').doc(ym);
+            } else {
+                cfgRef = db.collection('appData').doc(centerDocId);
+            }
+            const snap = await cfgRef.get();
+            const data = snap.exists ? snap.data() : {};
+            State.calendarConfig = data.calendarConfig || null;
+            // re-render calendar ถ้าเปิดอยู่
+            if (typeof CalendarCtrl !== 'undefined') CalendarCtrl.render();
+        } catch(e) {
+            console.warn('loadCalendarConfig:', e);
+            State.calendarConfig = null;
+        }
+    },
+
+    start: async () => {
         // login-screen ถูกซ่อนใน HTML แล้ว
-        // แสดง bottom nav
-        const _bnav = document.getElementById('bottom-nav');
-        if (_bnav) _bnav.style.display = 'grid';
+        // ✅ แสดง hamburger button
+        const hBtn = document.getElementById('hamburger-btn');
+        if (hBtn) hBtn.style.display = 'flex';
         document.getElementById('main-header').classList.remove('hidden');
         document.getElementById('main-content').classList.remove('hidden');
-
+        // bottom-nav ถูกแทนด้วย hamburger-btn แล้ว (ไม่ต้องแสดง nav เดิม)
         document.getElementById('user-route-label').innerText = State.myRoute;
         document.getElementById('loader').style.display = 'flex';
 
@@ -214,11 +272,11 @@ const App = {
             // อัปเดต % ตามสิ่งที่โหลดแล้ว
             const pct = (isMainLoaded ? 50 : 0) + (isSalesLoaded ? 50 : 0);
             if (!isMainLoaded && !isSalesLoaded) {
-                LoadBar.setProgress(15);
+                LoadBar.setProgress(15, 'กำลังโหลดข้อมูลร้านค้า...');
             } else if (isMainLoaded && !isSalesLoaded) {
-                LoadBar.setProgress(60);
+                LoadBar.setProgress(60, 'โหลดข้อมูลร้านเสร็จ... กำลังโหลดยอดขาย');
             } else if (!isMainLoaded && isSalesLoaded) {
-                LoadBar.setProgress(40);
+                LoadBar.setProgress(40, 'โหลดยอดขายเสร็จ... กำลังโหลดร้านค้า');
             }
             if (isMainLoaded && isSalesLoaded) {
                 LoadBar.done();
@@ -229,6 +287,7 @@ const App = {
                 if (!State.isLoaded) {
                     UI.restoreTab();
                     State.isLoaded = true;
+                    if (typeof CalendarCtrl !== 'undefined') CalendarCtrl.init();
                 }
             }
         };
@@ -236,9 +295,40 @@ const App = {
         const _centerMatch = State.myRoute.match(/^(\d+)/);
         const _centerDocId = _centerMatch ? (_centerMatch[1] + '_main') : 'v1_main';
         docMain = db.collection('appData').doc(_centerDocId);
-        const routeColRef = db.collection('appData').doc(_centerDocId).collection('routes');
 
-        LoadBar.setProgress(20);
+        // ── Auto-switch: เช็ค draft เดือนปัจจุบัน ──────────────────────
+        const _nowYM = (() => {
+            const d = new Date();
+            return `${d.getFullYear()}_${String(d.getMonth()+1).padStart(2,'0')}`;
+        })();
+
+        // ตรวจว่ามี draft ของเดือนนี้ไหม → ถ้ามีให้ Sales ใช้ draft แทน active
+        let routeColRef;
+        try {
+            const _draftDoc = await db.collection('appData').doc(_centerDocId)
+                .collection('drafts').doc(_nowYM).get();
+            if (_draftDoc.exists) {
+                // มี draft เดือนนี้ → ใช้ draft
+                routeColRef = db.collection('appData').doc(_centerDocId)
+                    .collection('drafts').doc(_nowYM).collection('routes');
+                State.activePlanYM = _nowYM;
+                State.activePlanMode = 'draft';
+                App.loadCalendarConfig(_centerDocId, _nowYM, 'drafts');
+                LoadBar.setProgress(15, `📅 โหลด Plan ${_nowYM}...`);
+            } else {
+                // ไม่มี draft → ใช้ active
+                routeColRef = db.collection('appData').doc(_centerDocId).collection('routes');
+                State.activePlanYM = _nowYM;
+                State.activePlanMode = 'active';
+                App.loadCalendarConfig(_centerDocId, _nowYM, 'active');
+            }
+        } catch(e) {
+            // fallback → active
+            routeColRef = db.collection('appData').doc(_centerDocId).collection('routes');
+            State.activePlanMode = 'active';
+        }
+
+        LoadBar.setProgress(20, 'กำลังดึงข้อมูลร้านค้า...');
         docMain.onSnapshot(async doc => {
             if (!doc.exists) { State.allStores = []; isMainLoaded = true; checkReady(); return; }
             const data = doc.data();
@@ -246,7 +336,7 @@ const App = {
                 State.allStores = data.routes[State.myRoute] || [];
                 isMainLoaded = true; checkReady();
             } else {
-                LoadBar.setProgress(35);
+                LoadBar.setProgress(35, 'ดึงข้อมูลจาก subcollection...');
                 try {
                     const rd = await routeColRef.doc(State.myRoute).get();
                     State.allStores = rd.exists ? (rd.data().stores || []) : [];
@@ -261,7 +351,7 @@ const App = {
             if (isMainLoaded) Processor.run();
         });
 
-        LoadBar.setProgress(30);
+        LoadBar.setProgress(30, 'กำลังโหลดข้อมูลยอดขาย...');
         colSales.onSnapshot(snap => {
             let merged = {};
             snap.forEach(doc => { Object.assign(merged, doc.data()); });
@@ -299,6 +389,12 @@ const Processor = {
             list.sort((a, b) => a.name.localeCompare(b.name, 'th'));
         } else if (mode === 'sales') {
             list.sort((a, b) => ((hist[b.id]?.net || 0) - (hist[a.id]?.net || 0)));
+        } else if (mode === 'active') {
+            list.sort((a, b) => {
+                const aA = (State.sales[a.id]?.vpo > 0) ? 0 : 1;
+                const bA = (State.sales[b.id]?.vpo > 0) ? 0 : 1;
+                return aA - bA;
+            });
         }
 
         let html = list.map(s => {
@@ -307,7 +403,7 @@ const Processor = {
             const h      = hist[s.id];
             const badge  = active
                 ? `<span style="background:#d1fae5;color:#065f46;font-size:9px;font-weight:800;padding:2px 8px;border-radius:8px;">Active</span>`
-                : '';
+                : `<span style="background:#f3f4f6;color:#9ca3af;font-size:9px;font-weight:800;padding:2px 8px;border-radius:8px;">Inactive</span>`;
             const mktTag = s.marketName
                 ? `<span style="font-size:10px;color:#3b82f6;font-weight:600;">${s.marketName}</span> `
                 : '';
@@ -438,7 +534,7 @@ const GPS = {
     _mapListenerAttached: false,
     _isSelfMoving: false,
 
-    start: () => {
+    start: async () => {
         if (!navigator.geolocation) return showSalesToast('⚠️ Browser ไม่รองรับ GPS', true);
         GPS.watchId = navigator.geolocation.watchPosition(GPS._onSuccess, GPS._onError, { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 });
         GPS.autoFollow = true;
@@ -541,6 +637,193 @@ const GPS = {
                 showSalesToast('📍 หยุดติดตาม — กดปุ่ม GPS เพื่อกลับมา');
             }
         });
+    }
+};
+
+// ==========================================
+// 📅 Calendar Controller
+// ==========================================
+const CalendarCtrl = {
+    _year: null,
+    _month: null,
+
+    init: () => {
+        const now = new Date();
+        CalendarCtrl._year  = now.getFullYear();
+        CalendarCtrl._month = now.getMonth(); // 0-based
+        CalendarCtrl.render();
+    },
+
+    // คำนวณว่าวันที่ date ตรงกับ Day อะไร
+    getDayLabel: (dateNum) => {
+        const cfg = State.calendarConfig;
+        if (!cfg) return null;
+
+        if (cfg.mode === 'fixed') {
+            // โหมด B: admin กำหนดเองว่าวันที่เท่าไหร่ = Day อะไร
+            return cfg.mapping ? (cfg.mapping[String(dateNum)] || null) : null;
+        }
+
+        if (cfg.mode === 'cycle') {
+            // โหมด A: คำนวณจาก startDay + holidays
+            const startDate  = parseInt(cfg.startDay || 1);
+            const holidays   = cfg.holidays || [];
+            const year  = CalendarCtrl._year;
+            const month = CalendarCtrl._month;
+
+            // หาจำนวนวันทำงาน (ไม่ใช่วันหยุด) ตั้งแต่ startDate ถึง dateNum
+            if (dateNum < startDate) return null;
+            let dayCounter = parseInt(cfg.startDayNum || 1); // Day ที่ startDate เริ่ม
+            let workdays = 0;
+            for (let d = startDate; d <= dateNum; d++) {
+                if (holidays.includes(d)) continue; // ข้ามวันหยุด
+                workdays++;
+                if (d === dateNum) {
+                    const dayNum = dayCounter + workdays - 1;
+                    const cycleDays = cfg.cycleDays || 24;
+                    if (dayNum > cycleDays) return null;
+                    return 'Day ' + dayNum;
+                }
+            }
+        }
+        return null;
+    },
+
+    // หาวันที่จาก Day label → เพื่อกดปฏิทินแล้ว navigate ไปคิวงาน
+    getDateFromDay: (dayLabel) => {
+        const cfg = State.calendarConfig;
+        if (!cfg) return null;
+
+        if (cfg.mode === 'fixed') {
+            if (!cfg.mapping) return null;
+            const entry = Object.entries(cfg.mapping).find(([, v]) => v === dayLabel);
+            return entry ? parseInt(entry[0]) : null;
+        }
+
+        if (cfg.mode === 'cycle') {
+            const startDate   = parseInt(cfg.startDay || 1);
+            const holidays    = cfg.holidays || [];
+            const startDayNum = parseInt(cfg.startDayNum || 1);
+            const targetNum   = parseInt(dayLabel.replace('Day ', ''));
+            const daysInMonth = new Date(CalendarCtrl._year, CalendarCtrl._month + 1, 0).getDate();
+            let workDay = startDayNum;
+            for (let d = startDate; d <= daysInMonth; d++) {
+                if (holidays.includes(d)) continue;
+                if (workDay === targetNum) return d;
+                workDay++;
+            }
+        }
+        return null;
+    },
+
+    render: () => {
+        const container = document.getElementById('calendar-grid');
+        if (!container) return;
+
+        const year  = CalendarCtrl._year;
+        const month = CalendarCtrl._month;
+        const now   = new Date();
+        const daysInMonth = new Date(year, month + 1, 0).getDate();
+        const firstDow    = new Date(year, month, 1).getDay(); // 0=Sun
+        const cfg = State.calendarConfig;
+
+        // Header
+        const monthLabel = new Date(year, month, 1)
+            .toLocaleDateString('th-TH', { year: 'numeric', month: 'long' });
+        const headerEl = document.getElementById('calendar-month-label');
+        if (headerEl) headerEl.textContent = monthLabel;
+
+        // Mode badge
+        const modeEl = document.getElementById('calendar-mode-badge');
+        if (modeEl) {
+            if (!cfg) {
+                modeEl.textContent = '⚠️ ยังไม่ได้ตั้งค่าปฏิทิน';
+                modeEl.style.background = '#fef3c7';
+                modeEl.style.color = '#92400e';
+            } else if (cfg.mode === 'cycle') {
+                modeEl.textContent = '🔄 Cycle D1-' + (cfg.cycleDays || 24);
+                modeEl.style.background = '#ede9fe';
+                modeEl.style.color = '#5b21b6';
+            } else {
+                modeEl.textContent = '📌 กำหนดวันที่เอง';
+                modeEl.style.background = '#dbeafe';
+                modeEl.style.color = '#1e40af';
+            }
+        }
+
+        // Grid cells
+        const DOW = ['อา','จ','อ','พ','พฤ','ศ','ส'];
+        let html = DOW.map(d =>
+            `<div style="text-align:center;font-size:10px;font-weight:800;color:#9ca3af;padding:4px 0;">${d}</div>`
+        ).join('');
+
+        // empty cells before first day (Sun=0)
+        const startOffset = firstDow; // อาทิตย์ = 0
+        for (let i = 0; i < startOffset; i++) {
+            html += `<div></div>`;
+        }
+
+        for (let d = 1; d <= daysInMonth; d++) {
+            const dayLabel = cfg ? CalendarCtrl.getDayLabel(d) : null;
+            const isToday  = (d === now.getDate() && month === now.getMonth() && year === now.getFullYear());
+            const dow      = new Date(year, month, d).getDay();
+            const isWeekend = dow === 0 || dow === 6;
+            const isHoliday = cfg?.holidays?.includes(d);
+
+            let bgColor = '#fff';
+            let textColor = '#111827';
+            let borderColor = '#f3f4f6';
+
+            if (isToday) { bgColor = '#2563eb'; textColor = '#fff'; borderColor = '#2563eb'; }
+            else if (isHoliday) { bgColor = '#fef2f2'; textColor = '#dc2626'; borderColor = '#fecaca'; }
+            else if (isWeekend) { bgColor = '#f9fafb'; textColor = '#6b7280'; }
+
+            const hasRoute = dayLabel && State.allStores.some(s => s.days && s.days.includes(dayLabel));
+            const clickHandler = dayLabel ? `CalendarCtrl.goToDay('${dayLabel}')` : '';
+
+            html += `
+            <div onclick="${clickHandler}"
+                style="border-radius:10px;border:1px solid ${borderColor};background:${bgColor};
+                       padding:4px 2px;text-align:center;cursor:${dayLabel ? 'pointer' : 'default'};
+                       min-height:52px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;
+                       gap:2px;transition:opacity 0.1s;${dayLabel ? 'active:opacity:0.7;' : ''}">
+                <div style="font-size:12px;font-weight:${isToday ? '900' : '700'};color:${textColor};line-height:1.2;">${d}</div>
+                ${dayLabel ? `
+                <div style="font-size:9px;font-weight:800;padding:1px 5px;border-radius:5px;
+                            background:${isToday ? 'rgba(255,255,255,0.25)' : '#ede9fe'};
+                            color:${isToday ? '#fff' : '#5b21b6'};white-space:nowrap;">
+                    ${dayLabel.replace('Day ','')}
+                </div>
+                ${hasRoute ? `<div style="width:5px;height:5px;border-radius:50%;background:${isToday ? '#fff' : '#2563eb'};margin-top:1px;"></div>` : ''}
+                ` : (isHoliday ? `<div style="font-size:9px;color:#dc2626;">หยุด</div>` : '')}
+            </div>`;
+        }
+
+        container.innerHTML = html;
+    },
+
+    // กดวันในปฏิทิน → navigate ไปหน้าคิวงาน
+    goToDay: (dayLabel) => {
+        // set currentDay แล้วไปหน้า route
+        State.currentDay = dayLabel;
+        // re-render route list
+        const el = document.getElementById('day-select');
+        if (el) el.value = dayLabel;
+        Processor.routeList();
+        UI.switchTab('route');
+        showSalesToast('📅 ' + dayLabel);
+    },
+
+    prevMonth: () => {
+        CalendarCtrl._month--;
+        if (CalendarCtrl._month < 0) { CalendarCtrl._month = 11; CalendarCtrl._year--; }
+        CalendarCtrl.render();
+    },
+
+    nextMonth: () => {
+        CalendarCtrl._month++;
+        if (CalendarCtrl._month > 11) { CalendarCtrl._month = 0; CalendarCtrl._year++; }
+        CalendarCtrl.render();
     }
 };
 
