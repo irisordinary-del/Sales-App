@@ -219,12 +219,11 @@ const App = {
 
     start: async () => {
         // login-screen ถูกซ่อนใน HTML แล้ว
-        // ✅ แสดง hamburger button
-        const hBtn = document.getElementById('hamburger-btn');
-        if (hBtn) hBtn.style.display = 'flex';
         document.getElementById('main-header').classList.remove('hidden');
         document.getElementById('main-content').classList.remove('hidden');
-        // bottom-nav ถูกแทนด้วย hamburger-btn แล้ว (ไม่ต้องแสดง nav เดิม)
+        // แสดง bottom-nav
+        const _bnav = document.getElementById('bottom-nav');
+        if (_bnav) _bnav.style.display = 'grid';
         document.getElementById('user-route-label').innerText = State.myRoute;
         document.getElementById('loader').style.display = 'flex';
 
