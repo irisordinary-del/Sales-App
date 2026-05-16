@@ -468,6 +468,30 @@ const App = {
         return cloudDB.collection('appData').doc(window.CENTER_DOC || 'v1_main');
     },
     routesCol:  () => cloudDB.collection('appData').doc(window.CENTER_DOC || 'v1_main').collection('routes'),
+
+    // ─── Plan Mode helpers ───────────────────────────────────────────────
+    // planMode: 'active' | 'draft:{YYYY_MM}' | 'history:{YYYY_MM}'
+    _planMode: 'active',
+
+    draftsCol:  () => cloudDB.collection('appData').doc(window.CENTER_DOC || 'v1_main').collection('drafts'),
+    historyCol: () => cloudDB.collection('appData').doc(window.CENTER_DOC || 'v1_main').collection('history'),
+
+    // ส่งคืน collection ตาม planMode ปัจจุบัน
+    currentRoutesCol: () => {
+        const m = App._planMode;
+        if (m === 'active') return App.routesCol();
+        if (m.startsWith('draft:')) {
+            const ym = m.replace('draft:', '');
+            return App.draftsCol().doc(ym).collection('routes');
+        }
+        if (m.startsWith('history:')) {
+            const ym = m.replace('history:', '');
+            return App.historyCol().doc(ym).collection('routes');
+        }
+        return App.routesCol();
+    },
+
+    isReadOnly: () => App._planMode.startsWith('history:'),
     _snapshotUnsub: null,
     _fileListenersReady: false,
 
@@ -704,19 +728,30 @@ const App = {
         });
     },
 
-    // ✅ saveDB: บันทึกทีละสายใน subcollection (ไม่เกิน 1MB ต่อสาย)
+    // ✅ saveDB: บันทึกทีละสายใน subcollection — รองรับ active/draft
     saveDB: () => {
+        if (App.isReadOnly()) {
+            UI.showErrorToast('⚠️ ไม่สามารถแก้ไข History ได้ครับ');
+            return;
+        }
         State.db.routes[State.localActiveRoute] = State.stores;
         const routeList = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
-        Promise.all([
-            App.routesCol().doc(State.localActiveRoute).set({ stores: State.stores }),
-            App.dbRef.update({ routeList, cycleDays: State.db.cycleDays || 24 })
-        ])
-        .then(() => UI.showSaveToast('💾 บันทึกเรียบร้อย'))
-        .catch(err => {
-            console.error('saveDB error:', err);
-            UI.showErrorToast('❌ บันทึกไม่สำเร็จ — ตรวจสอบอินเทอร์เน็ต');
-        });
+
+        const isDraft = App._planMode.startsWith('draft:');
+        const ym = isDraft ? App._planMode.replace('draft:', '') : null;
+
+        const routePromise = App.currentRoutesCol().doc(State.localActiveRoute).set({ stores: State.stores });
+        const metaPromise  = isDraft
+            ? App.draftsCol().doc(ym).set({ routeList, cycleDays: State.db.cycleDays || 24, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true })
+            : App.dbRef.update({ routeList, cycleDays: State.db.cycleDays || 24 });
+
+        const modeLabel = isDraft ? `📝 Draft ${ym}` : '💾';
+        Promise.all([routePromise, metaPromise])
+            .then(() => UI.showSaveToast(`${modeLabel} บันทึกเรียบร้อย`))
+            .catch(err => {
+                console.error('saveDB error:', err);
+                UI.showErrorToast('❌ บันทึกไม่สำเร็จ — ตรวจสอบอินเทอร์เน็ต');
+            });
     },
 
     // แก้บัค: reset tab กลับ tab1 ทุกครั้งที่ sync
@@ -738,11 +773,11 @@ const App = {
     switchRoute: (name) => {
         if (State.localActiveRoute === name) return;
         State.localActiveRoute = name;
-        localStorage.setItem('last_viewed_route', name);
+        if (App._planMode === 'active') localStorage.setItem('last_viewed_route', name);
         // ถ้า route นี้ยังไม่ได้โหลด → ดึงจาก Firestore
         if (State.db.routes[name] === undefined) {
             UI.showLoader('กำลังโหลดสาย ' + name + '...');
-            App.routesCol().doc(name).get().then(d => {
+            App.currentRoutesCol().doc(name).get().then(d => {
                 State.db.routes[name] = d.exists ? (d.data().stores || []) : [];
                 State.stores = State.db.routes[name];
                 App.sync(); MapCtrl.fitToStores(); UI.hideLoader();
@@ -847,6 +882,174 @@ const App = {
             .then(() => UI.showSaveToast('🗑️ ลบสายเรียบร้อย'))
             .catch(err => UI.showErrorToast('❌ ลบไม่สำเร็จ: ' + err.message));
         });
+    },
+
+    // ─── Plan Management ────────────────────────────────────────────────
+
+    // โหลด plan ตาม mode (active / draft:YYYY_MM / history:YYYY_MM)
+    switchPlanMode: async (mode) => {
+        App._planMode = mode;
+        State.db.routes = {};
+
+        const isActive  = mode === 'active';
+        const isDraft   = mode.startsWith('draft:');
+        const isHistory = mode.startsWith('history:');
+        const ym = (isDraft || isHistory) ? mode.split(':')[1] : null;
+
+        UI.showLoader('กำลังโหลด Plan...', isActive ? 'โหลด Plan ปัจจุบัน' : `โหลด ${isDraft ? 'Draft' : 'History'} ${ym || ''}`);
+
+        try {
+            let routeList, cycleDays;
+
+            if (isActive) {
+                const doc = await App.dbRef.get();
+                const d = doc.exists ? doc.data() : {};
+                routeList  = (d.routeList || []).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
+                cycleDays  = d.cycleDays || 24;
+            } else if (isDraft) {
+                const doc = await App.draftsCol().doc(ym).get();
+                const d = doc.exists ? doc.data() : {};
+                routeList  = (d.routeList || State.db.routeList || []).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
+                cycleDays  = d.cycleDays || State.db.cycleDays || 24;
+            } else {
+                const doc = await App.historyCol().doc(ym).get();
+                const d = doc.exists ? doc.data() : {};
+                routeList  = (d.routeList || []).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
+                cycleDays  = d.cycleDays || 24;
+            }
+
+            State.db.routeList = routeList.length ? routeList : (State.db.routeList || []);
+            State.db.cycleDays = cycleDays;
+
+            await App._loadAllRoutes(State.db.routeList);
+
+            State.localActiveRoute = State.db.routeList[0] || '';
+            State.stores = State.db.routes[State.localActiveRoute] || [];
+
+            // อัปเดต UI badge
+            PlanUI.updateBadge();
+            App.sync();
+            MapCtrl.fitToStores();
+            UI.hideLoader();
+
+            const label = isActive ? 'Plan ปัจจุบัน' : (isDraft ? `Draft ${ym}` : `History ${ym}`);
+            UI.showSaveToast(`✅ โหลด ${label} เสร็จ`);
+        } catch (err) {
+            UI.hideLoader();
+            UI.showErrorToast('❌ โหลด Plan ไม่สำเร็จ: ' + err.message);
+            console.error('switchPlanMode error:', err);
+        }
+    },
+
+    // สร้าง Draft จาก Active plan ปัจจุบัน
+    createDraft: async (ym) => {
+        if (!ym) return;
+        UI.showLoader('กำลังสร้าง Draft...', `Copy plan → Draft ${ym}`);
+        try {
+            // เช็คว่ามี draft นี้แล้วหรือยัง
+            const existing = await App.draftsCol().doc(ym).get();
+            if (existing.exists) {
+                UI.hideLoader();
+                UI.showErrorToast(`⚠️ Draft ${ym} มีอยู่แล้วครับ`);
+                return;
+            }
+
+            // Copy routeList + cycleDays
+            const meta = {
+                routeList:  State.db.routeList,
+                cycleDays:  State.db.cycleDays || 24,
+                createdAt:  firebase.firestore.FieldValue.serverTimestamp(),
+                sourceMode: 'active'
+            };
+            await App.draftsCol().doc(ym).set(meta);
+
+            // Copy ทุกสาย
+            const draftRoutesCol = App.draftsCol().doc(ym).collection('routes');
+            await Promise.all(State.db.routeList.map(async name => {
+                const stores = State.db.routes[name] || [];
+                await draftRoutesCol.doc(name).set({ stores });
+            }));
+
+            // อัปเดต draftList ใน metadata
+            const curDoc = await App.dbRef.get();
+            const curData = curDoc.exists ? curDoc.data() : {};
+            const draftList = [...new Set([...(curData.draftList || []), ym])].sort();
+            await App.dbRef.update({ draftList });
+
+            UI.hideLoader();
+            UI.showSaveToast(`✅ สร้าง Draft ${ym} เรียบร้อย`);
+            PlanUI.refresh();
+        } catch (err) {
+            UI.hideLoader();
+            UI.showErrorToast('❌ สร้าง Draft ไม่สำเร็จ: ' + err.message);
+            console.error('createDraft error:', err);
+        }
+    },
+
+    // Activate: copy active→history, draft→active
+    activateDraft: async (ym) => {
+        UI.showLoader('กำลัง Activate...', `Draft ${ym} → Active`);
+        try {
+            // 1. Snapshot active → history
+            const activeDoc = await App.dbRef.get();
+            const activeData = activeDoc.exists ? activeDoc.data() : {};
+            const histYm = PlanUI.currentYM(); // เดือนปัจจุบัน
+            const histMeta = {
+                routeList:   activeData.routeList  || [],
+                cycleDays:   activeData.cycleDays  || 24,
+                archivedAt:  firebase.firestore.FieldValue.serverTimestamp(),
+                label:       histYm
+            };
+            await App.historyCol().doc(histYm).set(histMeta);
+
+            // copy routes active → history
+            const histRoutesCol = App.historyCol().doc(histYm).collection('routes');
+            await Promise.all((activeData.routeList || []).map(async name => {
+                const rd = await App.routesCol().doc(name).get();
+                const stores = rd.exists ? (rd.data().stores || []) : [];
+                await histRoutesCol.doc(name).set({ stores });
+            }));
+
+            // 2. Load draft
+            const draftDoc = await App.draftsCol().doc(ym).get();
+            const draftData = draftDoc.exists ? draftDoc.data() : {};
+            const newRouteList = (draftData.routeList || []).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
+            const newCycleDays = draftData.cycleDays || 24;
+
+            // copy routes draft → active
+            const draftRoutesCol = App.draftsCol().doc(ym).collection('routes');
+            const draftRoutes = await draftRoutesCol.get();
+            const activeRoutesCol = App.routesCol();
+            await Promise.all(draftRoutes.docs.map(async d => {
+                await activeRoutesCol.doc(d.id).set(d.data());
+            }));
+
+            // 3. อัปเดต metadata active
+            const curDoc = await App.dbRef.get();
+            const curData = curDoc.exists ? curDoc.data() : {};
+            const historyList = [...new Set([...(curData.historyList || []), histYm])].sort().reverse();
+            const draftList   = (curData.draftList || []).filter(d => d !== ym);
+
+            await App.dbRef.update({
+                routeList:   newRouteList,
+                cycleDays:   newCycleDays,
+                historyList,
+                draftList,
+                lastActivated: ym,
+                updatedAt:   firebase.firestore.FieldValue.serverTimestamp()
+            });
+
+            UI.hideLoader();
+            UI.showSaveToast(`✅ Activate ${ym} เรียบร้อย! Sales จะเห็น Plan ใหม่ทันที`);
+
+            // Reload active mode
+            await App.switchPlanMode('active');
+            PlanUI.refresh();
+        } catch (err) {
+            UI.hideLoader();
+            UI.showErrorToast('❌ Activate ไม่สำเร็จ: ' + err.message);
+            console.error('activateDraft error:', err);
+        }
     },
 
     clearStores: () => {

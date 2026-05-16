@@ -120,11 +120,11 @@
 
         <!-- Nav items -->
         <nav class="flex-1 py-3 space-y-1 overflow-hidden">
-            <button onclick="Nav.go('dashboard')" id="nav-dashboard" class="sidebar-menu w-full flex items-center justify-center md:justify-start px-0 md:px-5 py-3 md:py-3.5 text-sm font-bold">
+            <button onclick="Nav.go('dashboard')" id="nav-dashboard" class="sidebar-menu active w-full flex items-center justify-center md:justify-start px-0 md:px-5 py-3 md:py-3.5 text-sm font-bold">
                 <span class="text-xl md:text-lg md:mr-3">📊</span>
                 <span class="hidden md:inline">Dashboard</span>
             </button>
-            <button onclick="Nav.go('planning')" id="nav-planning" class="sidebar-menu active w-full flex items-center justify-center md:justify-start px-0 md:px-5 py-3 md:py-3.5 text-sm font-bold">
+            <button onclick="Nav.go('planning')" id="nav-planning" class="sidebar-menu w-full flex items-center justify-center md:justify-start px-0 md:px-5 py-3 md:py-3.5 text-sm font-bold">
                 <span class="text-xl md:text-lg md:mr-3">📍</span>
                 <span class="hidden md:inline">วางแผนคิวงาน</span>
             </button>
@@ -177,7 +177,7 @@
 
         <!-- ===== PAGE: Planning ===== -->
 
-        <div id="page-planning" class="app-page">
+        <div id="page-planning" class="app-page hidden">
 
 
 
@@ -215,12 +215,49 @@
                 </button>
                 <input type="file" id="bulkUpload" accept=".xlsx,.xls" class="hidden" onchange="FileManager.bulkImport(event)">
                 <div class="flex-1"></div>
+                <!-- Plan Selector -->
+                <div class="flex items-center gap-1.5">
+                    <div id="plan-mode-badge"
+                        style="font-size:10px;font-weight:800;padding:3px 8px;border-radius:6px;background:#059669;color:#fff;white-space:nowrap;">
+                        ✅ Active
+                    </div>
+                    <select id="plan-selector" onchange="PlanUI.onSelect(this.value)"
+                        class="bg-gray-700 border border-gray-600 text-white text-xs font-bold rounded-lg px-2 py-1.5 outline-none focus:ring-2 focus:ring-indigo-400 max-w-[130px]">
+                        <option value="active">📅 Plan ปัจจุบัน</option>
+                    </select>
+                    <button onclick="PlanUI.openCreateDraft()"
+                        class="bg-indigo-600 hover:bg-indigo-500 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap" title="สร้าง Draft เดือนหน้า">
+                        + Draft
+                    </button>
+                </div>
                 <button onclick="UI.showSummaryModal()" class="bg-gray-700 hover:bg-gray-600 border border-gray-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap">
                     📊 ภาพรวม
                 </button>
             </div>
 
 
+
+            <!-- Draft mode banner -->
+            <div id="draft-banner" style="display:none;"
+                class="bg-amber-50 border-b border-amber-200 px-4 py-2 flex items-center justify-between shrink-0">
+                <div class="flex items-center gap-2">
+                    <span style="font-size:13px;">📝</span>
+                    <span id="draft-banner-label" class="text-xs font-bold text-amber-800">กำลังแก้ไข Draft</span>
+                    <span class="text-xs text-amber-600">— การเปลี่ยนแปลงนี้จะไม่กระทบ Sales จนกว่าจะ Activate</span>
+                </div>
+                <button onclick="PlanUI.confirmActivate()"
+                    class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-1.5 rounded-lg text-xs font-bold transition shadow-sm">
+                    ✅ Activate
+                </button>
+            </div>
+
+            <!-- History mode banner -->
+            <div id="history-banner" style="display:none;"
+                class="bg-blue-50 border-b border-blue-200 px-4 py-2 flex items-center gap-2 shrink-0">
+                <span style="font-size:13px;">🔒</span>
+                <span id="history-banner-label" class="text-xs font-bold text-blue-800">ดู History (Read-Only)</span>
+                <span class="text-xs text-blue-600">— ไม่สามารถแก้ไขได้</span>
+            </div>
 
             <!-- Map + Sidebar Panel -->
             <div class="flex-1 flex flex-col md:flex-row overflow-hidden">
@@ -588,7 +625,7 @@
         </div>
 
         <!-- ===== PAGE: Dashboard ===== -->
-        <div id="page-dashboard" class="app-page hidden"></div>
+        <div id="page-dashboard" class="app-page"></div>
 
     </div><!-- end main-wrap -->
 
@@ -667,6 +704,73 @@
     </div>
 
 
+    <!-- Activate Confirm Modal -->
+    <div id="activate-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden">
+            <div class="p-5 border-b bg-emerald-50 flex items-center gap-3">
+                <div class="w-10 h-10 rounded-full bg-emerald-600 flex items-center justify-center text-white text-xl">✅</div>
+                <div>
+                    <h2 class="text-base font-black text-gray-900">ยืนยัน Activate Plan</h2>
+                    <p id="activate-modal-sub" class="text-xs text-gray-500 mt-0.5"></p>
+                </div>
+            </div>
+            <div class="p-5 space-y-3">
+                <div class="bg-amber-50 border border-amber-200 rounded-xl p-3">
+                    <p class="text-xs font-bold text-amber-800 mb-2">⚠️ สิ่งที่จะเกิดขึ้น:</p>
+                    <ul class="text-xs text-amber-700 space-y-1 list-disc list-inside">
+                        <li>Plan ปัจจุบันจะถูกเก็บใน History อัตโนมัติ</li>
+                        <li>Draft นี้จะกลายเป็น Plan ที่ใช้งาน</li>
+                        <li id="activate-sales-note" class="font-bold text-red-600">Sales จะเห็น Plan ใหม่ทันที</li>
+                    </ul>
+                </div>
+                <div class="bg-gray-50 border border-gray-200 rounded-xl p-3 text-xs text-gray-600">
+                    <div class="flex justify-between mb-1">
+                        <span>จำนวนสาย:</span>
+                        <span id="activate-route-count" class="font-bold text-gray-800">—</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span>จำนวนร้านทั้งหมด:</span>
+                        <span id="activate-store-count" class="font-bold text-gray-800">—</span>
+                    </div>
+                </div>
+            </div>
+            <div class="p-5 border-t flex gap-3">
+                <button onclick="document.getElementById('activate-modal').classList.add('hidden')"
+                    class="flex-1 border border-gray-200 rounded-xl py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-50 transition">ยกเลิก</button>
+                <button onclick="PlanUI.doActivate()"
+                    class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl py-2.5 text-sm font-bold transition shadow-sm">✅ ยืนยัน Activate</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create Draft Modal -->
+    <div id="create-draft-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden">
+            <div class="p-5 border-b flex justify-between items-center">
+                <h2 class="text-base font-black text-gray-900">📝 สร้าง Draft เดือนใหม่</h2>
+                <button onclick="document.getElementById('create-draft-modal').classList.add('hidden')"
+                    class="w-8 h-8 rounded-full border border-gray-200 text-gray-400 hover:bg-gray-100 font-bold">✕</button>
+            </div>
+            <div class="p-5 space-y-4">
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1.5">เดือนที่จะวางแผน</label>
+                    <select id="draft-month-select"
+                        class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-300">
+                    </select>
+                </div>
+                <div class="bg-indigo-50 border border-indigo-100 rounded-xl p-3 text-xs text-indigo-700">
+                    💡 ระบบจะ Copy Plan ปัจจุบันมาเป็น Draft ให้อัตโนมัติ แก้ไขได้โดยไม่กระทบ Sales
+                </div>
+            </div>
+            <div class="p-5 border-t flex gap-3">
+                <button onclick="document.getElementById('create-draft-modal').classList.add('hidden')"
+                    class="flex-1 border border-gray-200 rounded-xl py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-50 transition">ยกเลิก</button>
+                <button onclick="PlanUI.doCreateDraft()"
+                    class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl py-2.5 text-sm font-bold transition shadow-sm">สร้าง Draft</button>
+            </div>
+        </div>
+    </div>
+
     <!-- ===== SCRIPTS (ลำดับสำคัญมาก) ===== -->
 
     <!-- 0. Auth (ต้องก่อน app-config เพราะ app-config redirect ถ้าไม่มี center) -->
@@ -724,8 +828,10 @@
         };
 
         document.addEventListener('DOMContentLoaded', () => {
-            if (App && App.init) App.init();
+            if (App && App.init) App.init().then ? App.init().then(() => PlanUI.refresh()) : (() => { App.init(); setTimeout(PlanUI.refresh, 3000); })();
             if (typeof Dashboard !== 'undefined') Dashboard.init();
+            // หน้าแรกเป็น Dashboard เสมอ (ยกเว้น sales ที่ redirect ใน block ล่าง)
+            Nav.go('dashboard');
 
             // แสดง user info ใน sidebar ล่างสุด
             const sidebarUserEl = document.getElementById('sidebar-user-info');
@@ -850,6 +956,164 @@
                 doChangePw();
             }
         });
+    </script>
+
+    <script>
+        // ==========================================
+        // 📅 Plan UI Controller
+        // ==========================================
+        const PlanUI = {
+            _pendingActivateYm: null,
+
+            // ได้ YYYY_MM เดือนปัจจุบัน
+            currentYM: () => {
+                const d = new Date();
+                return `${d.getFullYear()}_${String(d.getMonth()+1).padStart(2,'0')}`;
+            },
+
+            // สร้าง options เดือนถัดไป 3 เดือน
+            _nextMonths: (n=3) => {
+                const months = [];
+                const d = new Date();
+                for (let i = 1; i <= n; i++) {
+                    const next = new Date(d.getFullYear(), d.getMonth() + i, 1);
+                    const ym  = `${next.getFullYear()}_${String(next.getMonth()+1).padStart(2,'0')}`;
+                    const lbl = next.toLocaleDateString('th-TH', { year: 'numeric', month: 'long' });
+                    months.push({ ym, lbl });
+                }
+                return months;
+            },
+
+            // refresh plan selector dropdown จาก Firestore metadata
+            refresh: async () => {
+                try {
+                    const doc = await App.dbRef.get();
+                    const d   = doc.exists ? doc.data() : {};
+                    const draftList   = (d.draftList   || []).sort().reverse();
+                    const historyList = (d.historyList || []).sort().reverse().slice(0, 6);
+
+                    const sel = document.getElementById('plan-selector');
+                    if (!sel) return;
+
+                    let opts = `<option value="active">📅 Plan ปัจจุบัน</option>`;
+                    if (draftList.length) {
+                        opts += `<optgroup label="── Draft ──">`;
+                        draftList.forEach(ym => {
+                            const [y, m] = ym.split('_');
+                            const lbl = new Date(+y, +m-1, 1).toLocaleDateString('th-TH', { year: 'numeric', month: 'short' });
+                            opts += `<option value="draft:${ym}">📝 Draft ${lbl}</option>`;
+                        });
+                        opts += `</optgroup>`;
+                    }
+                    if (historyList.length) {
+                        opts += `<optgroup label="── History ──">`;
+                        historyList.forEach(ym => {
+                            const [y, m] = ym.split('_');
+                            const lbl = new Date(+y, +m-1, 1).toLocaleDateString('th-TH', { year: 'numeric', month: 'short' });
+                            opts += `<option value="history:${ym}">🔒 ${lbl}</option>`;
+                        });
+                        opts += `</optgroup>`;
+                    }
+                    sel.innerHTML = opts;
+                    sel.value = App._planMode.startsWith('draft:') || App._planMode.startsWith('history:')
+                        ? App._planMode : 'active';
+                } catch(e) { console.warn('PlanUI.refresh:', e); }
+            },
+
+            // เมื่อ select เปลี่ยน
+            onSelect: async (val) => {
+                if (val === App._planMode) return;
+                await App.switchPlanMode(val);
+                PlanUI.updateBadge();
+            },
+
+            // อัปเดต badge + banner
+            updateBadge: () => {
+                const m = App._planMode;
+                const badge    = document.getElementById('plan-mode-badge');
+                const draftB   = document.getElementById('draft-banner');
+                const histB    = document.getElementById('history-banner');
+                const draftLbl = document.getElementById('draft-banner-label');
+                const histLbl  = document.getElementById('history-banner-label');
+
+                if (m === 'active') {
+                    if (badge)  { badge.textContent = '✅ Active'; badge.style.background = '#059669'; }
+                    if (draftB) draftB.style.display = 'none';
+                    if (histB)  histB.style.display  = 'none';
+                } else if (m.startsWith('draft:')) {
+                    const ym = m.replace('draft:', '');
+                    const [y, mo] = ym.split('_');
+                    const lbl = new Date(+y, +mo-1, 1).toLocaleDateString('th-TH', { year: 'numeric', month: 'long' });
+                    if (badge)  { badge.textContent = `📝 Draft ${lbl}`; badge.style.background = '#d97706'; }
+                    if (draftLbl) draftLbl.textContent = `กำลังแก้ไข Draft ${lbl}`;
+                    if (draftB) draftB.style.display = 'flex';
+                    if (histB)  histB.style.display  = 'none';
+                } else if (m.startsWith('history:')) {
+                    const ym = m.replace('history:', '');
+                    const [y, mo] = ym.split('_');
+                    const lbl = new Date(+y, +mo-1, 1).toLocaleDateString('th-TH', { year: 'numeric', month: 'long' });
+                    if (badge)  { badge.textContent = `🔒 ${lbl}`; badge.style.background = '#6b7280'; }
+                    if (draftB) draftB.style.display = 'none';
+                    if (histLbl) histLbl.textContent = `ดู History ${lbl} (Read-Only)`;
+                    if (histB)  histB.style.display  = 'flex';
+                }
+                // sync selector
+                const sel = document.getElementById('plan-selector');
+                if (sel && sel.value !== m) sel.value = m;
+            },
+
+            // เปิด modal สร้าง Draft
+            openCreateDraft: () => {
+                const sel = document.getElementById('draft-month-select');
+                if (sel) {
+                    sel.innerHTML = PlanUI._nextMonths(4).map(({ym, lbl}) =>
+                        `<option value="${ym}">${lbl}</option>`
+                    ).join('');
+                }
+                document.getElementById('create-draft-modal').classList.remove('hidden');
+            },
+
+            doCreateDraft: async () => {
+                const ym = document.getElementById('draft-month-select').value;
+                document.getElementById('create-draft-modal').classList.add('hidden');
+                if (!ym) return;
+                // ต้องอยู่ใน active mode ก่อน copy
+                if (App._planMode !== 'active') await App.switchPlanMode('active');
+                await App.createDraft(ym);
+                await PlanUI.refresh();
+            },
+
+            // เปิด confirm modal Activate
+            confirmActivate: () => {
+                const m = App._planMode;
+                if (!m.startsWith('draft:')) return;
+                const ym = m.replace('draft:', '');
+                const [y, mo] = ym.split('_');
+                const lbl = new Date(+y, +mo-1, 1).toLocaleDateString('th-TH', { year: 'numeric', month: 'long' });
+
+                PlanUI._pendingActivateYm = ym;
+
+                const sub = document.getElementById('activate-modal-sub');
+                if (sub) sub.textContent = `Draft ${lbl} → Plan ที่ใช้งาน`;
+
+                const rc = document.getElementById('activate-route-count');
+                const sc = document.getElementById('activate-store-count');
+                if (rc) rc.textContent = State.db.routeList.length + ' สาย';
+                if (sc) {
+                    const total = Object.values(State.db.routes).reduce((s,r) => s + (r||[]).length, 0);
+                    sc.textContent = total.toLocaleString() + ' ร้าน';
+                }
+                document.getElementById('activate-modal').classList.remove('hidden');
+            },
+
+            doActivate: async () => {
+                document.getElementById('activate-modal').classList.add('hidden');
+                if (!PlanUI._pendingActivateYm) return;
+                await App.activateDraft(PlanUI._pendingActivateYm);
+                PlanUI._pendingActivateYm = null;
+                await PlanUI.refresh();
+            }
+        };
     </script>
 
     <script>
