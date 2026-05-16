@@ -105,12 +105,15 @@
     </div>
 
     <!-- Header -->
-    <header id="main-header" class="bg-white text-gray-900 px-4 py-3 shrink-0 shadow-sm relative z-50 hidden border-b">
+    <header id="main-header" class="bg-white text-gray-900 px-4 py-2 shrink-0 shadow-sm relative z-50 hidden border-b">
         <div class="flex justify-between items-center">
-            <!-- ชื่อสาย -->
-            <div class="bg-blue-600 text-white text-xs font-black px-2.5 py-1 rounded-lg shadow-sm">
+            <!-- ซ้าย: spacer -->
+            <div style="width:36px;"></div>
+            <!-- กลาง: ชื่อสาย -->
+            <div class="bg-blue-600 text-white text-xs font-black px-3 py-1.5 rounded-lg shadow-sm">
                 <span id="user-route-label">—</span>
             </div>
+            <!-- ขวา: drawer -->
             <button onclick="Drawer.open()"
                 style="width:36px;height:36px;border-radius:10px;border:1px solid #e5e7eb;background:#f8fafc;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:background 0.15s;"
                 onmouseenter="this.style.background='#f1f5f9'" onmouseleave="this.style.background='#f8fafc'">
@@ -272,8 +275,19 @@
 
         <!-- Tab: คิวงาน -->
         <div id="tab-route" class="app-tab bg-gray-50">
-            <div class="bg-white p-2 shrink-0 border-b z-20 shadow-sm relative">
-                <select id="day-select" class="w-full bg-gray-50 text-gray-900 text-sm font-bold outline-none px-3 py-2 rounded-lg border border-gray-300 text-center appearance-none"></select>
+            <!-- แถบด้านบน: day selector + mini calendar -->
+            <div class="bg-white shrink-0 border-b z-20 shadow-sm relative">
+                <!-- Row 1: day selector ย่อ + วันที่ปัจจุบัน -->
+                <div style="display:flex;align-items:center;gap:8px;padding:6px 10px 4px;">
+                    <select id="day-select"
+                        class="flex-1 bg-gray-50 text-gray-900 text-sm font-bold outline-none px-3 py-1.5 rounded-lg border border-gray-300 text-center appearance-none"></select>
+                    <div id="today-badge"
+                        style="flex-shrink:0;font-size:11px;font-weight:800;color:#2563eb;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:4px 10px;white-space:nowrap;"></div>
+                </div>
+                <!-- Row 2: mini calendar strip (7 วันรอบวันนี้) -->
+                <div id="mini-cal-strip"
+                    style="display:flex;gap:4px;padding:4px 10px 8px;overflow-x:auto;scrollbar-width:none;">
+                </div>
             </div>
             <div id="split-container" class="flex-1 flex flex-col lg:flex-row min-h-0 w-full relative">
                 <div id="map-container" class="relative bg-gray-200 flex items-center justify-center z-10 transition-none">
@@ -308,7 +322,7 @@
     </div>
 
     <!-- Bottom Navigation Bar -->
-    <nav id="bottom-nav" style="grid-template-columns:repeat(4,1fr);">
+    <nav id="bottom-nav" style="grid-template-columns:repeat(3,1fr);">
         <button class="bnav-item active" id="nav-dashboard" onclick="UI.switchTab('dashboard')">
             <span class="bnav-icon">📊</span>
             <span>ยอดขาย</span>
@@ -316,10 +330,6 @@
         <button class="bnav-item" id="nav-stores" onclick="UI.switchTab('stores')">
             <span class="bnav-icon">🏪</span>
             <span>ร้านค้า</span>
-        </button>
-        <button class="bnav-item" id="nav-calendar" onclick="UI.switchTab('calendar')">
-            <span class="bnav-icon">📅</span>
-            <span>ปฏิทิน</span>
         </button>
         <button class="bnav-item" id="nav-route" onclick="UI.switchTab('route')">
             <span class="bnav-icon">📋</span>

@@ -340,6 +340,59 @@ const Processor = {
     // ✅ ลบ dashboard() ออก — run แค่ stores กับ route
     run: () => { Processor.stores(); Processor.setupRoute(); },
 
+    renderMiniCal: (daysSorted) => {
+        const strip = document.getElementById('mini-cal-strip');
+        if (!strip) return;
+        const cfg = State.calendarConfig;
+        if (!cfg) { strip.innerHTML = ''; return; }
+
+        // หาวันที่ของแต่ละ Day จาก calendarConfig
+        const now = new Date();
+        const todayDate = now.getDate();
+        const daysInMonth = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate();
+        const dayNames = ['อา','จ','อ','พ','พฤ','ศ','ส'];
+
+        // สร้าง map date → dayLabel
+        const dateToDay = {};
+        for (let d = 1; d <= daysInMonth; d++) {
+            const lbl = CalendarCtrl.getDayLabel(d);
+            if (lbl) dateToDay[d] = lbl;
+        }
+
+        // แสดง 7 วัน: 3 วันก่อนวันนี้ถึง 3 วันหลัง
+        let html = '';
+        for (let offset = -3; offset <= 3; offset++) {
+            const dateNum = todayDate + offset;
+            if (dateNum < 1 || dateNum > daysInMonth) {
+                html += `<div style="flex-shrink:0;width:38px;"></div>`;
+                continue;
+            }
+            const dow = new Date(now.getFullYear(), now.getMonth(), dateNum).getDay();
+            const dayLabel = dateToDay[dateNum];
+            const isToday = offset === 0;
+            const isSelected = dayLabel && dayLabel === State.currentDay;
+            const isCurrent = isToday || isSelected;
+
+            html += `<div onclick="${dayLabel ? `Processor.selectDayFromCal('${dayLabel}')` : ''}"
+                style="flex-shrink:0;width:40px;border-radius:10px;padding:4px 2px;text-align:center;
+                       background:${isSelected ? '#2563eb' : isToday ? '#eff6ff' : '#f9fafb'};
+                       border:1px solid ${isSelected ? '#2563eb' : isToday ? '#bfdbfe' : '#e5e7eb'};
+                       cursor:${dayLabel ? 'pointer' : 'default'};transition:all 0.15s;">
+                <div style="font-size:9px;font-weight:700;color:${isSelected ? '#bfdbfe' : '#9ca3af'};">${dayNames[dow]}</div>
+                <div style="font-size:13px;font-weight:900;color:${isSelected ? '#fff' : isToday ? '#2563eb' : '#374151'};line-height:1.3;">${dateNum}</div>
+                ${dayLabel ? `<div style="font-size:9px;font-weight:800;color:${isSelected ? '#fff' : '#6d28d9'};background:${isSelected ? 'rgba(255,255,255,0.2)' : '#ede9fe'};border-radius:4px;padding:1px 3px;margin-top:2px;">${dayLabel.replace('Day','')}</div>` : '<div style="height:16px;"></div>'}
+            </div>`;
+        }
+        strip.innerHTML = html;
+    },
+
+    selectDayFromCal: (dayLabel) => {
+        State.currentDay = dayLabel;
+        const el = document.getElementById('day-select');
+        if (el) el.value = dayLabel;
+        Processor.routeList();
+    },
+
     stores: () => {
         const hist = (typeof StoreHistory !== 'undefined') ? StoreHistory._storeMap : {};
         const mode = (typeof UI !== 'undefined' && UI._sortMode) ? UI._sortMode : 'seq';
@@ -396,7 +449,7 @@ const Processor = {
         let el = document.getElementById('day-select');
         el.innerHTML = sorted.map(d => {
             const markets = getDayMarkets(d);
-            const label = 'สายวิ่งวันที่ ' + d.replace('Day ', '') + (markets ? '  ' + markets : '');
+            const label = 'Day ' + d.replace('Day ', '') + (markets ? '  · ' + markets : '');
             return `<option value="${d}">${label}</option>`;
         }).join('');
 
@@ -405,10 +458,23 @@ const Processor = {
             State.mapNeedsFit = true;
         }
         el.value = State.currentDay;
-        // อัปเดตหัว tab-stores ให้แสดงชื่อตลาดของวันที่เลือก
+
+        // today badge
+        const todayBadge = document.getElementById('today-badge');
+        if (todayBadge) {
+            const now = new Date();
+            const dayNames = ['อา','จ','อ','พ','พฤ','ศ','ส'];
+            const monthNames = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+            todayBadge.textContent = `${dayNames[now.getDay()]} ${now.getDate()} ${monthNames[now.getMonth()]}`;
+        }
+
+        // mini calendar strip — แสดง 7 วัน (3 ก่อน วันนี้ 3 หลัง)
+        Processor.renderMiniCal(sorted);
+
+        // อัปเดตหัว tab-stores
         const _stM = getDayMarkets(State.currentDay);
         const _stEl = document.getElementById('stores-title');
-        if (_stEl) _stEl.textContent = _stM ? 'สายวิ่งวันที่ ' + State.currentDay.replace('Day ','') + ' · ' + _stM : 'รายชื่อร้านค้าทั้งหมด';
+        if (_stEl) _stEl.textContent = _stM ? 'Day ' + State.currentDay.replace('Day ','') + ' · ' + _stM : 'รายชื่อร้านค้าทั้งหมด';
         Processor.routeList();
     },
 
@@ -435,8 +501,8 @@ const Processor = {
         c.innerHTML = html || '<p class="text-center text-gray-400 mt-5">ไม่มีคิวงาน</p>';
         const _markets = getDayMarkets(State.currentDay);
         const _dayNum  = State.currentDay.replace('Day ', '');
-        const _title   = 'สายวิ่งวันที่ ' + _dayNum + (_markets ? ' · ' + _markets : '');
-        document.getElementById('route-title').innerText = `${_title} (${list.length} ร้าน)`;
+        const _marketStr = _markets ? ' · ' + _markets : '';
+        document.getElementById('route-title').innerText = `วันที่ ${_dayNum}${_marketStr} (${list.length} ร้าน)`;
 
         if (sortableList) sortableList.destroy();
         window._sortableInstance = Sortable.create(c, {
