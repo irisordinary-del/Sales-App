@@ -43,6 +43,7 @@ let map = null, mapMarkers = [], sortableList = null, markerClusterGroup = null;
 // ─── Tab keys ที่ระบบรู้จัก ───────────────────────────────
 const VALID_TABS = ['dashboard', 'stores', 'route', 'calendar'];
 const DEFAULT_TAB = 'dashboard';
+const FORCE_DEFAULT_TAB = true; // เริ่มที่ dashboard เสมอ
 const TAB_STORAGE_KEY = 'sales_last_tab';
 
 const UI = {
@@ -110,15 +111,22 @@ const UI = {
         // บันทึก tab ล่าสุด
         localStorage.setItem(TAB_STORAGE_KEY, id);
 
-        if (id === 'route' && map) {
-            setTimeout(() => { map.invalidateSize(); if (State.mapNeedsFit) MapCtrl.fitBounds(); }, 200);
+        if (id === 'route') {
+            setTimeout(() => {
+                if (!map) {
+                    MapCtrl.initAndDraw(); // บังคับเปิดแผนที่ทันที
+                } else {
+                    map.invalidateSize();
+                    if (State.mapNeedsFit) MapCtrl.fitBounds();
+                }
+            }, 200);
         }
     },
 
     // ✅ restore tab หลัง login / refresh
     restoreTab: () => {
-        const saved = localStorage.getItem(TAB_STORAGE_KEY);
-        UI.switchTab(VALID_TABS.includes(saved) ? saved : DEFAULT_TAB);
+        // เริ่มที่ dashboard เสมอ ไม่จำ tab เดิม
+        UI.switchTab(DEFAULT_TAB);
     },
 
     searchStores: (val) => {
@@ -252,6 +260,8 @@ const App = {
                     UI.restoreTab();
                     State.isLoaded = true;
                     if (typeof CalendarCtrl !== 'undefined') CalendarCtrl.init();
+                    // บังคับเปิดแผนที่ทันที
+                    setTimeout(() => MapCtrl.initAndDraw(), 400);
                 }
             }
         };
@@ -344,7 +354,6 @@ const Processor = {
         const strip = document.getElementById('mini-cal-strip');
         if (!strip) return;
         const cfg = State.calendarConfig;
-        if (!cfg) { strip.innerHTML = ''; return; }
 
         // หาวันที่ของแต่ละ Day จาก calendarConfig
         const now = new Date();
@@ -449,7 +458,9 @@ const Processor = {
         let el = document.getElementById('day-select');
         el.innerHTML = sorted.map(d => {
             const markets = getDayMarkets(d);
-            const label = 'Day ' + d.replace('Day ', '') + (markets ? '  · ' + markets : '');
+            // แสดงแค่ตลาดอันแรก ป้องกันยาวเกิน
+            const mktFirst = markets ? markets.split(' · ')[0] : '';
+            const label = 'Day ' + d.replace('Day ', '') + (mktFirst ? '  · ' + mktFirst : '');
             return `<option value="${d}">${label}</option>`;
         }).join('');
 
@@ -501,8 +512,10 @@ const Processor = {
         c.innerHTML = html || '<p class="text-center text-gray-400 mt-5">ไม่มีคิวงาน</p>';
         const _markets = getDayMarkets(State.currentDay);
         const _dayNum  = State.currentDay.replace('Day ', '');
-        const _marketStr = _markets ? ' · ' + _markets : '';
-        document.getElementById('route-title').innerText = `วันที่ ${_dayNum}${_marketStr} (${list.length} ร้าน)`;
+        // แสดงแค่ตลาดอันแรก ไม่เอาซ้ำทั้งหมด
+        const _mktFirst = _markets ? _markets.split(' · ')[0] : '';
+        const _marketStr = _mktFirst ? ' · ' + _mktFirst : '';
+        document.getElementById('route-title').innerText = `Day ${_dayNum}${_marketStr} (${list.length} ร้าน)`;
 
         if (sortableList) sortableList.destroy();
         window._sortableInstance = Sortable.create(c, {
@@ -859,15 +872,15 @@ const CalendarCtrl = {
 
 const MapCtrl = {
     initAndDraw: () => {
-        document.getElementById('btn-load-map').classList.add('hidden');
-        document.getElementById('map').classList.remove('hidden');
-        document.getElementById('btn-fit-map').classList.remove('hidden');
-        if (!map) {
+        const mapEl = document.getElementById('map');
+        const fitBtn = document.getElementById('btn-fit-map');
+        if (fitBtn) fitBtn.classList.remove('hidden');
+        if (!map && mapEl) {
             map = L.map('map', { zoomControl: false, rotate: true, rotateControl: false }).setView([14.4745, 100.1222], 10);
             MapCtrl._initRotateUI();
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
         }
-        setTimeout(() => { map.invalidateSize(); MapCtrl.drawMap(); MapCtrl.addGpsButton(); }, 200);
+        setTimeout(() => { if (map) { map.invalidateSize(); MapCtrl.drawMap(); MapCtrl.addGpsButton(); } }, 300);
     },
 
     drawMap: () => {
