@@ -361,57 +361,7 @@ const Processor = {
     // ✅ ลบ dashboard() ออก — run แค่ stores กับ route
     run: () => { Processor.stores(); Processor.setupRoute(); },
 
-    renderMiniCal: (daysSorted) => {
-        const strip = document.getElementById('mini-cal-strip');
-        if (!strip) return;
-        const cfg = State.calendarConfig;
-
-        // หาวันที่ของแต่ละ Day จาก calendarConfig
-        const now = new Date();
-        const todayDate = now.getDate();
-        const daysInMonth = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate();
-        const dayNames = ['อา','จ','อ','พ','พฤ','ศ','ส'];
-
-        // สร้าง map date → dayLabel
-        const dateToDay = {};
-        for (let d = 1; d <= daysInMonth; d++) {
-            const lbl = CalendarCtrl.getDayLabel(d);
-            if (lbl) dateToDay[d] = lbl;
-        }
-
-        // แสดง 7 วัน: 3 วันก่อนวันนี้ถึง 3 วันหลัง
-        let html = '';
-        for (let offset = -3; offset <= 3; offset++) {
-            const dateNum = todayDate + offset;
-            if (dateNum < 1 || dateNum > daysInMonth) {
-                html += `<div style="flex-shrink:0;width:38px;"></div>`;
-                continue;
-            }
-            const dow = new Date(now.getFullYear(), now.getMonth(), dateNum).getDay();
-            const dayLabel = dateToDay[dateNum];
-            const isToday = offset === 0;
-            const isSelected = dayLabel && dayLabel === State.currentDay;
-            const isCurrent = isToday || isSelected;
-
-            html += `<div onclick="${dayLabel ? `Processor.selectDayFromCal('${dayLabel}')` : ''}"
-                style="flex-shrink:0;width:40px;border-radius:10px;padding:4px 2px;text-align:center;
-                       background:${isSelected ? '#2563eb' : isToday ? '#eff6ff' : '#f9fafb'};
-                       border:1px solid ${isSelected ? '#2563eb' : isToday ? '#bfdbfe' : '#e5e7eb'};
-                       cursor:${dayLabel ? 'pointer' : 'default'};transition:all 0.15s;">
-                <div style="font-size:9px;font-weight:700;color:${isSelected ? '#bfdbfe' : '#9ca3af'};">${dayNames[dow]}</div>
-                <div style="font-size:13px;font-weight:900;color:${isSelected ? '#fff' : isToday ? '#2563eb' : '#374151'};line-height:1.3;">${dateNum}</div>
-                ${dayLabel ? `<div style="font-size:9px;font-weight:800;color:${isSelected ? '#fff' : '#6d28d9'};background:${isSelected ? 'rgba(255,255,255,0.2)' : '#ede9fe'};border-radius:4px;padding:1px 3px;margin-top:2px;">${dayLabel.replace('Day','')}</div>` : '<div style="height:16px;"></div>'}
-            </div>`;
-        }
-        strip.innerHTML = html;
-    },
-
-    selectDayFromCal: (dayLabel) => {
-        State.currentDay = dayLabel;
-        const el = document.getElementById('day-select');
-        if (el) el.value = dayLabel;
-        Processor.routeList();
-    },
+    // mini-cal strip removed — ใช้ CalendarCtrl.openPopup() แทน
 
     stores: () => {
         const hist = (typeof StoreHistory !== 'undefined') ? StoreHistory._storeMap : {};
@@ -481,17 +431,6 @@ const Processor = {
         }
         el.value = State.currentDay;
 
-        // today badge
-        const todayBadge = document.getElementById('today-badge');
-        if (todayBadge) {
-            const now = new Date();
-            const dayNames = ['อา','จ','อ','พ','พฤ','ศ','ส'];
-            const monthNames = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
-            todayBadge.textContent = `${dayNames[now.getDay()]} ${now.getDate()} ${monthNames[now.getMonth()]}`;
-        }
-
-        // mini calendar strip — แสดง 7 วัน (3 ก่อน วันนี้ 3 หลัง)
-        Processor.renderMiniCal(sorted);
 
         // อัปเดตหัว tab-stores
         const _stM = getDayMarkets(State.currentDay);
@@ -878,6 +817,43 @@ const CalendarCtrl = {
         CalendarCtrl._month++;
         if (CalendarCtrl._month > 11) { CalendarCtrl._month = 0; CalendarCtrl._year++; }
         CalendarCtrl.render();
+    },
+
+    openPopup: () => {
+        const popup = document.getElementById('calendar-popup');
+        const sheet = document.getElementById('calendar-popup-sheet');
+        if (!popup || !sheet) return;
+        // sync เดือนปัจจุบัน
+        const now = new Date();
+        CalendarCtrl._year  = now.getFullYear();
+        CalendarCtrl._month = now.getMonth();
+        CalendarCtrl.render();
+        popup.style.display = 'block';
+        requestAnimationFrame(() => {
+            sheet.style.transform = 'translateY(0)';
+        });
+    },
+
+    closePopup: (e) => {
+        // ปิดเมื่อกด overlay หรือเรียกตรง
+        const sheet = document.getElementById('calendar-popup-sheet');
+        const popup = document.getElementById('calendar-popup');
+        if (e && sheet && sheet.contains(e.target)) return; // กดใน sheet ไม่ปิด
+        if (sheet) sheet.style.transform = 'translateY(100%)';
+        setTimeout(() => { if (popup) popup.style.display = 'none'; }, 300);
+    },
+
+    // override goToDay ให้ปิด popup ก่อน navigate
+    goToDay: (dayLabel) => {
+        CalendarCtrl.closePopup();
+        setTimeout(() => {
+            State.currentDay = dayLabel;
+            const el = document.getElementById('day-select');
+            if (el) el.value = dayLabel;
+            Processor.routeList();
+            UI.switchTab('route');
+            showSalesToast('📅 ' + dayLabel);
+        }, 320);
     }
 };
 
@@ -896,8 +872,6 @@ const MapCtrl = {
 
     drawMap: () => {
         if (!map) return;
-
-        // ลบ layer เดิม
         if (markerClusterGroup) { map.removeLayer(markerClusterGroup); }
         mapMarkers = [];
 

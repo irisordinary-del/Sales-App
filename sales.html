@@ -275,19 +275,13 @@
 
         <!-- Tab: คิวงาน -->
         <div id="tab-route" class="app-tab bg-gray-50">
-            <!-- แถบด้านบน: day selector + mini calendar -->
-            <div class="bg-white shrink-0 border-b z-20 shadow-sm relative">
-                <!-- Row 1: day selector ย่อ + วันที่ปัจจุบัน -->
-                <div style="display:flex;align-items:center;gap:8px;padding:6px 10px 4px;">
-                    <select id="day-select"
-                        class="flex-1 bg-gray-50 text-gray-900 text-sm font-bold outline-none px-3 py-1.5 rounded-lg border border-gray-300 text-center appearance-none"></select>
-                    <div id="today-badge"
-                        style="flex-shrink:0;font-size:11px;font-weight:800;color:#2563eb;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:4px 10px;white-space:nowrap;"></div>
-                </div>
-                <!-- Row 2: mini calendar strip (7 วันรอบวันนี้) -->
-                <div id="mini-cal-strip"
-                    style="display:flex;gap:4px;padding:4px 10px 8px;overflow-x:auto;scrollbar-width:none;">
-                </div>
+            <!-- แถบบนสุด: day selector + ปุ่มปฏิทิน -->
+            <div style="background:#fff;border-bottom:1px solid #e5e7eb;padding:6px 10px;display:flex;align-items:center;gap:8px;flex-shrink:0;z-index:20;box-shadow:0 1px 4px rgba(0,0,0,0.06);">
+                <select id="day-select"
+                    style="flex:1;background:#f9fafb;color:#111827;font-size:13px;font-weight:700;outline:none;padding:7px 12px;border-radius:10px;border:1px solid #e5e7eb;text-align:center;appearance:none;font-family:inherit;"></select>
+                <button onclick="CalendarCtrl.openPopup()"
+                    style="flex-shrink:0;width:38px;height:38px;border-radius:10px;border:1px solid #e5e7eb;background:#f9fafb;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:18px;transition:background 0.15s;"
+                    title="ปฏิทิน">📅</button>
             </div>
             <div id="split-container" class="flex-1 flex flex-col lg:flex-row min-h-0 w-full relative">
                 <div id="map-container" class="relative bg-gray-200 z-10 transition-none">
@@ -335,6 +329,59 @@
             <span>คิวงาน</span>
         </button>
     </nav>
+
+    <!-- Calendar Popup — full screen slide up -->
+    <div id="calendar-popup"
+        style="display:none;position:fixed;inset:0;z-index:99998;background:rgba(0,0,0,0.5);backdrop-filter:blur(2px);"
+        onclick="CalendarCtrl.closePopup(event)">
+        <div id="calendar-popup-sheet"
+            style="position:absolute;left:0;right:0;bottom:0;background:#fff;border-radius:20px 20px 0 0;
+                   max-height:92dvh;display:flex;flex-direction:column;
+                   transform:translateY(100%);transition:transform 0.3s cubic-bezier(0.4,0,0.2,1);">
+
+            <!-- Handle -->
+            <div style="display:flex;justify-content:center;padding:10px 0 6px;flex-shrink:0;">
+                <div style="width:40px;height:4px;border-radius:2px;background:#e5e7eb;"></div>
+            </div>
+
+            <!-- Header ปฏิทิน -->
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:4px 16px 10px;flex-shrink:0;">
+                <button onclick="CalendarCtrl.prevMonth()"
+                    style="width:34px;height:34px;border-radius:8px;border:1px solid #e5e7eb;background:#f9fafb;font-size:18px;cursor:pointer;">‹</button>
+                <div style="text-align:center;">
+                    <div id="calendar-month-label" style="font-size:16px;font-weight:900;color:#111827;"></div>
+                    <div id="calendar-mode-badge"
+                        style="font-size:10px;font-weight:700;padding:2px 10px;border-radius:20px;display:inline-block;margin-top:3px;"></div>
+                </div>
+                <button onclick="CalendarCtrl.nextMonth()"
+                    style="width:34px;height:34px;border-radius:8px;border:1px solid #e5e7eb;background:#f9fafb;font-size:18px;cursor:pointer;">›</button>
+            </div>
+
+            <!-- Grid -->
+            <div style="flex:1;overflow-y:auto;padding:0 12px 16px;">
+                <div id="calendar-grid"
+                    style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;">
+                </div>
+
+                <!-- Legend -->
+                <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:14px;padding:0 4px;">
+                    <div style="display:flex;align-items:center;gap:4px;font-size:11px;color:#6b7280;font-weight:600;">
+                        <div style="width:10px;height:10px;border-radius:50%;background:#2563eb;"></div> วันนี้
+                    </div>
+                    <div style="display:flex;align-items:center;gap:4px;font-size:11px;color:#6b7280;font-weight:600;">
+                        <div style="width:10px;height:10px;border-radius:3px;background:#ede9fe;border:1px solid #ddd8fe;"></div> Day วิ่ง
+                    </div>
+                    <div style="display:flex;align-items:center;gap:4px;font-size:11px;color:#6b7280;font-weight:600;">
+                        <div style="width:10px;height:10px;border-radius:50%;background:#2563eb;margin-left:2px;"></div> มีคิวงาน
+                    </div>
+                    <div style="display:flex;align-items:center;gap:4px;font-size:11px;color:#dc2626;font-weight:600;">
+                        <div style="width:10px;height:10px;border-radius:3px;background:#fef2f2;border:1px solid #fecaca;"></div> วันหยุด
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
 
     <!-- Store Modal — bottom sheet -->
     <div id="store-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-[99999] flex items-end">
