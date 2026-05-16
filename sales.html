@@ -395,25 +395,6 @@
             finally { btn.disabled = false; btn.textContent = 'บันทึก'; }
         }
 
-            if (typeof App !== 'undefined' && App.switchRoute) App.switchRoute(val);
-        }
-
-        // ── Top Loading Bar (global LoadBar replaces old one in sales-app.js) ──
-        const LoadBar = {
-            _timer: null,
-            show: () => {
-                const b = document.getElementById('top-load-bar'), f = document.getElementById('top-load-fill');
-                if (!b || !f) return;
-                b.classList.remove('done'); b.style.opacity = '1'; f.style.background = 'linear-gradient(90deg,#2563eb,#60a5fa,#2563eb)'; f.style.width = '8%';
-            },
-            setProgress: (pct) => { const f = document.getElementById('top-load-fill'); if (f) f.style.width = Math.min(pct, 94) + '%'; },
-            done: () => {
-                const f = document.getElementById('top-load-fill'); if (f) f.style.width = '100%';
-                if (LoadBar._timer) clearTimeout(LoadBar._timer);
-                LoadBar._timer = setTimeout(() => { const b = document.getElementById('top-load-bar'); if (b) b.classList.add('done'); }, 500);
-            },
-            error: (msg) => { const f = document.getElementById('top-load-fill'); if (f) { f.style.width='100%'; f.style.background='#ef4444'; } console.error(msg); }
-        };
     </script>
 
 
@@ -491,6 +472,38 @@
                 document.getElementById('right-drawer').style.transform = 'translateX(110%)';
                 document.getElementById('drawer-overlay').style.display = 'none';
                 document.body.style.overflow = '';
+            }
+        };
+    </script>
+
+    <!-- LoadBar must load before sales-app.js -->
+    <script>
+        const LoadBar = {
+            _timer: null,
+            show: () => {
+                const b = document.getElementById('top-load-bar'), f = document.getElementById('top-load-fill');
+                if (!b || !f) return;
+                b.classList.remove('done'); b.style.opacity = '1';
+                f.style.background = 'linear-gradient(90deg,#2563eb,#60a5fa,#2563eb)';
+                f.style.width = '8%';
+            },
+            setProgress: (pct) => {
+                const f = document.getElementById('top-load-fill');
+                if (f) f.style.width = Math.min(pct, 94) + '%';
+            },
+            done: () => {
+                const f = document.getElementById('top-load-fill');
+                if (f) f.style.width = '100%';
+                if (LoadBar._timer) clearTimeout(LoadBar._timer);
+                LoadBar._timer = setTimeout(() => {
+                    const b = document.getElementById('top-load-bar');
+                    if (b) b.classList.add('done');
+                }, 500);
+            },
+            error: (msg) => {
+                const f = document.getElementById('top-load-fill');
+                if (f) { f.style.width = '100%'; f.style.background = '#ef4444'; }
+                console.error(msg);
             }
         };
     </script>
