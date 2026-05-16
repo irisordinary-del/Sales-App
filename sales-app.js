@@ -99,7 +99,7 @@ const UI = {
     switchTab: (id) => {
         if (!VALID_TABS.includes(id)) id = DEFAULT_TAB;
 
-        document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+        document.querySelectorAll('.bnav-item').forEach(el => el.classList.remove('active'));
         const navEl = document.getElementById('nav-' + id);
         if (navEl) navEl.classList.add('active');
 
@@ -169,43 +169,6 @@ const UI = {
     }
 };
 
-// ── Loading bar ──
-const LoadBar = {
-    _timer: null,
-    show: () => {
-        const wrap = document.getElementById('load-bar-wrap');
-        if (!wrap) return;
-        wrap.style.display = 'block';
-        wrap.classList.remove('hide');
-        LoadBar.setProgress(5, 'กำลังเชื่อมต่อ Firebase...');
-    },
-    setProgress: (pct, label) => {
-        const fill = document.getElementById('load-bar-fill');
-        const lbl  = document.getElementById('load-bar-label');
-        if (fill) fill.style.width = Math.min(pct, 100) + '%';
-        if (lbl)  lbl.textContent  = label || ('โหลดข้อมูล ' + Math.round(pct) + '%');
-    },
-    done: () => {
-        LoadBar.setProgress(100, '✅ โหลดข้อมูลเสร็จแล้ว');
-        if (LoadBar._timer) clearTimeout(LoadBar._timer);
-        LoadBar._timer = setTimeout(() => {
-            const wrap = document.getElementById('load-bar-wrap');
-            if (wrap) {
-                wrap.classList.add('hide');
-                setTimeout(() => { wrap.style.display = 'none'; wrap.classList.remove('hide'); }, 420);
-            }
-        }, 700);
-    },
-    error: (msg) => {
-        LoadBar.setProgress(100, '❌ ' + (msg || 'โหลดไม่สำเร็จ'));
-        if (LoadBar._timer) clearTimeout(LoadBar._timer);
-        LoadBar._timer = setTimeout(() => {
-            const wrap = document.getElementById('load-bar-wrap');
-            if (wrap) { wrap.classList.add('hide'); setTimeout(() => { wrap.style.display = 'none'; wrap.classList.remove('hide'); }, 420); }
-        }, 2000);
-    }
-};
-
 const App = {
     checkAuth: () => {
         // ถ้า session มีอยู่และเป็น sales → เข้าได้เลย
@@ -233,12 +196,12 @@ const App = {
 
     start: () => {
         // login-screen ถูกซ่อนใน HTML แล้ว
-        // ✅ แสดง hamburger button
-        const hBtn = document.getElementById('hamburger-btn');
-        if (hBtn) hBtn.style.display = 'flex';
+        // แสดง bottom nav
+        const _bnav = document.getElementById('bottom-nav');
+        if (_bnav) _bnav.style.display = 'grid';
         document.getElementById('main-header').classList.remove('hidden');
         document.getElementById('main-content').classList.remove('hidden');
-        // bottom-nav ถูกแทนด้วย hamburger-btn แล้ว (ไม่ต้องแสดง nav เดิม)
+
         document.getElementById('user-route-label').innerText = State.myRoute;
         document.getElementById('loader').style.display = 'flex';
 
@@ -251,11 +214,11 @@ const App = {
             // อัปเดต % ตามสิ่งที่โหลดแล้ว
             const pct = (isMainLoaded ? 50 : 0) + (isSalesLoaded ? 50 : 0);
             if (!isMainLoaded && !isSalesLoaded) {
-                LoadBar.setProgress(15, 'กำลังโหลดข้อมูลร้านค้า...');
+                LoadBar.setProgress(15);
             } else if (isMainLoaded && !isSalesLoaded) {
-                LoadBar.setProgress(60, 'โหลดข้อมูลร้านเสร็จ... กำลังโหลดยอดขาย');
+                LoadBar.setProgress(60);
             } else if (!isMainLoaded && isSalesLoaded) {
-                LoadBar.setProgress(40, 'โหลดยอดขายเสร็จ... กำลังโหลดร้านค้า');
+                LoadBar.setProgress(40);
             }
             if (isMainLoaded && isSalesLoaded) {
                 LoadBar.done();
@@ -275,7 +238,7 @@ const App = {
         docMain = db.collection('appData').doc(_centerDocId);
         const routeColRef = db.collection('appData').doc(_centerDocId).collection('routes');
 
-        LoadBar.setProgress(20, 'กำลังดึงข้อมูลร้านค้า...');
+        LoadBar.setProgress(20);
         docMain.onSnapshot(async doc => {
             if (!doc.exists) { State.allStores = []; isMainLoaded = true; checkReady(); return; }
             const data = doc.data();
@@ -283,7 +246,7 @@ const App = {
                 State.allStores = data.routes[State.myRoute] || [];
                 isMainLoaded = true; checkReady();
             } else {
-                LoadBar.setProgress(35, 'ดึงข้อมูลจาก subcollection...');
+                LoadBar.setProgress(35);
                 try {
                     const rd = await routeColRef.doc(State.myRoute).get();
                     State.allStores = rd.exists ? (rd.data().stores || []) : [];
@@ -298,7 +261,7 @@ const App = {
             if (isMainLoaded) Processor.run();
         });
 
-        LoadBar.setProgress(30, 'กำลังโหลดข้อมูลยอดขาย...');
+        LoadBar.setProgress(30);
         colSales.onSnapshot(snap => {
             let merged = {};
             snap.forEach(doc => { Object.assign(merged, doc.data()); });
@@ -336,12 +299,6 @@ const Processor = {
             list.sort((a, b) => a.name.localeCompare(b.name, 'th'));
         } else if (mode === 'sales') {
             list.sort((a, b) => ((hist[b.id]?.net || 0) - (hist[a.id]?.net || 0)));
-        } else if (mode === 'active') {
-            list.sort((a, b) => {
-                const aA = (State.sales[a.id]?.vpo > 0) ? 0 : 1;
-                const bA = (State.sales[b.id]?.vpo > 0) ? 0 : 1;
-                return aA - bA;
-            });
         }
 
         let html = list.map(s => {
@@ -350,7 +307,7 @@ const Processor = {
             const h      = hist[s.id];
             const badge  = active
                 ? `<span style="background:#d1fae5;color:#065f46;font-size:9px;font-weight:800;padding:2px 8px;border-radius:8px;">Active</span>`
-                : `<span style="background:#f3f4f6;color:#9ca3af;font-size:9px;font-weight:800;padding:2px 8px;border-radius:8px;">Inactive</span>`;
+                : '';
             const mktTag = s.marketName
                 ? `<span style="font-size:10px;color:#3b82f6;font-weight:600;">${s.marketName}</span> `
                 : '';

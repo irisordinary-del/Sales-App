@@ -61,7 +61,7 @@ const SalesDashboard = {
 
         // แสดงชื่อสายใน header
         const lbl = document.getElementById('db-route-label');
-        if (lbl) lbl.textContent = 'สาย: ' + SalesDashboard._username;
+        if (lbl) lbl.textContent = SalesDashboard._username;
 
         SalesDashboard._ready = true;
         SalesDashboard._ensureKpiCards();
@@ -83,9 +83,19 @@ const SalesDashboard = {
                 '<div style="font-size:10px;color:#9ca3af;margin-top:2px;">' + sub + '</div>';
             return el;
         };
+        const u = SalesDashboard._username;
+        const isV = /V\d/i.test(u);
+        const isC = /C\d/i.test(u);
+        // SKU avg — always show
         parent.insertBefore(mk('#0ea5e9', '📦 SKU เฉลี่ย/ร้าน', 'db-kpi-avgsku', 'SKU รวมเฉลี่ยต่อร้าน', '#0284c7'), invCard);
-        parent.insertBefore(mk('#ec4899', '🚐 ยอด/ร้าน สาย V', 'db-kpi-avgvol-v', 'บาท เฉลี่ยต่อร้าน', '#db2777'), invCard);
-        parent.insertBefore(mk('#f97316', '🏪 ยอด/ร้าน สาย C', 'db-kpi-avgvol-c', 'บาท เฉลี่ยต่อร้าน', '#ea580c'), invCard);
+        // V card only for V routes
+        if (isV || (!isV && !isC)) {
+            parent.insertBefore(mk('#ec4899', '🚐 ยอด/ร้าน', 'db-kpi-avgvol-v', 'บาท เฉลี่ยต่อร้าน', '#db2777'), invCard);
+        }
+        // C card only for C routes
+        if (isC || (!isV && !isC)) {
+            parent.insertBefore(mk('#f97316', '🏪 ยอด/ร้าน', 'db-kpi-avgvol-c', 'บาท เฉลี่ยต่อร้าน', '#ea580c'), invCard);
+        }
     },
 
     // ─── โหลดรายการเดือนที่มีข้อมูล ──────────────────────────────────────
@@ -195,7 +205,7 @@ const SalesDashboard = {
 
         // ─ KPI Cards ─
         SalesDashboard._setText('db-kpi-total', SalesDashboard._fmt(total));
-        SalesDashboard._setText('db-kpi-total-sub', 'Invoice Net Amount');
+        SalesDashboard._setText('db-kpi-total-sub', 'ยอดขาย');
         SalesDashboard._setText('db-kpi-shops', outletM.outletCount.toLocaleString());
         SalesDashboard._setText('db-kpi-avgsku', SalesDashboard._fmtSku(outletM.avgSku));
         SalesDashboard._setText('db-kpi-avgvol-v', outletM.v.outletCount > 0 ? Math.round(outletM.v.avgVol).toLocaleString('th-TH') : '—');
