@@ -512,8 +512,10 @@ const App = {
     // โหลดทุกสายจาก subcollection พร้อมกัน
     _loadAllRoutes: async (routeList) => {
         State.db.routes = {};
+        // ใช้ currentRoutesCol() เพื่อโหลดจาก path ที่ถูกต้องตาม mode
+        const col = App.currentRoutesCol();
         await Promise.all(routeList.map(name =>
-            App.routesCol().doc(name).get()
+            col.doc(name).get()
                 .then(d => {
                     const stores = d.exists ? (d.data().stores || []) : [];
                     State.db.routes[name] = stores;
