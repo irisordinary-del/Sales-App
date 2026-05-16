@@ -41,7 +41,7 @@ let State = { myRoute: "", allStores: [], routeStores: [], sales: {}, currentDay
 let map = null, mapMarkers = [], sortableList = null, markerClusterGroup = null;
 
 // ─── Tab keys ที่ระบบรู้จัก ───────────────────────────────
-const VALID_TABS = ['dashboard', 'stores', 'route', 'calendar'];
+const VALID_TABS = ['dashboard', 'stores', 'route'];
 const DEFAULT_TAB = 'dashboard';
 const FORCE_DEFAULT_TAB = true; // เริ่มที่ dashboard เสมอ
 const TAB_STORAGE_KEY = 'sales_last_tab';
@@ -115,7 +115,7 @@ const UI = {
         if (id === 'route') {
             setTimeout(() => {
                 if (!map) {
-                    MapCtrl.initAndDraw(); // บังคับเปิดแผนที่ทันที
+                    MapCtrl.initAndDraw();
                 } else {
                     map.invalidateSize();
                     if (State.mapNeedsFit) MapCtrl.fitBounds();
@@ -419,9 +419,7 @@ const Processor = {
         let el = document.getElementById('day-select');
         el.innerHTML = sorted.map(d => {
             const markets = getDayMarkets(d);
-            // แสดงแค่ตลาดอันแรก ป้องกันยาวเกิน
-            const mktFirst = markets ? markets.split(' · ')[0] : '';
-            const label = 'Day ' + d.replace('Day ', '') + (mktFirst ? '  · ' + mktFirst : '');
+            const label = 'Day ' + d.replace('Day ', '');
             return `<option value="${d}">${label}</option>`;
         }).join('');
 
@@ -460,12 +458,8 @@ const Processor = {
 
         let c = document.getElementById('route-store-list');
         c.innerHTML = html || '<p class="text-center text-gray-400 mt-5">ไม่มีคิวงาน</p>';
-        const _markets = getDayMarkets(State.currentDay);
-        const _dayNum  = State.currentDay.replace('Day ', '');
-        // แสดงแค่ตลาดอันแรก ไม่เอาซ้ำทั้งหมด
-        const _mktFirst = _markets ? _markets.split(' · ')[0] : '';
-        const _marketStr = _mktFirst ? ' · ' + _mktFirst : '';
-        document.getElementById('route-title').innerText = `Day ${_dayNum}${_marketStr} (${list.length} ร้าน)`;
+        const _dayNum = State.currentDay.replace('Day ', '');
+        document.getElementById('route-title').innerText = `Day ${_dayNum} (${list.length} ร้าน)`;
 
         if (sortableList) sortableList.destroy();
         window._sortableInstance = Sortable.create(c, {
