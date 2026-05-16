@@ -169,42 +169,7 @@ const UI = {
     }
 };
 
-// ── Loading bar ──
-const LoadBar = {
-    _timer: null,
-    show: () => {
-        const wrap = document.getElementById('load-bar-wrap');
-        if (!wrap) return;
-        wrap.style.display = 'block';
-        wrap.classList.remove('hide');
-        LoadBar.setProgress(5, 'กำลังเชื่อมต่อ Firebase...');
-    },
-    setProgress: (pct, label) => {
-        const fill = document.getElementById('load-bar-fill');
-        const lbl  = document.getElementById('load-bar-label');
-        if (fill) fill.style.width = Math.min(pct, 100) + '%';
-        if (lbl)  lbl.textContent  = label || ('โหลดข้อมูล ' + Math.round(pct) + '%');
-    },
-    done: () => {
-        LoadBar.setProgress(100, '✅ โหลดข้อมูลเสร็จแล้ว');
-        if (LoadBar._timer) clearTimeout(LoadBar._timer);
-        LoadBar._timer = setTimeout(() => {
-            const wrap = document.getElementById('load-bar-wrap');
-            if (wrap) {
-                wrap.classList.add('hide');
-                setTimeout(() => { wrap.style.display = 'none'; wrap.classList.remove('hide'); }, 420);
-            }
-        }, 700);
-    },
-    error: (msg) => {
-        LoadBar.setProgress(100, '❌ ' + (msg || 'โหลดไม่สำเร็จ'));
-        if (LoadBar._timer) clearTimeout(LoadBar._timer);
-        LoadBar._timer = setTimeout(() => {
-            const wrap = document.getElementById('load-bar-wrap');
-            if (wrap) { wrap.classList.add('hide'); setTimeout(() => { wrap.style.display = 'none'; wrap.classList.remove('hide'); }, 420); }
-        }, 2000);
-    }
-};
+// LoadBar defined in sales.html inline script (loads before this file)
 
 const App = {
     checkAuth: () => {
