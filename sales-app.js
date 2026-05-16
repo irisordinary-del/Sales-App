@@ -110,6 +110,7 @@ const UI = {
 
         // บันทึก tab ล่าสุด
         localStorage.setItem(TAB_STORAGE_KEY, id);
+        localStorage.setItem('sales_tab_date', new Date().toDateString());
 
         if (id === 'route') {
             setTimeout(() => {
@@ -125,8 +126,18 @@ const UI = {
 
     // ✅ restore tab หลัง login / refresh
     restoreTab: () => {
-        // เริ่มที่ dashboard เสมอ ไม่จำ tab เดิม
-        UI.switchTab(DEFAULT_TAB);
+        const today = new Date().toDateString(); // เช่น "Sat May 17 2026"
+        const lastDate = localStorage.getItem('sales_tab_date');
+        const savedTab = localStorage.getItem(TAB_STORAGE_KEY);
+
+        if (lastDate !== today) {
+            // วันใหม่ → เริ่ม dashboard + บันทึกวันนี้
+            localStorage.setItem('sales_tab_date', today);
+            UI.switchTab(DEFAULT_TAB);
+        } else {
+            // วันเดิม → เปิด tab ที่ค้างไว้
+            UI.switchTab(VALID_TABS.includes(savedTab) ? savedTab : DEFAULT_TAB);
+        }
     },
 
     searchStores: (val) => {
