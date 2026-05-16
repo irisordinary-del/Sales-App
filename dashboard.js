@@ -83,46 +83,51 @@ const Dashboard = {
         const isAdmin = Dashboard._session.role === 'admin' || Dashboard._session.role === 'supervisor';
 
         container.innerHTML = `
-        <!-- Header -->
-        <div class="h-16 bg-gray-900 text-white flex items-center justify-between px-4 md:px-5 shadow-md shrink-0 border-b-4 border-emerald-600 z-10">
-            <div class="flex items-center gap-3 flex-wrap min-w-0">
+        <!-- Header: ชื่อระบบ + ศูนย์ -->
+        <div class="h-12 bg-gray-900 text-white flex items-center justify-between px-3 md:px-4 shadow-md shrink-0 border-b-2 border-emerald-600 z-10">
+            <div class="flex items-center gap-3">
                 <button type="button" onclick="SidebarCtrl.toggle()" class="w-8 h-8 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white flex items-center justify-center transition shrink-0" title="เมนู">
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
                         <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
                     </svg>
                 </button>
-                <span class="text-lg font-black text-emerald-400">📊 Dashboard</span>
+                <span class="text-base font-black text-indigo-400 tracking-wide">Route<span class="text-white">Plan</span></span>
+                <span id="header-center-label-db" class="text-xs text-gray-400 font-bold hidden sm:block"></span>
+            </div>
+            <span class="text-xs text-gray-500 font-bold">📊 Dashboard</span>
+        </div>
 
-                <!-- Month selector -->
-                <select id="db-month-select" onchange="Dashboard._onMonthChange(this.value)"
-                    class="bg-gray-800 border border-gray-600 text-white text-sm font-bold rounded-lg px-3 py-1.5 outline-none focus:ring-2 focus:ring-emerald-500">
-                    <option value="">-- เลือกเดือน --</option>
-                </select>
+        <!-- Filter bar -->
+        <div class="bg-white border-b border-gray-200 px-3 py-2 flex flex-wrap items-center gap-2 shrink-0 shadow-sm z-[9]">
+            <!-- Month selector -->
+            <select id="db-month-select" onchange="Dashboard._onMonthChange(this.value)"
+                class="bg-gray-50 border border-gray-200 text-gray-800 text-sm font-bold rounded-lg px-3 py-1.5 outline-none focus:ring-2 focus:ring-emerald-400">
+                <option value="">-- เลือกเดือน --</option>
+            </select>
 
-                <!-- Amount mode toggle -->
-                <div class="flex bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
-                    <button id="db-btn-gross" onclick="Dashboard._setAmountMode('gross')"
-                        class="px-3 py-1.5 text-xs font-bold transition bg-emerald-700 text-white">Gross</button>
-                    <button id="db-btn-net" onclick="Dashboard._setAmountMode('net')"
-                        class="px-3 py-1.5 text-xs font-bold transition text-gray-400">Net</button>
-                </div>
-
-                <!-- Upload button (admin/supervisor only) -->
-                ${isAdmin ? `
-                <label class="cursor-pointer bg-indigo-700 hover:bg-indigo-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition">
-                    📂 อัปโหลด Sellout
-                    <input type="file" id="db-file-input" accept=".xlsx,.xls" class="hidden" onchange="Dashboard._onFileUpload(event)">
-                </label>
-                ` : ''}
+            <!-- Amount mode toggle -->
+            <div class="flex bg-gray-100 rounded-lg border border-gray-200 overflow-hidden">
+                <button id="db-btn-gross" onclick="Dashboard._setAmountMode('gross')"
+                    class="px-3 py-1.5 text-xs font-bold transition bg-emerald-600 text-white">Gross</button>
+                <button id="db-btn-net" onclick="Dashboard._setAmountMode('net')"
+                    class="px-3 py-1.5 text-xs font-bold transition text-gray-500 hover:text-gray-800">Net</button>
             </div>
 
-            <div class="flex items-center gap-3">
-                <!-- Breadcrumb / Reset filter -->
-                <div id="db-breadcrumb" class="text-xs text-gray-400 font-medium hidden sm:flex items-center gap-1"></div>
-                <button id="db-reset-btn" onclick="Dashboard._resetDrill()" class="hidden text-xs bg-gray-700 hover:bg-gray-600 text-white px-3 py-1.5 rounded-lg font-bold transition">
-                    ↩ รีเซ็ต
-                </button>
-            </div>
+            <!-- Upload button (admin/supervisor only) -->
+            ${isAdmin ? `
+            <label class="cursor-pointer bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition shadow-sm">
+                📂 อัปโหลด Sellout
+                <input type="file" id="db-file-input" accept=".xlsx,.xls" class="hidden" onchange="Dashboard._onFileUpload(event)">
+            </label>
+            ` : ''}
+
+            <div class="flex-1"></div>
+
+            <!-- Breadcrumb / Reset -->
+            <div id="db-breadcrumb" class="text-xs text-gray-400 font-medium hidden sm:flex items-center gap-1"></div>
+            <button id="db-reset-btn" onclick="Dashboard._resetDrill()" class="hidden text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-200 px-3 py-1.5 rounded-lg font-bold transition">
+                ↩ รีเซ็ต
+            </button>
         </div>
 
         <!-- Upload progress bar -->
