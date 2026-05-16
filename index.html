@@ -828,10 +828,12 @@
         };
 
         document.addEventListener('DOMContentLoaded', () => {
-            if (App && App.init) App.init().then ? App.init().then(() => PlanUI.refresh()) : (() => { App.init(); setTimeout(PlanUI.refresh, 3000); })();
+            if (App && App.init) App.init();
             if (typeof Dashboard !== 'undefined') Dashboard.init();
-            // หน้าแรกเป็น Dashboard เสมอ (ยกเว้น sales ที่ redirect ใน block ล่าง)
+            // หน้าแรกเป็น Dashboard เสมอ
             Nav.go('dashboard');
+            // refresh plan selector หลัง Firestore โหลดเสร็จ (~3 วิ)
+            setTimeout(() => PlanUI.refresh(), 3000);
 
             // แสดง user info ใน sidebar ล่างสุด
             const sidebarUserEl = document.getElementById('sidebar-user-info');
@@ -1080,7 +1082,13 @@
                 // ต้องอยู่ใน active mode ก่อน copy
                 if (App._planMode !== 'active') await App.switchPlanMode('active');
                 await App.createDraft(ym);
+                // refresh dropdown แล้ว switch ไป draft mode ทันที
                 await PlanUI.refresh();
+                const sel = document.getElementById('plan-selector');
+                if (sel) {
+                    sel.value = 'draft:' + ym;
+                    await PlanUI.onSelect('draft:' + ym);
+                }
             },
 
             // เปิด confirm modal Activate

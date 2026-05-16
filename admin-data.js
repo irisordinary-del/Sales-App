@@ -978,7 +978,7 @@ const App = {
 
             UI.hideLoader();
             UI.showSaveToast(`✅ สร้าง Draft ${ym} เรียบร้อย`);
-            PlanUI.refresh();
+            if (typeof PlanUI !== 'undefined') PlanUI.refresh();
         } catch (err) {
             UI.hideLoader();
             UI.showErrorToast('❌ สร้าง Draft ไม่สำเร็จ: ' + err.message);
@@ -1044,7 +1044,7 @@ const App = {
 
             // Reload active mode
             await App.switchPlanMode('active');
-            PlanUI.refresh();
+            if (typeof PlanUI !== 'undefined') PlanUI.refresh();
         } catch (err) {
             UI.hideLoader();
             UI.showErrorToast('❌ Activate ไม่สำเร็จ: ' + err.message);
