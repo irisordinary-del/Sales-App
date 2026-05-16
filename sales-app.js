@@ -458,8 +458,10 @@ const Processor = {
 
         let c = document.getElementById('route-store-list');
         c.innerHTML = html || '<p class="text-center text-gray-400 mt-5">ไม่มีคิวงาน</p>';
-        const _dayNum = State.currentDay.replace('Day ', '');
-        document.getElementById('route-title').innerText = `Day ${_dayNum} (${list.length} ร้าน)`;
+        const _markets = getDayMarkets(State.currentDay);
+        const _dayNum  = State.currentDay.replace('Day ', '');
+        const _mkt     = _markets ? ' · ' + _markets.split(' · ')[0] : '';
+        document.getElementById('route-title').innerText = `Day ${_dayNum}${_mkt} (${list.length} ร้าน)`;
 
         if (sortableList) sortableList.destroy();
         window._sortableInstance = Sortable.create(c, {
