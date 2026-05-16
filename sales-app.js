@@ -97,11 +97,6 @@ const UI = {
     },
 
     switchTab: (id) => {
-        // sync bottom nav
-        ['stores','dashboard','route'].forEach(t => {
-            const btn = document.getElementById('nav-' + t);
-            if (btn) btn.classList.toggle('active', t === id);
-        });
         if (!VALID_TABS.includes(id)) id = DEFAULT_TAB;
 
         document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
@@ -239,8 +234,8 @@ const App = {
     start: () => {
         // login-screen ถูกซ่อนใน HTML แล้ว
         // ✅ แสดง hamburger button
-        const bnav = document.getElementById('bottom-nav');
-        if (bnav) bnav.style.display = 'flex';
+        const hBtn = document.getElementById('hamburger-btn');
+        if (hBtn) hBtn.style.display = 'flex';
         document.getElementById('main-header').classList.remove('hidden');
         document.getElementById('main-content').classList.remove('hidden');
         // bottom-nav ถูกแทนด้วย hamburger-btn แล้ว (ไม่ต้องแสดง nav เดิม)
@@ -354,22 +349,23 @@ const Processor = {
             const active = k && k.vpo > 0;
             const h      = hist[s.id];
             const badge  = active
-                ? `<span class="badge-active">Active</span>`
-                : `<span class="badge-inactive">Inactive</span>`;
+                ? `<span style="background:#d1fae5;color:#065f46;font-size:9px;font-weight:800;padding:2px 8px;border-radius:8px;">Active</span>`
+                : `<span style="background:#f3f4f6;color:#9ca3af;font-size:9px;font-weight:800;padding:2px 8px;border-radius:8px;">Inactive</span>`;
             const mktTag = s.marketName
-                ? `<span class="store-market">${s.marketName} · </span>`
+                ? `<span style="font-size:10px;color:#3b82f6;font-weight:600;">${s.marketName}</span> `
                 : '';
             const histTag = h
-                ? `<div class="store-hist"><div class="store-hist-dot"></div>฿ ${_fmtB(h.net)} · ${h.skuCount} SKU · ${h.invCount} บิล</div>`
+                ? `<div style="margin-top:3px;font-size:10px;color:#059669;font-weight:700;">💰 ${_fmtB(h.net)} · ${h.skuCount} SKU · ${h.invCount} บิล</div>`
                 : '';
-            return `<div class="store-card" onclick="UI.openModal('${s.id}')"
-                data-search="${s.id.toLowerCase()} ${s.name.toLowerCase()} ${(s.marketName||'').toLowerCase()}">
-                <div class="store-card-body">
-                    <div class="store-name">${s.name}</div>
-                    <div class="store-meta">${mktTag}${s.id}</div>
+            return `<div onclick="UI.openModal('${s.id}')"
+                data-search="${s.id.toLowerCase()} ${s.name.toLowerCase()} ${(s.marketName||'').toLowerCase()}"
+                style="background:#fff;border-radius:14px;border:1px solid #e5e7eb;padding:11px 14px;display:flex;justify-content:space-between;align-items:flex-start;cursor:pointer;active:background:#f9fafb;">
+                <div style="flex:1;min-width:0;margin-right:10px;">
+                    <div style="font-weight:800;font-size:13px;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${s.name}</div>
+                    <div style="font-size:10px;color:#9ca3af;font-family:monospace;margin-top:1px;">${mktTag}${s.id}</div>
                     ${histTag}
                 </div>
-                ${badge}
+                <div style="flex-shrink:0;">${badge}</div>
             </div>`;
         }).join('');
         document.getElementById('all-store-list').innerHTML = html
@@ -407,13 +403,13 @@ const Processor = {
             let seq = s.seqs?.[State.currentDay] || i + 1;
             let navLink = `https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}&travelmode=driving`;
             return `
-            <div data-id="${s.id}" class="store-item">
-                <div class="drag-handle">≡</div>
-                <div data-seq class="seq-badge">${seq}</div>
-                <div class="store-item-name" onclick="UI.openModal('${s.id}')">${s.name}</div>
-                <div class="item-actions">
-                    <button onclick="UI.openModal('${s.id}')" class="btn-kpi">📊 KPI</button>
-                    <a href="${navLink}" target="_blank" class="btn-nav">🚗 นำทาง</a>
+            <div data-id="${s.id}" class="store-item bg-white p-2.5 rounded-xl border shadow-sm flex items-center gap-2 relative mb-2.5">
+                <div class="drag-handle text-gray-300 px-1 cursor-grab active:cursor-grabbing">≡</div>
+                <div data-seq class="w-7 h-7 rounded-full bg-blue-600 text-white flex items-center justify-center font-black text-xs shrink-0 shadow-sm">${seq}</div>
+                <div class="flex-1 font-bold text-sm text-gray-800 leading-tight cursor-pointer truncate" onclick="UI.openModal('${s.id}')">${s.name}</div>
+                <div class="flex items-center gap-1.5 shrink-0">
+                    <button onclick="UI.openModal('${s.id}')" class="bg-blue-50 hover:bg-blue-100 text-blue-600 px-2 py-1.5 rounded-lg font-bold text-[10px] border border-blue-100 transition active:scale-95">📊 KPI</button>
+                    <a href="${navLink}" target="_blank" class="bg-emerald-50 hover:bg-emerald-100 text-emerald-600 px-2 py-1.5 rounded-lg font-bold text-[10px] text-center border border-emerald-100 transition active:scale-95">🚗 นำทาง</a>
                 </div>
             </div>`;
         }).join('');
