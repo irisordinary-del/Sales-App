@@ -4,401 +4,365 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Sales App</title>
-    
+
     <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore-compat.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css"/>
     <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css"/>
     <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
     <script src="https://unpkg.com/leaflet-rotate@0.2.8/dist/leaflet-rotate-src.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-    
+    <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="sales-style.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-    <style>
-        /* ── Dashboard tab ── */
-        #tab-dashboard { background:#f8fafc; overflow-y:auto; padding-bottom:80px; }
-        .db-card { background:#fff; border-radius:16px; border:1px solid #e5e7eb; padding:14px 16px; margin-bottom:12px; }
-        .db-bar-track { background:#f1f5f9; border-radius:99px; height:7px; overflow:hidden; margin-top:4px; }
-        .db-bar-fill  { height:7px; border-radius:99px; transition:width 0.5s; }
-        .db-kpi-num   { font-size:1.5rem; font-weight:900; line-height:1.2; }
-        .db-section-title { font-size:11px; font-weight:800; color:#6b7280; text-transform:uppercase; letter-spacing:.5px; margin-bottom:10px; }
-        .db-row       { display:flex; align-items:center; gap:8px; padding:7px 0; border-bottom:1px solid #f3f4f6; font-size:13px; }
-        .db-row:last-child { border-bottom:none; }
-        .pct-good { color:#059669; font-weight:900; }
-        .pct-ok   { color:#d97706; font-weight:900; }
-        .pct-bad  { color:#dc2626; font-weight:900; }
-        /* Sort panel */
-        .sort-opt-btn { background:#f3f4f6; border:1px solid #e5e7eb; border-radius:20px; padding:5px 12px; font-size:11px; font-weight:700; cursor:pointer; font-family:inherit; color:#374151; transition:all 0.15s; }
-        .sort-opt-btn:active, .sort-opt-btn.active { background:#2563eb; color:#fff; border-color:#2563eb; }
-        /* Loading bar */
-        #load-bar-wrap { position:fixed; bottom:0; left:0; right:0; z-index:99999; padding:0; pointer-events:none; }
-        #load-bar-track { height:3px; background:#e5e7eb; width:100%; }
-        #load-bar-fill { height:3px; background:linear-gradient(90deg,#2563eb,#60a5fa); width:0%; transition:width 0.3s ease; }
-        #load-bar-label { text-align:center; font-size:10px; font-weight:700; color:#2563eb; padding:2px 0 4px; background:rgba(255,255,255,0.92); letter-spacing:0.3px; }
-        #load-bar-wrap.hide { animation: barFadeOut 0.4s ease forwards; }
-        @keyframes barFadeOut { to { opacity:0; transform:translateY(100%); } }
-    </style>
 </head>
 <body>
 
-    <!-- Login screen ถูกย้ายไป login.html แล้ว — ซ่อนไว้ -->
-    <div id="login-screen" style="display:none!important"></div>
+<!-- ── Loader ── -->
+<div id="loader">
+    <div class="spinner"></div>
+    <p>กำลังซิงค์ข้อมูลล่าสุด...</p>
+</div>
 
-    <!-- Loading bar ด้านล่างสุด -->
-    <div id="load-bar-wrap" style="display:none;">
-        <div id="load-bar-label">กำลังโหลดข้อมูล... 0%</div>
-        <div id="load-bar-track"><div id="load-bar-fill"></div></div>
+<!-- ── Loading progress bar ── -->
+<div id="load-bar-wrap" style="display:none;">
+    <div id="load-bar-label">กำลังโหลด... 0%</div>
+    <div id="load-bar-track"><div id="load-bar-fill"></div></div>
+</div>
+
+<!-- ── Header ── -->
+<header id="main-header" class="hidden">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div class="route-pill">สาย: <span id="user-route-label">V00</span></div>
+        <div id="sync-status" class="sync-badge">🟢 อัปเดตล่าสุด</div>
+        <div style="display:flex;gap:7px;">
+            <button onclick="showChangePwModal()" class="hdr-btn">🔑 PW</button>
+            <button onclick="App.logout()" class="hdr-btn">ออก</button>
+        </div>
+    </div>
+</header>
+
+<!-- ── Main content ── -->
+<div id="main-content" class="hidden">
+
+    <!-- ══ Tab: ร้านค้า ══ -->
+    <div id="tab-stores" class="app-tab">
+        <div class="search-bar-wrap">
+            <div class="search-row">
+                <input type="text" id="search-input" class="search-input"
+                    onkeyup="UI.searchStores(this.value)"
+                    placeholder="🔍 ค้นหารหัสหรือชื่อร้าน...">
+                <button id="sort-btn" onclick="UI.toggleSort()" class="icon-btn">⇅ เรียง</button>
+                <select id="store-month-sel" class="month-sel"
+                    onchange="StoreHistory.onMonthChange(this.value)">
+                    <option value="">-- ย้อนหลัง --</option>
+                </select>
+            </div>
+            <div id="sort-panel" class="flex">
+                <button onclick="UI.applySort('seq')"    class="sort-opt-btn">🔢 ลำดับวิ่ง</button>
+                <button onclick="UI.applySort('name')"   class="sort-opt-btn">🔤 ชื่อ A→Z</button>
+                <button onclick="UI.applySort('sales')"  class="sort-opt-btn">💰 ยอดขาย</button>
+                <button onclick="UI.applySort('active')" class="sort-opt-btn">🟢 Active ก่อน</button>
+            </div>
+        </div>
+        <div class="store-list-wrap">
+            <div id="all-store-list"></div>
+        </div>
     </div>
 
-    <div id="loader">
-        <div class="spinner"></div>
-        <p class="text-blue-600 font-bold text-lg">กำลังซิงค์ข้อมูลล่าสุด...</p>
+    <!-- ══ Tab: Dashboard ══ -->
+    <div id="tab-dashboard" class="app-tab">
+        <!-- Header -->
+        <div class="db-header">
+            <div>
+                <div class="db-title">📊 ยอดขายของฉัน</div>
+                <div id="db-route-label" class="db-subtitle"></div>
+            </div>
+            <div class="db-controls">
+                <select id="db-month-sel" class="db-month-sel"
+                    onchange="SalesDashboard.onMonthChange(this.value)">
+                    <option value="">-- เดือน --</option>
+                </select>
+                <span class="db-mode-badge">Net</span>
+            </div>
+        </div>
+
+        <!-- KPI grid -->
+        <div class="db-kpi-grid">
+            <div class="db-kpi-card" style="--kpi-accent:#2563eb;">
+                <div class="db-kpi-label">💰 ยอดขาย</div>
+                <div class="db-kpi-num" id="db-kpi-total">—</div>
+                <div class="db-kpi-sub" id="db-kpi-total-sub"></div>
+            </div>
+            <div class="db-kpi-card" style="--kpi-accent:#f59e0b;">
+                <div class="db-kpi-label">🎯 vs Target</div>
+                <div class="db-kpi-num" id="db-kpi-pct">—</div>
+                <div class="db-kpi-sub" id="db-kpi-target-sub"></div>
+            </div>
+            <div class="db-kpi-card" style="--kpi-accent:#10b981;">
+                <div class="db-kpi-label">🏪 ร้านที่ซื้อ</div>
+                <div class="db-kpi-num" id="db-kpi-shops" style="color:#059669;">—</div>
+                <div class="db-kpi-sub">ร้านที่มียอด</div>
+            </div>
+            <div class="db-kpi-card" style="--kpi-accent:#8b5cf6;">
+                <div class="db-kpi-label">📄 Invoice</div>
+                <div class="db-kpi-num" id="db-kpi-inv" style="color:#7c3aed;">—</div>
+                <div class="db-kpi-sub">ใบ</div>
+            </div>
+        </div>
+
+        <!-- Target progress -->
+        <div class="db-card" style="margin-bottom:9px;">
+            <div class="target-header">
+                <span class="target-label">🎯 ความคืบหน้า Target</span>
+                <span id="db-target-pct-label" class="target-pct-lbl"></span>
+            </div>
+            <div class="bar-track">
+                <div class="bar-fill" id="db-target-bar" style="width:0%;background:#2563eb;"></div>
+            </div>
+            <div class="target-footer">
+                <span id="db-target-sold">ยอดขาย: —</span>
+                <span id="db-target-goal">Target: —</span>
+            </div>
+        </div>
+
+        <!-- Category หลัก -->
+        <div class="db-card">
+            <div class="db-section-title">📦 Category หลัก</div>
+            <div id="db-cat-body">
+                <div style="text-align:center;padding:14px;color:var(--text4);font-size:12px;">เลือกเดือนก่อนครับ</div>
+            </div>
+        </div>
+
+        <!-- ShopType -->
+        <div class="db-card">
+            <div class="db-section-title">🏪 ประเภทร้าน</div>
+            <div id="db-shop-body">
+                <div style="text-align:center;padding:14px;color:var(--text4);font-size:12px;">ยังไม่มีข้อมูล</div>
+            </div>
+        </div>
+
+        <!-- กระเช้า / อื่นๆ -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:0;">
+            <div class="db-card" style="margin-bottom:0;">
+                <div class="db-section-title">🎁 กระเช้า</div>
+                <div id="db-basket-body" style="font-size:18px;font-weight:900;color:var(--amber);">—</div>
+            </div>
+            <div class="db-card" style="margin-bottom:0;">
+                <div class="db-section-title">🔖 อื่นๆ</div>
+                <div id="db-others-body" style="font-size:18px;font-weight:900;color:var(--text3);">—</div>
+            </div>
+        </div>
+
+        <!-- empty -->
+        <div id="db-empty">
+            <div style="font-size:40px;margin-bottom:12px;">📭</div>
+            <div style="font-size:13px;color:var(--text4);font-weight:600;line-height:1.7;">
+                ยังไม่มีข้อมูลเดือนนี้<br>Admin จะอัปโหลดให้ครับ
+            </div>
+        </div>
     </div>
 
-    <header id="main-header" class="bg-white text-gray-900 px-4 py-3 shrink-0 shadow-sm relative z-50 hidden border-b">
-        <div class="flex justify-between items-center">
-            <div class="bg-blue-600 text-white text-xs font-black px-2.5 py-1 rounded-lg shadow-sm">สาย: <span id="user-route-label">V00</span></div>
-            <div id="sync-status" class="text-[10px] bg-emerald-100 px-2 py-0.5 rounded-full text-emerald-600 font-bold">🟢 อัปเดตล่าสุด</div>
-            <div class="flex items-center gap-2">
-                <button onclick="showChangePwModal()" class="text-[10px] text-gray-400 font-bold">🔑 PW</button>
-                <button onclick="App.logout()" class="text-[10px] text-gray-400 font-bold">เปลี่ยนสาย</button>
-            </div>
-        </div>
-    </header>
-
-    <div id="main-content" class="hidden">
-
-        <!-- Tab: ร้านค้า -->
-        <div id="tab-stores" class="app-tab bg-gray-50">
-            <div class="shrink-0 bg-white border-b shadow-sm z-10 px-4 pt-3 pb-3">
-                <div class="flex items-center gap-2 mb-2">
-                    <input type="text" id="search-input" onkeyup="UI.searchStores(this.value)"
-                        placeholder="🔍 ค้นหารหัสหรือชื่อร้าน..."
-                        class="flex-1 p-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500">
-                    <button id="sort-btn" onclick="UI.toggleSort()" title="เรียงลำดับ"
-                        style="flex-shrink:0;background:#f3f4f6;border:1px solid #e5e7eb;border-radius:12px;padding:8px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;color:#374151;white-space:nowrap;transition:all 0.2s;">
-                        ⇅ เรียง
-                    </button>
-                    <select id="store-month-sel" onchange="StoreHistory.onMonthChange(this.value)"
-                        style="flex-shrink:0;background:#f3f4f6;border:1px solid #e5e7eb;border-radius:10px;padding:8px 10px;font-size:11px;font-weight:700;outline:none;font-family:inherit;color:#374151;">
-                        <option value="">-- ย้อนหลัง --</option>
-                    </select>
-                </div>
-                <div id="sort-panel" style="display:none;gap:6px;flex-wrap:wrap;margin-top:4px;" class="flex">
-                    <button onclick="UI.applySort('seq')"    class="sort-opt-btn">🔢 ลำดับวิ่ง</button>
-                    <button onclick="UI.applySort('name')"   class="sort-opt-btn">🔤 ชื่อร้าน A→Z</button>
-                    <button onclick="UI.applySort('sales')"  class="sort-opt-btn">💰 ยอดขาย มาก→น้อย</button>
-                    <button onclick="UI.applySort('active')" class="sort-opt-btn">🟢 Active ก่อน</button>
-                </div>
-            </div>
-            <div class="flex-1 overflow-y-auto p-3 pb-24">
-                <div id="all-store-list" class="space-y-2"></div>
-            </div>
+    <!-- ══ Tab: คิวงาน ══ -->
+    <div id="tab-route" class="app-tab">
+        <div class="day-bar">
+            <select id="day-select" class="day-select"></select>
         </div>
 
-        <!-- Tab: Dashboard ยอดขาย -->
-        <div id="tab-dashboard" class="app-tab flex-col p-4">
-            <!-- Header -->
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-shrink:0;">
-                <div>
-                    <div style="font-size:16px;font-weight:900;color:#111827;">📊 ยอดขายของฉัน</div>
-                    <div id="db-route-label" style="font-size:11px;color:#6b7280;font-weight:600;margin-top:2px;"></div>
-                </div>
-                <div style="display:flex;gap:8px;align-items:center;">
-                    <select id="db-month-sel" onchange="SalesDashboard.onMonthChange(this.value)"
-                        style="background:#f3f4f6;border:1px solid #e5e7eb;border-radius:10px;padding:6px 10px;font-size:11px;font-weight:700;outline:none;font-family:inherit;">
-                        <option value="">-- เดือน --</option>
-                    </select>
-                    <span style="background:#2563eb;color:#fff;font-size:11px;font-weight:800;padding:6px 12px;border-radius:10px;">Net</span>
-                </div>
+        <div id="split-container">
+            <div id="map-container">
+                <button id="btn-load-map" onclick="MapCtrl.initAndDraw()" class="map-open-btn">
+                    📍 เปิดแผนที่นำทาง
+                </button>
+                <div id="map" class="hidden"></div>
+                <button id="btn-fit-map" onclick="MapCtrl.fitBounds()" class="hidden">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"
+                            d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/>
+                    </svg>
+                </button>
             </div>
 
-            <!-- KPI Cards -->
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;flex-shrink:0;margin-bottom:12px;">
-                <div class="db-card" style="border-left:4px solid #2563eb;">
-                    <div style="font-size:10px;font-weight:700;color:#6b7280;margin-bottom:4px;">💰 ยอดขาย (หลัก)</div>
-                    <div class="db-kpi-num" id="db-kpi-total" style="color:#111827;">—</div>
-                    <div style="font-size:10px;color:#9ca3af;margin-top:2px;" id="db-kpi-total-sub"></div>
-                </div>
-                <div class="db-card" style="border-left:4px solid #f59e0b;">
-                    <div style="font-size:10px;font-weight:700;color:#6b7280;margin-bottom:4px;">🎯 vs Target</div>
-                    <div class="db-kpi-num" id="db-kpi-pct">—</div>
-                    <div style="font-size:10px;color:#9ca3af;margin-top:2px;" id="db-kpi-target-sub"></div>
-                </div>
-                <div class="db-card" style="border-left:4px solid #10b981;">
-                    <div style="font-size:10px;font-weight:700;color:#6b7280;margin-bottom:4px;">🏪 ร้านที่ซื้อ</div>
-                    <div class="db-kpi-num" id="db-kpi-shops" style="color:#059669;">—</div>
-                    <div style="font-size:10px;color:#9ca3af;margin-top:2px;">ร้านที่มียอด</div>
-                </div>
-                <div class="db-card" style="border-left:4px solid #8b5cf6;">
-                    <div style="font-size:10px;font-weight:700;color:#6b7280;margin-bottom:4px;">📄 Invoice</div>
-                    <div class="db-kpi-num" id="db-kpi-inv" style="color:#7c3aed;">—</div>
-                    <div style="font-size:10px;color:#9ca3af;margin-top:2px;">ใบ</div>
-                </div>
-            </div>
+            <div id="resizer"><div class="resizer-handle"></div></div>
 
-            <!-- Target progress -->
-            <div class="db-card" style="flex-shrink:0;margin-bottom:12px;">
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-                    <span style="font-size:12px;font-weight:800;color:#374151;">🎯 ความคืบหน้า Target</span>
-                    <span id="db-target-pct-label" style="font-size:14px;font-weight:900;"></span>
-                </div>
-                <div class="db-bar-track" style="height:12px;">
-                    <div class="db-bar-fill" id="db-target-bar" style="width:0%;background:#2563eb;height:12px;"></div>
-                </div>
-                <div style="display:flex;justify-content:space-between;margin-top:5px;font-size:10px;color:#9ca3af;">
-                    <span id="db-target-sold">ยอดขาย: —</span>
-                    <span id="db-target-goal">Target: —</span>
-                </div>
-            </div>
-
-            <!-- Category หลัก -->
-            <div class="db-card" style="flex-shrink:0;margin-bottom:12px;">
-                <div class="db-section-title">📦 Category หลัก</div>
-                <div id="db-cat-body"><div style="text-align:center;padding:16px;color:#9ca3af;font-size:12px;">เลือกเดือนก่อนครับ</div></div>
-            </div>
-
-            <!-- ShopType -->
-            <div class="db-card" style="flex-shrink:0;margin-bottom:12px;">
-                <div class="db-section-title">🏪 ประเภทร้าน</div>
-                <div id="db-shop-body"><div style="text-align:center;padding:16px;color:#9ca3af;font-size:12px;">ยังไม่มีข้อมูล</div></div>
-            </div>
-
-            <!-- กระเช้า / อื่นๆ -->
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;flex-shrink:0;">
-                <div class="db-card">
-                    <div class="db-section-title">🎁 กระเช้า</div>
-                    <div id="db-basket-body" style="font-size:18px;font-weight:900;color:#f59e0b;">—</div>
-                </div>
-                <div class="db-card">
-                    <div class="db-section-title">🔖 อื่นๆ</div>
-                    <div id="db-others-body" style="font-size:18px;font-weight:900;color:#6b7280;">—</div>
-                </div>
-            </div>
-
-            <!-- empty -->
-            <div id="db-empty" style="display:none;text-align:center;padding:40px 20px;">
-                <div style="font-size:36px;margin-bottom:10px;">📭</div>
-                <div style="font-size:13px;color:#6b7280;font-weight:600;">ยังไม่มีข้อมูลเดือนนี้<br>Admin จะอัปโหลดให้ครับ</div>
-            </div>
-        </div>
-
-        <!-- Tab: คิวงาน -->
-        <div id="tab-route" class="app-tab bg-gray-50">
-            <div class="bg-white p-2 shrink-0 border-b z-20 shadow-sm relative">
-                <select id="day-select" class="w-full bg-gray-50 text-gray-900 text-sm font-bold outline-none px-3 py-2 rounded-lg border border-gray-300 text-center appearance-none"></select>
-            </div>
-            
-            <div id="split-container" class="flex-1 flex flex-col lg:flex-row min-h-0 w-full relative">
-                
-                <div id="map-container" class="relative bg-gray-200 flex items-center justify-center z-10 transition-none">
-                    <button id="btn-load-map" onclick="MapCtrl.initAndDraw()" class="bg-blue-600 text-white px-5 py-2 rounded-full text-sm font-bold shadow-lg active:scale-95 transition">📍 เปิดแผนที่นำทาง</button>
-                    <div id="map" class="w-full h-full hidden"></div>
-                    <button id="btn-fit-map" onclick="MapCtrl.fitBounds()" class="hidden absolute bottom-3 right-3 z-[400] bg-white p-2 rounded-full shadow-lg border text-blue-600 active:scale-95 transition">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" /></svg>
-                    </button>
-                </div>
-                
-                <div id="resizer" class="bg-white border-y lg:border-y-0 lg:border-x border-gray-200 flex items-center justify-center z-20 cursor-row-resize lg:cursor-col-resize hover:bg-gray-100 transition-colors shadow-[0_0_10px_rgba(0,0,0,0.05)]" style="flex: 0 0 16px; touch-action: none;">
-                    <div class="w-12 h-1.5 bg-gray-300 rounded-full lg:w-1.5 lg:h-12"></div>
-                </div>
-                
-                <div id="route-side-panel" class="flex-1 flex flex-col overflow-hidden bg-gray-50 relative z-10">
-                    <div class="flex justify-between items-center p-3 shrink-0 bg-white border-b shadow-sm">
-                        <h3 class="font-bold text-sm text-gray-800" id="route-title">สายวิ่ง</h3>
-                        <div id="edit-order-btn-wrap" style="display:flex;gap:6px;">
-                        <button id="edit-order-btn" onclick="UI.startEditOrder()"
-                            style="font-size:11px;font-weight:700;padding:4px 10px;border-radius:7px;border:1px solid #d1d5db;background:white;color:#374151;cursor:pointer;">
-                            ✏️ แก้ไขลำดับ
+            <div id="route-side-panel">
+                <div class="route-panel-header">
+                    <h3 class="route-panel-title" id="route-title">สายวิ่ง</h3>
+                    <div style="display:flex;gap:6px;" id="edit-order-btn-wrap">
+                        <button id="edit-order-btn" onclick="UI.startEditOrder()" class="edit-order-btn">
+                            ✏️ แก้ลำดับ
                         </button>
-                        <button id="confirm-order-btn" onclick="UI.confirmEditOrder()"
-                            style="font-size:11px;font-weight:700;padding:4px 10px;border-radius:7px;border:none;background:#22c55e;color:white;cursor:pointer;display:none;">
+                        <button id="confirm-order-btn" onclick="UI.confirmEditOrder()" class="confirm-order-btn">
                             ✓ ยืนยัน
                         </button>
                     </div>
-                    </div>
-                    <div id="route-store-list" class="flex-1 overflow-y-auto px-3 py-3 pb-24 space-y-2"></div>
                 </div>
-
+                <div id="route-store-list"></div>
             </div>
         </div>
-
     </div>
 
-    <!-- Hamburger floating button -->
-    <button id="hamburger-btn"
-        style="position:fixed;bottom:20px;right:16px;z-index:1001;width:52px;height:52px;border-radius:50%;background:#1f2937;color:white;border:none;cursor:pointer;display:none;align-items:center;justify-content:center;box-shadow:0 4px 20px rgba(0,0,0,0.35);"
-        onclick="UI.toggleMenu()">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
-            <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+</div><!-- end #main-content -->
+
+<!-- ── Bottom Navigation ── -->
+<nav id="bottom-nav" style="display:none;">
+    <button class="nav-tab active" id="nav-stores" onclick="UI.switchTab('stores')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+            <polyline points="9 22 9 12 15 12 15 22"/>
         </svg>
+        <span>ร้านค้า</span>
     </button>
+    <button class="nav-tab" id="nav-dashboard" onclick="UI.switchTab('dashboard')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/>
+            <line x1="6" y1="20" x2="6" y2="14"/>
+        </svg>
+        <span>ยอดขาย</span>
+    </button>
+    <button class="nav-tab" id="nav-route" onclick="UI.switchTab('route')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3"/>
+        </svg>
+        <span>คิวงาน</span>
+    </button>
+</nav>
 
-    <!-- Menu overlay -->
-    <div id="menu-overlay" onclick="UI.closeMenu()"
-        style="position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,0.45);display:none;align-items:flex-end;justify-content:flex-end;">
-        <div onclick="event.stopPropagation()"
-            style="position:absolute;bottom:84px;right:16px;background:white;border-radius:18px;box-shadow:0 8px 40px rgba(0,0,0,0.22);overflow:hidden;min-width:180px;">
-            <button onclick="UI.switchTab('dashboard'); UI.closeMenu()"
-                style="display:block;width:100%;padding:15px 20px;text-align:left;border:none;background:none;cursor:pointer;font-size:15px;font-weight:700;color:#111827;border-bottom:1px solid #f3f4f6;transition:background 0.1s;"
-                onmouseenter="this.style.background='#f9fafb'" onmouseleave="this.style.background='none'">
-                📊 ยอดขาย
-            </button>
-            <button onclick="UI.switchTab('route'); UI.closeMenu()"
-                style="display:block;width:100%;padding:15px 20px;text-align:left;border:none;background:none;cursor:pointer;font-size:15px;font-weight:700;color:#111827;border-bottom:1px solid #f3f4f6;transition:background 0.1s;"
-                onmouseenter="this.style.background='#f9fafb'" onmouseleave="this.style.background='none'">
-                📋 คิวงาน
-            </button>
-            <button onclick="UI.switchTab('stores'); UI.closeMenu()"
-                style="display:block;width:100%;padding:15px 20px;text-align:left;border:none;background:none;cursor:pointer;font-size:15px;font-weight:700;color:#111827;transition:background 0.1s;"
-                onmouseenter="this.style.background='#f9fafb'" onmouseleave="this.style.background='none'">
-                🏪 ร้านค้า
-            </button>
+<!-- ── Store Modal (bottom sheet) ── -->
+<div id="store-modal">
+    <div class="modal-sheet">
+        <div class="modal-drag" onclick="UI.closeModal()">
+            <div class="modal-drag-bar"></div>
+        </div>
+        <div class="modal-header">
+            <div class="modal-title-wrap">
+                <h2 id="m-name"></h2>
+                <p id="m-id"></p>
+                <p id="m-shoptype"></p>
+            </div>
+            <button class="modal-close" onclick="UI.closeModal()">✕</button>
+        </div>
+        <div id="m-month-tabs"></div>
+        <div class="modal-body">
+            <div class="modal-kpi-grid">
+                <div class="modal-kpi-cell green">
+                    <div class="modal-kpi-lbl">ยอดซื้อ (฿)</div>
+                    <div id="m-gross" class="modal-kpi-val">—</div>
+                </div>
+                <div class="modal-kpi-cell blue">
+                    <div class="modal-kpi-lbl">Invoice</div>
+                    <div id="m-bills" class="modal-kpi-val">—</div>
+                </div>
+                <div class="modal-kpi-cell violet">
+                    <div class="modal-kpi-lbl">SKU</div>
+                    <div id="m-sku" class="modal-kpi-val">—</div>
+                </div>
+            </div>
+            <div class="sku-list-wrap">
+                <div class="sku-section-hdr">📦 สินค้าที่ซื้อ</div>
+                <div id="m-sku-list"></div>
+            </div>
+            <div id="m-no-data" class="hidden">
+                <div style="font-size:32px;margin-bottom:10px;">📭</div>
+                <div style="font-size:13px;color:var(--text4);font-weight:600;">ไม่มีข้อมูลเดือนนี้</div>
+            </div>
+            <div style="height:12px;"></div>
+        </div>
+        <div class="modal-footer">
+            <button id="m-nav-btn" class="nav-btn">🚗 นำทางไปร้านนี้</button>
         </div>
     </div>
+</div>
 
-    <!-- Store Modal — bottom sheet -->
-    <div id="store-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-[99999] flex items-end">
-        <div class="bg-white w-full rounded-t-3xl shadow-2xl flex flex-col" style="max-height:88dvh;">
-            <!-- Drag handle -->
-            <div class="flex justify-center pt-2.5 pb-1 shrink-0" onclick="UI.closeModal()">
-                <div class="w-10 h-1 bg-gray-300 rounded-full"></div>
+<!-- ── Change Password Modal ── -->
+<div id="changepw-modal">
+    <div class="pw-modal-box">
+        <div class="pw-modal-header">
+            <span class="pw-modal-title">🔑 เปลี่ยน Password</span>
+            <button class="pw-close-btn" onclick="closeChangePwModal()">✕</button>
+        </div>
+        <div class="pw-modal-body">
+            <div class="pw-field">
+                <label>Password เดิม</label>
+                <input type="password" id="cpw-old" placeholder="กรอก password เดิม">
             </div>
-            <!-- Header -->
-            <div class="px-5 pt-1 pb-3 border-b border-gray-100 flex items-start justify-between shrink-0">
-                <div class="flex-1 min-w-0 mr-3">
-                    <h2 id="m-name" class="text-base font-black text-gray-900 leading-tight"></h2>
-                    <p id="m-id" class="text-[11px] text-blue-500 font-mono mt-0.5"></p>
-                    <p id="m-shoptype" class="text-[11px] text-gray-400 font-medium mt-0.5"></p>
-                </div>
-                <button onclick="UI.closeModal()"
-                    class="w-8 h-8 rounded-full bg-gray-100 text-gray-500 font-bold text-sm flex items-center justify-center shrink-0">✕</button>
+            <div class="pw-field">
+                <label>Password ใหม่</label>
+                <input type="password" id="cpw-new" placeholder="อย่างน้อย 4 ตัวอักษร">
             </div>
-            <!-- Month tabs -->
-            <div id="m-month-tabs" class="flex gap-2 px-4 py-2.5 overflow-x-auto shrink-0 border-b border-gray-100 bg-gray-50" style="scrollbar-width:none;"></div>
-            <!-- Body -->
-            <div class="flex-1 overflow-y-auto">
-                <!-- KPI row -->
-                <div class="grid grid-cols-3 gap-2 p-4 pb-2">
-                    <div class="bg-emerald-50 rounded-2xl p-2.5 text-center border border-emerald-100">
-                        <div class="text-[9px] font-bold text-emerald-600 uppercase mb-1">ยอดซื้อ (฿)</div>
-                        <div id="m-gross" class="text-base font-black text-emerald-700">—</div>
-                    </div>
-                    <div class="bg-blue-50 rounded-2xl p-2.5 text-center border border-blue-100">
-                        <div class="text-[9px] font-bold text-blue-600 uppercase mb-1">Invoice</div>
-                        <div id="m-bills" class="text-base font-black text-blue-700">—</div>
-                    </div>
-                    <div class="bg-violet-50 rounded-2xl p-2.5 text-center border border-violet-100">
-                        <div class="text-[9px] font-bold text-violet-600 uppercase mb-1">SKU</div>
-                        <div id="m-sku" class="text-base font-black text-violet-700">—</div>
-                    </div>
-                </div>
-                <!-- SKU list -->
-                <div class="px-4 pb-2">
-                    <div class="text-[11px] font-black text-gray-400 uppercase tracking-wide mb-2">📦 สินค้าที่ซื้อ</div>
-                    <div id="m-sku-list" class="space-y-2"></div>
-                </div>
-                <!-- No data -->
-                <div id="m-no-data" class="hidden py-8 text-center">
-                    <div style="font-size:32px;margin-bottom:8px;">📭</div>
-                    <div class="text-sm text-gray-400 font-medium">ไม่มีข้อมูลเดือนนี้</div>
-                </div>
-                <div class="h-4"></div>
+            <div class="pw-field">
+                <label>ยืนยัน Password ใหม่</label>
+                <input type="password" id="cpw-confirm" placeholder="กรอกซ้ำอีกครั้ง">
             </div>
-            <!-- Footer nav -->
-            <div class="p-4 border-t border-gray-100 shrink-0">
-                <button id="m-nav-btn"
-                    class="w-full bg-blue-600 text-white py-3 rounded-2xl font-black shadow-md active:scale-95 transition text-sm">
-                    🚗 นำทางไปร้านนี้
-                </button>
-            </div>
+            <div id="cpw-error" class="pw-error"></div>
+        </div>
+        <div class="pw-modal-footer">
+            <button class="pw-cancel-btn" onclick="closeChangePwModal()">ยกเลิก</button>
+            <button class="pw-save-btn" id="cpw-btn" onclick="doChangePw()">บันทึก</button>
         </div>
     </div>
+</div>
 
-    <!-- Modal: เปลี่ยน Password -->
-    <div id="changepw-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);z-index:99999;align-items:center;justify-content:center;padding:16px;">
-        <div style="background:#fff;border-radius:24px;width:100%;max-width:360px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
-            <div style="padding:18px 20px;border-bottom:1px solid #f1f5f9;display:flex;justify-content:space-between;align-items:center;">
-                <span style="font-size:15px;font-weight:800;color:#111827;">🔑 เปลี่ยน Password</span>
-                <button onclick="closeChangePwModal()" style="width:30px;height:30px;border-radius:50%;border:1px solid #e5e7eb;background:#fff;color:#9ca3af;font-size:14px;cursor:pointer;font-weight:700;">✕</button>
-            </div>
-            <div style="padding:18px 20px;display:flex;flex-direction:column;gap:14px;">
-                <div>
-                    <label style="display:block;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:6px;">Password เดิม</label>
-                    <input type="password" id="cpw-old" placeholder="กรอก password เดิม"
-                        style="width:100%;background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;padding:12px 14px;font-size:14px;outline:none;font-family:inherit;box-sizing:border-box;">
-                </div>
-                <div>
-                    <label style="display:block;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:6px;">Password ใหม่</label>
-                    <input type="password" id="cpw-new" placeholder="อย่างน้อย 4 ตัวอักษร"
-                        style="width:100%;background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;padding:12px 14px;font-size:14px;outline:none;font-family:inherit;box-sizing:border-box;">
-                </div>
-                <div>
-                    <label style="display:block;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:6px;">ยืนยัน Password ใหม่</label>
-                    <input type="password" id="cpw-confirm" placeholder="กรอกซ้ำอีกครั้ง"
-                        style="width:100%;background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;padding:12px 14px;font-size:14px;outline:none;font-family:inherit;box-sizing:border-box;">
-                </div>
-                <div id="cpw-error" style="display:none;background:#fef2f2;border:1px solid #fecaca;color:#dc2626;font-size:12px;font-weight:700;border-radius:10px;padding:10px 14px;text-align:center;"></div>
-            </div>
-            <div style="padding:14px 20px;border-top:1px solid #f1f5f9;display:flex;gap:10px;">
-                <button onclick="closeChangePwModal()" style="flex:1;border:1px solid #e5e7eb;border-radius:12px;padding:12px;font-size:13px;font-weight:700;color:#6b7280;background:#fff;cursor:pointer;font-family:inherit;">ยกเลิก</button>
-                <button onclick="doChangePw()" id="cpw-btn" style="flex:1;border:none;border-radius:12px;padding:12px;font-size:13px;font-weight:700;color:#fff;background:#2563eb;cursor:pointer;font-family:inherit;box-shadow:0 4px 12px rgba(37,99,235,0.3);">บันทึก</button>
-            </div>
-        </div>
-    </div>
+<script>
+    /* ── switchTab: sync bottom nav active state ── */
+    const _origSwitchTab = typeof UI !== 'undefined' ? UI.switchTab : null;
 
-    <script>
-        function showChangePwModal() {
-            document.getElementById('cpw-old').value     = '';
-            document.getElementById('cpw-new').value     = '';
-            document.getElementById('cpw-confirm').value = '';
-            document.getElementById('cpw-error').style.display = 'none';
-            const modal = document.getElementById('changepw-modal');
-            modal.style.display = 'flex';
-            setTimeout(() => document.getElementById('cpw-old').focus(), 100);
+    function _syncNavActive(tabId) {
+        ['stores','dashboard','route'].forEach(t => {
+            const btn = document.getElementById('nav-' + t);
+            if (btn) btn.classList.toggle('active', t === tabId);
+        });
+    }
+    /* hook จะถูก patch ใน sales-app.js หลัง load */
+    document.addEventListener('DOMContentLoaded', () => {
+        const _origUI = window.UI;
+        if (_origUI && _origUI.switchTab) {
+            const _orig = _origUI.switchTab.bind(_origUI);
+            _origUI.switchTab = (id) => { _orig(id); _syncNavActive(id); };
         }
-        function closeChangePwModal() {
-            document.getElementById('changepw-modal').style.display = 'none';
+    });
+
+    /* ── Password modal ── */
+    function showChangePwModal() {
+        ['cpw-old','cpw-new','cpw-confirm'].forEach(id => document.getElementById(id).value = '');
+        document.getElementById('cpw-error').style.display = 'none';
+        document.getElementById('changepw-modal').style.display = 'flex';
+        setTimeout(() => document.getElementById('cpw-old').focus(), 100);
+    }
+    function closeChangePwModal() {
+        document.getElementById('changepw-modal').style.display = 'none';
+    }
+    async function doChangePw() {
+        const oldPw  = document.getElementById('cpw-old').value;
+        const newPw  = document.getElementById('cpw-new').value;
+        const confPw = document.getElementById('cpw-confirm').value;
+        const errEl  = document.getElementById('cpw-error');
+        const btn    = document.getElementById('cpw-btn');
+        errEl.style.display = 'none';
+        if (newPw !== confPw) {
+            errEl.textContent = '⚠️ Password ใหม่ไม่ตรงกัน';
+            errEl.style.display = 'block'; return;
         }
-        async function doChangePw() {
-            const oldPw  = document.getElementById('cpw-old').value;
-            const newPw  = document.getElementById('cpw-new').value;
-            const confPw = document.getElementById('cpw-confirm').value;
-            const errEl  = document.getElementById('cpw-error');
-            const btn    = document.getElementById('cpw-btn');
-
-            errEl.style.display = 'none';
-
-            if (newPw !== confPw) {
-                errEl.textContent = '⚠️ Password ใหม่ไม่ตรงกัน';
-                errEl.style.display = 'block';
-                return;
-            }
-
-            btn.disabled = true;
-            btn.textContent = 'กำลังบันทึก...';
-            try {
-                await Auth.changePassword(oldPw, newPw);
-                closeChangePwModal();
-                showSalesToast('✅ เปลี่ยน Password เรียบร้อยแล้ว');
-            } catch (err) {
-                errEl.textContent = '⚠️ ' + err.message;
-                errEl.style.display = 'block';
-            } finally {
-                btn.disabled = false;
-                btn.textContent = 'บันทึก';
-            }
+        btn.disabled = true; btn.textContent = 'กำลังบันทึก...';
+        try {
+            await Auth.changePassword(oldPw, newPw);
+            closeChangePwModal();
+            showSalesToast('✅ เปลี่ยน Password เรียบร้อยแล้ว');
+        } catch (err) {
+            errEl.textContent = '⚠️ ' + err.message;
+            errEl.style.display = 'block';
+        } finally {
+            btn.disabled = false; btn.textContent = 'บันทึก';
         }
-    </script>
+    }
+</script>
 
-    <script src="auth.js"></script>
-    <script src="sales-app.js"></script>
-    <script src="store-history.js"></script>
-    <script src="sales-dashboard.js"></script>
+<script src="auth.js"></script>
+<script src="sales-app.js"></script>
+<script src="store-history.js"></script>
+<script src="sales-dashboard.js"></script>
 </body>
 </html>

@@ -114,11 +114,8 @@ const StoreHistory = {
                     const label  = new Date(+y, +m - 1, 1)
                         .toLocaleDateString('th-TH', { month: 'short', year: '2-digit' });
                     const active = i === 0;
-                    return `<button id="mtab-${ym}"
-                        onclick="StoreHistory.switchMonth('${ym}')"
-                        style="flex-shrink:0;padding:5px 12px;border-radius:20px;font-size:11px;font-weight:800;border:none;cursor:pointer;transition:all 0.15s;
-                               background:${active ? '#2563eb' : '#f3f4f6'};
-                               color:${active ? '#fff' : '#6b7280'};">
+                    return `<button id="mtab-${ym}" class="m-tab-btn${active ? ' active' : ''}"
+                        onclick="StoreHistory.switchMonth('${ym}')">
                         ${label}
                     </button>`;
                 }).join('');
@@ -140,9 +137,7 @@ const StoreHistory = {
         StoreHistory._months.forEach(m => {
             const btn = document.getElementById('mtab-' + m);
             if (!btn) return;
-            const active = m === ym;
-            btn.style.background = active ? '#2563eb' : '#f3f4f6';
-            btn.style.color      = active ? '#fff'    : '#6b7280';
+            btn.classList.toggle('active', m === ym);
         });
         await StoreHistory._renderModalMonth(StoreHistory._currentStoreId, ym);
     },
