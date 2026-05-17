@@ -200,16 +200,10 @@ const SkuDist = {
                             </div>
                         </div>
                         <!-- Target รายสาย (expand) -->
-                        <details class="mt-1">
+                        <details class="mt-1" ontoggle="if(this.open) SkuDist._renderRouteTargets()">
                             <summary class="text-xs text-indigo-600 font-bold cursor-pointer hover:underline select-none">ตั้ง target แยกรายสาย...</summary>
                             <div id="skudist-route-targets" class="mt-3 space-y-2 max-h-52 overflow-y-auto pr-1"></div>
                         </details>
-                        <script>
-                            // render route targets เมื่อ expand
-                            document.querySelector('#skudist-campaign-modal details')?.addEventListener('toggle', function(e) {
-                                if (e.target.open) SkuDist._renderRouteTargets();
-                            });
-                        </script>
                     </div>
 
                     <!-- SKU Groups -->
