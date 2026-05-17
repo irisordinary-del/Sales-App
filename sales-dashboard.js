@@ -314,7 +314,8 @@ const SalesDashboard = {
     _fmt: (n) => {
         if (!n || isNaN(n)) return '0';
         return Math.round(n).toLocaleString('th-TH');
-    }
+    },
+
     // ─── โหลด Active Campaigns ────────────────────────────────────────────
     _loadCampaigns: async () => {
         try {

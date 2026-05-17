@@ -887,7 +887,8 @@ const Dashboard = {
     _hideUploadBar: () => {
         const bar = document.getElementById('db-upload-bar');
         if (bar) bar.classList.add('hidden');
-    }
+    },
+
     // ─── Active Campaign Coverage on Dashboard ──────────────────────────
     _renderCampaignSection: async () => {
         const el = document.getElementById('db-campaign-section');
