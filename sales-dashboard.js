@@ -73,7 +73,8 @@ const SalesDashboard = {
         SalesDashboard._ready = true;
         SalesDashboard._ensureKpiCards();
         SalesDashboard._loadMonthList();
-        SalesDashboard._loadCampaigns();
+        // รอ State.isLoaded (routes พร้อม) ก่อนโหลด campaigns
+        SalesDashboard._waitAndLoadCampaigns();
     },
 
     _ensureKpiCards: () => {
@@ -319,6 +320,19 @@ const SalesDashboard = {
     },
 
     // ─── โหลด Active Campaigns ────────────────────────────────────────────
+    _waitAndLoadCampaigns: () => {
+        // poll จนกว่า State.isLoaded = true (routes พร้อมแล้ว) แล้วค่อยโหลด
+        const check = () => {
+            if (typeof State !== 'undefined' && State.isLoaded &&
+                State.myRoute && State.allStores?.length > 0) {
+                SalesDashboard._loadCampaigns();
+            } else {
+                setTimeout(check, 500);
+            }
+        };
+        setTimeout(check, 500);
+    },
+
     _loadCampaigns: async () => {
         try {
             const centerDoc = window.CENTER_DOC || Auth.getSession()?.centerDoc || '';
@@ -381,8 +395,9 @@ const SalesDashboard = {
         }
 
         // ร้านในสายตัวเอง
-        const myStores = (typeof State !== 'undefined' && State.db?.routes?.[route])
-            ? State.db.routes[route].map(s => String(s.id))
+        // Sales app ใช้ State.allStores (ไม่ใช่ State.db.routes)
+        const myStores = (typeof State !== 'undefined' && State.allStores?.length > 0)
+            ? State.allStores.map(s => String(s.id))
             : [];
         const myStoreSet  = new Set(myStores);
         const totalStores = myStores.length;
