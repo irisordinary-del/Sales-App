@@ -116,9 +116,10 @@ const RawDataMgr = {
     },
 
     applyImport: () => {
-        const REQUIRED_COLS = ['CY', 'รหัส', 'ชื่อ', 'Sales', 'ประเภทร้าน1', 'Sold To City', 'Sold To State', 'Address 5', 'Latitude', 'Longitude', 'ชื่อสาย', 'Day']; const selectedCols = (RawDataMgr.tempJson[0] ? Object.keys(RawDataMgr.tempJson[0]) : []).filter(c => REQUIRED_COLS.includes(c));
-        // [ROLLBACK] document.querySelectorAll('.raw-col-cb:checked').forEach(cb => selectedCols.push(cb.value));
-        // [ROLLBACK] if (selectedCols.length === 0) return UI.showErrorToast('กรุณาเลือกอย่างน้อย 1 คอลัมน์');
+        // กรองเฉพาะ column ที่จำเป็น — checkbox ใน modal เป็น UI แสดงข้อมูลเท่านั้น
+        const REQUIRED_COLS = ['CY', 'รหัส', 'ชื่อ', 'Sales', 'ประเภทร้าน1', 'Sold To City', 'Sold To State', 'Address 5', 'Latitude', 'Longitude', 'ชื่อสาย', 'Day'];
+        const selectedCols = (RawDataMgr.tempJson[0] ? Object.keys(RawDataMgr.tempJson[0]) : []).filter(c => REQUIRED_COLS.includes(c));
+        if (selectedCols.length === 0) return UI.showErrorToast('ไม่พบ column ที่จำเป็น กรุณาตรวจสอบ header ของไฟล์');
 
         const modal = document.getElementById('columnSelectModal');
         if (modal) modal.classList.add('hidden');
@@ -415,7 +416,7 @@ const ExcelIO = {
                                                     'Sold To State': s.district || '',
                                                     'Address 5': s.province || '',
                                                     'Latitude': s.lat,
-                                                    'Longtitude': s.lng,
+                                                    'Longitude': s.lng,  // แก้บัค: typo Longtitude → Longitude
                                                     'ชื่อตลาด': s.marketName || '',
                                                     'Day': s.days && s.days.length > 0 ? s.days[0] : (rawRow['Day'] || rawRow['L'] || ''),
                                     'seq': (() => { const d0 = s.days && s.days.length > 0 ? s.days[0] : (rawRow['Day'] || rawRow['L'] || ''); return (s.seqs && d0 && s.seqs[d0] !== undefined) ? s.seqs[d0] : ''; })()
@@ -431,7 +432,7 @@ const ExcelIO = {
 
                 // Create worksheet with 12 columns matching upload format
                 const ws = XLSX.utils.json_to_sheet(exportData, {
-                                header: ['CY', 'รหัส', 'ชื่อ', 'Sales', 'ประเภทร้านค้า1', 'Sold To City', 'Sold To State', 'Address 5', 'Latitude', 'Longtitude', 'ชื่อตลาด', 'Day', 'seq']
+                                header: ['CY', 'รหัส', 'ชื่อ', 'Sales', 'ประเภทร้านค้า1', 'Sold To City', 'Sold To State', 'Address 5', 'Latitude', 'Longitude', 'ชื่อตลาด', 'Day', 'seq']
                 });
 
                 // Set column widths
@@ -768,7 +769,7 @@ const App = {
         }
         MapCtrl.clearAll();
         UI.initDaySelector();
-        UI.switchTab('tab1');  // แก้บัค: reset tab กลับต้นเสมอ
+        UI.switchTab('tab1'); // reset tab (แต่ switchTab จะ guard ไม่ให้ทับ tab ที่ user เลือกอยู่)
         UI.render();
     },
 
@@ -801,10 +802,8 @@ const App = {
             + '<button id="_add-route-cancel" style="padding:8px 18px;border-radius:8px;border:1px solid #d1d5db;background:#fff;color:#6b7280;cursor:pointer;font-size:13px;font-weight:600;">ยกเลิก</button>'
             + '<button id="_add-route-ok" style="padding:8px 18px;border-radius:8px;border:none;background:#4f46e5;color:#fff;cursor:pointer;font-size:13px;font-weight:700;">เพิ่ม</button>'
             + '</div>';
-        overlay.appendChild(box);
-        document.body.appendChild(box);
+        overlay.appendChild(box);  // แก้บัค: appendChild เพียงครั้งเดียว ไม่ซ้ำ
         document.body.appendChild(overlay);
-        overlay.appendChild(box);
         const inp = box.querySelector('#_add-route-inp');
         inp.focus();
         const close = () => { if (document.body.contains(overlay)) document.body.removeChild(overlay); };
@@ -850,9 +849,10 @@ const App = {
             State.localActiveRoute = newName;
             App.sync();
             const routeList = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
+            // แก้บัค: ใช้ currentRoutesCol() ให้ตรงกับ planMode ปัจจุบัน
             Promise.all([
-                App.routesCol().doc(oldName).delete(),
-                App.routesCol().doc(newName).set({ stores: State.db.routes[newName] || [] }),
+                App.currentRoutesCol().doc(oldName).delete(),
+                App.currentRoutesCol().doc(newName).set({ stores: State.db.routes[newName] || [] }),
                 App.dbRef.update({ routeList })
             ])
             .then(() => UI.showSaveToast('💾 เปลี่ยนชื่อสายเรียบร้อย'))
@@ -1192,14 +1192,330 @@ const App = {
             if (UI && UI.render) UI.render();
             if (App && App.saveDB) App.saveDB();
             
-            if (UI && UI.showSaveToast) {
-                UI.showSaveToast('✅ เคลียร์การจัดสายเสร็จ');
-            } else {
-                UI.showSaveToast('✅ เคลียร์การจัดสายเสร็จ');
-            }
+            UI.showSaveToast('✅ เคลียร์การจัดสายเสร็จ');
         } catch(err) {
             console.error('❌ Clear error:', err);
             UI.showErrorToast('❌ เกิดข้อผิดพลาด: ' + err.message);
         }
+    }
+};
+
+// ==========================================
+// 🔄 Store Transfer — ย้ายร้านระหว่างสาย
+// ==========================================
+const StoreTrans = {
+    _selectedIds: new Set(),
+
+    // เปิด modal ย้ายร้าน
+    open: () => {
+        StoreTrans._selectedIds.clear();
+        StoreTrans._renderRouteList();
+        StoreTrans._renderStoreList();
+        document.getElementById('transfer-modal').classList.remove('hidden');
+    },
+
+    close: () => {
+        document.getElementById('transfer-modal').classList.add('hidden');
+        StoreTrans._selectedIds.clear();
+    },
+
+    // render dropdown สาย source (= สายปัจจุบัน) และ target
+    _renderRouteList: () => {
+        const routes = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
+        const srcEl = document.getElementById('transfer-src-route');
+        const dstEl = document.getElementById('transfer-dst-route');
+        if (srcEl) {
+            srcEl.innerHTML = routes.map(r =>
+                `<option value="${r}" ${r === State.localActiveRoute ? 'selected' : ''}>${r}</option>`
+            ).join('');
+        }
+        if (dstEl) {
+            dstEl.innerHTML = routes.map(r =>
+                `<option value="${r}" ${r !== State.localActiveRoute ? '' : ''}>${r}</option>`
+            ).join('');
+            // default dst = อันแรกที่ไม่ใช่ src
+            const other = routes.find(r => r !== State.localActiveRoute);
+            if (other && dstEl) dstEl.value = other;
+        }
+        if (srcEl) srcEl.addEventListener('change', () => StoreTrans._renderStoreList());
+    },
+
+    // render รายการร้านของ src route
+    _renderStoreList: () => {
+        const srcEl = document.getElementById('transfer-src-route');
+        const srcRoute = srcEl ? srcEl.value : State.localActiveRoute;
+        const stores = State.db.routes[srcRoute] || [];
+        StoreTrans._selectedIds.clear();
+
+        const listEl = document.getElementById('transfer-store-list');
+        if (!listEl) return;
+
+        if (!stores.length) {
+            listEl.innerHTML = '<p class="text-center text-xs text-gray-400 py-6">ไม่มีร้านค้าในสายนี้</p>';
+            return;
+        }
+
+        listEl.innerHTML = stores.map(s => {
+            const dayTxt = s.days && s.days.length ? s.days.join(' & ') : 'รอจัดสาย';
+            const c = s.days && s.days.length && DAY_COLORS[s.days[0]] ? DAY_COLORS[s.days[0]].hex : '#9ca3af';
+            return `
+            <label class="flex items-center gap-2.5 p-2.5 bg-white border border-gray-100 rounded-xl cursor-pointer hover:bg-indigo-50 hover:border-indigo-200 transition">
+                <input type="checkbox" value="${s.id}" onchange="StoreTrans._toggle(this)"
+                    class="w-4 h-4 text-indigo-600 rounded flex-shrink-0">
+                <div class="flex-1 min-w-0">
+                    <p class="text-sm font-bold text-gray-800 truncate">${s.name} ${s.freq===2?'<span style="background:#ef4444;color:#fff;padding:1px 5px;border-radius:8px;font-size:9px;font-weight:700;">F2</span>':''}</p>
+                    <p class="text-[10px] text-gray-400 font-mono">${s.id}</p>
+                </div>
+                <span class="text-[10px] font-bold px-2 py-0.5 rounded-full text-white flex-shrink-0" style="background:${c};">${dayTxt}</span>
+            </label>`;
+        }).join('');
+    },
+
+    _toggle: (cb) => {
+        if (cb.checked) StoreTrans._selectedIds.add(cb.value);
+        else StoreTrans._selectedIds.delete(cb.value);
+        const countEl = document.getElementById('transfer-count');
+        if (countEl) countEl.textContent = StoreTrans._selectedIds.size;
+    },
+
+    selectAll: () => {
+        document.querySelectorAll('#transfer-store-list input[type=checkbox]').forEach(cb => {
+            cb.checked = true;
+            StoreTrans._selectedIds.add(cb.value);
+        });
+        const countEl = document.getElementById('transfer-count');
+        if (countEl) countEl.textContent = StoreTrans._selectedIds.size;
+    },
+
+    clearAll: () => {
+        document.querySelectorAll('#transfer-store-list input[type=checkbox]').forEach(cb => {
+            cb.checked = false;
+        });
+        StoreTrans._selectedIds.clear();
+        const countEl = document.getElementById('transfer-count');
+        if (countEl) countEl.textContent = 0;
+    },
+
+    // ยืนยันย้าย
+    confirm: async () => {
+        if (StoreTrans._selectedIds.size === 0)
+            return UI.showErrorToast('⚠️ กรุณาเลือกร้านที่ต้องการย้าย');
+
+        if (App.isReadOnly())
+            return UI.showErrorToast('⚠️ ไม่สามารถแก้ไข History ได้');
+
+        const srcEl = document.getElementById('transfer-src-route');
+        const dstEl = document.getElementById('transfer-dst-route');
+        const srcRoute = srcEl ? srcEl.value : State.localActiveRoute;
+        const dstRoute = dstEl ? dstEl.value : '';
+
+        if (!dstRoute || srcRoute === dstRoute)
+            return UI.showErrorToast('⚠️ กรุณาเลือกสายปลายทางที่ต่างจากต้นทาง');
+
+        const count = StoreTrans._selectedIds.size;
+        UI.showConfirm(
+            `ย้าย ${count} ร้าน\nจาก "${srcRoute}" → "${dstRoute}"\nยืนยันหรือไม่?`,
+            async () => {
+                UI.showLoader('กำลังย้ายร้าน...', `${count} ร้าน → ${dstRoute}`);
+                try {
+                    const srcStores = State.db.routes[srcRoute] || [];
+                    const dstStores = State.db.routes[dstRoute] || [];
+                    const toMove = srcStores.filter(s => StoreTrans._selectedIds.has(s.id));
+                    const remaining = srcStores.filter(s => !StoreTrans._selectedIds.has(s.id));
+
+                    // รีเซ็ต days/seqs ของร้านที่ย้าย (เพราะ sequence ของสายเดิมไม่ match)
+                    toMove.forEach(s => { s.days = []; s.seqs = {}; s.selected = false; });
+
+                    State.db.routes[srcRoute] = remaining;
+                    State.db.routes[dstRoute] = [...dstStores, ...toMove];
+
+                    // อัปเดต State.stores ถ้า route ที่กำลังดูอยู่ถูกกระทบ
+                    if (State.localActiveRoute === srcRoute) State.stores = remaining;
+                    if (State.localActiveRoute === dstRoute) State.stores = State.db.routes[dstRoute];
+
+                    // บันทึกทั้ง src และ dst
+                    await Promise.all([
+                        App.currentRoutesCol().doc(srcRoute).set({ stores: remaining }),
+                        App.currentRoutesCol().doc(dstRoute).set({ stores: State.db.routes[dstRoute] })
+                    ]);
+
+                    StoreTrans.close();
+                    App.sync();
+                    MapCtrl.fitToStores();
+                    UI.hideLoader();
+                    UI.showSaveToast(`✅ ย้าย ${count} ร้าน → ${dstRoute} เรียบร้อย`);
+                } catch (err) {
+                    UI.hideLoader();
+                    UI.showErrorToast('❌ ย้ายไม่สำเร็จ: ' + err.message);
+                }
+            }
+        );
+    }
+};
+
+// ==========================================
+// 📤 Export Controller — รองรับทุก planMode
+// ==========================================
+const ExportCtrl = {
+
+    // แปลง YYYY_MM → ชื่อเดือนภาษาไทย พ.ศ.
+    formatYM: (ym) => {
+        if (!ym) return '';
+        const [y, m] = ym.split('_');
+        const d = new Date(+y, +m - 1, 1);
+        return d.toLocaleDateString('th-TH', { year: 'numeric', month: 'long' });
+    },
+
+    // เปิด modal เลือก plan/route ก่อน export
+    openModal: () => {
+        const modal = document.getElementById('export-modal');
+        if (!modal) { ExportCtrl.exportCurrent(); return; }
+
+        // populate plan options
+        const planSel = document.getElementById('export-plan-sel');
+        if (planSel) {
+            const m = App._planMode;
+            let opts = `<option value="current">📊 Plan ที่เปิดอยู่ตอนนี้ (${m === 'active' ? 'Active' : m})</option>`;
+            opts += `<option value="active">✅ Active (Sales ใช้อยู่)</option>`;
+            planSel.innerHTML = opts;
+        }
+
+        // populate route options
+        const routeSel = document.getElementById('export-route-sel');
+        if (routeSel) {
+            const routes = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
+            routeSel.innerHTML = `<option value="ALL">📦 ทุกสาย</option>` +
+                routes.map(r => `<option value="${r}" ${r === State.localActiveRoute ? 'selected' : ''}>${r}</option>`).join('');
+        }
+
+        modal.classList.remove('hidden');
+    },
+
+    closeModal: () => {
+        const modal = document.getElementById('export-modal');
+        if (modal) modal.classList.add('hidden');
+    },
+
+    doExport: async () => {
+        const planSel  = document.getElementById('export-plan-sel');
+        const routeSel = document.getElementById('export-route-sel');
+        const planVal  = planSel  ? planSel.value  : 'current';
+        const routeVal = routeSel ? routeSel.value : State.localActiveRoute;
+
+        ExportCtrl.closeModal();
+
+        // ถ้าเลือก active และ planMode ไม่ใช่ active → ต้องโหลดจาก Firestore
+        if (planVal === 'active' && App._planMode !== 'active') {
+            UI.showLoader('กำลังโหลด Active Plan...', 'ดึงข้อมูลจาก Firestore');
+            try {
+                const routeList = (await App.dbRef.get()).data()?.routeList || [];
+                const routesToExport = routeVal === 'ALL' ? routeList : [routeVal];
+                const routeData = {};
+                await Promise.all(routesToExport.map(async name => {
+                    const d = await App.routesCol().doc(name).get();
+                    routeData[name] = d.exists ? (d.data().stores || []) : [];
+                }));
+                UI.hideLoader();
+                ExportCtrl._writeExcel(routeData, 'Active');
+            } catch (err) {
+                UI.hideLoader();
+                UI.showErrorToast('❌ โหลดไม่สำเร็จ: ' + err.message);
+            }
+            return;
+        }
+
+        // ใช้ State ปัจจุบัน
+        const routeData = {};
+        if (routeVal === 'ALL') {
+            Object.assign(routeData, State.db.routes);
+        } else {
+            routeData[routeVal] = State.db.routes[routeVal] || [];
+        }
+        const label = App._planMode === 'active' ? 'Active' :
+            App._planMode.startsWith('draft:') ? 'Draft_' + App._planMode.replace('draft:','') :
+            'History_' + App._planMode.replace('history:','');
+        ExportCtrl._writeExcel(routeData, label);
+    },
+
+    _writeExcel: (routeData, label) => {
+        const allStores = [];
+        Object.entries(routeData).forEach(([routeName, stores]) => {
+            (stores || []).forEach(s => {
+                allStores.push({
+                    'Route':           routeName,
+                    'CY':              s.cy || '',
+                    'รหัส':            s.id,
+                    'ชื่อ':            s.name,
+                    'Sales':           s.salesCode || '',
+                    'ประเภทร้านค้า1':  s.shopType || '',
+                    'Sold To City':    s.subDistrict || '',
+                    'Sold To State':   s.district || '',
+                    'Address 5':       s.province || '',
+                    'Latitude':        s.lat,
+                    'Longitude':       s.lng,
+                    'ชื่อตลาด':        s.marketName || '',
+                    'Day':             s.days && s.days.length > 0 ? s.days[0] : '',
+                    'seq':             (() => {
+                        const d0 = s.days && s.days.length > 0 ? s.days[0] : '';
+                        return (s.seqs && d0 && s.seqs[d0] !== undefined) ? s.seqs[d0] : '';
+                    })()
+                });
+            });
+        });
+
+        if (!allStores.length) return UI.showErrorToast('ไม่มีข้อมูลให้โหลดครับ');
+
+        allStores.sort((a, b) => {
+            if (a['Route'] !== b['Route']) return a['Route'].localeCompare(b['Route'], 'th', { numeric: true });
+            const da = a['Day'] ? parseInt(String(a['Day']).replace('Day ', '')) : 999;
+            const db2 = b['Day'] ? parseInt(String(b['Day']).replace('Day ', '')) : 999;
+            return da - db2;
+        });
+
+        const ws = XLSX.utils.json_to_sheet(allStores, {
+            header: ['Route','CY','รหัส','ชื่อ','Sales','ประเภทร้านค้า1','Sold To City','Sold To State','Address 5','Latitude','Longitude','ชื่อตลาด','Day','seq']
+        });
+        ws['!cols'] = [
+            {wch:10},{wch:14},{wch:12},{wch:40},{wch:10},{wch:10},
+            {wch:18},{wch:18},{wch:14},{wch:14},{wch:14},{wch:30},{wch:6},{wch:6}
+        ];
+
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'RoutePlan');
+        const now = new Date();
+        const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+        XLSX.writeFile(wb, `RoutePlan_${label}_${dateStr}.xlsx`);
+        UI.showSaveToast(`✅ Export ${allStores.length} ร้าน เรียบร้อย`);
+    },
+
+    // backward compat สำหรับ ExcelIO.export() เดิม
+    exportCurrent: () => {
+        const routeData = { [State.localActiveRoute]: State.stores };
+        ExportCtrl._writeExcel(routeData, State.localActiveRoute);
+    }
+};
+
+// ==========================================
+// 🗓️ ฟังก์ชัน utility — แปลง YYYY_MM → ไทย
+// ==========================================
+const DateUtil = {
+    // แปลง YYYY_MM → "มิถุนายน 2569" (พ.ศ.)
+    ymToThai: (ym) => {
+        if (!ym) return '';
+        const [y, m] = ym.split('_');
+        const d = new Date(+y, +m - 1, 1);
+        return d.toLocaleDateString('th-TH', { year: 'numeric', month: 'long' });
+    },
+    // แปลง YYYY_MM → "มิ.ย. 2569"
+    ymToThaiShort: (ym) => {
+        if (!ym) return '';
+        const [y, m] = ym.split('_');
+        const d = new Date(+y, +m - 1, 1);
+        return d.toLocaleDateString('th-TH', { year: 'numeric', month: 'short' });
+    },
+    // YYYY_MM ของเดือนปัจจุบัน
+    currentYM: () => {
+        const d = new Date();
+        return `${d.getFullYear()}_${String(d.getMonth()+1).padStart(2,'0')}`;
     }
 };

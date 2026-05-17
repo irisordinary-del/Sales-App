@@ -54,6 +54,39 @@ service cloud.firestore {
       allow write: if (centerDoc.matches('[0-9a-zA-Z_]+_main') || centerDoc == 'v1_main')
                    && validCenterDoc(request.resource.data);
 
+      // 📝 drafts/{YYYY_MM} — Draft plan รายเดือน
+      match /drafts/{yearMonth} {
+        allow read: if true;
+        allow delete: if true;
+        allow write: if validYearMonth(yearMonth)
+                     && request.resource.data is map
+                     && request.resource.data.keys().hasAny(['routeList','cycleDays','calendarConfig','updatedAt','createdAt','sourceMode']);
+
+        match /routes/{routeId} {
+          allow read: if true;
+          allow delete: if true;
+          allow write: if request.resource.data.keys().hasAll(['stores'])
+                       && request.resource.data.stores is list
+                       && request.resource.data.stores.size() <= 2000;
+        }
+      }
+
+      // 🔒 history/{YYYY_MM} — Snapshot plan ที่ activate แล้ว
+      match /history/{yearMonth} {
+        allow read: if true;
+        allow delete: if true;
+        allow write: if validYearMonth(yearMonth)
+                     && request.resource.data is map;
+
+        match /routes/{routeId} {
+          allow read: if true;
+          allow delete: if true;
+          allow write: if request.resource.data.keys().hasAll(['stores'])
+                       && request.resource.data.stores is list
+                       && request.resource.data.stores.size() <= 2000;
+        }
+      }
+
       // 🛣️ routes/{routeId} — metadata ของแต่ละสาย
       match /routes/{routeId} {
         allow read: if true;
@@ -155,9 +188,12 @@ service cloud.firestore {
   // ==========================================
 
   function validCenterDoc(data) {
-    return data.keys().hasAny(['routeList', 'cycleDays', 'routes', 'kpiSettings', 'savedRawColumns', 'createdAt'])
+    return data.keys().hasAny(['routeList', 'cycleDays', 'routes', 'kpiSettings', 'savedRawColumns', 'createdAt',
+                                'draftList', 'historyList', 'lastActivated', 'updatedAt'])
            && (!data.keys().hasAll(['routeList']) || data.routeList is list)
-           && (!data.keys().hasAll(['cycleDays']) || data.cycleDays is number);
+           && (!data.keys().hasAll(['cycleDays']) || data.cycleDays is number)
+           && (!data.keys().hasAll(['draftList']) || data.draftList is list)
+           && (!data.keys().hasAll(['historyList']) || data.historyList is list);
   }
 
   // ตรวจรูปแบบ YYYY_MM เช่น 2026_04

@@ -210,6 +210,9 @@
                 <button onclick="App.addRoute()" class="bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm transition whitespace-nowrap">
                     + สาย
                 </button>
+                <button onclick="StoreTrans.open()" class="bg-violet-600 hover:bg-violet-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm transition whitespace-nowrap" title="ย้ายร้านระหว่างสาย">
+                    🔀 ย้ายร้าน
+                </button>
                 <button onclick="document.getElementById('bulkUpload').click()" class="bg-emerald-700 hover:bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 whitespace-nowrap transition">
                     📦 อัปโหลดพิกัด
                 </button>
@@ -223,7 +226,7 @@
                     </div>
                     <select id="plan-selector" onchange="PlanUI.onSelect(this.value)"
                         class="bg-gray-700 border border-gray-600 text-white text-xs font-bold rounded-lg px-2 py-1.5 outline-none focus:ring-2 focus:ring-indigo-400 max-w-[130px]">
-                        <option value="active">📅 Plan ปัจจุบัน</option>
+                        <option value="active">📅 Plan ปัจจุบัน (Active)</option>
                     </select>
                     <button onclick="PlanUI.openCreateDraft()"
                         class="bg-indigo-600 hover:bg-indigo-500 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap" title="สร้าง Draft เดือนหน้า">
@@ -344,13 +347,13 @@
 
                     <div class="flex border-b border-gray-200 text-sm bg-gray-50 shrink-0">
 
-                        <button onclick="UI.switchTab('tab1')" id="btn-tab1" class="tab-btn active flex-1 py-3 px-1">1. ข้อมูล</button>
+                        <button onclick="UI.userSwitchTab('tab1')" id="btn-tab1" class="tab-btn active flex-1 py-3 px-1">1. ข้อมูล</button>
 
-                        <button onclick="UI.switchTab('tab2')" id="btn-tab2" class="tab-btn flex-1 py-3 px-1">2. จัดสาย</button>
+                        <button onclick="UI.userSwitchTab('tab2')" id="btn-tab2" class="tab-btn flex-1 py-3 px-1">2. จัดสาย</button>
 
-                        <button onclick="UI.switchTab('tab3')" id="btn-tab3" class="tab-btn flex-1 py-3 px-1">3. แก้ไข</button>
+                        <button onclick="UI.userSwitchTab('tab3')" id="btn-tab3" class="tab-btn flex-1 py-3 px-1">3. แก้ไข</button>
 
-                        <button onclick="UI.switchTab('tab4')" id="btn-tab4" class="tab-btn flex-1 py-3 px-1">4. สรุป</button>
+                        <button onclick="UI.userSwitchTab('tab4')" id="btn-tab4" class="tab-btn flex-1 py-3 px-1">4. สรุป</button>
 
                     </div>
 
@@ -556,7 +559,7 @@
 
                         </div>
 
-                        <button onclick="ExcelIO.export()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-xl text-sm font-bold transition">
+                        <button onclick="ExportCtrl.openModal()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-xl text-sm font-bold transition">
 
                             📥 โหลดไฟล์ออก
 
@@ -640,6 +643,90 @@
     <!-- ===== MODALS ===== -->
 
 
+
+
+    <!-- Store Transfer Modal — ย้ายร้านระหว่าง Sales -->
+    <div id="transfer-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-lg flex flex-col overflow-hidden" style="max-height:90dvh;">
+            <div class="p-5 border-b flex justify-between items-center bg-gray-50 flex-shrink-0">
+                <div>
+                    <h2 class="text-base font-black text-gray-900">🔀 ย้ายร้านระหว่างสาย</h2>
+                    <p class="text-xs text-gray-500 mt-0.5">เลือกร้านจากสายต้นทาง แล้วโอนไปสายปลายทาง</p>
+                </div>
+                <button onclick="StoreTrans.close()" class="w-8 h-8 rounded-full border border-gray-200 text-gray-400 hover:bg-gray-100 font-bold transition text-sm">✕</button>
+            </div>
+            <div class="p-5 flex-1 overflow-y-auto">
+                <!-- Route selectors -->
+                <div class="grid grid-cols-2 gap-3 mb-4">
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 uppercase mb-1.5">สายต้นทาง</label>
+                        <select id="transfer-src-route" onchange="StoreTrans._renderStoreList()"
+                            class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold outline-none focus:ring-2 focus:ring-violet-300">
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 uppercase mb-1.5">สายปลายทาง</label>
+                        <select id="transfer-dst-route"
+                            class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold outline-none focus:ring-2 focus:ring-violet-300">
+                        </select>
+                    </div>
+                </div>
+                <!-- Note -->
+                <div class="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 mb-3 text-xs text-amber-800 font-medium">
+                    ⚠️ ร้านที่ย้ายจะถูก reset วันวิ่ง (days/seq) เพราะสายใหม่อาจมี cycle ต่างกัน — Admin ต้องจัดวันให้ใหม่
+                </div>
+                <!-- Select all / clear -->
+                <div class="flex items-center justify-between mb-2">
+                    <p class="text-xs font-bold text-gray-600">เลือกร้านที่ต้องการย้าย</p>
+                    <div class="flex gap-2">
+                        <button onclick="StoreTrans.selectAll()" class="text-xs text-indigo-600 font-bold hover:underline">เลือกทั้งหมด</button>
+                        <span class="text-gray-300">|</span>
+                        <button onclick="StoreTrans.clearAll()" class="text-xs text-gray-400 font-bold hover:underline">ล้าง</button>
+                    </div>
+                </div>
+                <!-- Store list -->
+                <div id="transfer-store-list" class="flex flex-col gap-1.5 max-h-64 overflow-y-auto pr-1">
+                </div>
+            </div>
+            <div class="p-5 border-t flex items-center justify-between flex-shrink-0 bg-gray-50">
+                <p class="text-xs text-gray-500">เลือกแล้ว <span id="transfer-count" class="font-black text-violet-600">0</span> ร้าน</p>
+                <div class="flex gap-3">
+                    <button onclick="StoreTrans.close()" class="border border-gray-200 rounded-xl px-4 py-2 text-sm font-bold text-gray-600 hover:bg-gray-50 transition">ยกเลิก</button>
+                    <button onclick="StoreTrans.confirm()" class="bg-violet-600 hover:bg-violet-700 text-white rounded-xl px-5 py-2 text-sm font-bold transition shadow-sm">✅ ย้ายเลย</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Export Modal — เลือก plan/route ก่อน export -->
+    <div id="export-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden">
+            <div class="p-5 border-b flex justify-between items-center bg-gray-50">
+                <h2 class="text-base font-black text-gray-900">📤 Export Excel</h2>
+                <button onclick="ExportCtrl.closeModal()" class="w-8 h-8 rounded-full border border-gray-200 text-gray-400 hover:bg-gray-100 font-bold transition text-sm">✕</button>
+            </div>
+            <div class="p-5 space-y-4">
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1.5">Export จาก Plan</label>
+                    <select id="export-plan-sel" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-bold outline-none focus:ring-2 focus:ring-emerald-300">
+                        <option value="current">📊 Plan ที่เปิดอยู่ตอนนี้</option>
+                        <option value="active">✅ Active (Sales ใช้อยู่)</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1.5">เลือกสาย</label>
+                    <select id="export-route-sel" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-bold outline-none focus:ring-2 focus:ring-emerald-300">
+                        <option value="ALL">📦 ทุกสาย</option>
+                    </select>
+                </div>
+                <p class="text-xs text-gray-400">ไฟล์จะมี column Route เพิ่มเมื่อเลือก "ทุกสาย"</p>
+            </div>
+            <div class="p-5 border-t flex gap-3">
+                <button onclick="ExportCtrl.closeModal()" class="flex-1 border border-gray-200 rounded-xl py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-50 transition">ยกเลิก</button>
+                <button onclick="ExportCtrl.doExport()" class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl py-2.5 text-sm font-bold transition shadow-sm">📥 Export</button>
+            </div>
+        </div>
+    </div>
 
     <!-- Overall Summary Modal -->
 
@@ -1008,8 +1095,8 @@
                         opts += `<optgroup label="── Draft ──">`;
                         draftList.forEach(ym => {
                             const [y, m] = ym.split('_');
-                            const lbl = new Date(+y, +m-1, 1).toLocaleDateString('th-TH', { year: 'numeric', month: 'short' });
-                            opts += `<option value="draft:${ym}">📝 Draft ${lbl}</option>`;
+                            const lbl = DateUtil ? DateUtil.ymToThaiShort(ym) : new Date(+y, +m-1, 1).toLocaleDateString('th-TH', { year: 'numeric', month: 'short' });
+                            opts += `<option value="draft:${ym}">📝 Draft · ${lbl}</option>`;
                         });
                         opts += `</optgroup>`;
                     }
@@ -1017,8 +1104,8 @@
                         opts += `<optgroup label="── History ──">`;
                         historyList.forEach(ym => {
                             const [y, m] = ym.split('_');
-                            const lbl = new Date(+y, +m-1, 1).toLocaleDateString('th-TH', { year: 'numeric', month: 'short' });
-                            opts += `<option value="history:${ym}">🔒 ${lbl}</option>`;
+                            const lbl = DateUtil ? DateUtil.ymToThaiShort(ym) : new Date(+y, +m-1, 1).toLocaleDateString('th-TH', { year: 'numeric', month: 'short' });
+                            opts += `<option value="history:${ym}">🔒 History · ${lbl}</option>`;
                         });
                         opts += `</optgroup>`;
                     }
