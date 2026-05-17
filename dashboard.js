@@ -8,6 +8,7 @@ const Dashboard = {
     // ─── State ───────────────────────────────────────────────────────────
     _session: null,
     _currentYM: '',          // 'YYYY_MM'
+    _rowCache: {},            // { 'YYYY_MM': rows[] } cache สำหรับ campaign
     _amountMode: 'gross',     // 'gross' | 'net'
     _drillRoute: null,        // null = ศูนย์ทั้งหมด
     _drillShopType: null,
@@ -72,6 +73,8 @@ const Dashboard = {
         Dashboard._currentYM = `${now.getFullYear()}_${String(now.getMonth() + 1).padStart(2, '0')}`;
 
         Dashboard._renderShell();
+        // โหลด campaign section แบบ async ไม่บล็อก UI
+        setTimeout(() => Dashboard._renderCampaignSection(), 1500);
         Dashboard._loadMonthList();
     },
 
@@ -520,8 +523,6 @@ const Dashboard = {
     _render: () => {
         Dashboard._renderBreadcrumb();
         Dashboard._renderKPIs();
-        // แสดง active campaigns (async ไม่บล็อก KPI)
-        Dashboard._renderCampaignSection();
         Dashboard._renderRouteTable();
         Dashboard._renderShopTypes();
         Dashboard._renderCategories();
@@ -894,56 +895,78 @@ const Dashboard = {
         const el = document.getElementById('db-campaign-section');
         if (!el) return;
 
-        // ต้องการ SkuDist และ cloudDB
         if (typeof SkuDist === 'undefined' || typeof cloudDB === 'undefined') {
             el.classList.add('hidden'); return;
         }
 
-        // โหลด campaigns ของศูนย์นี้
         try {
-            const snap = await cloudDB.collection('skuDistribution')
+            const nowYM = DateUtil ? DateUtil.currentYM() : '';
+            const snap  = await cloudDB.collection('skuDistribution')
                 .where('centerId', '==', window.CENTER_DOC || '')
                 .get();
 
-            const now = DateUtil ? DateUtil.currentYM() : '';
-            // กรองเฉพาะ campaign ที่ยังอยู่ในช่วงเวลา (startYM <= now <= endYM)
+            // แสดงทุก campaign ที่ยังไม่หมดอายุ (endYM >= ปัจจุบัน)
             const active = snap.docs
                 .map(d => ({ id: d.id, ...d.data() }))
-                .filter(c => c.startYM <= now && c.endYM >= now);
+                .filter(c => c.endYM >= nowYM && (c.groups || []).length > 0);
 
-            if (!active.length) {
-                el.classList.add('hidden'); return;
-            }
+            if (!active.length) { el.classList.add('hidden'); return; }
 
-            // โหลด SkuDist._allProdOptions ถ้ายังว่าง
             if (SkuDist._allProdOptions.length === 0) await SkuDist._loadProdOptions();
 
-            // คำนวณทุก active campaign
+            // build custCode → route index (คงที่ไม่ขึ้นกับเดือน)
+            const custToRoute = {};
+            const routes = State?.db?.routeList || [];
+            routes.forEach(route => {
+                (State.db.routes?.[route] || []).forEach(s => {
+                    custToRoute[String(s.id)] = route;
+                });
+            });
+
+            // helper: range เดือน
+            const getRange = (startYM, endYM) => {
+                const months = []; let [y, m] = startYM.split('_').map(Number);
+                const [ey, em] = endYM.split('_').map(Number);
+                while (y < ey || (y === ey && m <= em)) {
+                    months.push(`${y}_${String(m).padStart(2,'0')}`);
+                    m++; if (m > 12) { m = 1; y++; }
+                }
+                return months;
+            };
+
+            // helper: โหลด rows ของเดือน (cached + tag _route)
+            const loadMonthRows = async (ym) => {
+                if (Dashboard._rowCache[ym]) return Dashboard._rowCache[ym];
+                try {
+                    const chunks = await cloudDB.collection('sellout').doc(ym).collection('chunks').get();
+                    let rows = [];
+                    chunks.forEach(doc => rows = rows.concat(doc.data().rows || []));
+                    rows.forEach(r => { r._route = custToRoute[String(r.custCode||'')] || null; });
+                    Dashboard._rowCache[ym] = rows;
+                    return rows;
+                } catch(e) {
+                    Dashboard._rowCache[ym] = [];
+                    return [];
+                }
+            };
+
+            el.innerHTML = '<p class="text-xs text-gray-400 text-center py-3">⏳ กำลังโหลดข้อมูล campaign...</p>';
+            el.classList.remove('hidden');
+
             const cards = await Promise.all(active.map(async campaign => {
                 try {
-                    // โหลด sellout เดือนปัจจุบัน
-                    const ym = Dashboard._currentYM || now;
-                    const chunks = await cloudDB.collection('sellout').doc(ym)
-                        .collection('chunks').get();
+                    // โหลด rows ทุกเดือนใน campaign range
+                    const months = getRange(campaign.startYM, campaign.endYM);
                     let allRows = [];
-                    chunks.forEach(doc => allRows = allRows.concat(doc.data().rows || []));
+                    for (const ym of months) {
+                        allRows = allRows.concat(await loadMonthRows(ym));
+                    }
 
-                    // build custCode → route index
-                    const custToRoute = {};
-                    const routes = State?.db?.routeList || [];
-                    routes.forEach(route => {
-                        (State.db.routes?.[route] || []).forEach(s => {
-                            custToRoute[String(s.id)] = route;
-                        });
-                    });
-                    allRows.forEach(r => { r._route = custToRoute[String(r.custCode||'')] || null; });
-
-                    const targetUnit   = campaign.targetUnit || 'pct';
+                    const targetUnit    = campaign.targetUnit || 'pct';
                     const defaultTarget = campaign.defaultTarget ?? 80;
-                    const rawTargets   = campaign.routeTargets || {};
-                    const groups       = campaign.groups || [];
+                    const rawTargets    = campaign.routeTargets || {};
+                    const groups        = campaign.groups || [];
 
-                    // คำนวณ per group รวมทุกสาย
                     const groupSummaries = groups.map(g => {
                         const kws = (g.keywords || []).map(k => k.toLowerCase());
                         let totalStoreAll = 0, totalBought = 0, totalTarget = 0;
@@ -953,29 +976,31 @@ const Dashboard = {
                             const storeSet  = new Set(allStores);
                             totalStoreAll  += allStores.length;
 
-                            // target ของสายนี้
                             const rawTgt = rawTargets[route] ?? null;
                             const tgtPct = rawTgt !== null
-                                ? (targetUnit === 'count' ? (allStores.length > 0 ? rawTgt/allStores.length*100 : 0) : rawTgt)
+                                ? (targetUnit === 'count'
+                                    ? (allStores.length > 0 ? rawTgt/allStores.length*100 : 0)
+                                    : rawTgt)
                                 : defaultTarget;
                             totalTarget += Math.round(tgtPct/100 * allStores.length);
 
-                            // rows ที่ match กลุ่ม + อยู่ในสายนี้
                             const matched = allRows.filter(r =>
-                                r._route === route && storeSet.has(String(r.custCode||'')) &&
-                                kws.some(k => (r.prodCode||'').toLowerCase().includes(k) || (r.prodName||'').toLowerCase().includes(k))
+                                r._route === route &&
+                                storeSet.has(String(r.custCode||'')) &&
+                                kws.some(k =>
+                                    (r.prodCode||'').toLowerCase().includes(k) ||
+                                    (r.prodName||'').toLowerCase().includes(k))
                             );
-                            const bought = new Set(matched.map(r => String(r.custCode)));
-                            totalBought += bought.size;
+                            totalBought += new Set(matched.map(r => String(r.custCode))).size;
                         });
 
-                        const pct    = totalStoreAll > 0 ? Math.round(totalBought/totalStoreAll*100) : 0;
-                        const tgtPct = totalStoreAll > 0 ? Math.round(totalTarget/totalStoreAll*100) : 0;
-                        const vs     = pct - tgtPct;
-                        const color  = pct >= tgtPct ? '#10b981' : pct >= tgtPct*0.8 ? '#f59e0b' : '#ef4444';
-                        const barW   = Math.min(pct, 100);
-                        const tgtW   = Math.min(tgtPct, 100);
-                        return { name: g.name, pct, tgtPct, vs, color, barW, tgtW, totalBought, totalTarget, totalStoreAll };
+                        const pct   = totalStoreAll > 0 ? Math.round(totalBought/totalStoreAll*100) : 0;
+                        const tgtPct2 = totalStoreAll > 0 ? Math.round(totalTarget/totalStoreAll*100) : 0;
+                        const vs    = pct - tgtPct2;
+                        const color = pct >= tgtPct2 ? '#10b981' : pct >= tgtPct2*0.8 ? '#f59e0b' : '#ef4444';
+                        return { name: g.name, pct, tgtPct: tgtPct2, vs, color,
+                            barW: Math.min(pct,100), tgtW: Math.min(tgtPct2,100),
+                            totalBought, totalTarget, totalStoreAll };
                     });
 
                     const startLbl = DateUtil ? DateUtil.ymToThaiShort(campaign.startYM) : campaign.startYM;
@@ -987,7 +1012,7 @@ const Dashboard = {
                             <div class="flex items-center gap-2">
                                 <span class="text-base">🎯</span>
                                 <span class="text-sm font-black text-gray-800">${campaign.name}</span>
-                                <span class="text-xs text-gray-400 font-medium">${startLbl} → ${endLbl}</span>
+                                <span class="text-xs text-gray-400 font-medium">${startLbl} → ${endLbl} · ยอดรวมทั้งช่วง</span>
                             </div>
                             <button onclick="Nav.go('skudist')" class="text-xs text-pink-600 font-bold hover:underline">ดูรายละเอียด →</button>
                         </div>
@@ -998,13 +1023,12 @@ const Dashboard = {
                                     <span class="text-xs font-bold text-gray-600">${gs.name}</span>
                                     <span class="text-xs font-black" style="color:${gs.color}">${gs.pct}%</span>
                                 </div>
-                                <!-- Progress bar with target marker -->
                                 <div style="position:relative;height:8px;background:#e5e7eb;border-radius:99px;overflow:visible;margin-bottom:6px;">
                                     <div style="width:${gs.barW}%;height:8px;background:${gs.color};border-radius:99px;"></div>
                                     <div style="position:absolute;left:${gs.tgtW}%;top:-3px;width:2px;height:14px;background:#6366f1;border-radius:1px;" title="target ${gs.tgtPct}%"></div>
                                 </div>
                                 <div class="flex justify-between text-[10px] text-gray-500">
-                                    <span class="font-bold text-gray-800">${gs.totalBought.toLocaleString()}<span class="font-normal text-gray-400">/${gs.totalTarget.toLocaleString()} ร้าน</span></span>
+                                    <span class="font-bold text-gray-800">${gs.totalBought.toLocaleString()}<span class="font-normal text-gray-400">/${gs.totalTarget.toLocaleString()} ร้าน (target)</span></span>
                                     <span class="${gs.vs >= 0 ? 'text-emerald-600' : 'text-red-500'} font-bold">${gs.vs >= 0 ? '+' : ''}${gs.vs}% vs target</span>
                                 </div>
                             </div>`).join('')}
@@ -1017,12 +1041,9 @@ const Dashboard = {
             }));
 
             const html = cards.filter(Boolean).join('');
-            if (html) {
-                el.innerHTML = html;
-                el.classList.remove('hidden');
-            } else {
-                el.classList.add('hidden');
-            }
+            if (html) { el.innerHTML = html; el.classList.remove('hidden'); }
+            else       { el.classList.add('hidden'); }
+
         } catch(e) {
             console.warn('Dashboard._renderCampaignSection:', e);
             el.classList.add('hidden');
