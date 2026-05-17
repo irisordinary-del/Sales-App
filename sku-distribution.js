@@ -11,11 +11,12 @@ const SkuDist = {
     _centerDoc: () => window.CENTER_DOC || 'v1_main',
 
     // ─── State ───────────────────────────────────────────────────────────
-    _campaigns: [],      // [ { id, name, startYM, endYM, groups: [{id, name, keywords:[]}] } ]
+    _campaigns: [],      // [ { id, name, startYM, endYM, defaultTarget, routeTargets:{}, groups: [...] } ]
     _activeCampaign: null,
-    _result: null,       // คำนวณแล้ว { routeCode: { storeCoverage, skuCoverage, ... } }
+    _result: null,       // คำนวณแล้ว { routeCode: { totalStores, groups:{}, routeTarget } }
     _allProdOptions: [], // prodCode+prodName จาก sellout (สำหรับ autocomplete)
     _previewRows: [],    // rows ที่ match keyword ล่าสุด (preview)
+    _routeTargets: {},   // { routeCode: pct } — ตั้งในระหว่าง edit modal
 
     // ─── Init ─────────────────────────────────────────────────────────────
     init: async () => {
@@ -184,6 +185,34 @@ const SkuDist = {
                         </div>
                     </div>
 
+                    <!-- Target Coverage ต่อสาย -->
+                    <div class="border-t border-gray-100 pt-4">
+                        <p class="text-sm font-black text-gray-800 mb-1">🎯 Target Coverage ต่อสาย</p>
+                        <p class="text-xs text-gray-400 mb-3">ตั้ง % store coverage ที่ต้องการให้แต่ละสายทำได้ — ถ้าไม่ตั้งจะใช้ค่า default</p>
+                        <div class="grid grid-cols-2 gap-3 mb-2">
+                            <div>
+                                <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Target เริ่มต้น (ทุกสาย)</label>
+                                <div class="flex items-center gap-1.5">
+                                    <input id="skudist-c-default-target" type="number" min="0" max="100" placeholder="80"
+                                        class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold outline-none focus:ring-2 focus:ring-pink-200">
+                                    <span class="text-sm text-gray-400 font-bold">%</span>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Target รายสาย (expand) -->
+                        <details class="mt-1">
+                            <summary class="text-xs text-indigo-600 font-bold cursor-pointer hover:underline select-none">ตั้ง target แยกรายสาย...</summary>
+                            <div id="skudist-route-targets" class="mt-3 space-y-2 max-h-52 overflow-y-auto pr-1"></div>
+                        </details>
+                        <script>
+                            // render route targets เมื่อ expand
+                            document.querySelector('#skudist-campaign-modal details')?.addEventListener('toggle', function(e) {
+                                if (e.target.open) SkuDist._renderRouteTargets();
+                            });
+                        </script>
+                    </div>
+
+                    <!-- SKU Groups -->
                     <div class="border-t border-gray-100 pt-4">
                         <div class="flex items-center justify-between mb-3">
                             <p class="text-sm font-black text-gray-800">กลุ่ม SKU Target</p>
@@ -262,9 +291,10 @@ const SkuDist = {
     openCreateCampaign: () => {
         SkuDist._editingId = null;
         SkuDist._groups = [];
+        SkuDist._routeTargets = {};
         document.getElementById('skudist-modal-title').textContent = 'สร้าง Campaign';
         document.getElementById('skudist-c-name').value = '';
-        // default เดือนปัจจุบัน
+        document.getElementById('skudist-c-default-target').value = '80';
         const ym = DateUtil ? DateUtil.currentYM() : '';
         document.getElementById('skudist-c-start').value = ym;
         document.getElementById('skudist-c-end').value   = ym;
@@ -276,13 +306,48 @@ const SkuDist = {
         const c = SkuDist._campaigns.find(x => x.id === id);
         if (!c) return;
         SkuDist._editingId = id;
-        SkuDist._groups    = JSON.parse(JSON.stringify(c.groups || []));
+        SkuDist._groups       = JSON.parse(JSON.stringify(c.groups || []));
+        SkuDist._routeTargets = JSON.parse(JSON.stringify(c.routeTargets || {}));
         document.getElementById('skudist-modal-title').textContent = 'แก้ไข Campaign';
         document.getElementById('skudist-c-name').value  = c.name || '';
         document.getElementById('skudist-c-start').value = c.startYM || '';
         document.getElementById('skudist-c-end').value   = c.endYM   || '';
+        document.getElementById('skudist-c-default-target').value = c.defaultTarget ?? 80;
         SkuDist._renderGroups();
         document.getElementById('skudist-campaign-modal').classList.remove('hidden');
+    },
+
+    // render input target รายสาย
+    _renderRouteTargets: () => {
+        const el = document.getElementById('skudist-route-targets');
+        if (!el) return;
+        const routes = typeof State !== 'undefined' && State.db?.routeList?.length
+            ? State.db.routeList.sort((a,b) => a.localeCompare(b,'th',{numeric:true}))
+            : [];
+        if (!routes.length) {
+            el.innerHTML = '<p class="text-xs text-gray-400">ไม่พบสายวิ่งในระบบ</p>';
+            return;
+        }
+        const defVal = document.getElementById('skudist-c-default-target')?.value || 80;
+        el.innerHTML = routes.map(r => {
+            const val = SkuDist._routeTargets[r] ?? '';
+            return `
+            <div class="flex items-center gap-2">
+                <span class="text-xs font-bold text-indigo-700 min-w-[70px]">${r}</span>
+                <input type="number" min="0" max="100"
+                    value="${val}"
+                    placeholder="${defVal}% (default)"
+                    oninput="SkuDist._setRouteTarget('${r}', this.value)"
+                    class="w-28 bg-gray-50 border border-gray-200 rounded-lg px-2 py-1 text-xs font-bold outline-none focus:ring-2 focus:ring-pink-200">
+                <span class="text-xs text-gray-400">%</span>
+            </div>`;
+        }).join('');
+    },
+
+    _setRouteTarget: (route, val) => {
+        const n = parseFloat(val);
+        if (!isNaN(n) && n >= 0 && n <= 100) SkuDist._routeTargets[route] = n;
+        else delete SkuDist._routeTargets[route];
     },
 
     closeModal: () => {
@@ -488,11 +553,14 @@ const SkuDist = {
 
         UI.showLoader('กำลังบันทึก Campaign...', '');
         try {
+            const defaultTarget = parseFloat(document.getElementById('skudist-c-default-target')?.value) || 80;
             const data = {
                 name, startYM, endYM,
-                centerId: SkuDist._centerDoc(),
-                groups:   SkuDist._groups,
-                updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                centerId:      SkuDist._centerDoc(),
+                groups:        SkuDist._groups,
+                defaultTarget,
+                routeTargets:  SkuDist._routeTargets,
+                updatedAt:     firebase.firestore.FieldValue.serverTimestamp(),
             };
 
             if (SkuDist._editingId) {
@@ -552,72 +620,103 @@ const SkuDist = {
                 } catch (e) { /* เดือนนั้นอาจไม่มีข้อมูล */ }
             }
 
-            // กรองเฉพาะ sCode ของศูนย์
-            if (typeof State !== 'undefined' && State.db?.routeList?.length) {
-                const centerRoutes = new Set(State.db.routeList.map(r => r.toUpperCase()));
-                allRows = allRows.filter(r => centerRoutes.has((r.sCode || '').toUpperCase()));
-            }
-
-            // คำนวณ per route per group
+            // ── สร้าง index: custCode → route จาก State (ยึดร้านค้าเป็นหลัก ไม่ใช่ sCode) ──
+            const custToRoute = {};  // { "4010000257": "402V01" }
             const routes = typeof State !== 'undefined' && State.db?.routeList?.length
                 ? State.db.routeList
-                : [...new Set(allRows.map(r => r.sCode))].sort();
-
-            const groups = campaign.groups || [];
-            const result = {}; // { routeCode: { total, groups: { gId: { storeCoverage, skuCoverage } } } }
+                : [];
 
             routes.forEach(route => {
-                const routeRows = allRows.filter(r =>
-                    (r.sCode || '').toUpperCase() === route.toUpperCase()
+                (State.db.routes?.[route] || []).forEach(s => {
+                    custToRoute[String(s.id)] = route;
+                });
+            });
+
+            // tag แต่ละ row ด้วย route จาก custCode (ไม่ใช้ sCode)
+            allRows.forEach(r => {
+                r._route = custToRoute[String(r.custCode || '')] || null;
+            });
+
+            // กรองเฉพาะ row ที่ร้านอยู่ในศูนย์นี้
+            const centerRows = allRows.filter(r => r._route !== null);
+
+            const groups = campaign.groups || [];
+            const defaultTarget = campaign.defaultTarget ?? 80;
+            const routeTargets  = campaign.routeTargets  || {};
+
+            // หา target SKU ต่อ group (คำนวณครั้งเดียว ไม่ต้องวนซ้ำ)
+            const groupTargetSkus = {};
+            groups.forEach(g => {
+                const kws = (g.keywords || []).map(k => k.toLowerCase());
+                groupTargetSkus[g.id] = new Set(
+                    SkuDist._allProdOptions
+                        .filter(p => kws.some(k =>
+                            p.code.toLowerCase().includes(k) || p.name.toLowerCase().includes(k)))
+                        .map(p => p.code)
                 );
-                // ร้านทั้งหมดในสาย (จาก State)
-                const allStoresInRoute = typeof State !== 'undefined'
-                    ? (State.db.routes?.[route] || []).map(s => String(s.id))
-                    : [];
-                const totalStores = allStoresInRoute.length || new Set(routeRows.map(r => String(r.custCode))).size;
+            });
+
+            const result = {};
+            routes.forEach(route => {
+                // ร้านทั้งหมดในสาย (จาก State — นับแม้ไม่มียอด)
+                const allStoresInRoute = (State.db.routes?.[route] || []).map(s => String(s.id));
+                const totalStores      = allStoresInRoute.length;
+                const storeSet         = new Set(allStoresInRoute);
+
+                // rows ของสายนี้ (กรองจาก _route ที่ tag ไว้ + ตัดร้านที่ไม่อยู่ใน State ออก)
+                const routeRows = centerRows.filter(r =>
+                    r._route === route && storeSet.has(String(r.custCode || ''))
+                );
+
+                // target coverage สำหรับสายนี้
+                const routeTarget = routeTargets[route] ?? defaultTarget;
 
                 const groupResult = {};
                 groups.forEach(g => {
                     const kws = (g.keywords || []).map(k => k.toLowerCase());
 
-                    // rows ที่ match group นี้
+                    // rows ที่ match กลุ่มนี้
                     const matchedRows = routeRows.filter(r => {
                         const code = (r.prodCode || '').toLowerCase();
                         const name = (r.prodName || '').toLowerCase();
                         return kws.some(k => code.includes(k) || name.includes(k));
                     });
 
-                    // ร้านที่ซื้อสินค้าในกลุ่มนี้อย่างน้อย 1 ครั้ง
-                    const storesBought = new Set(matchedRows.map(r => String(r.custCode)));
+                    // ร้านที่ซื้ออย่างน้อย 1 SKU ในกลุ่ม (unique custCode)
+                    const storesBought       = new Set(matchedRows.map(r => String(r.custCode)));
                     const storeCoverageCount = storesBought.size;
-                    const storeCoveragePct = totalStores > 0
-                        ? Math.round(storeCoverageCount / totalStores * 100)
-                        : 0;
+                    const storeCoveragePct   = totalStores > 0
+                        ? Math.round(storeCoverageCount / totalStores * 100) : 0;
 
-                    // SKU ที่ขายได้จริงใน group นี้ ÷ keywords ทั้งหมด
-                    // (นับ unique prodCode ที่ match)
-                    const skusSold = new Set(matchedRows.map(r => r.prodCode).filter(Boolean));
-                    // หา unique prodCode ที่ควรขายได้ (จาก allProdOptions ที่ match)
-                    const targetSkus = new Set(SkuDist._allProdOptions
-                        .filter(p => kws.some(k => p.code.toLowerCase().includes(k) || p.name.toLowerCase().includes(k)))
-                        .map(p => p.code));
+                    // ร้านที่ยังไม่ซื้อ
+                    const storesNotBought = allStoresInRoute.filter(id => !storesBought.has(id));
+
+                    // SKU coverage
+                    const skusSold    = new Set(matchedRows.map(r => r.prodCode).filter(Boolean));
+                    const targetSkus  = groupTargetSkus[g.id];
                     const skuCoveragePct = targetSkus.size > 0
                         ? Math.round(skusSold.size / targetSkus.size * 100)
                         : (skusSold.size > 0 ? 100 : 0);
+
+                    // vs target
+                    const vsTarget = storeCoveragePct - routeTarget;
 
                     groupResult[g.id] = {
                         groupName:           g.name,
                         storeCoverageCount,
                         storeCoveragePct,
+                        storesNotBought,          // id ของร้านที่ยังไม่ซื้อ
                         skusSoldCount:       skusSold.size,
                         targetSkuCount:      targetSkus.size,
                         skuCoveragePct,
                         totalStores,
+                        routeTarget,
+                        vsTarget,                 // + = เกิน target, - = ต่ำกว่า target
                         vol: matchedRows.reduce((s, r) => s + (r.net || r.gross || 0), 0),
                     };
                 });
 
-                result[route] = { totalStores, groups: groupResult };
+                result[route] = { totalStores, routeTarget, groups: groupResult };
             });
 
             SkuDist._result = result;
@@ -674,78 +773,98 @@ const SkuDist = {
             return;
         }
 
-        const colSpan = 2 + groups.length * 2;
-
-        // Summary cards (รวมทุกสาย)
+        // ── Summary cards ──
         const summaryHtml = groups.map(g => {
-            const vals = routes.map(r => SkuDist._result[r]?.groups?.[g.id]);
-            const avgStore = vals.reduce((s,v) => s + (v?.storeCoveragePct||0), 0) / (vals.length||1);
-            const avgSku   = vals.reduce((s,v) => s + (v?.skuCoveragePct||0),   0) / (vals.length||1);
+            const vals     = routes.map(r => SkuDist._result[r]?.groups?.[g.id]);
+            const avgStore = vals.reduce((s,v) => s+(v?.storeCoveragePct||0),0) / (vals.length||1);
+            const avgSku   = vals.reduce((s,v) => s+(v?.skuCoveragePct||0),0)   / (vals.length||1);
+            const avgTgt   = vals.reduce((s,v) => s+(v?.routeTarget||0),0)      / (vals.length||1);
+            const aboveTarget = vals.filter(v => (v?.vsTarget||0) >= 0).length;
             return `
             <div class="bg-white border border-gray-100 rounded-2xl p-4 shadow-sm">
                 <p class="text-xs font-bold text-gray-500 mb-2">🎯 ${g.name}</p>
-                <div class="flex gap-4">
+                <div class="flex gap-3 flex-wrap">
                     <div>
                         <p class="text-2xl font-black ${SkuDist._coverageColor(avgStore)}">${Math.round(avgStore)}%</p>
-                        <p class="text-xs text-gray-400">เฉลี่ยร้านที่กระจาย</p>
+                        <p class="text-xs text-gray-400">เฉลี่ย store coverage</p>
+                    </div>
+                    <div>
+                        <p class="text-2xl font-black text-gray-400">${Math.round(avgTgt)}%</p>
+                        <p class="text-xs text-gray-400">เฉลี่ย target</p>
                     </div>
                     <div>
                         <p class="text-2xl font-black ${SkuDist._coverageColor(avgSku)}">${Math.round(avgSku)}%</p>
                         <p class="text-xs text-gray-400">เฉลี่ย SKU coverage</p>
                     </div>
                 </div>
+                <div class="mt-2 pt-2 border-t border-gray-100 flex gap-3 text-xs">
+                    <span class="text-emerald-600 font-bold">✓ ${aboveTarget} สายถึง target</span>
+                    <span class="text-red-500 font-bold">✗ ${routes.length - aboveTarget} สายไม่ถึง</span>
+                </div>
             </div>`;
         }).join('');
 
-        // Table
+        // ── Table ──
         const thead = `
         <tr class="bg-gray-50">
             <th class="px-3 py-2 text-left text-xs font-bold text-gray-500 sticky left-0 bg-gray-50">สาย</th>
-            <th class="px-3 py-2 text-center text-xs font-bold text-gray-500">ร้านทั้งหมด</th>
+            <th class="px-3 py-2 text-center text-xs font-bold text-gray-500">ร้าน</th>
             ${groups.map(g => `
-                <th class="px-3 py-2 text-center text-xs font-bold text-pink-700 bg-pink-50" colspan="2">${g.name}</th>
+                <th class="px-3 py-2 text-center text-xs font-bold text-pink-700 bg-pink-50" colspan="3">${g.name}</th>
             `).join('')}
         </tr>
         <tr class="bg-gray-50 border-b border-gray-200">
             <th class="px-3 py-1 sticky left-0 bg-gray-50"></th>
             <th class="px-3 py-1"></th>
             ${groups.map(() => `
-                <th class="px-3 py-1 text-center text-[10px] font-bold text-gray-400">ร้านที่กระจาย</th>
-                <th class="px-3 py-1 text-center text-[10px] font-bold text-gray-400">SKU coverage</th>
+                <th class="px-2 py-1 text-center text-[10px] font-bold text-gray-400">store coverage</th>
+                <th class="px-2 py-1 text-center text-[10px] font-bold text-gray-400">vs target</th>
+                <th class="px-2 py-1 text-center text-[10px] font-bold text-gray-400">SKU coverage</th>
             `).join('')}
         </tr>`;
 
         const tbody = routes.map(route => {
             const rd = SkuDist._result[route];
+            const rowCells = groups.map(g => {
+                const gd  = rd.groups?.[g.id] || {};
+                const sp  = gd.storeCoveragePct || 0;
+                const kp  = gd.skuCoveragePct   || 0;
+                const tgt = gd.routeTarget ?? 80;
+                const vs  = gd.vsTarget ?? (sp - tgt);
+                const vsColor  = vs >= 0 ? 'text-emerald-600' : 'text-red-500';
+                const vsPrefix = vs >= 0 ? '+' : '';
+                return `
+                <td class="px-2 py-2.5 text-center">
+                    <div class="flex flex-col items-center gap-0.5">
+                        <span class="text-sm font-black ${SkuDist._coverageColor(sp)}">${sp}%</span>
+                        <span class="text-[10px] text-gray-400">${gd.storeCoverageCount||0}/${rd.totalStores}</span>
+                        ${SkuDist._miniBar(sp, tgt)}
+                    </div>
+                </td>
+                <td class="px-2 py-2.5 text-center">
+                    <span class="text-sm font-black ${vsColor}">${vsPrefix}${Math.round(vs)}%</span>
+                    <p class="text-[10px] text-gray-400">tgt ${tgt}%</p>
+                </td>
+                <td class="px-2 py-2.5 text-center">
+                    <div class="flex flex-col items-center gap-0.5">
+                        <span class="text-sm font-black ${SkuDist._coverageColor(kp)}">${kp}%</span>
+                        <span class="text-[10px] text-gray-400">${gd.skusSoldCount||0}/${gd.targetSkuCount||0} SKU</span>
+                        ${SkuDist._miniBar(kp)}
+                    </div>
+                </td>`;
+            }).join('');
+
+            const anyBelowTarget = groups.some(g => (rd.groups?.[g.id]?.vsTarget ?? 0) < 0);
             return `
-            <tr class="border-b border-gray-100 hover:bg-pink-50/30 transition">
+            <tr class="border-b border-gray-100 hover:bg-pink-50/30 transition ${anyBelowTarget ? 'bg-red-50/20' : ''}">
                 <td class="px-3 py-2.5 font-bold text-xs text-indigo-700 sticky left-0 bg-white">${route}</td>
-                <td class="px-3 py-2.5 text-center text-xs text-gray-500">${rd.totalStores}</td>
-                ${groups.map(g => {
-                    const gd = rd.groups?.[g.id] || {};
-                    const sp = gd.storeCoveragePct || 0;
-                    const kp = gd.skuCoveragePct   || 0;
-                    return `
-                    <td class="px-3 py-2.5 text-center">
-                        <div class="flex flex-col items-center gap-0.5">
-                            <span class="text-sm font-black ${SkuDist._coverageColor(sp)}">${sp}%</span>
-                            <span class="text-[10px] text-gray-400">${gd.storeCoverageCount||0}/${rd.totalStores} ร้าน</span>
-                            ${SkuDist._miniBar(sp)}
-                        </div>
-                    </td>
-                    <td class="px-3 py-2.5 text-center">
-                        <div class="flex flex-col items-center gap-0.5">
-                            <span class="text-sm font-black ${SkuDist._coverageColor(kp)}">${kp}%</span>
-                            <span class="text-[10px] text-gray-400">${gd.skusSoldCount||0}/${gd.targetSkuCount||0} SKU</span>
-                            ${SkuDist._miniBar(kp)}
-                        </div>
-                    </td>`;
-                }).join('')}
+                <td class="px-2 py-2.5 text-center text-xs text-gray-500">${rd.totalStores}</td>
+                ${rowCells}
             </tr>`;
         }).join('');
 
         body.innerHTML = `
-            <div class="grid grid-cols-2 sm:grid-cols-${Math.min(groups.length, 4)} gap-3 mb-4">
+            <div class="grid grid-cols-1 sm:grid-cols-${Math.min(groups.length+1, 4)} gap-3 mb-4">
                 ${summaryHtml}
             </div>
             <div class="overflow-x-auto rounded-xl border border-gray-100">
@@ -762,10 +881,14 @@ const SkuDist = {
         return 'text-red-500';
     },
 
-    _miniBar: (pct) => {
+    _miniBar: (pct, target = null) => {
         const color = pct >= 80 ? '#10b981' : pct >= 50 ? '#f59e0b' : '#ef4444';
-        return `<div style="width:60px;height:4px;background:#e5e7eb;border-radius:99px;overflow:hidden;">
-            <div style="width:${pct}%;height:4px;background:${color};border-radius:99px;"></div>
+        const tgtMarker = target !== null
+            ? `<div style="position:absolute;left:${Math.min(target,100)}%;top:-2px;width:2px;height:8px;background:#6366f1;border-radius:1px;" title="target ${target}%"></div>`
+            : '';
+        return `<div style="position:relative;width:64px;height:4px;background:#e5e7eb;border-radius:99px;overflow:visible;">
+            <div style="width:${Math.min(pct,100)}%;height:4px;background:${color};border-radius:99px;"></div>
+            ${tgtMarker}
         </div>`;
     },
 
@@ -781,13 +904,18 @@ const SkuDist = {
             const rd = SkuDist._result[route];
             const row = { 'สาย': route, 'ร้านทั้งหมด': rd.totalStores };
             groups.forEach(g => {
-                const gd = rd.groups?.[g.id] || {};
-                row[`${g.name} — ร้านที่กระจาย (%)`]  = gd.storeCoveragePct || 0;
-                row[`${g.name} — ร้านที่กระจาย (ร้าน)`] = gd.storeCoverageCount || 0;
-                row[`${g.name} — SKU coverage (%)`]     = gd.skuCoveragePct   || 0;
-                row[`${g.name} — SKU ที่ขาย`]            = gd.skusSoldCount    || 0;
-                row[`${g.name} — SKU เป้าหมาย`]         = gd.targetSkuCount   || 0;
-                row[`${g.name} — ยอดขาย (Net)`]         = Math.round(gd.vol   || 0);
+                const gd  = rd.groups?.[g.id] || {};
+                const tgt = gd.routeTarget ?? rd.routeTarget ?? 80;
+                const vs  = (gd.storeCoveragePct || 0) - tgt;
+                row[`${g.name} — store coverage (%)`]       = gd.storeCoveragePct  || 0;
+                row[`${g.name} — target (%)`]               = tgt;
+                row[`${g.name} — vs target (%)`]            = Math.round(vs * 10) / 10;
+                row[`${g.name} — ร้านที่กระจาย (ร้าน)`]     = gd.storeCoverageCount || 0;
+                row[`${g.name} — ร้านที่ยังไม่กระจาย`]       = (gd.storesNotBought || []).join(', ');
+                row[`${g.name} — SKU coverage (%)`]         = gd.skuCoveragePct    || 0;
+                row[`${g.name} — SKU ที่ขาย`]               = gd.skusSoldCount     || 0;
+                row[`${g.name} — SKU เป้าหมาย`]             = gd.targetSkuCount    || 0;
+                row[`${g.name} — ยอดขาย (Net)`]             = Math.round(gd.vol    || 0);
             });
             rows.push(row);
         });
