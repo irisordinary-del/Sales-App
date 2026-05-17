@@ -144,6 +144,9 @@ const Dashboard = {
             <!-- KPI Cards row -->
             <div id="db-kpi-row" class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3"></div>
 
+            <!-- Active Campaign Coverage (โหลดจาก SkuDist) -->
+            <div id="db-campaign-section" class="hidden"></div>
+
             <!-- Middle row: By-Route table + ShopType pie -->
             <div class="grid grid-cols-1 lg:grid-cols-5 gap-4">
                 <!-- Route table -->
@@ -517,6 +520,8 @@ const Dashboard = {
     _render: () => {
         Dashboard._renderBreadcrumb();
         Dashboard._renderKPIs();
+        // แสดง active campaigns (async ไม่บล็อก KPI)
+        Dashboard._renderCampaignSection();
         Dashboard._renderRouteTable();
         Dashboard._renderShopTypes();
         Dashboard._renderCategories();
@@ -883,5 +888,146 @@ const Dashboard = {
         const bar = document.getElementById('db-upload-bar');
         if (bar) bar.classList.add('hidden');
     }
+    // ─── Active Campaign Coverage on Dashboard ──────────────────────────
+    _renderCampaignSection: async () => {
+        const el = document.getElementById('db-campaign-section');
+        if (!el) return;
+
+        // ต้องการ SkuDist และ cloudDB
+        if (typeof SkuDist === 'undefined' || typeof cloudDB === 'undefined') {
+            el.classList.add('hidden'); return;
+        }
+
+        // โหลด campaigns ของศูนย์นี้
+        try {
+            const snap = await cloudDB.collection('skuDistribution')
+                .where('centerId', '==', window.CENTER_DOC || '')
+                .get();
+
+            const now = DateUtil ? DateUtil.currentYM() : '';
+            // กรองเฉพาะ campaign ที่ยังอยู่ในช่วงเวลา (startYM <= now <= endYM)
+            const active = snap.docs
+                .map(d => ({ id: d.id, ...d.data() }))
+                .filter(c => c.startYM <= now && c.endYM >= now);
+
+            if (!active.length) {
+                el.classList.add('hidden'); return;
+            }
+
+            // โหลด SkuDist._allProdOptions ถ้ายังว่าง
+            if (SkuDist._allProdOptions.length === 0) await SkuDist._loadProdOptions();
+
+            // คำนวณทุก active campaign
+            const cards = await Promise.all(active.map(async campaign => {
+                try {
+                    // โหลด sellout เดือนปัจจุบัน
+                    const ym = Dashboard._currentYM || now;
+                    const chunks = await cloudDB.collection('sellout').doc(ym)
+                        .collection('chunks').get();
+                    let allRows = [];
+                    chunks.forEach(doc => allRows = allRows.concat(doc.data().rows || []));
+
+                    // build custCode → route index
+                    const custToRoute = {};
+                    const routes = State?.db?.routeList || [];
+                    routes.forEach(route => {
+                        (State.db.routes?.[route] || []).forEach(s => {
+                            custToRoute[String(s.id)] = route;
+                        });
+                    });
+                    allRows.forEach(r => { r._route = custToRoute[String(r.custCode||'')] || null; });
+
+                    const targetUnit   = campaign.targetUnit || 'pct';
+                    const defaultTarget = campaign.defaultTarget ?? 80;
+                    const rawTargets   = campaign.routeTargets || {};
+                    const groups       = campaign.groups || [];
+
+                    // คำนวณ per group รวมทุกสาย
+                    const groupSummaries = groups.map(g => {
+                        const kws = (g.keywords || []).map(k => k.toLowerCase());
+                        let totalStoreAll = 0, totalBought = 0, totalTarget = 0;
+
+                        routes.forEach(route => {
+                            const allStores = (State.db.routes?.[route] || []).map(s => String(s.id));
+                            const storeSet  = new Set(allStores);
+                            totalStoreAll  += allStores.length;
+
+                            // target ของสายนี้
+                            const rawTgt = rawTargets[route] ?? null;
+                            const tgtPct = rawTgt !== null
+                                ? (targetUnit === 'count' ? (allStores.length > 0 ? rawTgt/allStores.length*100 : 0) : rawTgt)
+                                : defaultTarget;
+                            totalTarget += Math.round(tgtPct/100 * allStores.length);
+
+                            // rows ที่ match กลุ่ม + อยู่ในสายนี้
+                            const matched = allRows.filter(r =>
+                                r._route === route && storeSet.has(String(r.custCode||'')) &&
+                                kws.some(k => (r.prodCode||'').toLowerCase().includes(k) || (r.prodName||'').toLowerCase().includes(k))
+                            );
+                            const bought = new Set(matched.map(r => String(r.custCode)));
+                            totalBought += bought.size;
+                        });
+
+                        const pct    = totalStoreAll > 0 ? Math.round(totalBought/totalStoreAll*100) : 0;
+                        const tgtPct = totalStoreAll > 0 ? Math.round(totalTarget/totalStoreAll*100) : 0;
+                        const vs     = pct - tgtPct;
+                        const color  = pct >= tgtPct ? '#10b981' : pct >= tgtPct*0.8 ? '#f59e0b' : '#ef4444';
+                        const barW   = Math.min(pct, 100);
+                        const tgtW   = Math.min(tgtPct, 100);
+                        return { name: g.name, pct, tgtPct, vs, color, barW, tgtW, totalBought, totalTarget, totalStoreAll };
+                    });
+
+                    const startLbl = DateUtil ? DateUtil.ymToThaiShort(campaign.startYM) : campaign.startYM;
+                    const endLbl   = DateUtil ? DateUtil.ymToThaiShort(campaign.endYM)   : campaign.endYM;
+
+                    return `
+                    <div class="bg-white rounded-2xl shadow-sm border border-pink-100 overflow-hidden">
+                        <div class="flex items-center justify-between px-4 py-3 border-b border-pink-100 bg-pink-50/50">
+                            <div class="flex items-center gap-2">
+                                <span class="text-base">🎯</span>
+                                <span class="text-sm font-black text-gray-800">${campaign.name}</span>
+                                <span class="text-xs text-gray-400 font-medium">${startLbl} → ${endLbl}</span>
+                            </div>
+                            <button onclick="Nav.go('skudist')" class="text-xs text-pink-600 font-bold hover:underline">ดูรายละเอียด →</button>
+                        </div>
+                        <div class="p-4 grid grid-cols-1 sm:grid-cols-${Math.min(groupSummaries.length, 4)} gap-4">
+                            ${groupSummaries.map(gs => `
+                            <div>
+                                <div class="flex items-center justify-between mb-1.5">
+                                    <span class="text-xs font-bold text-gray-600">${gs.name}</span>
+                                    <span class="text-xs font-black" style="color:${gs.color}">${gs.pct}%</span>
+                                </div>
+                                <!-- Progress bar with target marker -->
+                                <div style="position:relative;height:8px;background:#e5e7eb;border-radius:99px;overflow:visible;margin-bottom:6px;">
+                                    <div style="width:${gs.barW}%;height:8px;background:${gs.color};border-radius:99px;"></div>
+                                    <div style="position:absolute;left:${gs.tgtW}%;top:-3px;width:2px;height:14px;background:#6366f1;border-radius:1px;" title="target ${gs.tgtPct}%"></div>
+                                </div>
+                                <div class="flex justify-between text-[10px] text-gray-500">
+                                    <span class="font-bold text-gray-800">${gs.totalBought.toLocaleString()}<span class="font-normal text-gray-400">/${gs.totalTarget.toLocaleString()} ร้าน</span></span>
+                                    <span class="${gs.vs >= 0 ? 'text-emerald-600' : 'text-red-500'} font-bold">${gs.vs >= 0 ? '+' : ''}${gs.vs}% vs target</span>
+                                </div>
+                            </div>`).join('')}
+                        </div>
+                    </div>`;
+                } catch(e) {
+                    console.warn('Dashboard campaign card error:', e);
+                    return '';
+                }
+            }));
+
+            const html = cards.filter(Boolean).join('');
+            if (html) {
+                el.innerHTML = html;
+                el.classList.remove('hidden');
+            } else {
+                el.classList.add('hidden');
+            }
+        } catch(e) {
+            console.warn('Dashboard._renderCampaignSection:', e);
+            el.classList.add('hidden');
+        }
+    },
+
+
 };
 
