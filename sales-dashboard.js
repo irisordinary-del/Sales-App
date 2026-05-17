@@ -12,6 +12,8 @@ const SalesDashboard = {
     _rows: [],           // rows ของ sales คนนี้
     _target: 0,          // target เดือนนี้
     _username: '',       // Salesman Code (uppercase)
+    _myRoute: '',        // route ของ sales เช่น "402V01"
+    _campaigns: [],      // active campaigns ของศูนย์นี้
     _ready: false,
 
     EXCLUDED_CATS: new Set(['อื่นๆ', 'กระเช้าของขวัญ']),
@@ -63,9 +65,14 @@ const SalesDashboard = {
         const lbl = document.getElementById('db-route-label');
         if (lbl) lbl.textContent = SalesDashboard._username;
 
+        // ดึง route จาก session หรือ State
+        const myRoute = Auth.getSession()?.username?.toUpperCase() || '';
+        SalesDashboard._myRoute = myRoute;
+
         SalesDashboard._ready = true;
         SalesDashboard._ensureKpiCards();
         SalesDashboard._loadMonthList();
+        SalesDashboard._loadCampaigns();
     },
 
     _ensureKpiCards: () => {
@@ -138,6 +145,7 @@ const SalesDashboard = {
             SalesDashboard._loadTarget(ym)
         ]);
         SalesDashboard._render();
+        SalesDashboard._renderCampaigns(ym);
     },
 
     // ─── โหลดข้อมูล Sellout เฉพาะ sCode ตัวเอง ───────────────────────────
@@ -307,6 +315,155 @@ const SalesDashboard = {
         if (!n || isNaN(n)) return '0';
         return Math.round(n).toLocaleString('th-TH');
     }
+    // ─── โหลด Active Campaigns ────────────────────────────────────────────
+    _loadCampaigns: async () => {
+        try {
+            const centerDoc = window.CENTER_DOC || Auth.getSession()?.centerDoc || '';
+            if (!centerDoc) return;
+            const snap = await db.collection('skuDistribution')
+                .where('centerId', '==', centerDoc)
+                .get();
+            SalesDashboard._campaigns = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        } catch (e) {
+            console.warn('SalesDashboard._loadCampaigns:', e);
+            SalesDashboard._campaigns = [];
+        }
+    },
+
+    // ─── Render Campaign Coverage สำหรับสายตัวเอง ────────────────────────
+    _renderCampaigns: async (ym) => {
+        const el = document.getElementById('db-campaign-section');
+        if (!el) return;
+
+        const now = ym || SalesDashboard._ym || '';
+        const route = SalesDashboard._myRoute;
+        if (!route || !now) { el.innerHTML = ''; return; }
+
+        // กรองเฉพาะ campaign ที่อยู่ในช่วงเวลา
+        const active = SalesDashboard._campaigns.filter(c =>
+            c.startYM <= now && c.endYM >= now &&
+            (c.groups || []).length > 0
+        );
+
+        if (!active.length) { el.innerHTML = ''; return; }
+
+        // โหลด prodOptions ถ้ายังไม่มี (ใช้ร่วมกับ SkuDist ถ้ามี)
+        let prodOptions = [];
+        if (typeof SkuDist !== 'undefined' && SkuDist._allProdOptions.length > 0) {
+            prodOptions = SkuDist._allProdOptions;
+        } else {
+            try {
+                const listSnap = await db.collection('sellout').get();
+                const months = listSnap.docs.map(d => d.id)
+                    .filter(id => /^\d{4}_\d{2}$/.test(id)).sort().reverse();
+                if (months.length) {
+                    const chunks = await db.collection('sellout').doc(months[0]).collection('chunks').get();
+                    const seen = new Map();
+                    chunks.forEach(doc => {
+                        (doc.data().rows || []).forEach(r => {
+                            const code = String(r.prodCode || '').trim();
+                            const name = String(r.prodName || '').trim();
+                            if (code && !seen.has(code)) seen.set(code, name);
+                        });
+                    });
+                    prodOptions = [...seen.entries()].map(([code, name]) => ({ code, name }));
+                }
+            } catch(e) { /* ไม่กระทบ */ }
+        }
+
+        // ร้านในสายตัวเอง (จาก State ถ้ามี)
+        const myStores = (typeof State !== 'undefined' && State.db?.routes?.[route])
+            ? State.db.routes[route].map(s => String(s.id))
+            : [];
+        const myStoreSet = new Set(myStores);
+        const totalStores = myStores.length;
+
+        // rows ของเดือนนี้ (ใช้ SalesDashboard._rows แต่กรองเฉพาะร้านในสาย)
+        const rows = SalesDashboard._rows.filter(r =>
+            myStoreSet.size > 0 ? myStoreSet.has(String(r.custCode || '')) : true
+        );
+
+        // render แต่ละ campaign
+        const cardsHtml = active.map(campaign => {
+            const groups   = campaign.groups || [];
+            const targetUnit    = campaign.targetUnit || 'pct';
+            const defaultTarget = campaign.defaultTarget ?? 80;
+            const rawTargets    = campaign.routeTargets || {};
+
+            // target สำหรับสายนี้
+            const rawTgt = rawTargets[route] ?? null;
+            const tgtPct = rawTgt !== null
+                ? (targetUnit === 'count'
+                    ? (totalStores > 0 ? Math.round(rawTgt / totalStores * 100) : 0)
+                    : rawTgt)
+                : defaultTarget;
+            const tgtCount = Math.round(tgtPct / 100 * totalStores);
+
+            const groupBars = groups.map(g => {
+                const kws = (g.keywords || []).map(k => k.toLowerCase());
+
+                // rows ที่ match
+                const matched = rows.filter(r => {
+                    const code = (r.prodCode || '').toLowerCase();
+                    const name = (r.prodName || '').toLowerCase();
+                    return kws.some(k => code.includes(k) || name.includes(k));
+                });
+                const bought = new Set(matched.map(r => String(r.custCode)));
+                const boughtCount = bought.size;
+                const pct   = totalStores > 0 ? Math.round(boughtCount / totalStores * 100) : 0;
+                const vs    = pct - tgtPct;
+                const color = pct >= tgtPct ? '#10b981' : pct >= tgtPct * 0.8 ? '#f59e0b' : '#ef4444';
+
+                // SKU coverage
+                const targetSkus = new Set(prodOptions
+                    .filter(p => kws.some(k => p.code.toLowerCase().includes(k) || p.name.toLowerCase().includes(k)))
+                    .map(p => p.code));
+                const soldSkus  = new Set(matched.map(r => r.prodCode).filter(Boolean));
+                const skuPct    = targetSkus.size > 0 ? Math.round(soldSkus.size / targetSkus.size * 100) : (soldSkus.size > 0 ? 100 : 0);
+
+                return `
+                <div style="margin-bottom:14px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;">
+                        <span style="font-size:12px;font-weight:700;color:#374151;">${g.name}</span>
+                        <span style="font-size:14px;font-weight:900;color:${color};">${pct}%</span>
+                    </div>
+                    <!-- Bar -->
+                    <div style="position:relative;height:10px;background:#e5e7eb;border-radius:99px;overflow:visible;margin-bottom:5px;">
+                        <div style="width:${Math.min(pct,100)}%;height:10px;background:${color};border-radius:99px;"></div>
+                        <div style="position:absolute;left:${Math.min(tgtPct,100)}%;top:-3px;width:2px;height:16px;background:#6366f1;border-radius:1px;" title="target ${tgtPct}%"></div>
+                    </div>
+                    <!-- Stats -->
+                    <div style="display:flex;justify-content:space-between;font-size:10px;">
+                        <span style="color:#111827;font-weight:700;">${boughtCount}<span style="color:#9ca3af;font-weight:400;">/${tgtCount} ร้าน</span></span>
+                        <span style="color:${vs >= 0 ? '#10b981' : '#ef4444'};font-weight:700;">${vs >= 0 ? '+' : ''}${vs}% vs target</span>
+                    </div>
+                    <!-- SKU -->
+                    <div style="margin-top:4px;font-size:10px;color:#9ca3af;">
+                        SKU coverage: <span style="font-weight:700;color:#6366f1;">${skuPct}%</span>
+                        <span style="margin-left:4px;">(${soldSkus.size}/${targetSkus.size} SKU)</span>
+                    </div>
+                </div>`;
+            }).join('');
+
+            const startLbl = typeof DateUtil !== 'undefined' ? DateUtil.ymToThaiShort(campaign.startYM) : campaign.startYM;
+            const endLbl   = typeof DateUtil !== 'undefined' ? DateUtil.ymToThaiShort(campaign.endYM)   : campaign.endYM;
+
+            return `
+            <div class="db-card" style="flex-shrink:0;margin-bottom:12px;border-left:4px solid #ec4899;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                    <div>
+                        <div style="font-size:12px;font-weight:900;color:#111827;">🎯 ${campaign.name}</div>
+                        <div style="font-size:10px;color:#9ca3af;margin-top:2px;">${startLbl} → ${endLbl} &nbsp;|&nbsp; target ${tgtPct}% (${tgtCount} ร้าน)</div>
+                    </div>
+                </div>
+                ${groupBars}
+            </div>`;
+        }).join('');
+
+        el.innerHTML = cardsHtml;
+    },
+
+
 };
 
 // ─── Hook เข้า App.start() ── เรียก init หลัง login สำเร็จ ─────────────
