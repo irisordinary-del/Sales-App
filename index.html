@@ -132,6 +132,10 @@
                 <span class="text-xl md:text-lg md:mr-3">📦</span>
                 <span class="hidden md:inline">ภาพรวมทุกสาย</span>
             </button>
+            <button onclick="Nav.go('skudist')" id="nav-skudist" class="sidebar-menu w-full flex items-center justify-center md:justify-start px-0 md:px-5 py-3 md:py-3.5 text-sm font-bold">
+                <span class="text-xl md:text-lg md:mr-3">🎯</span>
+                <span class="hidden md:inline">กระจายสินค้า</span>
+            </button>
         </nav>
 
         <!-- User info — ล่างสุด sidebar -->
@@ -635,6 +639,7 @@
 
         <!-- ===== PAGE: Dashboard ===== -->
         <div id="page-dashboard" class="app-page"></div>
+        <div id="page-skudist" class="app-page hidden flex flex-col overflow-hidden" style="height:100%;"></div>
 
     </div><!-- end main-wrap -->
 
@@ -1505,5 +1510,6 @@
         };
         document.addEventListener('DOMContentLoaded', SidebarCtrl.restore);
     </script>
+    <script src="sku-distribution.js"></script>
 </body>
 </html>

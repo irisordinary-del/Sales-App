@@ -16,6 +16,9 @@ const Nav = {
         if (page === 'allroutes') {
             if (typeof UI !== 'undefined' && UI.renderAllRoutes) UI.renderAllRoutes();
         }
+        if (page === 'skudist') {
+            if (typeof SkuDist !== 'undefined') SkuDist.init();
+        }
         if (page === 'planning') {
             setTimeout(() => { if (MapCtrl.map) MapCtrl.map.invalidateSize(); }, 200);
         }

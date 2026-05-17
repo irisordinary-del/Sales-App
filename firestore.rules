@@ -13,6 +13,7 @@
 //   sellout/{year_month}                            ← Dashboard: Sellout metadata รายเดือน
 //   sellout/{year_month}/chunks/{chunkId}           ← Dashboard: Sellout rows แบ่ง chunk
 //   targets/{year_month}                            ← Dashboard: Target รายสายรายเดือน
+//   skuDistribution/{campaignId}                    ← SKU Distribution Campaigns
 //   routes/{routeName}                              ← ChunkDB routes (firebase-chunks.js)
 //   routes/{routeName}/chunks/{chunkId}             ← ChunkDB route chunks
 // ==========================================
@@ -166,6 +167,20 @@ service cloud.firestore {
                      && request.resource.data.rows is list
                      && request.resource.data.rows.size() <= 350;
       }
+    }
+
+    // ==========================================
+    // 🎯 skuDistribution — SKU Distribution Campaigns
+    // skuDistribution/{campaignId} ← { name, startYM, endYM, centerId, groups:[] }
+    // ==========================================
+    match /skuDistribution/{campaignId} {
+      allow read: if true;
+      allow delete: if true;
+      allow write: if request.resource.data.keys().hasAll(['name','centerId','groups'])
+                   && request.resource.data.name is string
+                   && request.resource.data.centerId is string
+                   && request.resource.data.groups is list
+                   && request.resource.data.groups.size() <= 20;
     }
 
     // ==========================================
