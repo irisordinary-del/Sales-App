@@ -8,6 +8,7 @@ const Dashboard = {
     // ─── State ───────────────────────────────────────────────────────────
     _session: null,
     _currentYM: '',          // 'YYYY_MM'
+    _rowCache: {},            // { 'YYYY_MM': rows[] } cache สำหรับ campaign
     _amountMode: 'gross',     // 'gross' | 'net'
     _drillRoute: null,        // null = ศูนย์ทั้งหมด
     _drillShopType: null,
@@ -72,6 +73,8 @@ const Dashboard = {
         Dashboard._currentYM = `${now.getFullYear()}_${String(now.getMonth() + 1).padStart(2, '0')}`;
 
         Dashboard._renderShell();
+        // โหลด campaign section แบบ async ไม่บล็อก UI
+        setTimeout(() => Dashboard._renderCampaignSection(), 1500);
         Dashboard._loadMonthList();
     },
 
@@ -83,46 +86,51 @@ const Dashboard = {
         const isAdmin = Dashboard._session.role === 'admin' || Dashboard._session.role === 'supervisor';
 
         container.innerHTML = `
-        <!-- Header -->
-        <div class="h-16 bg-gray-900 text-white flex items-center justify-between px-4 md:px-5 shadow-md shrink-0 border-b-4 border-emerald-600 z-10">
-            <div class="flex items-center gap-3 flex-wrap min-w-0">
+        <!-- Header: ชื่อระบบ + ศูนย์ -->
+        <div class="h-12 bg-gray-900 text-white flex items-center justify-between px-3 md:px-4 shadow-md shrink-0 border-b-2 border-emerald-600 z-10">
+            <div class="flex items-center gap-3">
                 <button type="button" onclick="SidebarCtrl.toggle()" class="w-8 h-8 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white flex items-center justify-center transition shrink-0" title="เมนู">
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
                         <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
                     </svg>
                 </button>
-                <span class="text-lg font-black text-emerald-400">📊 Dashboard</span>
+                <span class="text-base font-black text-indigo-400 tracking-wide">Route<span class="text-white">Plan</span></span>
+                <span id="header-center-label-db" class="text-xs text-gray-400 font-bold hidden sm:block"></span>
+            </div>
+            <span class="text-xs text-gray-500 font-bold">📊 Dashboard</span>
+        </div>
 
-                <!-- Month selector -->
-                <select id="db-month-select" onchange="Dashboard._onMonthChange(this.value)"
-                    class="bg-gray-800 border border-gray-600 text-white text-sm font-bold rounded-lg px-3 py-1.5 outline-none focus:ring-2 focus:ring-emerald-500">
-                    <option value="">-- เลือกเดือน --</option>
-                </select>
+        <!-- Filter bar -->
+        <div class="bg-white border-b border-gray-200 px-3 py-2 flex flex-wrap items-center gap-2 shrink-0 shadow-sm z-[9]">
+            <!-- Month selector -->
+            <select id="db-month-select" onchange="Dashboard._onMonthChange(this.value)"
+                class="bg-gray-50 border border-gray-200 text-gray-800 text-sm font-bold rounded-lg px-3 py-1.5 outline-none focus:ring-2 focus:ring-emerald-400">
+                <option value="">-- เลือกเดือน --</option>
+            </select>
 
-                <!-- Amount mode toggle -->
-                <div class="flex bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
-                    <button id="db-btn-gross" onclick="Dashboard._setAmountMode('gross')"
-                        class="px-3 py-1.5 text-xs font-bold transition bg-emerald-700 text-white">Gross</button>
-                    <button id="db-btn-net" onclick="Dashboard._setAmountMode('net')"
-                        class="px-3 py-1.5 text-xs font-bold transition text-gray-400">Net</button>
-                </div>
-
-                <!-- Upload button (admin/supervisor only) -->
-                ${isAdmin ? `
-                <label class="cursor-pointer bg-indigo-700 hover:bg-indigo-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition">
-                    📂 อัปโหลด Sellout
-                    <input type="file" id="db-file-input" accept=".xlsx,.xls" class="hidden" onchange="Dashboard._onFileUpload(event)">
-                </label>
-                ` : ''}
+            <!-- Amount mode toggle -->
+            <div class="flex bg-gray-100 rounded-lg border border-gray-200 overflow-hidden">
+                <button id="db-btn-gross" onclick="Dashboard._setAmountMode('gross')"
+                    class="px-3 py-1.5 text-xs font-bold transition bg-emerald-600 text-white">Gross</button>
+                <button id="db-btn-net" onclick="Dashboard._setAmountMode('net')"
+                    class="px-3 py-1.5 text-xs font-bold transition text-gray-500 hover:text-gray-800">Net</button>
             </div>
 
-            <div class="flex items-center gap-3">
-                <!-- Breadcrumb / Reset filter -->
-                <div id="db-breadcrumb" class="text-xs text-gray-400 font-medium hidden sm:flex items-center gap-1"></div>
-                <button id="db-reset-btn" onclick="Dashboard._resetDrill()" class="hidden text-xs bg-gray-700 hover:bg-gray-600 text-white px-3 py-1.5 rounded-lg font-bold transition">
-                    ↩ รีเซ็ต
-                </button>
-            </div>
+            <!-- Upload button (admin/supervisor only) -->
+            ${isAdmin ? `
+            <label class="cursor-pointer bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition shadow-sm">
+                📂 อัปโหลด Sellout
+                <input type="file" id="db-file-input" accept=".xlsx,.xls" class="hidden" onchange="Dashboard._onFileUpload(event)">
+            </label>
+            ` : ''}
+
+            <div class="flex-1"></div>
+
+            <!-- Breadcrumb / Reset -->
+            <div id="db-breadcrumb" class="text-xs text-gray-400 font-medium hidden sm:flex items-center gap-1"></div>
+            <button id="db-reset-btn" onclick="Dashboard._resetDrill()" class="hidden text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-200 px-3 py-1.5 rounded-lg font-bold transition">
+                ↩ รีเซ็ต
+            </button>
         </div>
 
         <!-- Upload progress bar -->
@@ -138,6 +146,9 @@ const Dashboard = {
 
             <!-- KPI Cards row -->
             <div id="db-kpi-row" class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3"></div>
+
+            <!-- Active Campaign Coverage (โหลดจาก SkuDist) -->
+            <div id="db-campaign-section" class="hidden"></div>
 
             <!-- Middle row: By-Route table + ShopType pie -->
             <div class="grid grid-cols-1 lg:grid-cols-5 gap-4">
@@ -877,6 +888,168 @@ const Dashboard = {
     _hideUploadBar: () => {
         const bar = document.getElementById('db-upload-bar');
         if (bar) bar.classList.add('hidden');
-    }
+    },
+
+    // ─── Active Campaign Coverage on Dashboard ──────────────────────────
+    _renderCampaignSection: async () => {
+        const el = document.getElementById('db-campaign-section');
+        if (!el) return;
+
+        if (typeof SkuDist === 'undefined' || typeof cloudDB === 'undefined') {
+            el.classList.add('hidden'); return;
+        }
+
+        try {
+            const nowYM = DateUtil ? DateUtil.currentYM() : '';
+            const snap  = await cloudDB.collection('skuDistribution')
+                .where('centerId', '==', window.CENTER_DOC || '')
+                .get();
+
+            // แสดงทุก campaign ที่ยังไม่หมดอายุ (endYM >= ปัจจุบัน)
+            const active = snap.docs
+                .map(d => ({ id: d.id, ...d.data() }))
+                .filter(c => c.endYM >= nowYM && (c.groups || []).length > 0);
+
+            if (!active.length) { el.classList.add('hidden'); return; }
+
+            if (SkuDist._allProdOptions.length === 0) await SkuDist._loadProdOptions();
+
+            // build custCode → route index (คงที่ไม่ขึ้นกับเดือน)
+            const custToRoute = {};
+            const routes = State?.db?.routeList || [];
+            routes.forEach(route => {
+                (State.db.routes?.[route] || []).forEach(s => {
+                    custToRoute[String(s.id)] = route;
+                });
+            });
+
+            // helper: range เดือน
+            const getRange = (startYM, endYM) => {
+                const months = []; let [y, m] = startYM.split('_').map(Number);
+                const [ey, em] = endYM.split('_').map(Number);
+                while (y < ey || (y === ey && m <= em)) {
+                    months.push(`${y}_${String(m).padStart(2,'0')}`);
+                    m++; if (m > 12) { m = 1; y++; }
+                }
+                return months;
+            };
+
+            // helper: โหลด rows ของเดือน (cached + tag _route)
+            const loadMonthRows = async (ym) => {
+                if (Dashboard._rowCache[ym]) return Dashboard._rowCache[ym];
+                try {
+                    const chunks = await cloudDB.collection('sellout').doc(ym).collection('chunks').get();
+                    let rows = [];
+                    chunks.forEach(doc => rows = rows.concat(doc.data().rows || []));
+                    rows.forEach(r => { r._route = custToRoute[String(r.custCode||'')] || null; });
+                    Dashboard._rowCache[ym] = rows;
+                    return rows;
+                } catch(e) {
+                    Dashboard._rowCache[ym] = [];
+                    return [];
+                }
+            };
+
+            el.innerHTML = '<p class="text-xs text-gray-400 text-center py-3">⏳ กำลังโหลดข้อมูล campaign...</p>';
+            el.classList.remove('hidden');
+
+            const cards = await Promise.all(active.map(async campaign => {
+                try {
+                    // โหลด rows ทุกเดือนใน campaign range
+                    const months = getRange(campaign.startYM, campaign.endYM);
+                    let allRows = [];
+                    for (const ym of months) {
+                        allRows = allRows.concat(await loadMonthRows(ym));
+                    }
+
+                    const targetUnit    = campaign.targetUnit || 'pct';
+                    const defaultTarget = campaign.defaultTarget ?? 80;
+                    const rawTargets    = campaign.routeTargets || {};
+                    const groups        = campaign.groups || [];
+
+                    const groupSummaries = groups.map(g => {
+                        const kws = (g.keywords || []).map(k => k.toLowerCase());
+                        let totalStoreAll = 0, totalBought = 0, totalTarget = 0;
+
+                        routes.forEach(route => {
+                            const allStores = (State.db.routes?.[route] || []).map(s => String(s.id));
+                            const storeSet  = new Set(allStores);
+                            totalStoreAll  += allStores.length;
+
+                            const rawTgt = rawTargets[route] ?? null;
+                            const tgtPct = rawTgt !== null
+                                ? (targetUnit === 'count'
+                                    ? (allStores.length > 0 ? rawTgt/allStores.length*100 : 0)
+                                    : rawTgt)
+                                : defaultTarget;
+                            totalTarget += Math.round(tgtPct/100 * allStores.length);
+
+                            const matched = allRows.filter(r =>
+                                r._route === route &&
+                                storeSet.has(String(r.custCode||'')) &&
+                                kws.some(k =>
+                                    (r.prodCode||'').toLowerCase().includes(k) ||
+                                    (r.prodName||'').toLowerCase().includes(k))
+                            );
+                            totalBought += new Set(matched.map(r => String(r.custCode))).size;
+                        });
+
+                        const pct   = totalStoreAll > 0 ? Math.round(totalBought/totalStoreAll*100) : 0;
+                        const tgtPct2 = totalStoreAll > 0 ? Math.round(totalTarget/totalStoreAll*100) : 0;
+                        const vs    = pct - tgtPct2;
+                        const color = pct >= tgtPct2 ? '#10b981' : pct >= tgtPct2*0.8 ? '#f59e0b' : '#ef4444';
+                        return { name: g.name, pct, tgtPct: tgtPct2, vs, color,
+                            barW: Math.min(pct,100), tgtW: Math.min(tgtPct2,100),
+                            totalBought, totalTarget, totalStoreAll };
+                    });
+
+                    const startLbl = DateUtil ? DateUtil.ymToThaiShort(campaign.startYM) : campaign.startYM;
+                    const endLbl   = DateUtil ? DateUtil.ymToThaiShort(campaign.endYM)   : campaign.endYM;
+
+                    return `
+                    <div class="bg-white rounded-2xl shadow-sm border border-pink-100 overflow-hidden">
+                        <div class="flex items-center justify-between px-4 py-3 border-b border-pink-100 bg-pink-50/50">
+                            <div class="flex items-center gap-2">
+                                <span class="text-base">🎯</span>
+                                <span class="text-sm font-black text-gray-800">${campaign.name}</span>
+                                <span class="text-xs text-gray-400 font-medium">${startLbl} → ${endLbl} · ยอดรวมทั้งช่วง</span>
+                            </div>
+                            <button onclick="Nav.go('skudist')" class="text-xs text-pink-600 font-bold hover:underline">ดูรายละเอียด →</button>
+                        </div>
+                        <div class="p-4 grid grid-cols-1 sm:grid-cols-${Math.min(groupSummaries.length, 4)} gap-4">
+                            ${groupSummaries.map(gs => `
+                            <div>
+                                <div class="flex items-center justify-between mb-1.5">
+                                    <span class="text-xs font-bold text-gray-600">${gs.name}</span>
+                                    <span class="text-xs font-black" style="color:${gs.color}">${gs.pct}%</span>
+                                </div>
+                                <div style="position:relative;height:8px;background:#e5e7eb;border-radius:99px;overflow:visible;margin-bottom:6px;">
+                                    <div style="width:${gs.barW}%;height:8px;background:${gs.color};border-radius:99px;"></div>
+                                    <div style="position:absolute;left:${gs.tgtW}%;top:-3px;width:2px;height:14px;background:#6366f1;border-radius:1px;" title="target ${gs.tgtPct}%"></div>
+                                </div>
+                                <div class="flex justify-between text-[10px] text-gray-500">
+                                    <span class="font-bold text-gray-800">${gs.totalBought.toLocaleString()}<span class="font-normal text-gray-400">/${gs.totalTarget.toLocaleString()} ร้าน (target)</span></span>
+                                    <span class="${gs.vs >= 0 ? 'text-emerald-600' : 'text-red-500'} font-bold">${gs.vs >= 0 ? '+' : ''}${gs.vs}% vs target</span>
+                                </div>
+                            </div>`).join('')}
+                        </div>
+                    </div>`;
+                } catch(e) {
+                    console.warn('Dashboard campaign card error:', e);
+                    return '';
+                }
+            }));
+
+            const html = cards.filter(Boolean).join('');
+            if (html) { el.innerHTML = html; el.classList.remove('hidden'); }
+            else       { el.classList.add('hidden'); }
+
+        } catch(e) {
+            console.warn('Dashboard._renderCampaignSection:', e);
+            el.classList.add('hidden');
+        }
+    },
+
+
 };
 

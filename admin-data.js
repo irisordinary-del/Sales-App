@@ -116,9 +116,10 @@ const RawDataMgr = {
     },
 
     applyImport: () => {
-        const REQUIRED_COLS = ['CY', 'รหัส', 'ชื่อ', 'Sales', 'ประเภทร้าน1', 'Sold To City', 'Sold To State', 'Address 5', 'Latitude', 'Longitude', 'ชื่อสาย', 'Day']; const selectedCols = (RawDataMgr.tempJson[0] ? Object.keys(RawDataMgr.tempJson[0]) : []).filter(c => REQUIRED_COLS.includes(c));
-        // [ROLLBACK] document.querySelectorAll('.raw-col-cb:checked').forEach(cb => selectedCols.push(cb.value));
-        // [ROLLBACK] if (selectedCols.length === 0) return UI.showErrorToast('กรุณาเลือกอย่างน้อย 1 คอลัมน์');
+        // กรองเฉพาะ column ที่จำเป็น — checkbox ใน modal เป็น UI แสดงข้อมูลเท่านั้น
+        const REQUIRED_COLS = ['CY', 'รหัส', 'ชื่อ', 'Sales', 'ประเภทร้าน1', 'Sold To City', 'Sold To State', 'Address 5', 'Latitude', 'Longitude', 'ชื่อสาย', 'Day'];
+        const selectedCols = (RawDataMgr.tempJson[0] ? Object.keys(RawDataMgr.tempJson[0]) : []).filter(c => REQUIRED_COLS.includes(c));
+        if (selectedCols.length === 0) return UI.showErrorToast('ไม่พบ column ที่จำเป็น กรุณาตรวจสอบ header ของไฟล์');
 
         const modal = document.getElementById('columnSelectModal');
         if (modal) modal.classList.add('hidden');
@@ -415,7 +416,7 @@ const ExcelIO = {
                                                     'Sold To State': s.district || '',
                                                     'Address 5': s.province || '',
                                                     'Latitude': s.lat,
-                                                    'Longtitude': s.lng,
+                                                    'Longitude': s.lng,  // แก้บัค: typo Longtitude → Longitude
                                                     'ชื่อตลาด': s.marketName || '',
                                                     'Day': s.days && s.days.length > 0 ? s.days[0] : (rawRow['Day'] || rawRow['L'] || ''),
                                     'seq': (() => { const d0 = s.days && s.days.length > 0 ? s.days[0] : (rawRow['Day'] || rawRow['L'] || ''); return (s.seqs && d0 && s.seqs[d0] !== undefined) ? s.seqs[d0] : ''; })()
@@ -431,7 +432,7 @@ const ExcelIO = {
 
                 // Create worksheet with 12 columns matching upload format
                 const ws = XLSX.utils.json_to_sheet(exportData, {
-                                header: ['CY', 'รหัส', 'ชื่อ', 'Sales', 'ประเภทร้านค้า1', 'Sold To City', 'Sold To State', 'Address 5', 'Latitude', 'Longtitude', 'ชื่อตลาด', 'Day', 'seq']
+                                header: ['CY', 'รหัส', 'ชื่อ', 'Sales', 'ประเภทร้านค้า1', 'Sold To City', 'Sold To State', 'Address 5', 'Latitude', 'Longitude', 'ชื่อตลาด', 'Day', 'seq']
                 });
 
                 // Set column widths
@@ -468,6 +469,30 @@ const App = {
         return cloudDB.collection('appData').doc(window.CENTER_DOC || 'v1_main');
     },
     routesCol:  () => cloudDB.collection('appData').doc(window.CENTER_DOC || 'v1_main').collection('routes'),
+
+    // ─── Plan Mode helpers ───────────────────────────────────────────────
+    // planMode: 'active' | 'draft:{YYYY_MM}' | 'history:{YYYY_MM}'
+    _planMode: 'active',
+
+    draftsCol:  () => cloudDB.collection('appData').doc(window.CENTER_DOC || 'v1_main').collection('drafts'),
+    historyCol: () => cloudDB.collection('appData').doc(window.CENTER_DOC || 'v1_main').collection('history'),
+
+    // ส่งคืน collection ตาม planMode ปัจจุบัน
+    currentRoutesCol: () => {
+        const m = App._planMode;
+        if (m === 'active') return App.routesCol();
+        if (m.startsWith('draft:')) {
+            const ym = m.replace('draft:', '');
+            return App.draftsCol().doc(ym).collection('routes');
+        }
+        if (m.startsWith('history:')) {
+            const ym = m.replace('history:', '');
+            return App.historyCol().doc(ym).collection('routes');
+        }
+        return App.routesCol();
+    },
+
+    isReadOnly: () => App._planMode.startsWith('history:'),
     _snapshotUnsub: null,
     _fileListenersReady: false,
 
@@ -488,8 +513,10 @@ const App = {
     // โหลดทุกสายจาก subcollection พร้อมกัน
     _loadAllRoutes: async (routeList) => {
         State.db.routes = {};
+        // ใช้ currentRoutesCol() เพื่อโหลดจาก path ที่ถูกต้องตาม mode
+        const col = App.currentRoutesCol();
         await Promise.all(routeList.map(name =>
-            App.routesCol().doc(name).get()
+            col.doc(name).get()
                 .then(d => {
                     const stores = d.exists ? (d.data().stores || []) : [];
                     State.db.routes[name] = stores;
@@ -704,19 +731,30 @@ const App = {
         });
     },
 
-    // ✅ saveDB: บันทึกทีละสายใน subcollection (ไม่เกิน 1MB ต่อสาย)
+    // ✅ saveDB: บันทึกทีละสายใน subcollection — รองรับ active/draft
     saveDB: () => {
+        if (App.isReadOnly()) {
+            UI.showErrorToast('⚠️ ไม่สามารถแก้ไข History ได้ครับ');
+            return;
+        }
         State.db.routes[State.localActiveRoute] = State.stores;
         const routeList = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
-        Promise.all([
-            App.routesCol().doc(State.localActiveRoute).set({ stores: State.stores }),
-            App.dbRef.update({ routeList, cycleDays: State.db.cycleDays || 24 })
-        ])
-        .then(() => UI.showSaveToast('💾 บันทึกเรียบร้อย'))
-        .catch(err => {
-            console.error('saveDB error:', err);
-            UI.showErrorToast('❌ บันทึกไม่สำเร็จ — ตรวจสอบอินเทอร์เน็ต');
-        });
+
+        const isDraft = App._planMode.startsWith('draft:');
+        const ym = isDraft ? App._planMode.replace('draft:', '') : null;
+
+        const routePromise = App.currentRoutesCol().doc(State.localActiveRoute).set({ stores: State.stores });
+        const metaPromise  = isDraft
+            ? App.draftsCol().doc(ym).set({ routeList, cycleDays: State.db.cycleDays || 24, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true })
+            : App.dbRef.update({ routeList, cycleDays: State.db.cycleDays || 24 });
+
+        const modeLabel = isDraft ? `📝 Draft ${ym}` : '💾';
+        Promise.all([routePromise, metaPromise])
+            .then(() => UI.showSaveToast(`${modeLabel} บันทึกเรียบร้อย`))
+            .catch(err => {
+                console.error('saveDB error:', err);
+                UI.showErrorToast('❌ บันทึกไม่สำเร็จ — ตรวจสอบอินเทอร์เน็ต');
+            });
     },
 
     // แก้บัค: reset tab กลับ tab1 ทุกครั้งที่ sync
@@ -731,18 +769,18 @@ const App = {
         }
         MapCtrl.clearAll();
         UI.initDaySelector();
-        UI.switchTab('tab1');  // แก้บัค: reset tab กลับต้นเสมอ
+        UI.switchTab('tab1'); // reset tab (แต่ switchTab จะ guard ไม่ให้ทับ tab ที่ user เลือกอยู่)
         UI.render();
     },
 
     switchRoute: (name) => {
         if (State.localActiveRoute === name) return;
         State.localActiveRoute = name;
-        localStorage.setItem('last_viewed_route', name);
+        if (App._planMode === 'active') localStorage.setItem('last_viewed_route', name);
         // ถ้า route นี้ยังไม่ได้โหลด → ดึงจาก Firestore
         if (State.db.routes[name] === undefined) {
             UI.showLoader('กำลังโหลดสาย ' + name + '...');
-            App.routesCol().doc(name).get().then(d => {
+            App.currentRoutesCol().doc(name).get().then(d => {
                 State.db.routes[name] = d.exists ? (d.data().stores || []) : [];
                 State.stores = State.db.routes[name];
                 App.sync(); MapCtrl.fitToStores(); UI.hideLoader();
@@ -764,10 +802,8 @@ const App = {
             + '<button id="_add-route-cancel" style="padding:8px 18px;border-radius:8px;border:1px solid #d1d5db;background:#fff;color:#6b7280;cursor:pointer;font-size:13px;font-weight:600;">ยกเลิก</button>'
             + '<button id="_add-route-ok" style="padding:8px 18px;border-radius:8px;border:none;background:#4f46e5;color:#fff;cursor:pointer;font-size:13px;font-weight:700;">เพิ่ม</button>'
             + '</div>';
-        overlay.appendChild(box);
-        document.body.appendChild(box);
+        overlay.appendChild(box);  // แก้บัค: appendChild เพียงครั้งเดียว ไม่ซ้ำ
         document.body.appendChild(overlay);
-        overlay.appendChild(box);
         const inp = box.querySelector('#_add-route-inp');
         inp.focus();
         const close = () => { if (document.body.contains(overlay)) document.body.removeChild(overlay); };
@@ -813,9 +849,10 @@ const App = {
             State.localActiveRoute = newName;
             App.sync();
             const routeList = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
+            // แก้บัค: ใช้ currentRoutesCol() ให้ตรงกับ planMode ปัจจุบัน
             Promise.all([
-                App.routesCol().doc(oldName).delete(),
-                App.routesCol().doc(newName).set({ stores: State.db.routes[newName] || [] }),
+                App.currentRoutesCol().doc(oldName).delete(),
+                App.currentRoutesCol().doc(newName).set({ stores: State.db.routes[newName] || [] }),
                 App.dbRef.update({ routeList })
             ])
             .then(() => UI.showSaveToast('💾 เปลี่ยนชื่อสายเรียบร้อย'))
@@ -847,6 +884,174 @@ const App = {
             .then(() => UI.showSaveToast('🗑️ ลบสายเรียบร้อย'))
             .catch(err => UI.showErrorToast('❌ ลบไม่สำเร็จ: ' + err.message));
         });
+    },
+
+    // ─── Plan Management ────────────────────────────────────────────────
+
+    // โหลด plan ตาม mode (active / draft:YYYY_MM / history:YYYY_MM)
+    switchPlanMode: async (mode) => {
+        App._planMode = mode;
+        State.db.routes = {};
+
+        const isActive  = mode === 'active';
+        const isDraft   = mode.startsWith('draft:');
+        const isHistory = mode.startsWith('history:');
+        const ym = (isDraft || isHistory) ? mode.split(':')[1] : null;
+
+        UI.showLoader('กำลังโหลด Plan...', isActive ? 'โหลด Plan ปัจจุบัน' : `โหลด ${isDraft ? 'Draft' : 'History'} ${ym || ''}`);
+
+        try {
+            let routeList, cycleDays;
+
+            if (isActive) {
+                const doc = await App.dbRef.get();
+                const d = doc.exists ? doc.data() : {};
+                routeList  = (d.routeList || []).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
+                cycleDays  = d.cycleDays || 24;
+            } else if (isDraft) {
+                const doc = await App.draftsCol().doc(ym).get();
+                const d = doc.exists ? doc.data() : {};
+                routeList  = (d.routeList || State.db.routeList || []).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
+                cycleDays  = d.cycleDays || State.db.cycleDays || 24;
+            } else {
+                const doc = await App.historyCol().doc(ym).get();
+                const d = doc.exists ? doc.data() : {};
+                routeList  = (d.routeList || []).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
+                cycleDays  = d.cycleDays || 24;
+            }
+
+            State.db.routeList = routeList.length ? routeList : (State.db.routeList || []);
+            State.db.cycleDays = cycleDays;
+
+            await App._loadAllRoutes(State.db.routeList);
+
+            State.localActiveRoute = State.db.routeList[0] || '';
+            State.stores = State.db.routes[State.localActiveRoute] || [];
+
+            // อัปเดต UI badge
+            PlanUI.updateBadge();
+            App.sync();
+            MapCtrl.fitToStores();
+            UI.hideLoader();
+
+            const label = isActive ? 'Plan ปัจจุบัน' : (isDraft ? `Draft ${ym}` : `History ${ym}`);
+            UI.showSaveToast(`✅ โหลด ${label} เสร็จ`);
+        } catch (err) {
+            UI.hideLoader();
+            UI.showErrorToast('❌ โหลด Plan ไม่สำเร็จ: ' + err.message);
+            console.error('switchPlanMode error:', err);
+        }
+    },
+
+    // สร้าง Draft จาก Active plan ปัจจุบัน
+    createDraft: async (ym) => {
+        if (!ym) return;
+        UI.showLoader('กำลังสร้าง Draft...', `Copy plan → Draft ${ym}`);
+        try {
+            // เช็คว่ามี draft นี้แล้วหรือยัง
+            const existing = await App.draftsCol().doc(ym).get();
+            if (existing.exists) {
+                UI.hideLoader();
+                UI.showErrorToast(`⚠️ Draft ${ym} มีอยู่แล้วครับ`);
+                return;
+            }
+
+            // Copy routeList + cycleDays
+            const meta = {
+                routeList:  State.db.routeList,
+                cycleDays:  State.db.cycleDays || 24,
+                createdAt:  firebase.firestore.FieldValue.serverTimestamp(),
+                sourceMode: 'active'
+            };
+            await App.draftsCol().doc(ym).set(meta);
+
+            // Copy ทุกสาย
+            const draftRoutesCol = App.draftsCol().doc(ym).collection('routes');
+            await Promise.all(State.db.routeList.map(async name => {
+                const stores = State.db.routes[name] || [];
+                await draftRoutesCol.doc(name).set({ stores });
+            }));
+
+            // อัปเดต draftList ใน metadata
+            const curDoc = await App.dbRef.get();
+            const curData = curDoc.exists ? curDoc.data() : {};
+            const draftList = [...new Set([...(curData.draftList || []), ym])].sort();
+            await App.dbRef.update({ draftList });
+
+            UI.hideLoader();
+            UI.showSaveToast(`✅ สร้าง Draft ${ym} เรียบร้อย`);
+            if (typeof PlanUI !== 'undefined') PlanUI.refresh();
+        } catch (err) {
+            UI.hideLoader();
+            UI.showErrorToast('❌ สร้าง Draft ไม่สำเร็จ: ' + err.message);
+            console.error('createDraft error:', err);
+        }
+    },
+
+    // Activate: copy active→history, draft→active
+    activateDraft: async (ym) => {
+        UI.showLoader('กำลัง Activate...', `Draft ${ym} → Active`);
+        try {
+            // 1. Snapshot active → history
+            const activeDoc = await App.dbRef.get();
+            const activeData = activeDoc.exists ? activeDoc.data() : {};
+            const histYm = PlanUI.currentYM(); // เดือนปัจจุบัน
+            const histMeta = {
+                routeList:   activeData.routeList  || [],
+                cycleDays:   activeData.cycleDays  || 24,
+                archivedAt:  firebase.firestore.FieldValue.serverTimestamp(),
+                label:       histYm
+            };
+            await App.historyCol().doc(histYm).set(histMeta);
+
+            // copy routes active → history
+            const histRoutesCol = App.historyCol().doc(histYm).collection('routes');
+            await Promise.all((activeData.routeList || []).map(async name => {
+                const rd = await App.routesCol().doc(name).get();
+                const stores = rd.exists ? (rd.data().stores || []) : [];
+                await histRoutesCol.doc(name).set({ stores });
+            }));
+
+            // 2. Load draft
+            const draftDoc = await App.draftsCol().doc(ym).get();
+            const draftData = draftDoc.exists ? draftDoc.data() : {};
+            const newRouteList = (draftData.routeList || []).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
+            const newCycleDays = draftData.cycleDays || 24;
+
+            // copy routes draft → active
+            const draftRoutesCol = App.draftsCol().doc(ym).collection('routes');
+            const draftRoutes = await draftRoutesCol.get();
+            const activeRoutesCol = App.routesCol();
+            await Promise.all(draftRoutes.docs.map(async d => {
+                await activeRoutesCol.doc(d.id).set(d.data());
+            }));
+
+            // 3. อัปเดต metadata active
+            const curDoc = await App.dbRef.get();
+            const curData = curDoc.exists ? curDoc.data() : {};
+            const historyList = [...new Set([...(curData.historyList || []), histYm])].sort().reverse();
+            const draftList   = (curData.draftList || []).filter(d => d !== ym);
+
+            await App.dbRef.update({
+                routeList:   newRouteList,
+                cycleDays:   newCycleDays,
+                historyList,
+                draftList,
+                lastActivated: ym,
+                updatedAt:   firebase.firestore.FieldValue.serverTimestamp()
+            });
+
+            UI.hideLoader();
+            UI.showSaveToast(`✅ Activate ${ym} เรียบร้อย! Sales จะเห็น Plan ใหม่ทันที`);
+
+            // Reload active mode
+            await App.switchPlanMode('active');
+            if (typeof PlanUI !== 'undefined') PlanUI.refresh();
+        } catch (err) {
+            UI.hideLoader();
+            UI.showErrorToast('❌ Activate ไม่สำเร็จ: ' + err.message);
+            console.error('activateDraft error:', err);
+        }
     },
 
     clearStores: () => {
@@ -987,14 +1192,330 @@ const App = {
             if (UI && UI.render) UI.render();
             if (App && App.saveDB) App.saveDB();
             
-            if (UI && UI.showSaveToast) {
-                UI.showSaveToast('✅ เคลียร์การจัดสายเสร็จ');
-            } else {
-                UI.showSaveToast('✅ เคลียร์การจัดสายเสร็จ');
-            }
+            UI.showSaveToast('✅ เคลียร์การจัดสายเสร็จ');
         } catch(err) {
             console.error('❌ Clear error:', err);
             UI.showErrorToast('❌ เกิดข้อผิดพลาด: ' + err.message);
         }
+    }
+};
+
+// ==========================================
+// 🔄 Store Transfer — ย้ายร้านระหว่างสาย
+// ==========================================
+const StoreTrans = {
+    _selectedIds: new Set(),
+
+    // เปิด modal ย้ายร้าน
+    open: () => {
+        StoreTrans._selectedIds.clear();
+        StoreTrans._renderRouteList();
+        StoreTrans._renderStoreList();
+        document.getElementById('transfer-modal').classList.remove('hidden');
+    },
+
+    close: () => {
+        document.getElementById('transfer-modal').classList.add('hidden');
+        StoreTrans._selectedIds.clear();
+    },
+
+    // render dropdown สาย source (= สายปัจจุบัน) และ target
+    _renderRouteList: () => {
+        const routes = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
+        const srcEl = document.getElementById('transfer-src-route');
+        const dstEl = document.getElementById('transfer-dst-route');
+        if (srcEl) {
+            srcEl.innerHTML = routes.map(r =>
+                `<option value="${r}" ${r === State.localActiveRoute ? 'selected' : ''}>${r}</option>`
+            ).join('');
+        }
+        if (dstEl) {
+            dstEl.innerHTML = routes.map(r =>
+                `<option value="${r}" ${r !== State.localActiveRoute ? '' : ''}>${r}</option>`
+            ).join('');
+            // default dst = อันแรกที่ไม่ใช่ src
+            const other = routes.find(r => r !== State.localActiveRoute);
+            if (other && dstEl) dstEl.value = other;
+        }
+        if (srcEl) srcEl.addEventListener('change', () => StoreTrans._renderStoreList());
+    },
+
+    // render รายการร้านของ src route
+    _renderStoreList: () => {
+        const srcEl = document.getElementById('transfer-src-route');
+        const srcRoute = srcEl ? srcEl.value : State.localActiveRoute;
+        const stores = State.db.routes[srcRoute] || [];
+        StoreTrans._selectedIds.clear();
+
+        const listEl = document.getElementById('transfer-store-list');
+        if (!listEl) return;
+
+        if (!stores.length) {
+            listEl.innerHTML = '<p class="text-center text-xs text-gray-400 py-6">ไม่มีร้านค้าในสายนี้</p>';
+            return;
+        }
+
+        listEl.innerHTML = stores.map(s => {
+            const dayTxt = s.days && s.days.length ? s.days.join(' & ') : 'รอจัดสาย';
+            const c = s.days && s.days.length && DAY_COLORS[s.days[0]] ? DAY_COLORS[s.days[0]].hex : '#9ca3af';
+            return `
+            <label class="flex items-center gap-2.5 p-2.5 bg-white border border-gray-100 rounded-xl cursor-pointer hover:bg-indigo-50 hover:border-indigo-200 transition">
+                <input type="checkbox" value="${s.id}" onchange="StoreTrans._toggle(this)"
+                    class="w-4 h-4 text-indigo-600 rounded flex-shrink-0">
+                <div class="flex-1 min-w-0">
+                    <p class="text-sm font-bold text-gray-800 truncate">${s.name} ${s.freq===2?'<span style="background:#ef4444;color:#fff;padding:1px 5px;border-radius:8px;font-size:9px;font-weight:700;">F2</span>':''}</p>
+                    <p class="text-[10px] text-gray-400 font-mono">${s.id}</p>
+                </div>
+                <span class="text-[10px] font-bold px-2 py-0.5 rounded-full text-white flex-shrink-0" style="background:${c};">${dayTxt}</span>
+            </label>`;
+        }).join('');
+    },
+
+    _toggle: (cb) => {
+        if (cb.checked) StoreTrans._selectedIds.add(cb.value);
+        else StoreTrans._selectedIds.delete(cb.value);
+        const countEl = document.getElementById('transfer-count');
+        if (countEl) countEl.textContent = StoreTrans._selectedIds.size;
+    },
+
+    selectAll: () => {
+        document.querySelectorAll('#transfer-store-list input[type=checkbox]').forEach(cb => {
+            cb.checked = true;
+            StoreTrans._selectedIds.add(cb.value);
+        });
+        const countEl = document.getElementById('transfer-count');
+        if (countEl) countEl.textContent = StoreTrans._selectedIds.size;
+    },
+
+    clearAll: () => {
+        document.querySelectorAll('#transfer-store-list input[type=checkbox]').forEach(cb => {
+            cb.checked = false;
+        });
+        StoreTrans._selectedIds.clear();
+        const countEl = document.getElementById('transfer-count');
+        if (countEl) countEl.textContent = 0;
+    },
+
+    // ยืนยันย้าย
+    confirm: async () => {
+        if (StoreTrans._selectedIds.size === 0)
+            return UI.showErrorToast('⚠️ กรุณาเลือกร้านที่ต้องการย้าย');
+
+        if (App.isReadOnly())
+            return UI.showErrorToast('⚠️ ไม่สามารถแก้ไข History ได้');
+
+        const srcEl = document.getElementById('transfer-src-route');
+        const dstEl = document.getElementById('transfer-dst-route');
+        const srcRoute = srcEl ? srcEl.value : State.localActiveRoute;
+        const dstRoute = dstEl ? dstEl.value : '';
+
+        if (!dstRoute || srcRoute === dstRoute)
+            return UI.showErrorToast('⚠️ กรุณาเลือกสายปลายทางที่ต่างจากต้นทาง');
+
+        const count = StoreTrans._selectedIds.size;
+        UI.showConfirm(
+            `ย้าย ${count} ร้าน\nจาก "${srcRoute}" → "${dstRoute}"\nยืนยันหรือไม่?`,
+            async () => {
+                UI.showLoader('กำลังย้ายร้าน...', `${count} ร้าน → ${dstRoute}`);
+                try {
+                    const srcStores = State.db.routes[srcRoute] || [];
+                    const dstStores = State.db.routes[dstRoute] || [];
+                    const toMove = srcStores.filter(s => StoreTrans._selectedIds.has(s.id));
+                    const remaining = srcStores.filter(s => !StoreTrans._selectedIds.has(s.id));
+
+                    // รีเซ็ต days/seqs ของร้านที่ย้าย (เพราะ sequence ของสายเดิมไม่ match)
+                    toMove.forEach(s => { s.days = []; s.seqs = {}; s.selected = false; });
+
+                    State.db.routes[srcRoute] = remaining;
+                    State.db.routes[dstRoute] = [...dstStores, ...toMove];
+
+                    // อัปเดต State.stores ถ้า route ที่กำลังดูอยู่ถูกกระทบ
+                    if (State.localActiveRoute === srcRoute) State.stores = remaining;
+                    if (State.localActiveRoute === dstRoute) State.stores = State.db.routes[dstRoute];
+
+                    // บันทึกทั้ง src และ dst
+                    await Promise.all([
+                        App.currentRoutesCol().doc(srcRoute).set({ stores: remaining }),
+                        App.currentRoutesCol().doc(dstRoute).set({ stores: State.db.routes[dstRoute] })
+                    ]);
+
+                    StoreTrans.close();
+                    App.sync();
+                    MapCtrl.fitToStores();
+                    UI.hideLoader();
+                    UI.showSaveToast(`✅ ย้าย ${count} ร้าน → ${dstRoute} เรียบร้อย`);
+                } catch (err) {
+                    UI.hideLoader();
+                    UI.showErrorToast('❌ ย้ายไม่สำเร็จ: ' + err.message);
+                }
+            }
+        );
+    }
+};
+
+// ==========================================
+// 📤 Export Controller — รองรับทุก planMode
+// ==========================================
+const ExportCtrl = {
+
+    // แปลง YYYY_MM → ชื่อเดือนภาษาไทย พ.ศ.
+    formatYM: (ym) => {
+        if (!ym) return '';
+        const [y, m] = ym.split('_');
+        const d = new Date(+y, +m - 1, 1);
+        return d.toLocaleDateString('th-TH', { year: 'numeric', month: 'long' });
+    },
+
+    // เปิด modal เลือก plan/route ก่อน export
+    openModal: () => {
+        const modal = document.getElementById('export-modal');
+        if (!modal) { ExportCtrl.exportCurrent(); return; }
+
+        // populate plan options
+        const planSel = document.getElementById('export-plan-sel');
+        if (planSel) {
+            const m = App._planMode;
+            let opts = `<option value="current">📊 Plan ที่เปิดอยู่ตอนนี้ (${m === 'active' ? 'Active' : m})</option>`;
+            opts += `<option value="active">✅ Active (Sales ใช้อยู่)</option>`;
+            planSel.innerHTML = opts;
+        }
+
+        // populate route options
+        const routeSel = document.getElementById('export-route-sel');
+        if (routeSel) {
+            const routes = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
+            routeSel.innerHTML = `<option value="ALL">📦 ทุกสาย</option>` +
+                routes.map(r => `<option value="${r}" ${r === State.localActiveRoute ? 'selected' : ''}>${r}</option>`).join('');
+        }
+
+        modal.classList.remove('hidden');
+    },
+
+    closeModal: () => {
+        const modal = document.getElementById('export-modal');
+        if (modal) modal.classList.add('hidden');
+    },
+
+    doExport: async () => {
+        const planSel  = document.getElementById('export-plan-sel');
+        const routeSel = document.getElementById('export-route-sel');
+        const planVal  = planSel  ? planSel.value  : 'current';
+        const routeVal = routeSel ? routeSel.value : State.localActiveRoute;
+
+        ExportCtrl.closeModal();
+
+        // ถ้าเลือก active และ planMode ไม่ใช่ active → ต้องโหลดจาก Firestore
+        if (planVal === 'active' && App._planMode !== 'active') {
+            UI.showLoader('กำลังโหลด Active Plan...', 'ดึงข้อมูลจาก Firestore');
+            try {
+                const routeList = (await App.dbRef.get()).data()?.routeList || [];
+                const routesToExport = routeVal === 'ALL' ? routeList : [routeVal];
+                const routeData = {};
+                await Promise.all(routesToExport.map(async name => {
+                    const d = await App.routesCol().doc(name).get();
+                    routeData[name] = d.exists ? (d.data().stores || []) : [];
+                }));
+                UI.hideLoader();
+                ExportCtrl._writeExcel(routeData, 'Active');
+            } catch (err) {
+                UI.hideLoader();
+                UI.showErrorToast('❌ โหลดไม่สำเร็จ: ' + err.message);
+            }
+            return;
+        }
+
+        // ใช้ State ปัจจุบัน
+        const routeData = {};
+        if (routeVal === 'ALL') {
+            Object.assign(routeData, State.db.routes);
+        } else {
+            routeData[routeVal] = State.db.routes[routeVal] || [];
+        }
+        const label = App._planMode === 'active' ? 'Active' :
+            App._planMode.startsWith('draft:') ? 'Draft_' + App._planMode.replace('draft:','') :
+            'History_' + App._planMode.replace('history:','');
+        ExportCtrl._writeExcel(routeData, label);
+    },
+
+    _writeExcel: (routeData, label) => {
+        const allStores = [];
+        Object.entries(routeData).forEach(([routeName, stores]) => {
+            (stores || []).forEach(s => {
+                allStores.push({
+                    'Route':           routeName,
+                    'CY':              s.cy || '',
+                    'รหัส':            s.id,
+                    'ชื่อ':            s.name,
+                    'Sales':           s.salesCode || '',
+                    'ประเภทร้านค้า1':  s.shopType || '',
+                    'Sold To City':    s.subDistrict || '',
+                    'Sold To State':   s.district || '',
+                    'Address 5':       s.province || '',
+                    'Latitude':        s.lat,
+                    'Longitude':       s.lng,
+                    'ชื่อตลาด':        s.marketName || '',
+                    'Day':             s.days && s.days.length > 0 ? s.days[0] : '',
+                    'seq':             (() => {
+                        const d0 = s.days && s.days.length > 0 ? s.days[0] : '';
+                        return (s.seqs && d0 && s.seqs[d0] !== undefined) ? s.seqs[d0] : '';
+                    })()
+                });
+            });
+        });
+
+        if (!allStores.length) return UI.showErrorToast('ไม่มีข้อมูลให้โหลดครับ');
+
+        allStores.sort((a, b) => {
+            if (a['Route'] !== b['Route']) return a['Route'].localeCompare(b['Route'], 'th', { numeric: true });
+            const da = a['Day'] ? parseInt(String(a['Day']).replace('Day ', '')) : 999;
+            const db2 = b['Day'] ? parseInt(String(b['Day']).replace('Day ', '')) : 999;
+            return da - db2;
+        });
+
+        const ws = XLSX.utils.json_to_sheet(allStores, {
+            header: ['Route','CY','รหัส','ชื่อ','Sales','ประเภทร้านค้า1','Sold To City','Sold To State','Address 5','Latitude','Longitude','ชื่อตลาด','Day','seq']
+        });
+        ws['!cols'] = [
+            {wch:10},{wch:14},{wch:12},{wch:40},{wch:10},{wch:10},
+            {wch:18},{wch:18},{wch:14},{wch:14},{wch:14},{wch:30},{wch:6},{wch:6}
+        ];
+
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'RoutePlan');
+        const now = new Date();
+        const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+        XLSX.writeFile(wb, `RoutePlan_${label}_${dateStr}.xlsx`);
+        UI.showSaveToast(`✅ Export ${allStores.length} ร้าน เรียบร้อย`);
+    },
+
+    // backward compat สำหรับ ExcelIO.export() เดิม
+    exportCurrent: () => {
+        const routeData = { [State.localActiveRoute]: State.stores };
+        ExportCtrl._writeExcel(routeData, State.localActiveRoute);
+    }
+};
+
+// ==========================================
+// 🗓️ ฟังก์ชัน utility — แปลง YYYY_MM → ไทย
+// ==========================================
+const DateUtil = {
+    // แปลง YYYY_MM → "มิถุนายน 2569" (พ.ศ.)
+    ymToThai: (ym) => {
+        if (!ym) return '';
+        const [y, m] = ym.split('_');
+        const d = new Date(+y, +m - 1, 1);
+        return d.toLocaleDateString('th-TH', { year: 'numeric', month: 'long' });
+    },
+    // แปลง YYYY_MM → "มิ.ย. 2569"
+    ymToThaiShort: (ym) => {
+        if (!ym) return '';
+        const [y, m] = ym.split('_');
+        const d = new Date(+y, +m - 1, 1);
+        return d.toLocaleDateString('th-TH', { year: 'numeric', month: 'short' });
+    },
+    // YYYY_MM ของเดือนปัจจุบัน
+    currentYM: () => {
+        const d = new Date();
+        return `${d.getFullYear()}_${String(d.getMonth()+1).padStart(2,'0')}`;
     }
 };

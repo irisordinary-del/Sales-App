@@ -469,9 +469,19 @@ const FileManager = {
                         '💾 กำลังบันทึก... (' + (_si + 1) + '/' + savedRoutes.length + ' สาย)',
                         'สาย ' + _n + ' — ' + (State.db.routes[_n] ? State.db.routes[_n].length : 0) + ' ร้าน'
                     );
-                    await App.routesCol().doc(_n).set({ stores: State.db.routes[_n] || [] });
+                    await App.currentRoutesCol().doc(_n).set({ stores: State.db.routes[_n] || [] });
                 }
-                await App.dbRef.update({ routeList, cycleDays: State.db.cycleDays || 24 });
+                // update metadata ถูก path ตาม mode
+                const isDraft = App._planMode && App._planMode.startsWith('draft:');
+                if (isDraft) {
+                    const ym = App._planMode.replace('draft:', '');
+                    await App.draftsCol().doc(ym).set(
+                        { routeList, cycleDays: State.db.cycleDays || 24, updatedAt: firebase.firestore.FieldValue.serverTimestamp() },
+                        { merge: true }
+                    );
+                } else {
+                    await App.dbRef.update({ routeList, cycleDays: State.db.cycleDays || 24 });
+                }
 
                 // อัปเดต State และ UI
                 if (!State.localActiveRoute || !State.db.routes[State.localActiveRoute]) {

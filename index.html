@@ -120,17 +120,21 @@
 
         <!-- Nav items -->
         <nav class="flex-1 py-3 space-y-1 overflow-hidden">
-            <button onclick="Nav.go('dashboard')" id="nav-dashboard" class="sidebar-menu w-full flex items-center justify-center md:justify-start px-0 md:px-5 py-3 md:py-3.5 text-sm font-bold">
+            <button onclick="Nav.go('dashboard')" id="nav-dashboard" class="sidebar-menu active w-full flex items-center justify-center md:justify-start px-0 md:px-5 py-3 md:py-3.5 text-sm font-bold">
                 <span class="text-xl md:text-lg md:mr-3">📊</span>
                 <span class="hidden md:inline">Dashboard</span>
             </button>
-            <button onclick="Nav.go('planning')" id="nav-planning" class="sidebar-menu active w-full flex items-center justify-center md:justify-start px-0 md:px-5 py-3 md:py-3.5 text-sm font-bold">
+            <button onclick="Nav.go('planning')" id="nav-planning" class="sidebar-menu w-full flex items-center justify-center md:justify-start px-0 md:px-5 py-3 md:py-3.5 text-sm font-bold">
                 <span class="text-xl md:text-lg md:mr-3">📍</span>
                 <span class="hidden md:inline">วางแผนคิวงาน</span>
             </button>
             <button onclick="Nav.go('allroutes')" id="nav-allroutes" class="sidebar-menu w-full flex items-center justify-center md:justify-start px-0 md:px-5 py-3 md:py-3.5 text-sm font-bold">
                 <span class="text-xl md:text-lg md:mr-3">📦</span>
                 <span class="hidden md:inline">ภาพรวมทุกสาย</span>
+            </button>
+            <button onclick="Nav.go('skudist')" id="nav-skudist" class="sidebar-menu w-full flex items-center justify-center md:justify-start px-0 md:px-5 py-3 md:py-3.5 text-sm font-bold">
+                <span class="text-xl md:text-lg md:mr-3">🎯</span>
+                <span class="hidden md:inline">กระจายสินค้า</span>
             </button>
         </nav>
 
@@ -177,46 +181,96 @@
 
         <!-- ===== PAGE: Planning ===== -->
 
-        <div id="page-planning" class="app-page">
+        <div id="page-planning" class="app-page hidden">
 
 
 
-            <!-- Header — responsive -->
-            <div class="h-14 bg-gray-900 text-white flex items-center justify-between px-3 md:px-5 shadow-md z-[5000] relative shrink-0 border-b-4 border-indigo-600">
-                <!-- Left: hamburger + route selector + actions -->
-                <div class="flex items-center gap-2 min-w-0 flex-1">
+            <!-- Header: ชื่อระบบ + ศูนย์ -->
+            <div class="h-12 bg-gray-900 text-white flex items-center justify-between px-3 md:px-4 shadow-md z-[5000] relative shrink-0 border-b-2 border-indigo-600">
+                <div class="flex items-center gap-3">
                     <button onclick="SidebarCtrl.toggle()"
                         class="w-8 h-8 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white flex items-center justify-center transition shrink-0">
                         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
                             <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
                         </svg>
                     </button>
-                    <div class="flex items-center bg-gray-800 rounded-lg p-1 border border-gray-700 min-w-0">
-                        <select id="routeSelector" onchange="App.switchRoute(this.value)"
-                            class="bg-gray-900 text-white border-none text-sm focus:ring-0 outline-none font-bold py-1 px-2 rounded cursor-pointer max-w-[100px] sm:max-w-[180px]">
-                        </select>
-                        <div class="flex items-center border-l border-gray-700 ml-1 pl-1">
-                            <button onclick="App.renameRoute()" class="text-gray-400 hover:text-white px-1.5 py-1 transition text-sm">✏️</button>
-                            <button onclick="App.deleteRoute()" class="text-gray-400 hover:text-red-400 px-1.5 py-1 transition text-sm">🗑️</button>
-                        </div>
-                    </div>
-                    <button onclick="App.addRoute()" class="bg-indigo-600 hover:bg-indigo-500 text-white px-2.5 py-1.5 rounded-md text-xs font-bold shadow-sm transition whitespace-nowrap">
-                        + สาย
-                    </button>
-                    <button onclick="document.getElementById('bulkUpload').click()" class="hidden sm:flex bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold items-center gap-1 whitespace-nowrap">
-                        📦 อัปโหลด
-                    </button>
-                    <input type="file" id="bulkUpload" accept=".xlsx,.xls" class="hidden" onchange="FileManager.bulkImport(event)">
+                    <span class="text-base font-black text-indigo-400 tracking-wide">Route<span class="text-white">Plan</span></span>
+                    <span id="header-center-label" class="text-xs text-gray-400 font-bold hidden sm:block"></span>
                 </div>
-                <!-- Right: summary button -->
-                <div class="flex items-center gap-2 ml-2 shrink-0">
-                    <button onclick="UI.showSummaryModal()" class="bg-gray-800 border border-gray-600 hover:bg-gray-700 px-3 py-1.5 rounded-lg text-xs font-bold transition text-white whitespace-nowrap">
-                        📊 <span class="hidden sm:inline">ภาพรวม</span>
+                <span class="text-xs text-gray-500 font-bold">📍 วางแผนคิวงาน</span>
+            </div>
+
+            <!-- Toolbar: route selector + actions -->
+            <div class="bg-gray-800 px-3 py-2 flex items-center gap-2 flex-wrap z-[4999] shrink-0 border-b border-gray-700">
+                <div class="flex items-center bg-gray-900 rounded-lg p-1 border border-gray-700 min-w-0">
+                    <select id="routeSelector" onchange="App.switchRoute(this.value)"
+                        class="bg-gray-900 text-white border-none text-sm focus:ring-0 outline-none font-bold py-1 px-2 rounded cursor-pointer max-w-[110px] sm:max-w-[200px]">
+                    </select>
+                    <div class="flex items-center border-l border-gray-700 ml-1 pl-1">
+                        <button onclick="App.renameRoute()" class="text-gray-400 hover:text-white px-1.5 py-1 transition text-sm" title="เปลี่ยนชื่อ">✏️</button>
+                        <button onclick="App.deleteRoute()" class="text-gray-400 hover:text-red-400 px-1.5 py-1 transition text-sm" title="ลบสาย">🗑️</button>
+                    </div>
+                </div>
+                <button onclick="App.addRoute()" class="bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm transition whitespace-nowrap">
+                    + สาย
+                </button>
+                <button onclick="StoreTrans.open()" class="bg-violet-600 hover:bg-violet-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm transition whitespace-nowrap" title="ย้ายร้านระหว่างสาย">
+                    🔀 ย้ายร้าน
+                </button>
+                <button onclick="document.getElementById('bulkUpload').click()" class="bg-emerald-700 hover:bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 whitespace-nowrap transition">
+                    📦 อัปโหลดพิกัด
+                </button>
+                <input type="file" id="bulkUpload" accept=".xlsx,.xls" class="hidden" onchange="FileManager.bulkImport(event)">
+                <div class="flex-1"></div>
+                <!-- Plan Selector -->
+                <div class="flex items-center gap-1.5">
+                    <div id="plan-mode-badge"
+                        style="font-size:10px;font-weight:800;padding:3px 8px;border-radius:6px;background:#059669;color:#fff;white-space:nowrap;">
+                        ✅ Active
+                    </div>
+                    <select id="plan-selector" onchange="PlanUI.onSelect(this.value)"
+                        class="bg-gray-700 border border-gray-600 text-white text-xs font-bold rounded-lg px-2 py-1.5 outline-none focus:ring-2 focus:ring-indigo-400 max-w-[130px]">
+                        <option value="active">📅 Plan ปัจจุบัน (Active)</option>
+                    </select>
+                    <button onclick="PlanUI.openCreateDraft()"
+                        class="bg-indigo-600 hover:bg-indigo-500 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap" title="สร้าง Draft เดือนหน้า">
+                        + Draft
+                    </button>
+                </div>
+                <button onclick="UI.showSummaryModal()" class="bg-gray-700 hover:bg-gray-600 border border-gray-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap">
+                    📊 ภาพรวม
+                </button>
+            </div>
+
+
+
+            <!-- Draft mode banner -->
+            <div id="draft-banner" style="display:none;"
+                class="bg-amber-50 border-b border-amber-200 px-4 py-2 flex items-center justify-between shrink-0">
+                <div class="flex items-center gap-2">
+                    <span style="font-size:13px;">📝</span>
+                    <span id="draft-banner-label" class="text-xs font-bold text-amber-800">กำลังแก้ไข Draft</span>
+                    <span class="text-xs text-amber-600">— การเปลี่ยนแปลงนี้จะไม่กระทบ Sales จนกว่าจะ Activate</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button onclick="CalendarAdmin.open(App._planMode)"
+                        class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition shadow-sm">
+                        📅 ตั้งค่าปฏิทิน
+                    </button>
+                    <button onclick="PlanUI.confirmActivate()"
+                        class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-1.5 rounded-lg text-xs font-bold transition shadow-sm">
+                        ✅ Activate
                     </button>
                 </div>
             </div>
 
-
+            <!-- History mode banner -->
+            <div id="history-banner" style="display:none;"
+                class="bg-blue-50 border-b border-blue-200 px-4 py-2 flex items-center gap-2 shrink-0">
+                <span style="font-size:13px;">🔒</span>
+                <span id="history-banner-label" class="text-xs font-bold text-blue-800">ดู History (Read-Only)</span>
+                <span class="text-xs text-blue-600">— ไม่สามารถแก้ไขได้</span>
+            </div>
 
             <!-- Map + Sidebar Panel -->
             <div class="flex-1 flex flex-col md:flex-row overflow-hidden">
@@ -297,13 +351,13 @@
 
                     <div class="flex border-b border-gray-200 text-sm bg-gray-50 shrink-0">
 
-                        <button onclick="UI.switchTab('tab1')" id="btn-tab1" class="tab-btn active flex-1 py-3 px-1">1. ข้อมูล</button>
+                        <button onclick="UI.userSwitchTab('tab1')" id="btn-tab1" class="tab-btn active flex-1 py-3 px-1">1. ข้อมูล</button>
 
-                        <button onclick="UI.switchTab('tab2')" id="btn-tab2" class="tab-btn flex-1 py-3 px-1">2. จัดสาย</button>
+                        <button onclick="UI.userSwitchTab('tab2')" id="btn-tab2" class="tab-btn flex-1 py-3 px-1">2. จัดสาย</button>
 
-                        <button onclick="UI.switchTab('tab3')" id="btn-tab3" class="tab-btn flex-1 py-3 px-1">3. แก้ไข</button>
+                        <button onclick="UI.userSwitchTab('tab3')" id="btn-tab3" class="tab-btn flex-1 py-3 px-1">3. แก้ไข</button>
 
-                        <button onclick="UI.switchTab('tab4')" id="btn-tab4" class="tab-btn flex-1 py-3 px-1">4. สรุป</button>
+                        <button onclick="UI.userSwitchTab('tab4')" id="btn-tab4" class="tab-btn flex-1 py-3 px-1">4. สรุป</button>
 
                     </div>
 
@@ -509,7 +563,7 @@
 
                         </div>
 
-                        <button onclick="ExcelIO.export()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-xl text-sm font-bold transition">
+                        <button onclick="ExportCtrl.openModal()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-xl text-sm font-bold transition">
 
                             📥 โหลดไฟล์ออก
 
@@ -530,18 +584,24 @@
 
         <div id="page-allroutes" class="app-page hidden">
 
-            <!-- Header -->
-            <div class="h-16 bg-gray-900 text-white flex items-center justify-between px-4 shadow-md z-[5000] relative shrink-0 border-b-4 border-indigo-500">
+            <!-- Header: ชื่อระบบ + ศูนย์ -->
+            <div class="h-12 bg-gray-900 text-white flex items-center justify-between px-3 md:px-4 shadow-md z-[5000] relative shrink-0 border-b-2 border-indigo-500">
                 <div class="flex items-center gap-3">
                     <button onclick="SidebarCtrl.toggle()" class="w-8 h-8 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white flex items-center justify-center transition shrink-0">
                         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
                             <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
                         </svg>
                     </button>
-                    <h1 class="text-xl font-black tracking-wide text-indigo-400 mr-2 hidden sm:block">Route<span class="text-white">Plan</span></h1>
-                    <span class="text-lg font-bold">📦 ภาพรวมทุกสาย</span>
+                    <span class="text-base font-black text-indigo-400 tracking-wide">Route<span class="text-white">Plan</span></span>
+                    <span id="header-center-label-ar" class="text-xs text-gray-400 font-bold hidden sm:block"></span>
                 </div>
-                <button onclick="FileManager.exportAllRoutes()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2 rounded-lg text-sm font-bold shadow-md transition flex items-center gap-2">
+                <span class="text-xs text-gray-500 font-bold">📦 ภาพรวมทุกสาย</span>
+            </div>
+
+            <!-- Action bar -->
+            <div class="bg-white border-b border-gray-200 px-4 py-2.5 flex items-center justify-between shrink-0 shadow-sm z-[4999]">
+                <h2 class="text-sm font-black text-gray-800">📋 รายการร้านค้าทุกสาย</h2>
+                <button onclick="FileManager.exportAllRoutes()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-xs font-bold shadow-sm transition flex items-center gap-1.5">
                     💾 Export ทุกสาย
                 </button>
             </div>
@@ -554,9 +614,8 @@
 
                 <!-- Route Table -->
                 <div class="bg-white rounded-2xl shadow-md overflow-hidden">
-                    <div class="p-4 border-b flex items-center justify-between bg-gray-50">
-                        <h2 class="font-black text-gray-800">📋 รายการร้านค้าทุกสาย</h2>
-                        <span id="allroutes-total" class="text-sm text-gray-500"></span>
+                    <div class="p-3 border-b flex items-center justify-between bg-gray-50">
+                        <span id="allroutes-total" class="text-sm text-gray-500 font-bold"></span>
                     </div>
                     <div class="overflow-x-auto">
                         <table class="w-full text-sm">
@@ -579,7 +638,8 @@
         </div>
 
         <!-- ===== PAGE: Dashboard ===== -->
-        <div id="page-dashboard" class="app-page hidden"></div>
+        <div id="page-dashboard" class="app-page"></div>
+        <div id="page-skudist" class="app-page hidden flex flex-col overflow-hidden" style="height:100%;"></div>
 
     </div><!-- end main-wrap -->
 
@@ -588,6 +648,90 @@
     <!-- ===== MODALS ===== -->
 
 
+
+
+    <!-- Store Transfer Modal — ย้ายร้านระหว่าง Sales -->
+    <div id="transfer-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-lg flex flex-col overflow-hidden" style="max-height:90dvh;">
+            <div class="p-5 border-b flex justify-between items-center bg-gray-50 flex-shrink-0">
+                <div>
+                    <h2 class="text-base font-black text-gray-900">🔀 ย้ายร้านระหว่างสาย</h2>
+                    <p class="text-xs text-gray-500 mt-0.5">เลือกร้านจากสายต้นทาง แล้วโอนไปสายปลายทาง</p>
+                </div>
+                <button onclick="StoreTrans.close()" class="w-8 h-8 rounded-full border border-gray-200 text-gray-400 hover:bg-gray-100 font-bold transition text-sm">✕</button>
+            </div>
+            <div class="p-5 flex-1 overflow-y-auto">
+                <!-- Route selectors -->
+                <div class="grid grid-cols-2 gap-3 mb-4">
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 uppercase mb-1.5">สายต้นทาง</label>
+                        <select id="transfer-src-route" onchange="StoreTrans._renderStoreList()"
+                            class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold outline-none focus:ring-2 focus:ring-violet-300">
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 uppercase mb-1.5">สายปลายทาง</label>
+                        <select id="transfer-dst-route"
+                            class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold outline-none focus:ring-2 focus:ring-violet-300">
+                        </select>
+                    </div>
+                </div>
+                <!-- Note -->
+                <div class="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 mb-3 text-xs text-amber-800 font-medium">
+                    ⚠️ ร้านที่ย้ายจะถูก reset วันวิ่ง (days/seq) เพราะสายใหม่อาจมี cycle ต่างกัน — Admin ต้องจัดวันให้ใหม่
+                </div>
+                <!-- Select all / clear -->
+                <div class="flex items-center justify-between mb-2">
+                    <p class="text-xs font-bold text-gray-600">เลือกร้านที่ต้องการย้าย</p>
+                    <div class="flex gap-2">
+                        <button onclick="StoreTrans.selectAll()" class="text-xs text-indigo-600 font-bold hover:underline">เลือกทั้งหมด</button>
+                        <span class="text-gray-300">|</span>
+                        <button onclick="StoreTrans.clearAll()" class="text-xs text-gray-400 font-bold hover:underline">ล้าง</button>
+                    </div>
+                </div>
+                <!-- Store list -->
+                <div id="transfer-store-list" class="flex flex-col gap-1.5 max-h-64 overflow-y-auto pr-1">
+                </div>
+            </div>
+            <div class="p-5 border-t flex items-center justify-between flex-shrink-0 bg-gray-50">
+                <p class="text-xs text-gray-500">เลือกแล้ว <span id="transfer-count" class="font-black text-violet-600">0</span> ร้าน</p>
+                <div class="flex gap-3">
+                    <button onclick="StoreTrans.close()" class="border border-gray-200 rounded-xl px-4 py-2 text-sm font-bold text-gray-600 hover:bg-gray-50 transition">ยกเลิก</button>
+                    <button onclick="StoreTrans.confirm()" class="bg-violet-600 hover:bg-violet-700 text-white rounded-xl px-5 py-2 text-sm font-bold transition shadow-sm">✅ ย้ายเลย</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Export Modal — เลือก plan/route ก่อน export -->
+    <div id="export-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden">
+            <div class="p-5 border-b flex justify-between items-center bg-gray-50">
+                <h2 class="text-base font-black text-gray-900">📤 Export Excel</h2>
+                <button onclick="ExportCtrl.closeModal()" class="w-8 h-8 rounded-full border border-gray-200 text-gray-400 hover:bg-gray-100 font-bold transition text-sm">✕</button>
+            </div>
+            <div class="p-5 space-y-4">
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1.5">Export จาก Plan</label>
+                    <select id="export-plan-sel" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-bold outline-none focus:ring-2 focus:ring-emerald-300">
+                        <option value="current">📊 Plan ที่เปิดอยู่ตอนนี้</option>
+                        <option value="active">✅ Active (Sales ใช้อยู่)</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1.5">เลือกสาย</label>
+                    <select id="export-route-sel" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-bold outline-none focus:ring-2 focus:ring-emerald-300">
+                        <option value="ALL">📦 ทุกสาย</option>
+                    </select>
+                </div>
+                <p class="text-xs text-gray-400">ไฟล์จะมี column Route เพิ่มเมื่อเลือก "ทุกสาย"</p>
+            </div>
+            <div class="p-5 border-t flex gap-3">
+                <button onclick="ExportCtrl.closeModal()" class="flex-1 border border-gray-200 rounded-xl py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-50 transition">ยกเลิก</button>
+                <button onclick="ExportCtrl.doExport()" class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl py-2.5 text-sm font-bold transition shadow-sm">📥 Export</button>
+            </div>
+        </div>
+    </div>
 
     <!-- Overall Summary Modal -->
 
@@ -658,6 +802,73 @@
     </div>
 
 
+    <!-- Activate Confirm Modal -->
+    <div id="activate-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden">
+            <div class="p-5 border-b bg-emerald-50 flex items-center gap-3">
+                <div class="w-10 h-10 rounded-full bg-emerald-600 flex items-center justify-center text-white text-xl">✅</div>
+                <div>
+                    <h2 class="text-base font-black text-gray-900">ยืนยัน Activate Plan</h2>
+                    <p id="activate-modal-sub" class="text-xs text-gray-500 mt-0.5"></p>
+                </div>
+            </div>
+            <div class="p-5 space-y-3">
+                <div class="bg-amber-50 border border-amber-200 rounded-xl p-3">
+                    <p class="text-xs font-bold text-amber-800 mb-2">⚠️ สิ่งที่จะเกิดขึ้น:</p>
+                    <ul class="text-xs text-amber-700 space-y-1 list-disc list-inside">
+                        <li>Plan ปัจจุบันจะถูกเก็บใน History อัตโนมัติ</li>
+                        <li>Draft นี้จะกลายเป็น Plan ที่ใช้งาน</li>
+                        <li id="activate-sales-note" class="font-bold text-red-600">Sales จะเห็น Plan ใหม่ทันที</li>
+                    </ul>
+                </div>
+                <div class="bg-gray-50 border border-gray-200 rounded-xl p-3 text-xs text-gray-600">
+                    <div class="flex justify-between mb-1">
+                        <span>จำนวนสาย:</span>
+                        <span id="activate-route-count" class="font-bold text-gray-800">—</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span>จำนวนร้านทั้งหมด:</span>
+                        <span id="activate-store-count" class="font-bold text-gray-800">—</span>
+                    </div>
+                </div>
+            </div>
+            <div class="p-5 border-t flex gap-3">
+                <button onclick="document.getElementById('activate-modal').classList.add('hidden')"
+                    class="flex-1 border border-gray-200 rounded-xl py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-50 transition">ยกเลิก</button>
+                <button onclick="PlanUI.doActivate()"
+                    class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl py-2.5 text-sm font-bold transition shadow-sm">✅ ยืนยัน Activate</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create Draft Modal -->
+    <div id="create-draft-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden">
+            <div class="p-5 border-b flex justify-between items-center">
+                <h2 class="text-base font-black text-gray-900">📝 สร้าง Draft เดือนใหม่</h2>
+                <button onclick="document.getElementById('create-draft-modal').classList.add('hidden')"
+                    class="w-8 h-8 rounded-full border border-gray-200 text-gray-400 hover:bg-gray-100 font-bold">✕</button>
+            </div>
+            <div class="p-5 space-y-4">
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1.5">เดือนที่จะวางแผน</label>
+                    <select id="draft-month-select"
+                        class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-300">
+                    </select>
+                </div>
+                <div class="bg-indigo-50 border border-indigo-100 rounded-xl p-3 text-xs text-indigo-700">
+                    💡 ระบบจะ Copy Plan ปัจจุบันมาเป็น Draft ให้อัตโนมัติ แก้ไขได้โดยไม่กระทบ Sales
+                </div>
+            </div>
+            <div class="p-5 border-t flex gap-3">
+                <button onclick="document.getElementById('create-draft-modal').classList.add('hidden')"
+                    class="flex-1 border border-gray-200 rounded-xl py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-50 transition">ยกเลิก</button>
+                <button onclick="PlanUI.doCreateDraft()"
+                    class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl py-2.5 text-sm font-bold transition shadow-sm">สร้าง Draft</button>
+            </div>
+        </div>
+    </div>
+
     <!-- ===== SCRIPTS (ลำดับสำคัญมาก) ===== -->
 
     <!-- 0. Auth (ต้องก่อน app-config เพราะ app-config redirect ถ้าไม่มี center) -->
@@ -717,6 +928,10 @@
         document.addEventListener('DOMContentLoaded', () => {
             if (App && App.init) App.init();
             if (typeof Dashboard !== 'undefined') Dashboard.init();
+            // หน้าแรกเป็น Dashboard เสมอ
+            Nav.go('dashboard');
+            // refresh plan selector หลัง Firestore โหลดเสร็จ (~3 วิ)
+            setTimeout(() => PlanUI.refresh(), 3000);
 
             // แสดง user info ใน sidebar ล่างสุด
             const sidebarUserEl = document.getElementById('sidebar-user-info');
@@ -744,6 +959,11 @@
                 if (cEl) cEl.insertAdjacentHTML('afterbegin',
                     `<div class="text-[10px] text-emerald-400 font-bold text-center bg-slate-800 rounded-lg py-1 mb-1">🏢 ${centerLabel}</div>`
                 );
+                // set header center labels
+                ['header-center-label','header-center-label-ar','header-center-label-db'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) { el.textContent = '| 🏢 ' + centerLabel; el.classList.remove('hidden'); }
+                });
             }
 
             if (_session.role === 'sales') {
@@ -839,6 +1059,406 @@
     </script>
 
     <script>
+        // ==========================================
+        // 📅 Plan UI Controller
+        // ==========================================
+        const PlanUI = {
+            _pendingActivateYm: null,
+
+            // ได้ YYYY_MM เดือนปัจจุบัน
+            currentYM: () => {
+                const d = new Date();
+                return `${d.getFullYear()}_${String(d.getMonth()+1).padStart(2,'0')}`;
+            },
+
+            // สร้าง options เดือนถัดไป 3 เดือน
+            _nextMonths: (n=3) => {
+                const months = [];
+                const d = new Date();
+                for (let i = 1; i <= n; i++) {
+                    const next = new Date(d.getFullYear(), d.getMonth() + i, 1);
+                    const ym  = `${next.getFullYear()}_${String(next.getMonth()+1).padStart(2,'0')}`;
+                    const lbl = next.toLocaleDateString('th-TH', { year: 'numeric', month: 'long' });
+                    months.push({ ym, lbl });
+                }
+                return months;
+            },
+
+            // refresh plan selector dropdown จาก Firestore metadata
+            refresh: async () => {
+                try {
+                    const doc = await App.dbRef.get();
+                    const d   = doc.exists ? doc.data() : {};
+                    const draftList   = (d.draftList   || []).sort().reverse();
+                    const historyList = (d.historyList || []).sort().reverse().slice(0, 6);
+
+                    const sel = document.getElementById('plan-selector');
+                    if (!sel) return;
+
+                    let opts = `<option value="active">📅 Plan ปัจจุบัน</option>`;
+                    if (draftList.length) {
+                        opts += `<optgroup label="── Draft ──">`;
+                        draftList.forEach(ym => {
+                            const [y, m] = ym.split('_');
+                            const lbl = DateUtil ? DateUtil.ymToThaiShort(ym) : new Date(+y, +m-1, 1).toLocaleDateString('th-TH', { year: 'numeric', month: 'short' });
+                            opts += `<option value="draft:${ym}">📝 Draft · ${lbl}</option>`;
+                        });
+                        opts += `</optgroup>`;
+                    }
+                    if (historyList.length) {
+                        opts += `<optgroup label="── History ──">`;
+                        historyList.forEach(ym => {
+                            const [y, m] = ym.split('_');
+                            const lbl = DateUtil ? DateUtil.ymToThaiShort(ym) : new Date(+y, +m-1, 1).toLocaleDateString('th-TH', { year: 'numeric', month: 'short' });
+                            opts += `<option value="history:${ym}">🔒 History · ${lbl}</option>`;
+                        });
+                        opts += `</optgroup>`;
+                    }
+                    sel.innerHTML = opts;
+                    sel.value = App._planMode.startsWith('draft:') || App._planMode.startsWith('history:')
+                        ? App._planMode : 'active';
+                } catch(e) { console.warn('PlanUI.refresh:', e); }
+            },
+
+            // เมื่อ select เปลี่ยน
+            onSelect: async (val) => {
+                if (val === App._planMode) return;
+                await App.switchPlanMode(val);
+                PlanUI.updateBadge();
+            },
+
+            // อัปเดต badge + banner
+            updateBadge: () => {
+                const m = App._planMode;
+                const badge    = document.getElementById('plan-mode-badge');
+                const draftB   = document.getElementById('draft-banner');
+                const histB    = document.getElementById('history-banner');
+                const draftLbl = document.getElementById('draft-banner-label');
+                const histLbl  = document.getElementById('history-banner-label');
+
+                if (m === 'active') {
+                    if (badge)  { badge.textContent = '✅ Active'; badge.style.background = '#059669'; }
+                    if (draftB) draftB.style.display = 'none';
+                    if (histB)  histB.style.display  = 'none';
+                } else if (m.startsWith('draft:')) {
+                    const ym = m.replace('draft:', '');
+                    const [y, mo] = ym.split('_');
+                    const lbl = new Date(+y, +mo-1, 1).toLocaleDateString('th-TH', { year: 'numeric', month: 'long' });
+                    if (badge)  { badge.textContent = `📝 Draft ${lbl}`; badge.style.background = '#d97706'; }
+                    if (draftLbl) draftLbl.textContent = `กำลังแก้ไข Draft ${lbl}`;
+                    if (draftB) draftB.style.display = 'flex';
+                    if (histB)  histB.style.display  = 'none';
+                } else if (m.startsWith('history:')) {
+                    const ym = m.replace('history:', '');
+                    const [y, mo] = ym.split('_');
+                    const lbl = new Date(+y, +mo-1, 1).toLocaleDateString('th-TH', { year: 'numeric', month: 'long' });
+                    if (badge)  { badge.textContent = `🔒 ${lbl}`; badge.style.background = '#6b7280'; }
+                    if (draftB) draftB.style.display = 'none';
+                    if (histLbl) histLbl.textContent = `ดู History ${lbl} (Read-Only)`;
+                    if (histB)  histB.style.display  = 'flex';
+                }
+                // sync selector
+                const sel = document.getElementById('plan-selector');
+                if (sel && sel.value !== m) sel.value = m;
+            },
+
+            // เปิด modal สร้าง Draft
+            openCreateDraft: () => {
+                const sel = document.getElementById('draft-month-select');
+                if (sel) {
+                    sel.innerHTML = PlanUI._nextMonths(4).map(({ym, lbl}) =>
+                        `<option value="${ym}">${lbl}</option>`
+                    ).join('');
+                }
+                document.getElementById('create-draft-modal').classList.remove('hidden');
+            },
+
+            doCreateDraft: async () => {
+                const ym = document.getElementById('draft-month-select').value;
+                document.getElementById('create-draft-modal').classList.add('hidden');
+                if (!ym) return;
+                // ต้องอยู่ใน active mode ก่อน copy
+                if (App._planMode !== 'active') await App.switchPlanMode('active');
+                await App.createDraft(ym);
+                // refresh dropdown แล้ว switch ไป draft mode ทันที
+                await PlanUI.refresh();
+                const sel = document.getElementById('plan-selector');
+                if (sel) {
+                    sel.value = 'draft:' + ym;
+                    await PlanUI.onSelect('draft:' + ym);
+                }
+            },
+
+            // เปิด confirm modal Activate
+            confirmActivate: () => {
+                const m = App._planMode;
+                if (!m.startsWith('draft:')) return;
+                const ym = m.replace('draft:', '');
+                const [y, mo] = ym.split('_');
+                const lbl = new Date(+y, +mo-1, 1).toLocaleDateString('th-TH', { year: 'numeric', month: 'long' });
+
+                PlanUI._pendingActivateYm = ym;
+
+                const sub = document.getElementById('activate-modal-sub');
+                if (sub) sub.textContent = `Draft ${lbl} → Plan ที่ใช้งาน`;
+
+                const rc = document.getElementById('activate-route-count');
+                const sc = document.getElementById('activate-store-count');
+                if (rc) rc.textContent = State.db.routeList.length + ' สาย';
+                if (sc) {
+                    const total = Object.values(State.db.routes).reduce((s,r) => s + (r||[]).length, 0);
+                    sc.textContent = total.toLocaleString() + ' ร้าน';
+                }
+                document.getElementById('activate-modal').classList.remove('hidden');
+            },
+
+            doActivate: async () => {
+                document.getElementById('activate-modal').classList.add('hidden');
+                if (!PlanUI._pendingActivateYm) return;
+                await App.activateDraft(PlanUI._pendingActivateYm);
+                PlanUI._pendingActivateYm = null;
+                await PlanUI.refresh();
+            }
+        };
+    </script>
+
+    <!-- Calendar Config Modal -->
+    <div id="calendar-config-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden" style="max-height:90dvh;display:flex;flex-direction:column;">
+            <div class="p-5 border-b flex justify-between items-center bg-gray-50 flex-shrink-0">
+                <div>
+                    <h2 class="text-base font-black text-gray-900">📅 ตั้งค่าปฏิทิน</h2>
+                    <p id="cal-modal-plan-label" class="text-xs text-gray-500 mt-0.5"></p>
+                </div>
+                <button onclick="CalendarAdmin.close()" class="w-8 h-8 rounded-full border border-gray-200 text-gray-400 hover:bg-gray-100 font-bold">✕</button>
+            </div>
+
+            <div class="overflow-y-auto flex-1 p-5 space-y-4">
+                <!-- โหมด -->
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-2">โหมดปฏิทิน</label>
+                    <div class="grid grid-cols-2 gap-2">
+                        <button id="cal-mode-cycle" onclick="CalendarAdmin.setMode('cycle')"
+                            class="border-2 border-indigo-500 bg-indigo-50 rounded-xl p-3 text-center cursor-pointer transition">
+                            <div class="text-xl mb-1">🔄</div>
+                            <div class="text-xs font-black text-indigo-800">Cycle D1-24</div>
+                            <div class="text-[10px] text-indigo-600 mt-0.5">ต่อเนื่องนับวัน</div>
+                        </button>
+                        <button id="cal-mode-fixed" onclick="CalendarAdmin.setMode('fixed')"
+                            class="border-2 border-gray-200 bg-gray-50 rounded-xl p-3 text-center cursor-pointer transition">
+                            <div class="text-xl mb-1">📌</div>
+                            <div class="text-xs font-black text-gray-700">กำหนดวันที่เอง</div>
+                            <div class="text-[10px] text-gray-500 mt-0.5">ระบุวันที่ = Day</div>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Cycle settings -->
+                <div id="cal-cycle-section" class="space-y-3">
+                    <div class="bg-indigo-50 border border-indigo-100 rounded-xl p-4 space-y-3">
+                        <div class="flex items-center justify-between">
+                            <label class="text-xs font-bold text-gray-700">Day 1 เริ่มวันที่:</label>
+                            <input type="number" id="cal-start-date" min="1" max="28" value="1"
+                                class="w-16 border border-gray-200 rounded-lg px-2 py-1.5 text-sm font-bold text-center outline-none focus:ring-2 focus:ring-indigo-300">
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <label class="text-xs font-bold text-gray-700">Day เริ่มต้น (ที่วันที่นั้น):</label>
+                            <input type="number" id="cal-start-day-num" min="1" max="24" value="1"
+                                class="w-16 border border-gray-200 rounded-lg px-2 py-1.5 text-sm font-bold text-center outline-none focus:ring-2 focus:ring-indigo-300">
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <label class="text-xs font-bold text-gray-700">จำนวนวัน Cycle:</label>
+                            <input type="number" id="cal-cycle-days" min="1" max="31" value="24"
+                                class="w-16 border border-gray-200 rounded-lg px-2 py-1.5 text-sm font-bold text-center outline-none focus:ring-2 focus:ring-indigo-300">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-gray-700 mb-2">วันหยุด (กดเลือกวันที่):</label>
+                        <div id="cal-holiday-grid" class="grid grid-cols-7 gap-1"></div>
+                        <p class="text-[10px] text-gray-400 mt-1">วันที่เลือกจะข้าม cycle</p>
+                    </div>
+                </div>
+
+                <!-- Fixed settings -->
+                <div id="cal-fixed-section" class="hidden space-y-3">
+                    <div class="bg-blue-50 border border-blue-100 rounded-xl p-3">
+                        <p class="text-xs text-blue-700 font-bold mb-2">กำหนดวันที่ของเดือน = Day ที่เท่าไหร่</p>
+                        <div id="cal-fixed-rows" class="space-y-2"></div>
+                        <button onclick="CalendarAdmin.addFixedRow()"
+                            class="mt-2 w-full border border-dashed border-blue-300 rounded-lg py-2 text-xs font-bold text-blue-600 hover:bg-blue-50 transition">
+                            + เพิ่มวัน
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="p-5 border-t flex gap-3 flex-shrink-0">
+                <button onclick="CalendarAdmin.close()"
+                    class="flex-1 border border-gray-200 rounded-xl py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-50 transition">ยกเลิก</button>
+                <button onclick="CalendarAdmin.save()"
+                    class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl py-2.5 text-sm font-bold transition shadow-sm">💾 บันทึก</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ==========================================
+        // 📅 Calendar Admin Controller
+        // ==========================================
+        const CalendarAdmin = {
+            _mode: 'cycle',
+            _holidays: [],
+            _fixedRows: [],
+            _targetRef: null, // Firestore ref ที่จะ save
+
+            open: async (planMode) => {
+                // planMode: 'active' | 'draft:YYYY_MM'
+                const modal = document.getElementById('calendar-config-modal');
+                modal.classList.remove('hidden');
+
+                const lbl = document.getElementById('cal-modal-plan-label');
+                if (planMode === 'active') {
+                    lbl.textContent = 'Plan ปัจจุบัน';
+                    CalendarAdmin._targetRef = App.dbRef;
+                } else {
+                    const ym = planMode.replace('draft:', '');
+                    const [y, m] = ym.split('_');
+                    const lbStr = new Date(+y, +m-1, 1).toLocaleDateString('th-TH', { year:'numeric', month:'long' });
+                    lbl.textContent = `Draft ${lbStr}`;
+                    CalendarAdmin._targetRef = App.draftsCol().doc(ym);
+                }
+
+                // โหลด config ที่มีอยู่
+                try {
+                    const snap = await CalendarAdmin._targetRef.get();
+                    const cfg = snap.exists ? (snap.data().calendarConfig || null) : null;
+                    CalendarAdmin._holidays = [];
+                    CalendarAdmin._fixedRows = [];
+                    if (cfg) {
+                        CalendarAdmin.setMode(cfg.mode || 'cycle');
+                        if (cfg.mode === 'cycle') {
+                            document.getElementById('cal-start-date').value    = cfg.startDay    || 1;
+                            document.getElementById('cal-start-day-num').value = cfg.startDayNum || 1;
+                            document.getElementById('cal-cycle-days').value    = cfg.cycleDays   || 24;
+                            CalendarAdmin._holidays = cfg.holidays || [];
+                        } else {
+                            const mapping = cfg.mapping || {};
+                            CalendarAdmin._fixedRows = Object.entries(mapping).map(([d, day]) => ({ date: d, day }));
+                        }
+                    } else {
+                        CalendarAdmin.setMode('cycle');
+                    }
+                } catch(e) {
+                    CalendarAdmin.setMode('cycle');
+                }
+                CalendarAdmin._renderHolidayGrid();
+                CalendarAdmin._renderFixedRows();
+            },
+
+            close: () => document.getElementById('calendar-config-modal').classList.add('hidden'),
+
+            setMode: (mode) => {
+                CalendarAdmin._mode = mode;
+                const cycleBtn = document.getElementById('cal-mode-cycle');
+                const fixedBtn = document.getElementById('cal-mode-fixed');
+                const cycleSec = document.getElementById('cal-cycle-section');
+                const fixedSec = document.getElementById('cal-fixed-section');
+                if (mode === 'cycle') {
+                    cycleBtn.className = 'border-2 border-indigo-500 bg-indigo-50 rounded-xl p-3 text-center cursor-pointer transition';
+                    fixedBtn.className = 'border-2 border-gray-200 bg-gray-50 rounded-xl p-3 text-center cursor-pointer transition';
+                    cycleSec.classList.remove('hidden');
+                    fixedSec.classList.add('hidden');
+                } else {
+                    cycleBtn.className = 'border-2 border-gray-200 bg-gray-50 rounded-xl p-3 text-center cursor-pointer transition';
+                    fixedBtn.className = 'border-2 border-indigo-500 bg-indigo-50 rounded-xl p-3 text-center cursor-pointer transition';
+                    cycleSec.classList.add('hidden');
+                    fixedSec.classList.remove('hidden');
+                }
+            },
+
+            _renderHolidayGrid: () => {
+                const grid = document.getElementById('cal-holiday-grid');
+                if (!grid) return;
+                let html = '';
+                for (let d = 1; d <= 31; d++) {
+                    const isHol = CalendarAdmin._holidays.includes(d);
+                    html += `<button onclick="CalendarAdmin.toggleHoliday(${d})" id="hol-${d}"
+                        style="border-radius:6px;border:1px solid ${isHol ? '#fecaca' : '#e5e7eb'};
+                               background:${isHol ? '#fee2e2' : '#f9fafb'};
+                               color:${isHol ? '#dc2626' : '#374151'};
+                               font-size:11px;font-weight:700;padding:4px 2px;cursor:pointer;
+                               font-family:inherit;">${d}</button>`;
+                }
+                grid.innerHTML = html;
+            },
+
+            toggleHoliday: (d) => {
+                const idx = CalendarAdmin._holidays.indexOf(d);
+                if (idx >= 0) CalendarAdmin._holidays.splice(idx, 1);
+                else CalendarAdmin._holidays.push(d);
+                CalendarAdmin._renderHolidayGrid();
+            },
+
+            addFixedRow: () => {
+                CalendarAdmin._fixedRows.push({ date: '', day: 'Day 1' });
+                CalendarAdmin._renderFixedRows();
+            },
+
+            _renderFixedRows: () => {
+                const container = document.getElementById('cal-fixed-rows');
+                if (!container) return;
+                const dayOptions = Array.from({length: 24}, (_, i) => `<option>Day ${i+1}</option>`).join('');
+                container.innerHTML = CalendarAdmin._fixedRows.map((row, i) => `
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <span style="font-size:12px;color:#6b7280;white-space:nowrap;">วันที่</span>
+                        <input type="number" min="1" max="31" value="${row.date}"
+                            onchange="CalendarAdmin._fixedRows[${i}].date=this.value"
+                            style="width:52px;border:1px solid #e5e7eb;border-radius:8px;padding:6px;font-size:12px;font-weight:700;text-align:center;outline:none;">
+                        <span style="font-size:12px;color:#6b7280;">=</span>
+                        <select onchange="CalendarAdmin._fixedRows[${i}].day=this.value"
+                            style="flex:1;border:1px solid #e5e7eb;border-radius:8px;padding:6px;font-size:12px;font-weight:700;outline:none;">
+                            ${dayOptions}
+                        </select>
+                        <button onclick="CalendarAdmin._fixedRows.splice(${i},1);CalendarAdmin._renderFixedRows()"
+                            style="color:#dc2626;border:none;background:none;cursor:pointer;font-size:16px;padding:2px;">✕</button>
+                    </div>
+                `).join('');
+                // set select values
+                setTimeout(() => {
+                    container.querySelectorAll('select').forEach((sel, i) => {
+                        sel.value = CalendarAdmin._fixedRows[i]?.day || 'Day 1';
+                    });
+                }, 0);
+            },
+
+            save: async () => {
+                if (!CalendarAdmin._targetRef) return;
+                let cfg;
+                if (CalendarAdmin._mode === 'cycle') {
+                    cfg = {
+                        mode:        'cycle',
+                        startDay:    parseInt(document.getElementById('cal-start-date').value) || 1,
+                        startDayNum: parseInt(document.getElementById('cal-start-day-num').value) || 1,
+                        cycleDays:   parseInt(document.getElementById('cal-cycle-days').value) || 24,
+                        holidays:    [...CalendarAdmin._holidays].sort((a,b)=>a-b)
+                    };
+                } else {
+                    const mapping = {};
+                    CalendarAdmin._fixedRows.forEach(r => { if (r.date && r.day) mapping[r.date] = r.day; });
+                    cfg = { mode: 'fixed', mapping };
+                }
+                try {
+                    await CalendarAdmin._targetRef.set({ calendarConfig: cfg }, { merge: true });
+                    CalendarAdmin.close();
+                    UI.showSaveToast('✅ บันทึกตั้งค่าปฏิทินเรียบร้อย');
+                } catch(e) {
+                    UI.showErrorToast('❌ บันทึกไม่สำเร็จ: ' + e.message);
+                }
+            }
+        };
+    </script>
+
+    <script>
         const SidebarCtrl = {
             _collapsed: false,
             _clearPageOffset: () => {
@@ -890,5 +1510,6 @@
         };
         document.addEventListener('DOMContentLoaded', SidebarCtrl.restore);
     </script>
+    <script src="sku-distribution.js"></script>
 </body>
 </html>

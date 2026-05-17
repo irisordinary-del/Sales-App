@@ -9,16 +9,16 @@ const Nav = {
         const navEl = document.getElementById('nav-' + page);
         if (navEl) navEl.classList.add('active');
 
-        // // Hide all pages, show target page
-            document.querySelectorAll('[id^="page-"]').forEach(p => p.classList.add('hidden'));
-            const pageEl = document.getElementById('page-' + page);
-            if (pageEl) pageEl.classList.remove('hidden');
+        document.querySelectorAll('[id^="page-"]').forEach(p => p.classList.add('hidden'));
+        const pageEl = document.getElementById('page-' + page);
+        if (pageEl) pageEl.classList.remove('hidden');
 
-            // Render page-specific content
-            if (page === 'allroutes') {
-                if (typeof UI !== 'undefined' && UI.renderAllRoutes) UI.renderAllRoutes();
-            }
-
+        if (page === 'allroutes') {
+            if (typeof UI !== 'undefined' && UI.renderAllRoutes) UI.renderAllRoutes();
+        }
+        if (page === 'skudist') {
+            if (typeof SkuDist !== 'undefined') SkuDist.init();
+        }
         if (page === 'planning') {
             setTimeout(() => { if (MapCtrl.map) MapCtrl.map.invalidateSize(); }, 200);
         }
@@ -30,6 +30,7 @@ const Nav = {
 // ==========================================
 const UI = {
     _filterTimeout: null,
+    _currentTab: 'tab1',   // track tab ที่ user เลือกอยู่
 
     showLoader: (text, sub) => {
         const el = document.getElementById('loader');
@@ -65,8 +66,6 @@ const UI = {
         }, 3000);
     },
 
-
-    // ✅ ใหม่: Custom Confirm Dialog แทน browser confirm()
     showConfirm: (message, onConfirm, onCancel) => {
         const overlay = document.createElement('div');
         overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.55);z-index:9999;display:flex;align-items:center;justify-content:center;';
@@ -94,7 +93,11 @@ const UI = {
         }
     },
 
-    switchTab: (id) => {
+    // แก้บัค: track tab ที่ user เลือกและไม่ reset โดยพลการ
+    switchTab: (id, force = false) => {
+        // ถ้าไม่ force และ user กำลังอยู่ tab อื่น → ไม่ reset
+        if (!force && UI._currentTab && UI._currentTab !== 'tab1' && id === 'tab1') return;
+        UI._currentTab = id;
         document.querySelectorAll('.tab-btn').forEach(b => {
             b.classList.remove('active', 'border-indigo-600', 'text-indigo-800');
             b.classList.add('text-gray-500');
@@ -115,6 +118,11 @@ const UI = {
         }
     },
 
+    // เรียกเมื่อ user กด tab เอง (force=true)
+    userSwitchTab: (id) => {
+        UI.switchTab(id, true);
+    },
+
     filterList: (id, val) => {
         clearTimeout(UI._filterTimeout);
         UI._filterTimeout = setTimeout(() => {
@@ -127,9 +135,8 @@ const UI = {
         }, 200);
     },
 
-    // แก้บัค: เพิ่ม focusOnEditTab ที่ขาดหายไป
     focusOnEditTab: (storeId) => {
-        UI.switchTab('tab3');
+        UI.switchTab('tab3', true);
         setTimeout(() => {
             const card = document.getElementById('card-' + storeId);
             if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -148,7 +155,6 @@ const UI = {
             }
         });
 
-        // อัปเดต assign-day selector พร้อมจำนวน
         const ds = document.getElementById('assign-day');
         const cv = ds ? ds.value : null;
         if (ds) {
@@ -173,7 +179,6 @@ const UI = {
                     : `<span class="bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded text-[9px] font-bold">❌ Inactive</span>`)
                 : '';
 
-            // Tab 1: ทุกร้าน
             htmlP.push(`
                 <div class="p-3 bg-white border border-gray-200 rounded-xl shadow-sm">
                     <div class="flex justify-between items-start">
@@ -184,7 +189,6 @@ const UI = {
                 </div>`);
 
             if (!s.days || !s.days.length) {
-                // Tab 2: รอจัดสาย
                 htmlU.push(`
                     <label class="flex p-3 bg-white border ${s.selected ? 'border-indigo-400 ring-1 ring-indigo-400 bg-indigo-50' : 'border-gray-200'} rounded-2xl cursor-pointer shadow-sm">
                         <input type="checkbox" ${s.selected ? 'checked' : ''} onchange="StoreMgr.toggleSelect('${s.id}')" class="mr-3 mt-1.5 w-4 h-4 text-indigo-600 rounded">
@@ -197,7 +201,6 @@ const UI = {
                         </div>
                     </label>`);
             } else {
-                // Tab 3: จัดสายแล้ว
                 const dTxt = s.days.join(' & ');
                 const c = DAY_COLORS[s.days[0]] ? DAY_COLORS[s.days[0]].hex : '#999';
                 const selOpts = opts.replace(`value="${s.days[0]}"`, `value="${s.days[0]}" selected`);
@@ -223,7 +226,6 @@ const UI = {
             }
         });
 
-        // Render lists
         const elUpload = document.getElementById('list-upload');
         const elUnassigned = document.getElementById('list-unassigned');
         const elAssigned = document.getElementById('list-assigned');
@@ -231,7 +233,6 @@ const UI = {
         if (elUnassigned) elUnassigned.innerHTML = htmlU.join('');
         if (elAssigned) elAssigned.innerHTML = htmlA.join('');
 
-        // Tab 4: สรุปวันที่
         const sumH = [];
         Object.keys(sums).forEach(d => {
             if (sums[d] > 0) {
@@ -252,7 +253,6 @@ const UI = {
                 : '<p class="col-span-2 text-center text-xs text-gray-400 mt-4">ยังไม่จัดสาย</p>';
         }
 
-        // Stats bar
         const wait = State.stores.filter(s => !s.days || !s.days.length).length;
         const tot = State.stores.length;
         const el = (id) => document.getElementById(id);
@@ -325,14 +325,10 @@ const UI = {
         if (modal) modal.classList.add('hidden');
     },
 
-    // ==========================================
-    // 📦 Render All Routes Summary Page
-    // ==========================================
     renderAllRoutes: () => {
         const routes = State.db.routes;
         const routeKeys = Object.keys(routes);
 
-        // Update summary cards
         const summaryEl = document.getElementById('allroutes-summary');
         const totalStores = routeKeys.reduce((sum, r) => sum + (routes[r] || []).length, 0);
         if (summaryEl) {
@@ -357,15 +353,12 @@ const UI = {
             summaryEl.innerHTML = summaryHTML;
         }
 
-        // Update total counter
         const totalEl = document.getElementById('allroutes-total');
         if (totalEl) totalEl.textContent = totalStores + ' ร้านค้า';
 
-        // Render table - show all rows using chunked batches via setTimeout
         const tbody = document.getElementById('allroutes-table-body');
         if (!tbody) return;
 
-        // Build all rows data first (fast)
         const allRows = [];
         routeKeys.forEach(routeName => {
             (routes[routeName] || []).forEach(store => {
@@ -378,7 +371,6 @@ const UI = {
             });
         });
 
-        // Render in batches of 300 rows to avoid UI freeze
         tbody.innerHTML = '';
         const BATCH = 300;
         let idx = 0;

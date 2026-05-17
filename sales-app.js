@@ -37,12 +37,13 @@ db.enablePersistence({ synchronizeTabs: true }).catch(function(err) { console.wa
 let docMain = db.collection('appData').doc('v1_main');
 const colSales = db.collection('v1_sales_chunks');
 
-let State = { myRoute: "", allStores: [], routeStores: [], sales: {}, currentDay: "", isLoaded: false, mapNeedsFit: true };
+let State = { myRoute: "", allStores: [], routeStores: [], sales: {}, currentDay: "", isLoaded: false, mapNeedsFit: true, calendarConfig: null, activePlanYM: null, activePlanMode: 'active' };
 let map = null, mapMarkers = [], sortableList = null, markerClusterGroup = null;
 
 // ─── Tab keys ที่ระบบรู้จัก ───────────────────────────────
 const VALID_TABS = ['dashboard', 'stores', 'route'];
 const DEFAULT_TAB = 'dashboard';
+const FORCE_DEFAULT_TAB = true; // เริ่มที่ dashboard เสมอ
 const TAB_STORAGE_KEY = 'sales_last_tab';
 
 const UI = {
@@ -109,16 +110,34 @@ const UI = {
 
         // บันทึก tab ล่าสุด
         localStorage.setItem(TAB_STORAGE_KEY, id);
+        localStorage.setItem('sales_tab_date', new Date().toDateString());
 
-        if (id === 'route' && map) {
-            setTimeout(() => { map.invalidateSize(); if (State.mapNeedsFit) MapCtrl.fitBounds(); }, 200);
+        if (id === 'route') {
+            setTimeout(() => {
+                if (!map) {
+                    MapCtrl.initAndDraw();
+                } else {
+                    map.invalidateSize();
+                    if (State.mapNeedsFit) MapCtrl.fitBounds();
+                }
+            }, 200);
         }
     },
 
     // ✅ restore tab หลัง login / refresh
     restoreTab: () => {
-        const saved = localStorage.getItem(TAB_STORAGE_KEY);
-        UI.switchTab(VALID_TABS.includes(saved) ? saved : DEFAULT_TAB);
+        const today = new Date().toDateString(); // เช่น "Sat May 17 2026"
+        const lastDate = localStorage.getItem('sales_tab_date');
+        const savedTab = localStorage.getItem(TAB_STORAGE_KEY);
+
+        if (lastDate !== today) {
+            // วันใหม่ → เริ่ม dashboard + บันทึกวันนี้
+            localStorage.setItem('sales_tab_date', today);
+            UI.switchTab(DEFAULT_TAB);
+        } else {
+            // วันเดิม → เปิด tab ที่ค้างไว้
+            UI.switchTab(VALID_TABS.includes(savedTab) ? savedTab : DEFAULT_TAB);
+        }
     },
 
     searchStores: (val) => {
@@ -169,42 +188,7 @@ const UI = {
     }
 };
 
-// ── Loading bar ──
-const LoadBar = {
-    _timer: null,
-    show: () => {
-        const wrap = document.getElementById('load-bar-wrap');
-        if (!wrap) return;
-        wrap.style.display = 'block';
-        wrap.classList.remove('hide');
-        LoadBar.setProgress(5, 'กำลังเชื่อมต่อ Firebase...');
-    },
-    setProgress: (pct, label) => {
-        const fill = document.getElementById('load-bar-fill');
-        const lbl  = document.getElementById('load-bar-label');
-        if (fill) fill.style.width = Math.min(pct, 100) + '%';
-        if (lbl)  lbl.textContent  = label || ('โหลดข้อมูล ' + Math.round(pct) + '%');
-    },
-    done: () => {
-        LoadBar.setProgress(100, '✅ โหลดข้อมูลเสร็จแล้ว');
-        if (LoadBar._timer) clearTimeout(LoadBar._timer);
-        LoadBar._timer = setTimeout(() => {
-            const wrap = document.getElementById('load-bar-wrap');
-            if (wrap) {
-                wrap.classList.add('hide');
-                setTimeout(() => { wrap.style.display = 'none'; wrap.classList.remove('hide'); }, 420);
-            }
-        }, 700);
-    },
-    error: (msg) => {
-        LoadBar.setProgress(100, '❌ ' + (msg || 'โหลดไม่สำเร็จ'));
-        if (LoadBar._timer) clearTimeout(LoadBar._timer);
-        LoadBar._timer = setTimeout(() => {
-            const wrap = document.getElementById('load-bar-wrap');
-            if (wrap) { wrap.classList.add('hide'); setTimeout(() => { wrap.style.display = 'none'; wrap.classList.remove('hide'); }, 420); }
-        }, 2000);
-    }
-};
+// LoadBar defined in sales.html inline script (loads before this file)
 
 const App = {
     checkAuth: () => {
@@ -228,17 +212,37 @@ const App = {
     },
 
     logout: () => {
-        Auth.logout(); // clear session + redirect login
+        Auth.logout();
     },
 
-    start: () => {
+    // โหลด calendarConfig จาก Firestore
+    loadCalendarConfig: async (centerDocId, ym, mode) => {
+        try {
+            let cfgRef;
+            if (mode === 'drafts') {
+                cfgRef = db.collection('appData').doc(centerDocId)
+                    .collection('drafts').doc(ym);
+            } else {
+                cfgRef = db.collection('appData').doc(centerDocId);
+            }
+            const snap = await cfgRef.get();
+            const data = snap.exists ? snap.data() : {};
+            State.calendarConfig = data.calendarConfig || null;
+            // re-render calendar ถ้าเปิดอยู่
+            if (typeof CalendarCtrl !== 'undefined') CalendarCtrl.render();
+        } catch(e) {
+            console.warn('loadCalendarConfig:', e);
+            State.calendarConfig = null;
+        }
+    },
+
+    start: async () => {
         // login-screen ถูกซ่อนใน HTML แล้ว
-        // ✅ แสดง hamburger button
-        const hBtn = document.getElementById('hamburger-btn');
-        if (hBtn) hBtn.style.display = 'flex';
         document.getElementById('main-header').classList.remove('hidden');
         document.getElementById('main-content').classList.remove('hidden');
-        // bottom-nav ถูกแทนด้วย hamburger-btn แล้ว (ไม่ต้องแสดง nav เดิม)
+        // แสดง bottom-nav
+        const _bnav = document.getElementById('bottom-nav');
+        if (_bnav) _bnav.style.display = 'grid';
         document.getElementById('user-route-label').innerText = State.myRoute;
         document.getElementById('loader').style.display = 'flex';
 
@@ -266,6 +270,9 @@ const App = {
                 if (!State.isLoaded) {
                     UI.restoreTab();
                     State.isLoaded = true;
+                    if (typeof CalendarCtrl !== 'undefined') CalendarCtrl.init();
+                    // บังคับเปิดแผนที่ทันที
+                    setTimeout(() => MapCtrl.initAndDraw(), 400);
                 }
             }
         };
@@ -273,7 +280,38 @@ const App = {
         const _centerMatch = State.myRoute.match(/^(\d+)/);
         const _centerDocId = _centerMatch ? (_centerMatch[1] + '_main') : 'v1_main';
         docMain = db.collection('appData').doc(_centerDocId);
-        const routeColRef = db.collection('appData').doc(_centerDocId).collection('routes');
+
+        // ── Auto-switch: เช็ค draft เดือนปัจจุบัน ──────────────────────
+        const _nowYM = (() => {
+            const d = new Date();
+            return `${d.getFullYear()}_${String(d.getMonth()+1).padStart(2,'0')}`;
+        })();
+
+        // ตรวจว่ามี draft ของเดือนนี้ไหม → ถ้ามีให้ Sales ใช้ draft แทน active
+        let routeColRef;
+        try {
+            const _draftDoc = await db.collection('appData').doc(_centerDocId)
+                .collection('drafts').doc(_nowYM).get();
+            if (_draftDoc.exists) {
+                // มี draft เดือนนี้ → ใช้ draft
+                routeColRef = db.collection('appData').doc(_centerDocId)
+                    .collection('drafts').doc(_nowYM).collection('routes');
+                State.activePlanYM = _nowYM;
+                State.activePlanMode = 'draft';
+                App.loadCalendarConfig(_centerDocId, _nowYM, 'drafts');
+                LoadBar.setProgress(15, `📅 โหลด Plan ${_nowYM}...`);
+            } else {
+                // ไม่มี draft → ใช้ active
+                routeColRef = db.collection('appData').doc(_centerDocId).collection('routes');
+                State.activePlanYM = _nowYM;
+                State.activePlanMode = 'active';
+                App.loadCalendarConfig(_centerDocId, _nowYM, 'active');
+            }
+        } catch(e) {
+            // fallback → active
+            routeColRef = db.collection('appData').doc(_centerDocId).collection('routes');
+            State.activePlanMode = 'active';
+        }
 
         LoadBar.setProgress(20, 'กำลังดึงข้อมูลร้านค้า...');
         docMain.onSnapshot(async doc => {
@@ -322,6 +360,8 @@ function getDayMarkets(day) {
 const Processor = {
     // ✅ ลบ dashboard() ออก — run แค่ stores กับ route
     run: () => { Processor.stores(); Processor.setupRoute(); },
+
+    // mini-cal strip removed — ใช้ CalendarCtrl.openPopup() แทน
 
     stores: () => {
         const hist = (typeof StoreHistory !== 'undefined') ? StoreHistory._storeMap : {};
@@ -379,7 +419,7 @@ const Processor = {
         let el = document.getElementById('day-select');
         el.innerHTML = sorted.map(d => {
             const markets = getDayMarkets(d);
-            const label = 'สายวิ่งวันที่ ' + d.replace('Day ', '') + (markets ? '  ' + markets : '');
+            const label = 'Day ' + d.replace('Day ', '');
             return `<option value="${d}">${label}</option>`;
         }).join('');
 
@@ -388,10 +428,12 @@ const Processor = {
             State.mapNeedsFit = true;
         }
         el.value = State.currentDay;
-        // อัปเดตหัว tab-stores ให้แสดงชื่อตลาดของวันที่เลือก
+
+
+        // อัปเดตหัว tab-stores
         const _stM = getDayMarkets(State.currentDay);
         const _stEl = document.getElementById('stores-title');
-        if (_stEl) _stEl.textContent = _stM ? 'สายวิ่งวันที่ ' + State.currentDay.replace('Day ','') + ' · ' + _stM : 'รายชื่อร้านค้าทั้งหมด';
+        if (_stEl) _stEl.textContent = _stM ? 'Day ' + State.currentDay.replace('Day ','') + ' · ' + _stM : 'รายชื่อร้านค้าทั้งหมด';
         Processor.routeList();
     },
 
@@ -418,8 +460,8 @@ const Processor = {
         c.innerHTML = html || '<p class="text-center text-gray-400 mt-5">ไม่มีคิวงาน</p>';
         const _markets = getDayMarkets(State.currentDay);
         const _dayNum  = State.currentDay.replace('Day ', '');
-        const _title   = 'สายวิ่งวันที่ ' + _dayNum + (_markets ? ' · ' + _markets : '');
-        document.getElementById('route-title').innerText = `${_title} (${list.length} ร้าน)`;
+        const _mkt     = _markets ? ' · ' + _markets.split(' · ')[0] : '';
+        document.getElementById('route-title').innerText = `Day ${_dayNum}${_mkt} (${list.length} ร้าน)`;
 
         if (sortableList) sortableList.destroy();
         window._sortableInstance = Sortable.create(c, {
@@ -481,7 +523,7 @@ const GPS = {
     _mapListenerAttached: false,
     _isSelfMoving: false,
 
-    start: () => {
+    start: async () => {
         if (!navigator.geolocation) return showSalesToast('⚠️ Browser ไม่รองรับ GPS', true);
         GPS.watchId = navigator.geolocation.watchPosition(GPS._onSuccess, GPS._onError, { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 });
         GPS.autoFollow = true;
@@ -587,23 +629,245 @@ const GPS = {
     }
 };
 
+// ==========================================
+// 📅 Calendar Controller
+// ==========================================
+const CalendarCtrl = {
+    _year: null,
+    _month: null,
+
+    init: () => {
+        const now = new Date();
+        CalendarCtrl._year  = now.getFullYear();
+        CalendarCtrl._month = now.getMonth(); // 0-based
+        CalendarCtrl.render();
+    },
+
+    // คำนวณว่าวันที่ date ตรงกับ Day อะไร
+    getDayLabel: (dateNum) => {
+        const cfg = State.calendarConfig;
+        if (!cfg) return null;
+
+        if (cfg.mode === 'fixed') {
+            // โหมด B: admin กำหนดเองว่าวันที่เท่าไหร่ = Day อะไร
+            return cfg.mapping ? (cfg.mapping[String(dateNum)] || null) : null;
+        }
+
+        if (cfg.mode === 'cycle') {
+            // โหมด A: คำนวณจาก startDay + holidays
+            const startDate  = parseInt(cfg.startDay || 1);
+            const holidays   = cfg.holidays || [];
+            const year  = CalendarCtrl._year;
+            const month = CalendarCtrl._month;
+
+            // หาจำนวนวันทำงาน (ไม่ใช่วันหยุด) ตั้งแต่ startDate ถึง dateNum
+            if (dateNum < startDate) return null;
+            let dayCounter = parseInt(cfg.startDayNum || 1); // Day ที่ startDate เริ่ม
+            let workdays = 0;
+            for (let d = startDate; d <= dateNum; d++) {
+                if (holidays.includes(d)) continue; // ข้ามวันหยุด
+                workdays++;
+                if (d === dateNum) {
+                    const dayNum = dayCounter + workdays - 1;
+                    const cycleDays = cfg.cycleDays || 24;
+                    if (dayNum > cycleDays) return null;
+                    return 'Day ' + dayNum;
+                }
+            }
+        }
+        return null;
+    },
+
+    // หาวันที่จาก Day label → เพื่อกดปฏิทินแล้ว navigate ไปคิวงาน
+    getDateFromDay: (dayLabel) => {
+        const cfg = State.calendarConfig;
+        if (!cfg) return null;
+
+        if (cfg.mode === 'fixed') {
+            if (!cfg.mapping) return null;
+            const entry = Object.entries(cfg.mapping).find(([, v]) => v === dayLabel);
+            return entry ? parseInt(entry[0]) : null;
+        }
+
+        if (cfg.mode === 'cycle') {
+            const startDate   = parseInt(cfg.startDay || 1);
+            const holidays    = cfg.holidays || [];
+            const startDayNum = parseInt(cfg.startDayNum || 1);
+            const targetNum   = parseInt(dayLabel.replace('Day ', ''));
+            const daysInMonth = new Date(CalendarCtrl._year, CalendarCtrl._month + 1, 0).getDate();
+            let workDay = startDayNum;
+            for (let d = startDate; d <= daysInMonth; d++) {
+                if (holidays.includes(d)) continue;
+                if (workDay === targetNum) return d;
+                workDay++;
+            }
+        }
+        return null;
+    },
+
+    render: () => {
+        const container = document.getElementById('calendar-grid');
+        if (!container) return;
+
+        const year  = CalendarCtrl._year;
+        const month = CalendarCtrl._month;
+        const now   = new Date();
+        const daysInMonth = new Date(year, month + 1, 0).getDate();
+        const firstDow    = new Date(year, month, 1).getDay(); // 0=Sun
+        const cfg = State.calendarConfig;
+
+        // Header
+        const monthLabel = new Date(year, month, 1)
+            .toLocaleDateString('th-TH', { year: 'numeric', month: 'long' });
+        const headerEl = document.getElementById('calendar-month-label');
+        if (headerEl) headerEl.textContent = monthLabel;
+
+        // Mode badge
+        const modeEl = document.getElementById('calendar-mode-badge');
+        if (modeEl) {
+            if (!cfg) {
+                modeEl.textContent = '⚠️ ยังไม่ได้ตั้งค่าปฏิทิน';
+                modeEl.style.background = '#fef3c7';
+                modeEl.style.color = '#92400e';
+            } else if (cfg.mode === 'cycle') {
+                modeEl.textContent = '🔄 Cycle D1-' + (cfg.cycleDays || 24);
+                modeEl.style.background = '#ede9fe';
+                modeEl.style.color = '#5b21b6';
+            } else {
+                modeEl.textContent = '📌 กำหนดวันที่เอง';
+                modeEl.style.background = '#dbeafe';
+                modeEl.style.color = '#1e40af';
+            }
+        }
+
+        // Grid cells
+        const DOW = ['อา','จ','อ','พ','พฤ','ศ','ส'];
+        let html = DOW.map(d =>
+            `<div style="text-align:center;font-size:10px;font-weight:800;color:#9ca3af;padding:4px 0;">${d}</div>`
+        ).join('');
+
+        // empty cells before first day (Sun=0)
+        const startOffset = firstDow; // อาทิตย์ = 0
+        for (let i = 0; i < startOffset; i++) {
+            html += `<div></div>`;
+        }
+
+        for (let d = 1; d <= daysInMonth; d++) {
+            const dayLabel = cfg ? CalendarCtrl.getDayLabel(d) : null;
+            const isToday  = (d === now.getDate() && month === now.getMonth() && year === now.getFullYear());
+            const dow      = new Date(year, month, d).getDay();
+            const isWeekend = dow === 0 || dow === 6;
+            const isHoliday = cfg?.holidays?.includes(d);
+
+            let bgColor = '#fff';
+            let textColor = '#111827';
+            let borderColor = '#f3f4f6';
+
+            if (isToday) { bgColor = '#2563eb'; textColor = '#fff'; borderColor = '#2563eb'; }
+            else if (isHoliday) { bgColor = '#fef2f2'; textColor = '#dc2626'; borderColor = '#fecaca'; }
+            else if (isWeekend) { bgColor = '#f9fafb'; textColor = '#6b7280'; }
+
+            const hasRoute = dayLabel && State.allStores.some(s => s.days && s.days.includes(dayLabel));
+            const clickHandler = dayLabel ? `CalendarCtrl.goToDay('${dayLabel}')` : '';
+
+            html += `
+            <div onclick="${clickHandler}"
+                style="border-radius:10px;border:1px solid ${borderColor};background:${bgColor};
+                       padding:4px 2px;text-align:center;cursor:${dayLabel ? 'pointer' : 'default'};
+                       min-height:52px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;
+                       gap:2px;transition:opacity 0.1s;${dayLabel ? 'active:opacity:0.7;' : ''}">
+                <div style="font-size:12px;font-weight:${isToday ? '900' : '700'};color:${textColor};line-height:1.2;">${d}</div>
+                ${dayLabel ? `
+                <div style="font-size:9px;font-weight:800;padding:1px 5px;border-radius:5px;
+                            background:${isToday ? 'rgba(255,255,255,0.25)' : '#ede9fe'};
+                            color:${isToday ? '#fff' : '#5b21b6'};white-space:nowrap;">
+                    ${dayLabel.replace('Day ','')}
+                </div>
+                ${hasRoute ? `<div style="width:5px;height:5px;border-radius:50%;background:${isToday ? '#fff' : '#2563eb'};margin-top:1px;"></div>` : ''}
+                ` : (isHoliday ? `<div style="font-size:9px;color:#dc2626;">หยุด</div>` : '')}
+            </div>`;
+        }
+
+        container.innerHTML = html;
+    },
+
+    // กดวันในปฏิทิน → navigate ไปหน้าคิวงาน
+    goToDay: (dayLabel) => {
+        // set currentDay แล้วไปหน้า route
+        State.currentDay = dayLabel;
+        // re-render route list
+        const el = document.getElementById('day-select');
+        if (el) el.value = dayLabel;
+        Processor.routeList();
+        UI.switchTab('route');
+        showSalesToast('📅 ' + dayLabel);
+    },
+
+    prevMonth: () => {
+        CalendarCtrl._month--;
+        if (CalendarCtrl._month < 0) { CalendarCtrl._month = 11; CalendarCtrl._year--; }
+        CalendarCtrl.render();
+    },
+
+    nextMonth: () => {
+        CalendarCtrl._month++;
+        if (CalendarCtrl._month > 11) { CalendarCtrl._month = 0; CalendarCtrl._year++; }
+        CalendarCtrl.render();
+    },
+
+    openPopup: () => {
+        const popup = document.getElementById('calendar-popup');
+        const sheet = document.getElementById('calendar-popup-sheet');
+        if (!popup || !sheet) return;
+        // sync เดือนปัจจุบัน
+        const now = new Date();
+        CalendarCtrl._year  = now.getFullYear();
+        CalendarCtrl._month = now.getMonth();
+        CalendarCtrl.render();
+        popup.style.display = 'block';
+        requestAnimationFrame(() => {
+            sheet.style.transform = 'translateY(0)';
+        });
+    },
+
+    closePopup: (e) => {
+        // ปิดเมื่อกด overlay หรือเรียกตรง
+        const sheet = document.getElementById('calendar-popup-sheet');
+        const popup = document.getElementById('calendar-popup');
+        if (e && sheet && sheet.contains(e.target)) return; // กดใน sheet ไม่ปิด
+        if (sheet) sheet.style.transform = 'translateY(100%)';
+        setTimeout(() => { if (popup) popup.style.display = 'none'; }, 300);
+    },
+
+    // override goToDay ให้ปิด popup ก่อน navigate
+    goToDay: (dayLabel) => {
+        CalendarCtrl.closePopup();
+        setTimeout(() => {
+            State.currentDay = dayLabel;
+            const el = document.getElementById('day-select');
+            if (el) el.value = dayLabel;
+            Processor.routeList();
+            UI.switchTab('route');
+            showSalesToast('📅 ' + dayLabel);
+        }, 320);
+    }
+};
+
 const MapCtrl = {
     initAndDraw: () => {
-        document.getElementById('btn-load-map').classList.add('hidden');
-        document.getElementById('map').classList.remove('hidden');
-        document.getElementById('btn-fit-map').classList.remove('hidden');
-        if (!map) {
+        const mapEl = document.getElementById('map');
+        const fitBtn = document.getElementById('btn-fit-map');
+        if (fitBtn) fitBtn.classList.remove('hidden');
+        if (!map && mapEl) {
             map = L.map('map', { zoomControl: false, rotate: true, rotateControl: false }).setView([14.4745, 100.1222], 10);
             MapCtrl._initRotateUI();
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
         }
-        setTimeout(() => { map.invalidateSize(); MapCtrl.drawMap(); MapCtrl.addGpsButton(); }, 200);
+        setTimeout(() => { if (map) { map.invalidateSize(); MapCtrl.drawMap(); MapCtrl.addGpsButton(); } }, 300);
     },
 
     drawMap: () => {
         if (!map) return;
-
-        // ลบ layer เดิม
         if (markerClusterGroup) { map.removeLayer(markerClusterGroup); }
         mapMarkers = [];
 
