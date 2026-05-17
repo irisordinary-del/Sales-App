@@ -28,22 +28,20 @@ const SkuDist = {
     // ─── โหลด Campaigns จาก Firestore ────────────────────────────────────
     _loadCampaigns: async () => {
         try {
+            // ไม่ใช้ orderBy เพื่อหลีกเลี่ยง composite index — sort ใน JS แทน
             const snap = await SkuDist._col()
                 .where('centerId', '==', SkuDist._centerDoc())
-                .orderBy('createdAt', 'desc')
                 .get();
-            SkuDist._campaigns = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+            SkuDist._campaigns = snap.docs
+                .map(d => ({ id: d.id, ...d.data() }))
+                .sort((a, b) => {
+                    const ta = a.createdAt?.seconds || 0;
+                    const tb = b.createdAt?.seconds || 0;
+                    return tb - ta; // ใหม่ก่อน
+                });
         } catch (e) {
-            // อาจยังไม่มี index → โหลดแบบไม่ orderBy
-            try {
-                const snap2 = await SkuDist._col()
-                    .where('centerId', '==', SkuDist._centerDoc())
-                    .get();
-                SkuDist._campaigns = snap2.docs.map(d => ({ id: d.id, ...d.data() }));
-            } catch (e2) {
-                console.warn('SkuDist._loadCampaigns:', e2);
-                SkuDist._campaigns = [];
-            }
+            console.warn('SkuDist._loadCampaigns:', e);
+            SkuDist._campaigns = [];
         }
     },
 
@@ -70,9 +68,12 @@ const SkuDist = {
                 .sort().reverse();
 
             if (months.length > 0) {
+                // ไม่ใช้ orderBy เพื่อหลีกเลี่ยง Firestore index requirement
                 const chunks = await cloudDB.collection('sellout').doc(months[0])
-                    .collection('chunks').orderBy('index').get();
-                chunks.forEach(doc => extractFromRows(doc.data().rows || []));
+                    .collection('chunks').get();
+                // sort ใน JS แทน
+                const chunkDocs = chunks.docs.sort((a,b) => (a.data().index||0) - (b.data().index||0));
+                chunkDocs.forEach(doc => extractFromRows(doc.data().rows || []));
             }
         } catch (e) {
             console.warn('SkuDist._loadProdOptions (sellout):', e);
@@ -545,8 +546,9 @@ const SkuDist = {
             for (const ym of months) {
                 try {
                     const chunks = await cloudDB.collection('sellout').doc(ym)
-                        .collection('chunks').orderBy('index').get();
-                    chunks.forEach(doc => { allRows = allRows.concat(doc.data().rows || []); });
+                        .collection('chunks').get();
+                    const sorted = chunks.docs.sort((a,b) => (a.data().index||0) - (b.data().index||0));
+                    sorted.forEach(doc => { allRows = allRows.concat(doc.data().rows || []); });
                 } catch (e) { /* เดือนนั้นอาจไม่มีข้อมูล */ }
             }
 
