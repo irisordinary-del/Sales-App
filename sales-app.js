@@ -92,7 +92,8 @@ const UI = {
         });
         // Disable sortable
         if (window._sortableInstance) window._sortableInstance.option('disabled', true);
-        // Save order (trigger handleDrag)
+        // Save order + redraw map ครั้งเดียวหลัง confirm
+        Processor._updateSeqBadges();
         Processor.handleDrag();
         showSalesToast('✅ บันทึกลำดับเรียบร้อย');
     },
@@ -464,13 +465,19 @@ const Processor = {
         document.getElementById('route-title').innerText = `Day ${_dayNum}${_mkt} (${list.length} ร้าน)`;
 
         if (sortableList) sortableList.destroy();
-        window._sortableInstance = Sortable.create(c, {
+        sortableList = Sortable.create(c, {
             handle: '.drag-handle',
             animation: 150,
-            disabled: true,    // disabled ตอนแรก ต้องกด Edit ก่อน
-            onChange: Processor._updateSeqBadges,  // อัปเดตเลขทันทีทุกครั้งที่การ์ดเปลี่ยนตำแหน่ง
-            onEnd: Processor._updateSeqBadges      // อัปเดตอีกครั้งตอนวางเสร็จ (safety net)
+            forceFallback: false,   // ใช้ native drag บน desktop, touch event บน mobile
+            touchStartThreshold: 3, // threshold เล็กๆ กันกด popup โดยไม่ตั้งใจ drag
+            disabled: true,         // disabled ตอนแรก ต้องกด Edit ก่อน
+            // onChange: ลบออก — ไม่ redraw map ทุก pixel ที่ลาก (ทำให้กระตุก)
+            onEnd: () => {
+                // อัปเดตเลขใน badge อย่างเดียว ไม่ redraw map ระหว่าง drag
+                Processor._updateSeqBadgesOnly();
+            }
         });
+        window._sortableInstance = sortableList;
         // ซ่อน drag handles เริ่มต้น
         setTimeout(() => {
             document.querySelectorAll('.drag-handle').forEach(h => {
@@ -482,20 +489,20 @@ const Processor = {
         MapCtrl.drawMap();
     },
 
-    // อัปเดตตัวเลขใน badge (รายการ) และ marker บนแผนที่ — ไม่ save Firestore
-    _updateSeqBadges: () => {
-        // 1) อัปเดตตัวเลขในรายการ
+    // อัปเดตเลข badge + sync State — ไม่ redraw map (เรียกตอน drag จบ)
+    _updateSeqBadgesOnly: () => {
         document.querySelectorAll('#route-store-list > .store-item').forEach((item, index) => {
             const badge = item.querySelector('[data-seq]');
             if (badge) badge.textContent = index + 1;
-        });
-        // 2) sync seq ลง State แล้ว redraw marker บนแผนที่
-        const items = document.querySelectorAll('#route-store-list > .store-item');
-        items.forEach((item, index) => {
             const id = item.getAttribute('data-id');
             const target = State.allStores.find(s => s.id === id);
             if (target) { if (!target.seqs) target.seqs = {}; target.seqs[State.currentDay] = index + 1; }
         });
+    },
+
+    // อัปเดตเลข badge + sync State + redraw map (เรียกหลัง confirm order)
+    _updateSeqBadges: () => {
+        Processor._updateSeqBadgesOnly();
         MapCtrl.drawMap();
     },
 
