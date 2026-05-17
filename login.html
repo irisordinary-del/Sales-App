@@ -9,6 +9,13 @@
     <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
     <script src="app-config-init.js"></script>
     <script src="auth.js"></script>
+    <!-- PWA -->
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#6366f1">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="RoutePlan">
+    <link rel="apple-touch-icon" href="/icons/icon-192.png">
     <style>
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -318,5 +325,6 @@
             if (e.key === 'Enter') doLogin();
         });
     </script>
+    <script src="pwa-register.js"></script>
 </body>
 </html>
