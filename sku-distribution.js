@@ -47,28 +47,54 @@ const SkuDist = {
         }
     },
 
-    // ─── โหลด prodCode/prodName options จาก sellout ──────────────────────
+    // ─── โหลด prodCode/prodName options ─────────────────────────────────
+    // ลำดับ: 1) sellout (เดือนล่าสุด)  2) v1_raw_chunks (fallback)  3) v1_sales_chunks
     _loadProdOptions: async () => {
         if (SkuDist._allProdOptions.length > 0) return;
-        try {
-            // ดึงเดือนล่าสุดจาก sellout
-            const snap = await cloudDB.collection('sellout').orderBy('__name__', 'desc').limit(1).get();
-            if (snap.empty) return;
-            const ym = snap.docs[0].id;
-            const chunks = await cloudDB.collection('sellout').doc(ym)
-                .collection('chunks').orderBy('index').get();
-            const seen = new Map();
-            chunks.forEach(doc => {
-                (doc.data().rows || []).forEach(r => {
-                    const code = String(r.prodCode || '').trim();
-                    const name = String(r.prodName || '').trim();
-                    if (code && !seen.has(code)) seen.set(code, name);
-                });
+        const seen = new Map();
+
+        const extractFromRows = (rows) => {
+            rows.forEach(r => {
+                const code = String(r.prodCode || r['SO Product Code'] || '').trim();
+                const name = String(r.prodName || r['SO Product Name'] || '').trim();
+                if (code && !seen.has(code)) seen.set(code, name);
             });
-            SkuDist._allProdOptions = [...seen.entries()].map(([code, name]) => ({ code, name }));
+        };
+
+        // ── แหล่งที่ 1: sellout chunks (normalized rows มี prodCode/prodName) ──
+        try {
+            const listSnap = await cloudDB.collection('sellout').get();
+            const months = listSnap.docs
+                .map(d => d.id)
+                .filter(id => /^\d{4}_\d{2}$/.test(id))
+                .sort().reverse();
+
+            if (months.length > 0) {
+                const chunks = await cloudDB.collection('sellout').doc(months[0])
+                    .collection('chunks').orderBy('index').get();
+                chunks.forEach(doc => extractFromRows(doc.data().rows || []));
+            }
         } catch (e) {
-            console.warn('SkuDist._loadProdOptions:', e);
+            console.warn('SkuDist._loadProdOptions (sellout):', e);
         }
+
+        // ── แหล่งที่ 2: v1_raw_chunks (fallback ถ้า sellout ว่าง) ──
+        if (seen.size === 0) {
+            try {
+                const rawSnap = await cloudDB.collection('v1_raw_chunks').get();
+                rawSnap.forEach(doc => extractFromRows(doc.data().rows || []));
+            } catch (e) {
+                console.warn('SkuDist._loadProdOptions (v1_raw_chunks):', e);
+            }
+        }
+
+        // ── แหล่งที่ 3: v1_sales_chunks (มี skuCount แต่ไม่มีรายสินค้า — ข้ามถ้ายังว่าง) ──
+
+        SkuDist._allProdOptions = [...seen.entries()]
+            .map(([code, name]) => ({ code, name }))
+            .sort((a, b) => a.code.localeCompare(b.code));
+
+        console.log(`SkuDist: โหลด ${SkuDist._allProdOptions.length} SKU options`);
     },
 
     // ─── Shell UI ─────────────────────────────────────────────────────────
@@ -332,34 +358,53 @@ const SkuDist = {
         SkuDist._renderGroups();
     },
 
-    _onKwInput: (gId, val) => {
+    _onKwInput: async (gId, val) => {
         const dropdown = document.getElementById(`kw-dropdown-${gId}`);
         if (!dropdown) return;
         const q = val.trim().toLowerCase();
-        if (!q || q.length < 2) { dropdown.classList.add('hidden'); return; }
+        if (!q || q.length < 1) { dropdown.classList.add('hidden'); return; }
+
+        // แสดง loading ถ้ายังไม่มีข้อมูล
+        if (SkuDist._allProdOptions.length === 0) {
+            dropdown.innerHTML = `<div class="px-3 py-2.5 text-xs text-gray-400 flex items-center gap-2">
+                <span style="display:inline-block;width:12px;height:12px;border:2px solid #e5e7eb;border-top-color:#6366f1;border-radius:50%;animation:spin 0.7s linear infinite;"></span>
+                กำลังโหลดรายการสินค้า...
+            </div>
+            <style>@keyframes spin{to{transform:rotate(360deg)}}</style>`;
+            dropdown.classList.remove('hidden');
+            await SkuDist._loadProdOptions();
+        }
 
         const matches = SkuDist._allProdOptions
             .filter(p => p.code.toLowerCase().includes(q) || p.name.toLowerCase().includes(q))
             .slice(0, 20);
 
+        // escape สำหรับ onclick string
+        const qEsc = val.trim().replace(/'/g, "\'");
+
         if (!matches.length) {
-            // แสดง option เพิ่ม keyword ตรงๆ
-            dropdown.innerHTML = `<div class="px-3 py-2 text-xs text-gray-500">
-                ไม่พบสินค้าที่ match — <button onclick="SkuDist._addKeywordRaw('${gId}','${val.trim()}')" class="text-indigo-600 font-bold hover:underline">เพิ่ม "${val.trim()}" เป็น keyword ตรงๆ</button>
+            dropdown.innerHTML = `<div class="px-3 py-2.5 text-xs text-gray-500">
+                ไม่พบสินค้าที่ match
+                ${SkuDist._allProdOptions.length === 0
+                    ? '<span class="text-amber-600"> — ยังไม่มีข้อมูล sellout ในระบบ</span>'
+                    : ''}
+                <br><button onclick="SkuDist._addKeywordRaw('${gId}','${qEsc}')" class="text-indigo-600 font-bold hover:underline mt-1 inline-block">+ เพิ่ม "${qEsc}" เป็น keyword ตรงๆ</button>
             </div>`;
             dropdown.classList.remove('hidden');
             return;
         }
 
-        dropdown.innerHTML = matches.map(p => `
+        dropdown.innerHTML = matches.map(p => {
+            const codeEsc = p.code.replace(/'/g, "\'");
+            return `
             <div class="px-3 py-2 hover:bg-indigo-50 cursor-pointer flex items-center gap-2 border-b border-gray-50"
-                onclick="SkuDist._addKeyword('${gId}','${p.code}')">
+                onclick="SkuDist._addKeyword('${gId}','${codeEsc}')">
                 <span class="font-mono text-xs text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded">${p.code}</span>
                 <span class="text-xs text-gray-700 truncate">${p.name}</span>
-            </div>
-        `).join('') + `
+            </div>`;
+        }).join('') + `
             <div class="px-3 py-2 text-xs text-gray-400 border-t border-gray-100">
-                หรือ <button onclick="SkuDist._addKeywordRaw('${gId}','${val.trim()}')" class="text-indigo-600 font-bold hover:underline">เพิ่ม "${val.trim()}" เป็น keyword</button> (match แบบ contains)
+                หรือ <button onclick="SkuDist._addKeywordRaw('${gId}','${qEsc}')" class="text-indigo-600 font-bold hover:underline">+ เพิ่ม "${qEsc}" เป็น keyword</button> (match แบบ contains)
             </div>`;
         dropdown.classList.remove('hidden');
     },
