@@ -14,6 +14,7 @@ const SalesDashboard = {
     _username: '',       // Salesman Code (uppercase)
     _myRoute: '',        // route ของ sales เช่น "402V01"
     _campaigns: [],      // active campaigns ของศูนย์นี้
+    _rowCache: {},       // { 'YYYY_MM': rows[] } cache ไม่ต้องโหลดซ้ำ
     _ready: false,
 
     EXCLUDED_CATS: new Set(['อื่นๆ', 'กระเช้าของขวัญ']),
@@ -145,7 +146,8 @@ const SalesDashboard = {
             SalesDashboard._loadTarget(ym)
         ]);
         SalesDashboard._render();
-        SalesDashboard._renderCampaigns(ym);
+        // cache rows ของเดือนนี้ไว้ให้ campaign ใช้ด้วย
+        SalesDashboard._rowCache[ym] = SalesDashboard._rows;
     },
 
     // ─── โหลดข้อมูล Sellout เฉพาะ sCode ตัวเอง ───────────────────────────
@@ -325,6 +327,8 @@ const SalesDashboard = {
                 .where('centerId', '==', centerDoc)
                 .get();
             SalesDashboard._campaigns = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+            // render campaigns หลังโหลดเสร็จ (ไม่ขึ้นกับเดือนที่เลือก)
+            await SalesDashboard._renderCampaigns();
         } catch (e) {
             console.warn('SalesDashboard._loadCampaigns:', e);
             SalesDashboard._campaigns = [];
@@ -332,23 +336,27 @@ const SalesDashboard = {
     },
 
     // ─── Render Campaign Coverage สำหรับสายตัวเอง ────────────────────────
-    _renderCampaigns: async (ym) => {
+    _renderCampaigns: async () => {
         const el = document.getElementById('db-campaign-section');
         if (!el) return;
 
-        const now = ym || SalesDashboard._ym || '';
         const route = SalesDashboard._myRoute;
-        if (!route || !now) { el.innerHTML = ''; return; }
+        if (!route) { el.innerHTML = ''; return; }
 
-        // กรองเฉพาะ campaign ที่อยู่ในช่วงเวลา
+        // กรองเฉพาะ campaign ที่ยังไม่หมดอายุ (endYM >= เดือนปัจจุบัน)
+        const nowYM = (typeof DateUtil !== 'undefined')
+            ? DateUtil.currentYM()
+            : (() => { const d = new Date(); return `${d.getFullYear()}_${String(d.getMonth()+1).padStart(2,'0')}`; })();
+
         const active = SalesDashboard._campaigns.filter(c =>
-            c.startYM <= now && c.endYM >= now &&
-            (c.groups || []).length > 0
+            c.endYM >= nowYM && (c.groups || []).length > 0
         );
-
         if (!active.length) { el.innerHTML = ''; return; }
 
-        // โหลด prodOptions ถ้ายังไม่มี (ใช้ร่วมกับ SkuDist ถ้ามี)
+        // แสดง loading
+        el.innerHTML = `<div class="db-card" style="flex-shrink:0;margin-bottom:12px;border-left:4px solid #ec4899;text-align:center;padding:16px;color:#9ca3af;font-size:12px;">⏳ กำลังโหลดข้อมูล campaign...</div>`;
+
+        // โหลด prodOptions ถ้ายังไม่มี
         let prodOptions = [];
         if (typeof SkuDist !== 'undefined' && SkuDist._allProdOptions.length > 0) {
             prodOptions = SkuDist._allProdOptions;
@@ -372,55 +380,90 @@ const SalesDashboard = {
             } catch(e) { /* ไม่กระทบ */ }
         }
 
-        // ร้านในสายตัวเอง (จาก State ถ้ามี)
+        // ร้านในสายตัวเอง
         const myStores = (typeof State !== 'undefined' && State.db?.routes?.[route])
             ? State.db.routes[route].map(s => String(s.id))
             : [];
-        const myStoreSet = new Set(myStores);
+        const myStoreSet  = new Set(myStores);
         const totalStores = myStores.length;
 
-        // rows ของเดือนนี้ (ใช้ SalesDashboard._rows แต่กรองเฉพาะร้านในสาย)
-        const rows = SalesDashboard._rows.filter(r =>
-            myStoreSet.size > 0 ? myStoreSet.has(String(r.custCode || '')) : true
-        );
+        // helper: สร้าง range เดือน
+        const getRange = (startYM, endYM) => {
+            const months = [];
+            let [y, m] = startYM.split('_').map(Number);
+            const [ey, em] = endYM.split('_').map(Number);
+            while (y < ey || (y === ey && m <= em)) {
+                months.push(`${y}_${String(m).padStart(2,'0')}`);
+                m++; if (m > 12) { m = 1; y++; }
+            }
+            return months;
+        };
+
+        // helper: โหลด rows ของเดือนนั้น (cached)
+        const loadMonthRows = async (ym) => {
+            if (SalesDashboard._rowCache[ym]) return SalesDashboard._rowCache[ym];
+            try {
+                const chunks = await db.collection('sellout').doc(ym).collection('chunks').get();
+                let rows = [];
+                chunks.forEach(doc => rows = rows.concat(doc.data().rows || []));
+                // กรองเฉพาะร้านในสายตัวเอง (ยึดร้านเป็นหลัก)
+                const filtered = myStoreSet.size > 0
+                    ? rows.filter(r => myStoreSet.has(String(r.custCode || '')))
+                    : rows;
+                SalesDashboard._rowCache[ym] = filtered;
+                return filtered;
+            } catch(e) {
+                SalesDashboard._rowCache[ym] = [];
+                return [];
+            }
+        };
 
         // render แต่ละ campaign
-        const cardsHtml = active.map(campaign => {
-            const groups   = campaign.groups || [];
+        const cardsHtml = await Promise.all(active.map(async campaign => {
+            const groups        = campaign.groups || [];
             const targetUnit    = campaign.targetUnit || 'pct';
             const defaultTarget = campaign.defaultTarget ?? 80;
             const rawTargets    = campaign.routeTargets || {};
 
             // target สำหรับสายนี้
-            const rawTgt = rawTargets[route] ?? null;
-            const tgtPct = rawTgt !== null
+            const rawTgt  = rawTargets[route] ?? null;
+            const tgtPct  = rawTgt !== null
                 ? (targetUnit === 'count'
                     ? (totalStores > 0 ? Math.round(rawTgt / totalStores * 100) : 0)
                     : rawTgt)
                 : defaultTarget;
             const tgtCount = Math.round(tgtPct / 100 * totalStores);
 
+            // โหลด rows ทุกเดือนใน campaign range
+            const months = getRange(campaign.startYM, campaign.endYM);
+            let allRows = [];
+            for (const ym of months) {
+                const r = await loadMonthRows(ym);
+                allRows = allRows.concat(r);
+            }
+
             const groupBars = groups.map(g => {
                 const kws = (g.keywords || []).map(k => k.toLowerCase());
-
-                // rows ที่ match
-                const matched = rows.filter(r => {
+                const matched = allRows.filter(r => {
                     const code = (r.prodCode || '').toLowerCase();
                     const name = (r.prodName || '').toLowerCase();
                     return kws.some(k => code.includes(k) || name.includes(k));
                 });
-                const bought = new Set(matched.map(r => String(r.custCode)));
+                const bought      = new Set(matched.map(r => String(r.custCode)));
                 const boughtCount = bought.size;
-                const pct   = totalStores > 0 ? Math.round(boughtCount / totalStores * 100) : 0;
-                const vs    = pct - tgtPct;
-                const color = pct >= tgtPct ? '#10b981' : pct >= tgtPct * 0.8 ? '#f59e0b' : '#ef4444';
+                const pct         = totalStores > 0 ? Math.round(boughtCount / totalStores * 100) : 0;
+                const vs          = pct - tgtPct;
+                const color       = pct >= tgtPct ? '#10b981' : pct >= tgtPct * 0.8 ? '#f59e0b' : '#ef4444';
 
                 // SKU coverage
                 const targetSkus = new Set(prodOptions
-                    .filter(p => kws.some(k => p.code.toLowerCase().includes(k) || p.name.toLowerCase().includes(k)))
+                    .filter(p => kws.some(k =>
+                        p.code.toLowerCase().includes(k) || p.name.toLowerCase().includes(k)))
                     .map(p => p.code));
                 const soldSkus  = new Set(matched.map(r => r.prodCode).filter(Boolean));
-                const skuPct    = targetSkus.size > 0 ? Math.round(soldSkus.size / targetSkus.size * 100) : (soldSkus.size > 0 ? 100 : 0);
+                const skuPct    = targetSkus.size > 0
+                    ? Math.round(soldSkus.size / targetSkus.size * 100)
+                    : (soldSkus.size > 0 ? 100 : 0);
 
                 return `
                 <div style="margin-bottom:14px;">
@@ -428,20 +471,17 @@ const SalesDashboard = {
                         <span style="font-size:12px;font-weight:700;color:#374151;">${g.name}</span>
                         <span style="font-size:14px;font-weight:900;color:${color};">${pct}%</span>
                     </div>
-                    <!-- Bar -->
                     <div style="position:relative;height:10px;background:#e5e7eb;border-radius:99px;overflow:visible;margin-bottom:5px;">
                         <div style="width:${Math.min(pct,100)}%;height:10px;background:${color};border-radius:99px;"></div>
                         <div style="position:absolute;left:${Math.min(tgtPct,100)}%;top:-3px;width:2px;height:16px;background:#6366f1;border-radius:1px;" title="target ${tgtPct}%"></div>
                     </div>
-                    <!-- Stats -->
                     <div style="display:flex;justify-content:space-between;font-size:10px;">
-                        <span style="color:#111827;font-weight:700;">${boughtCount}<span style="color:#9ca3af;font-weight:400;">/${tgtCount} ร้าน</span></span>
+                        <span style="color:#111827;font-weight:700;">${boughtCount}<span style="color:#9ca3af;font-weight:400;">/${tgtCount} ร้าน (target)</span></span>
                         <span style="color:${vs >= 0 ? '#10b981' : '#ef4444'};font-weight:700;">${vs >= 0 ? '+' : ''}${vs}% vs target</span>
                     </div>
-                    <!-- SKU -->
-                    <div style="margin-top:4px;font-size:10px;color:#9ca3af;">
-                        SKU coverage: <span style="font-weight:700;color:#6366f1;">${skuPct}%</span>
-                        <span style="margin-left:4px;">(${soldSkus.size}/${targetSkus.size} SKU)</span>
+                    <div style="font-size:10px;color:#9ca3af;margin-top:3px;">
+                        ร้านทั้งหมดในสาย ${totalStores} ร้าน &nbsp;|&nbsp;
+                        SKU coverage: <span style="font-weight:700;color:#6366f1;">${skuPct}% (${soldSkus.size}/${targetSkus.size} SKU)</span>
                     </div>
                 </div>`;
             }).join('');
@@ -451,17 +491,15 @@ const SalesDashboard = {
 
             return `
             <div class="db-card" style="flex-shrink:0;margin-bottom:12px;border-left:4px solid #ec4899;">
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-                    <div>
-                        <div style="font-size:12px;font-weight:900;color:#111827;">🎯 ${campaign.name}</div>
-                        <div style="font-size:10px;color:#9ca3af;margin-top:2px;">${startLbl} → ${endLbl} &nbsp;|&nbsp; target ${tgtPct}% (${tgtCount} ร้าน)</div>
-                    </div>
+                <div style="margin-bottom:12px;">
+                    <div style="font-size:12px;font-weight:900;color:#111827;">🎯 ${campaign.name}</div>
+                    <div style="font-size:10px;color:#9ca3af;margin-top:2px;">${startLbl} → ${endLbl} &nbsp;·&nbsp; ยอดรวมทั้งช่วง</div>
                 </div>
                 ${groupBars}
             </div>`;
-        }).join('');
+        }));
 
-        el.innerHTML = cardsHtml;
+        el.innerHTML = cardsHtml.join('');
     },
 
 
