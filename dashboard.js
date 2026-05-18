@@ -17,7 +17,7 @@ const Dashboard = {
     _rows: [],                // flat filtered rows (current month)
     _allMonths: [],           // list of loaded YM keys
     _targets: {},             // { routeCode: amount }
-    _CHUNK_SIZE: 300,
+    _CHUNK_SIZE: 500,
 
     // Categories ที่ต้องแยกออก ไม่รวมยอดหลัก
     EXCLUDED_CATS: new Set(['อื่นๆ', 'กระเช้าของขวัญ']),
@@ -303,9 +303,10 @@ const Dashboard = {
             const metaDoc = await cloudDB.collection('sellout').doc(ym).get();
             if (!metaDoc.exists) { Dashboard._rows = []; Dashboard._hideUploadBar(); return; }
 
-            const chunks = await cloudDB.collection('sellout').doc(ym).collection('chunks').orderBy('index').get();
+            const chunks = await cloudDB.collection('sellout').doc(ym).collection('chunks').get();
+            const sortedDocs = chunks.docs.sort((a,b) => (a.data().index||0) - (b.data().index||0));
             let rows = [];
-            chunks.forEach(doc => { if (doc.data().rows) rows = rows.concat(doc.data().rows); });
+            sortedDocs.forEach(doc => { if (doc.data().rows) rows = rows.concat(doc.data().rows); });
             Dashboard._rows = rows;
             Dashboard._hideUploadBar();
         } catch (e) {
@@ -378,8 +379,7 @@ const Dashboard = {
 
     _normalizeRows: (raw) => {
         return raw
-            // รวม Invoiced + Credit Note (ไม่กรองทิ้ง Credit Note)
-            .filter(r => r['Invoice  Status'] === 'Invoiced' || r['Invoice  Status'] === 'Credit Note')
+            .filter(r => r['Invoice  Status'] === 'Invoiced' || r['Invoice  Status'] === 'Invoiced')
             .map(r => ({
                 sCode:    String(r['Salesman Code'] || '').trim().toUpperCase(),
                 sType:    String(r['Salesman Type'] || '').trim(),
@@ -388,16 +388,13 @@ const Dashboard = {
                 shopType: String(r['Shop Type Desc'] || '').trim(),
                 invDate:  r['Invoice Date'] ? String(r['Invoice Date']).slice(0, 10) : '',
                 invNum:   String(r['Invoice Number'] || '').trim(),
-                soNum:    String(r['SO Number'] || '').trim(),
-                soStatus: String(r['SO Status'] || '').trim(),       // 'Processed - Invoice' | 'Credit Note'
-                invStatus:String(r['Invoice  Status'] || '').trim(), // 'Invoiced' | 'Credit Note'
+                invStatus:String(r['Invoice  Status'] || '').trim(),
                 catDesc:  String(r['Category Description'] || '').trim(),
                 brandDesc:String(r['Brand Description'] || '').trim(),
                 prodCode: String(r['SO Product Code'] || '').trim(),
                 prodName: String(r['SO Product Name'] || '').trim(),
                 gross:    parseFloat(r['Invoice  Gross Amount']) || 0,
                 net:      parseFloat(r['Invoice Net Amount']) || 0,
-                soNet:    parseFloat(r['SO NET Amount']) || 0,        // ยอด SO ก่อน Confirm
                 qtyEA:    parseFloat(r['Delivery Total  QTY EA']) || 0,
             }));
     },
