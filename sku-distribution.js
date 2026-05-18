@@ -381,7 +381,8 @@ const SkuDist = {
 
     _setRouteTarget: (route, val) => {
         const n = parseFloat(val);
-        if (!isNaN(n) && n >= 0 && n <= 100) SkuDist._routeTargets[route] = n;
+        const maxVal = SkuDist._targetUnit === 'pct' ? 100 : 99999;
+        if (!isNaN(n) && n >= 0 && n <= maxVal) SkuDist._routeTargets[route] = n;
         else delete SkuDist._routeTargets[route];
     },
 
@@ -600,7 +601,7 @@ const SkuDist = {
             };
 
             if (SkuDist._editingId) {
-                await SkuDist._col().doc(SkuDist._editingId).set(data, { merge: true });
+                await SkuDist._col().doc(SkuDist._editingId).set(data);
             } else {
                 data.createdAt = firebase.firestore.FieldValue.serverTimestamp();
                 await SkuDist._col().add(data);

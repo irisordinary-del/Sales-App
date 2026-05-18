@@ -325,6 +325,24 @@ UI._currentTab         // track tab ปัจจุบัน
 - [ ] KPIMgr: product focus field ควรเก็บใน config document ของ center แทน hardcode
 - [ ] Campaign widget: refresh อัตโนมัติเมื่อ Admin สร้าง/ลบ campaign (ตอนนี้ต้อง reload)
 
+## Session 3 — Bug Fix (sales-app.js)
+
+### Drag & Drop กระตุก (`Processor.routeList`)
+**ปัญหา:** การลากเรียงร้านค้าในหน้า Sales กระตุก / ร้านหลุดไปท้ายสุด
+**สาเหตุ:**
+- `onChange` เรียก `MapCtrl.drawMap()` ทุก pixel ที่ลาก → หนักมากบนมือถือ
+- `onEnd` เรียก `drawMap()` ซ้ำอีกรอบ (2 รอบรวม)
+- `sortableList.destroy()` ไม่ทำงาน เพราะ instance ถูก assign ลง `window._sortableInstance` แต่ check จาก `sortableList`
+
+**แก้:**
+- ลบ `onChange` ออก
+- `onEnd` → เรียกแค่ `_updateSeqBadgesOnly()` (อัปเดตเลข badge, ไม่ redraw map)
+- `drawMap()` เรียกครั้งเดียวตอนกด "ยืนยัน ✓" เท่านั้น
+- แยก `_updateSeqBadgesOnly()` (ไม่ drawMap) ออกจาก `_updateSeqBadges()` (drawMap)
+- แก้ตัวแปร `sortableList` ให้ตรงกัน destroy ได้ถูกต้อง
+
+---
+
 ## Session 3 — สิ่งที่เพิ่มใหม่
 
 ### Audit Log (`audit-log.js`)
