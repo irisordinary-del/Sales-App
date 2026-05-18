@@ -520,13 +520,69 @@ const SalesDashboard = {
                 const matched = allRows.filter(r => {
                     const code = (r.prodCode || '').toLowerCase();
                     const name = (r.prodName || '').toLowerCase();
+                    return kws.some(k => code.includes(k) || name.includes(k));
+                });
+                const bought      = new Set(matched.map(r => String(r.custCode)));
+                const boughtCount = bought.size;
+                const pct         = totalStores > 0 ? Math.round(boughtCount / totalStores * 100) : 0;
+                const vs          = pct - tgtPct;
+                const color       = pct >= tgtPct ? '#10b981' : pct >= tgtPct * 0.8 ? '#f59e0b' : '#ef4444';
+
+                // SKU coverage
+                const targetSkus = new Set(prodOptions
+                    .filter(p => kws.some(k =>
+                        p.code.toLowerCase().includes(k) || p.name.toLowerCase().includes(k)))
+                    .map(p => p.code));
+                const soldSkus  = new Set(matched.map(r => r.prodCode).filter(Boolean));
+                const skuPct    = targetSkus.size > 0
+                    ? Math.round(soldSkus.size / targetSkus.size * 100)
+                    : (soldSkus.size > 0 ? 100 : 0);
+
+                return `
+                <div style="margin-bottom:14px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;">
+                        <span style="font-size:12px;font-weight:700;color:#374151;">${g.name}</span>
+                        <span style="font-size:14px;font-weight:900;color:${color};">${pct}%</span>
+                    </div>
+                    <div style="position:relative;height:10px;background:#e5e7eb;border-radius:99px;overflow:visible;margin-bottom:5px;">
+                        <div style="width:${Math.min(pct,100)}%;height:10px;background:${color};border-radius:99px;"></div>
+                        <div style="position:absolute;left:${Math.min(tgtPct,100)}%;top:-3px;width:2px;height:16px;background:#6366f1;border-radius:1px;" title="target ${tgtPct}%"></div>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;font-size:10px;">
+                        <span style="color:#111827;font-weight:700;">${boughtCount}<span style="color:#9ca3af;font-weight:400;">/${tgtCount} ร้าน (target)</span></span>
+                        <span style="color:${vs >= 0 ? '#10b981' : '#ef4444'};font-weight:700;">${vs >= 0 ? '+' : ''}${vs}% vs target</span>
+                    </div>
+                    <div style="font-size:10px;color:#9ca3af;margin-top:3px;">
+                        ร้านทั้งหมดในสาย ${totalStores} ร้าน &nbsp;|&nbsp;
+                        SKU coverage: <span style="font-weight:700;color:#6366f1;">${skuPct}% (${soldSkus.size}/${targetSkus.size} SKU)</span>
+                    </div>
+                </div>`;
+            }).join('');
+
+            const startLbl = typeof DateUtil !== 'undefined' ? DateUtil.ymToThaiShort(campaign.startYM) : campaign.startYM;
+            const endLbl   = typeof DateUtil !== 'undefined' ? DateUtil.ymToThaiShort(campaign.endYM)   : campaign.endYM;
+
+            return `
+            <div class="db-card" style="flex-shrink:0;margin-bottom:12px;border-left:4px solid #ec4899;">
+                <div style="margin-bottom:12px;">
+                    <div style="font-size:12px;font-weight:900;color:#111827;">🎯 ${campaign.name}</div>
+                    <div style="font-size:10px;color:#9ca3af;margin-top:2px;">${startLbl} → ${endLbl} &nbsp;·&nbsp; ยอดรวมทั้งช่วง</div>
+                </div>
+                ${groupBars}
+            </div>`;
+        }));
+
+        el.innerHTML = cardsHtml.join('');
+    },
+
+
+};
+
 // ─── Hook เข้า App.start() ── เรียก init หลัง login สำเร็จ ─────────────
-// รอ DOMContentLoaded แล้วค่อย patch
 document.addEventListener('DOMContentLoaded', () => {
-    // Poll จนกว่า App จะ init เสร็จ (State.isLoaded)
     const _tryInit = () => {
         if (typeof State !== 'undefined' && State.isLoaded) {
-            if (App.isSupervisor()) {
+            if (typeof App !== 'undefined' && App.isSupervisor()) {
                 SupervisorDashboard.init();
             } else {
                 SalesDashboard.init();
