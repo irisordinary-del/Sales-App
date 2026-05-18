@@ -17,6 +17,14 @@
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     
+    <!-- PWA -->
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#6366f1">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="RoutePlan">
+    <link rel="apple-touch-icon" href="/icons/icon-192.png">
+
     <link rel="stylesheet" href="sales-style.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <style>
@@ -133,7 +141,7 @@
                     <div style="font-size:16px;font-weight:900;color:#111827;">📊 ยอดขายของฉัน</div>
                     <div id="db-route-label" style="font-size:11px;color:#6b7280;font-weight:600;margin-top:2px;"></div>
                 </div>
-                <select id="db-month-sel" onchange="SalesDashboard.onMonthChange(this.value)"
+                <select id="db-month-sel" onchange="(typeof App !== 'undefined' && App.isSupervisor() ? SupervisorDashboard : SalesDashboard).onMonthChange(this.value)"
                     style="background:#f3f4f6;border:1px solid #e5e7eb;border-radius:10px;padding:6px 10px;font-size:11px;font-weight:700;outline:none;font-family:inherit;">
                     <option value="">-- เดือน --</option>
                 </select>
@@ -576,5 +584,6 @@
     <script src="sales-app.js"></script>
     <script src="store-history.js"></script>
     <script src="sales-dashboard.js"></script>
+    <script src="pwa-register.js"></script>
 </body>
 </html>

@@ -37,7 +37,7 @@ db.enablePersistence({ synchronizeTabs: true }).catch(function(err) { console.wa
 let docMain = db.collection('appData').doc('v1_main');
 const colSales = db.collection('v1_sales_chunks');
 
-let State = { myRoute: "", allStores: [], routeStores: [], sales: {}, currentDay: "", isLoaded: false, mapNeedsFit: true, calendarConfig: null, activePlanYM: null, activePlanMode: 'active' };
+let State = { myRoute: "", allStores: [], routeStores: [], sales: {}, currentDay: "", isLoaded: false, mapNeedsFit: true, calendarConfig: null, activePlanYM: null, activePlanMode: 'active', viewMode: 'sales', centerId: null, allRoutes: {}, routeList: [] };
 let map = null, mapMarkers = [], sortableList = null, markerClusterGroup = null;
 
 // ─── Tab keys ที่ระบบรู้จัก ───────────────────────────────
@@ -92,7 +92,8 @@ const UI = {
         });
         // Disable sortable
         if (window._sortableInstance) window._sortableInstance.option('disabled', true);
-        // Save order (trigger handleDrag)
+        // Save order + redraw map ครั้งเดียวหลัง confirm
+        Processor._updateSeqBadges();
         Processor.handleDrag();
         showSalesToast('✅ บันทึกลำดับเรียบร้อย');
     },
@@ -114,11 +115,26 @@ const UI = {
 
         if (id === 'route') {
             setTimeout(() => {
-                if (!map) {
-                    MapCtrl.initAndDraw();
+                if (App.isSupervisor()) {
+                    // Supervisor: แสดง grid ถ้ายังไม่ได้เลือกสาย
+                    if (!SupervisorUI._selectedRoute) {
+                        SupervisorUI.renderRouteGrid();
+                    } else {
+                        // เลือกสายแล้ว → init map เหมือน Sales
+                        if (!map) {
+                            MapCtrl.initAndDraw();
+                        } else {
+                            map.invalidateSize();
+                            if (State.mapNeedsFit) MapCtrl.fitBounds();
+                        }
+                    }
                 } else {
-                    map.invalidateSize();
-                    if (State.mapNeedsFit) MapCtrl.fitBounds();
+                    if (!map) {
+                        MapCtrl.initAndDraw();
+                    } else {
+                        map.invalidateSize();
+                        if (State.mapNeedsFit) MapCtrl.fitBounds();
+                    }
                 }
             }, 200);
         }
@@ -142,8 +158,8 @@ const UI = {
 
     searchStores: (val) => {
         let q = val.toLowerCase().trim();
-        document.querySelectorAll('#all-store-list > div').forEach(el => {
-            el.style.display = el.getAttribute('data-search').toLowerCase().includes(q) ? 'flex' : 'none';
+        document.querySelectorAll('#all-store-list > div[data-search]').forEach(el => {
+            el.style.display = (el.getAttribute('data-search')||'').toLowerCase().includes(q) ? 'flex' : 'none';
         });
     },
 
@@ -192,23 +208,120 @@ const UI = {
 
 const App = {
     checkAuth: () => {
-        // ถ้า session มีอยู่และเป็น sales → เข้าได้เลย
         const session = Auth.getSession();
+        const supervisorRoles = ['admin', 'supervisor', 'route_supervisor', 'asm'];
         if (session && session.role === 'sales') {
             State.myRoute = session.username;
+            State.viewMode = 'sales';
             App.start();
-        } else if (session && (session.role === 'admin' || session.role === 'supervisor')) {
+        } else if (session && ['route_supervisor','asm'].includes(session.role)) {
+            // Supervisor/ASM → เข้า sales.html ได้ เห็นทุกสาย
+            State.myRoute = session.username;
+            State.viewMode = session.role; // 'route_supervisor' | 'asm'
+            State.centerId = session.centerId;
+            App.startSupervisor();
+        } else if (session && supervisorRoles.includes(session.role)) {
             // admin/supervisor เข้า sales.html → redirect ไป admin
             window.location.replace('index.html');
         } else {
-            // ไม่มี session → ไป login
             window.location.replace('login.html');
         }
     },
 
-    login: async () => {
-        // login.html จัดการให้แล้ว — ฟังก์ชันนี้ไม่ถูกเรียกอีกต่อไป
-        window.location.replace('login.html');
+    // ─── isSupervisor helper ──────────────────────────────────────────────
+    isSupervisor: () => ['route_supervisor','asm'].includes(State.viewMode),
+
+    // ─── Start สำหรับ route_supervisor / asm ─────────────────────────────
+    startSupervisor: async () => {
+        document.getElementById('main-header').classList.remove('hidden');
+        document.getElementById('main-content').classList.remove('hidden');
+        const _bnav = document.getElementById('bottom-nav');
+        if (_bnav) _bnav.style.display = 'grid';
+
+        // แสดง role badge แทน route code
+        const session = Auth.getSession();
+        const roleLabel = State.viewMode === 'asm' ? '🏢 ASM' : '👁 Sup';
+        document.getElementById('user-route-label').innerText = roleLabel + ' · ' + (session?.displayName || session?.username || '');
+
+        // ซ่อน day-select และ edit-order-btn ที่ไม่จำเป็น
+        const dayRow = document.getElementById('day-select')?.closest('div');
+        if (dayRow) dayRow.style.display = 'none';
+        const editBtn = document.getElementById('edit-order-btn');
+        if (editBtn) editBtn.style.display = 'none';
+
+        document.getElementById('loader').style.display = 'flex';
+        LoadBar.show();
+        LoadBar.setProgress(15, 'กำลังโหลดข้อมูลทุกสาย...');
+
+        // หา centerId
+        const centerIdRaw = session?.centerId || '';
+        const _centerDocId = centerIdRaw ? (centerIdRaw + '_main') : 'v1_main';
+        State.centerId = centerIdRaw;
+
+        // โหลด routeList จาก metadata
+        try {
+            const metaSnap = await db.collection('appData').doc(_centerDocId).get();
+            State.routeList = metaSnap.exists ? (metaSnap.data().routeList || []) : [];
+        } catch(e) { State.routeList = []; }
+
+        // เช็ค draft เดือนปัจจุบัน
+        const _nowYM = (() => { const d = new Date(); return `${d.getFullYear()}_${String(d.getMonth()+1).padStart(2,'0')}`; })();
+        let routeColRef;
+        try {
+            const _draftDoc = await db.collection('appData').doc(_centerDocId).collection('drafts').doc(_nowYM).get();
+            routeColRef = _draftDoc.exists
+                ? db.collection('appData').doc(_centerDocId).collection('drafts').doc(_nowYM).collection('routes')
+                : db.collection('appData').doc(_centerDocId).collection('routes');
+            State.activePlanMode = _draftDoc.exists ? 'draft' : 'active';
+        } catch(e) {
+            routeColRef = db.collection('appData').doc(_centerDocId).collection('routes');
+        }
+
+        LoadBar.setProgress(30, 'โหลดข้อมูลร้านทุกสาย...');
+
+        // โหลดร้านทุกสาย
+        const routes = State.routeList;
+        let loaded = 0;
+        State.allRoutes = {};
+        State.allStores = [];
+
+        if (routes.length > 0) {
+            await Promise.all(routes.map(async (routeId) => {
+                try {
+                    const rd = await routeColRef.doc(routeId).get();
+                    State.allRoutes[routeId] = rd.exists ? (rd.data().stores || []) : [];
+                } catch(e) { State.allRoutes[routeId] = []; }
+                loaded++;
+                LoadBar.setProgress(30 + Math.round(loaded / routes.length * 40), `โหลด ${loaded}/${routes.length} สาย...`);
+            }));
+            // รวมทุกร้านสำหรับ map
+            State.allStores = Object.values(State.allRoutes).flat();
+        }
+
+        LoadBar.setProgress(75, 'โหลดยอดขาย...');
+
+        // โหลด sellout (ทุกสาย — ไม่กรอง sCode)
+        colSales.get().then(snap => {
+            let merged = {};
+            snap.forEach(doc => { Object.assign(merged, doc.data()); });
+            State.sales = merged;
+        }).catch(()=>{});
+
+        LoadBar.done();
+        document.getElementById('loader').style.display = 'none';
+
+        State.isLoaded = true;
+        // init SupervisorUI (Tab2 ร้านค้า + Tab3 grid สาย)
+        SupervisorUI.init();
+        // search box ใน Tab2 → ใช้ renderAllStores
+        const searchEl = document.getElementById('search-input');
+        if (searchEl) searchEl.oninput = (e) => {
+            const q = e.target.value.toLowerCase().trim();
+            document.querySelectorAll('#all-store-list > div[data-search]').forEach(el => {
+                el.style.display = (el.getAttribute('data-search')||'').toLowerCase().includes(q) ? 'flex' : 'none';
+            });
+        };
+        UI.switchTab('dashboard');
     },
 
     logout: () => {
@@ -464,13 +577,19 @@ const Processor = {
         document.getElementById('route-title').innerText = `Day ${_dayNum}${_mkt} (${list.length} ร้าน)`;
 
         if (sortableList) sortableList.destroy();
-        window._sortableInstance = Sortable.create(c, {
+        sortableList = Sortable.create(c, {
             handle: '.drag-handle',
             animation: 150,
-            disabled: true,    // disabled ตอนแรก ต้องกด Edit ก่อน
-            onChange: Processor._updateSeqBadges,  // อัปเดตเลขทันทีทุกครั้งที่การ์ดเปลี่ยนตำแหน่ง
-            onEnd: Processor._updateSeqBadges      // อัปเดตอีกครั้งตอนวางเสร็จ (safety net)
+            forceFallback: false,   // ใช้ native drag บน desktop, touch event บน mobile
+            touchStartThreshold: 3, // threshold เล็กๆ กันกด popup โดยไม่ตั้งใจ drag
+            disabled: true,         // disabled ตอนแรก ต้องกด Edit ก่อน
+            // onChange: ลบออก — ไม่ redraw map ทุก pixel ที่ลาก (ทำให้กระตุก)
+            onEnd: () => {
+                // อัปเดตเลขใน badge อย่างเดียว ไม่ redraw map ระหว่าง drag
+                Processor._updateSeqBadgesOnly();
+            }
         });
+        window._sortableInstance = sortableList;
         // ซ่อน drag handles เริ่มต้น
         setTimeout(() => {
             document.querySelectorAll('.drag-handle').forEach(h => {
@@ -482,25 +601,27 @@ const Processor = {
         MapCtrl.drawMap();
     },
 
-    // อัปเดตตัวเลขใน badge (รายการ) และ marker บนแผนที่ — ไม่ save Firestore
-    _updateSeqBadges: () => {
-        // 1) อัปเดตตัวเลขในรายการ
+    // อัปเดตเลข badge + sync State — ไม่ redraw map (เรียกตอน drag จบ)
+    _updateSeqBadgesOnly: () => {
         document.querySelectorAll('#route-store-list > .store-item').forEach((item, index) => {
             const badge = item.querySelector('[data-seq]');
             if (badge) badge.textContent = index + 1;
-        });
-        // 2) sync seq ลง State แล้ว redraw marker บนแผนที่
-        const items = document.querySelectorAll('#route-store-list > .store-item');
-        items.forEach((item, index) => {
             const id = item.getAttribute('data-id');
             const target = State.allStores.find(s => s.id === id);
             if (target) { if (!target.seqs) target.seqs = {}; target.seqs[State.currentDay] = index + 1; }
         });
+    },
+
+    // อัปเดตเลข badge + sync State + redraw map (เรียกหลัง confirm order)
+    _updateSeqBadges: () => {
+        Processor._updateSeqBadgesOnly();
         MapCtrl.drawMap();
     },
 
     // เรียกตอนกด "ยืนยัน" เท่านั้น — บันทึกลำดับจริงลง Firestore
     handleDrag: () => {
+        // Supervisor ใช้ SupervisorUI.handleDrag แทน
+        if (App.isSupervisor()) { SupervisorUI.handleDrag(); return; }
         let items = document.querySelectorAll('#route-store-list > .store-item'), updated = [...State.allStores];
         items.forEach((item, index) => {
             let id = item.getAttribute('data-id'), target = updated.find(s => s.id === id);
@@ -1020,6 +1141,258 @@ const Resizer = {
             }
         });
     }
+};
+
+// ==========================================
+// 👁 SupervisorUI — Route Supervisor / ASM
+// Tab2: ร้านค้าทุกสายรวม (หน้าตาเหมือน Sales + badge)
+// Tab3: Grid card เลือกสาย → คิวงาน + แผนที่ (เหมือน Sales ทุกอย่าง)
+// ==========================================
+const SupervisorUI = {
+
+    _selectedRoute: null,  // สายที่เลือกใน Tab3
+
+    init: () => {
+        // Tab3 nav label → "สายวิ่ง"
+        const navRoute = document.getElementById('nav-route');
+        if (navRoute) {
+            const icon = navRoute.querySelector('.bnav-icon');
+            const lbl  = navRoute.querySelector('span:not(.bnav-icon)');
+            if (icon) icon.textContent = '🗺️';
+            if (lbl)  lbl.textContent  = 'สายวิ่ง';
+        }
+
+        // Tab2: render ร้านค้าทุกสายรวม
+        SupervisorUI.renderAllStores();
+
+        // Tab3: render grid เลือกสาย
+        SupervisorUI.renderRouteGrid();
+    },
+
+    // ─── Tab2: ร้านค้าทุกสาย (หน้าตาเหมือน Sales) ────────────────────────
+    renderAllStores: () => {
+        const hist = (typeof StoreHistory !== 'undefined') ? StoreHistory._storeMap : {};
+        const mode = UI._sortMode || 'seq';
+
+        // รวมร้านทุกสาย พร้อม _route tag
+        let list = [];
+        State.routeList.forEach(routeId => {
+            (State.allRoutes[routeId] || []).forEach(s => {
+                list.push({ ...s, _route: routeId });
+            });
+        });
+
+        // sort
+        if (mode === 'name') {
+            list.sort((a,b) => a.name.localeCompare(b.name,'th'));
+        } else if (mode === 'sales') {
+            list.sort((a,b) => ((hist[b.id]?.net||0) - (hist[a.id]?.net||0)));
+        } else if (mode === 'active') {
+            list.sort((a,b) => {
+                const aA = (State.sales[a.id]?.vpo > 0) ? 0 : 1;
+                const bA = (State.sales[b.id]?.vpo > 0) ? 0 : 1;
+                return aA - bA || a._route.localeCompare(b._route,'th',{numeric:true});
+            });
+        } else {
+            // default: เรียงตามสาย
+            list.sort((a,b) => a._route.localeCompare(b._route,'th',{numeric:true}));
+        }
+
+        const html = list.map(s => {
+            const k      = State.sales[s.id];
+            const active = k && k.vpo > 0;
+            const h      = hist[s.id];
+            const badge  = active
+                ? `<span style="background:#d1fae5;color:#065f46;font-size:9px;font-weight:800;padding:2px 8px;border-radius:8px;">Active</span>`
+                : `<span style="background:#f3f4f6;color:#9ca3af;font-size:9px;font-weight:800;padding:2px 8px;border-radius:8px;">Inactive</span>`;
+            // badge สาย (ซ่อนสำหรับ role=sales)
+            const isC = /C\d/.test(s._route);
+            const routeColor = isC ? '#7c3aed' : '#2563eb';
+            const routeBg    = isC ? '#ede9fe'  : '#dbeafe';
+            const routeBadge = `<span style="background:${routeBg};color:${routeColor};font-size:9px;font-weight:800;padding:2px 7px;border-radius:8px;margin-left:4px;">${s._route}</span>`;
+            const mktTag = s.marketName
+                ? `<span style="font-size:10px;color:#3b82f6;font-weight:600;">${s.marketName}</span> `
+                : '';
+            const histTag = h
+                ? `<div style="margin-top:3px;font-size:10px;color:#059669;font-weight:700;">💰 ${_fmtB(h.net)} · ${h.skuCount} SKU · ${h.invCount} บิล</div>`
+                : '';
+            return `
+            <div onclick="UI.openModal('${s.id}')"
+                data-search="${s.id.toLowerCase()} ${s.name.toLowerCase()} ${s._route.toLowerCase()} ${(s.marketName||'').toLowerCase()}"
+                style="background:#fff;border-radius:14px;border:1px solid #e5e7eb;padding:11px 14px;
+                       display:flex;justify-content:space-between;align-items:flex-start;cursor:pointer;">
+                <div style="flex:1;min-width:0;margin-right:10px;">
+                    <div style="font-weight:800;font-size:13px;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${s.name}</div>
+                    <div style="font-size:10px;color:#9ca3af;font-family:monospace;margin-top:1px;">${mktTag}${s.id}${routeBadge}</div>
+                    ${histTag}
+                </div>
+                <div style="flex-shrink:0;">${badge}</div>
+            </div>`;
+        }).join('');
+
+        const container = document.getElementById('all-store-list');
+        if (container) container.innerHTML = html || '<p style="text-align:center;color:#9ca3af;margin-top:24px;font-size:13px;">ไม่พบร้านค้า</p>';
+    },
+
+    // ─── Tab3: Grid card เลือกสาย ─────────────────────────────────────────
+    renderRouteGrid: () => {
+        const container = document.getElementById('route-store-list');
+        if (!container) return;
+
+        // ซ่อน day-select bar ตอนอยู่ที่ grid
+        SupervisorUI._showDayBar(false);
+
+        const routes = [...State.routeList].sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
+        if (!routes.length) {
+            container.innerHTML = '<p style="text-align:center;color:#9ca3af;padding:24px;font-size:13px;">ไม่พบสายวิ่ง</p>';
+            return;
+        }
+
+        const cRoutes     = routes.filter(r => /C\d/.test(r));
+        const vRoutes     = routes.filter(r => /V\d/.test(r));
+        const otherRoutes = routes.filter(r => !/[CV]\d/.test(r));
+
+        const renderGroup = (title, color, bg, list) => {
+            if (!list.length) return '';
+            const cards = list.map(r => {
+                const stores = State.allRoutes[r] || [];
+                const icon   = /C\d/.test(r) ? '💳' : /V\d/.test(r) ? '🚐' : '📦';
+                const active = SupervisorUI._selectedRoute === r;
+                return `
+                <div onclick="SupervisorUI.selectRoute('${r}')"
+                    style="background:${active ? color : '#fff'};border:2px solid ${active ? color : '#e5e7eb'};
+                           border-radius:16px;padding:14px 12px;cursor:pointer;
+                           box-shadow:${active ? '0 4px 12px '+color+'44' : '0 1px 4px rgba(0,0,0,0.06)'};
+                           transition:all 0.15s;text-align:center;">
+                    <div style="font-size:18px;margin-bottom:4px;">${icon}</div>
+                    <div style="font-size:11px;font-weight:900;color:${active ? '#fff' : color};">${r}</div>
+                    <div style="font-size:18px;font-weight:900;color:${active ? '#fff' : '#111827'};line-height:1.2;margin-top:2px;">${stores.length}</div>
+                    <div style="font-size:9px;color:${active ? 'rgba(255,255,255,0.8)' : '#9ca3af'};margin-top:1px;">ร้าน</div>
+                </div>`;
+            }).join('');
+            return `
+            <div style="margin-bottom:16px;">
+                <div style="font-size:11px;font-weight:800;color:${color};margin-bottom:8px;padding:0 2px;">${title}</div>
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;">${cards}</div>
+            </div>`;
+        };
+
+        // wrapper กับปุ่ม back (ถ้าเลือกสายแล้ว)
+        const backBtn = SupervisorUI._selectedRoute ? `
+        <div onclick="SupervisorUI.clearRoute()"
+            style="display:flex;align-items:center;gap:8px;padding:9px 14px;background:#f1f5f9;
+                   border-radius:12px;cursor:pointer;margin-bottom:12px;font-weight:700;font-size:12px;color:#374151;">
+            ← ยกเลิกเลือกสาย
+        </div>` : '';
+
+        container.innerHTML = backBtn +
+            renderGroup('💳 Credit (C)', '#7c3aed', '#ede9fe', cRoutes) +
+            renderGroup('🚐 Van (V)',    '#2563eb', '#dbeafe', vRoutes) +
+            renderGroup('📦 อื่นๆ',      '#374151', '#f3f4f6', otherRoutes);
+    },
+
+    // ─── เลือกสาย → แสดงคิวงาน + แผนที่ ──────────────────────────────────
+    selectRoute: (routeId) => {
+        SupervisorUI._selectedRoute = routeId;
+        State.allStores   = State.allRoutes[routeId] || [];
+        State.myRoute     = routeId;
+        State.currentDay  = '';
+        State.mapNeedsFit = true;
+
+        // แสดง day-select bar + edit btn
+        SupervisorUI._showDayBar(true);
+
+        // inject ปุ่ม "← เลือกสายใหม่" ถ้ายังไม่มี
+        SupervisorUI._injectBackBtn(routeId);
+
+        // setup day dropdown เหมือน Sales
+        Processor.setupRoute();
+
+        // switch ไปหน้าคิวงานทันที
+        UI.switchTab('route');
+    },
+
+    _injectBackBtn: (routeId) => {
+        // ลบปุ่มเก่าก่อน (กรณีเปลี่ยนสาย)
+        const old = document.getElementById('sup-back-btn');
+        if (old) old.remove();
+
+        const splitContainer = document.getElementById('split-container');
+        if (!splitContainer) return;
+        const btn = document.createElement('div');
+        btn.id = 'sup-back-btn';
+        btn.onclick = SupervisorUI.clearRoute;
+        btn.style.cssText = [
+            'display:flex', 'align-items:center', 'gap:8px',
+            'padding:8px 14px', 'background:#f8fafc',
+            'border-bottom:1px solid #e5e7eb', 'cursor:pointer',
+            'font-weight:700', 'font-size:12px', 'color:#374151',
+            'flex-shrink:0', 'z-index:30',
+        ].join(';');
+        const isC = /C\d/.test(routeId);
+        const badgeColor = isC ? '#7c3aed' : '#2563eb';
+        const badgeBg    = isC ? '#ede9fe'  : '#dbeafe';
+        btn.innerHTML = `
+            <span style="font-size:14px;">←</span>
+            <span style="color:#9ca3af;">เลือกสายใหม่</span>
+            <span style="background:${badgeBg};color:${badgeColor};font-size:10px;font-weight:900;
+                         padding:2px 10px;border-radius:8px;">${routeId}</span>`;
+        // แทรกก่อน split-container
+        splitContainer.parentElement.insertBefore(btn, splitContainer);
+    },
+
+    clearRoute: () => {
+        SupervisorUI._selectedRoute = null;
+        State.allStores   = [];
+        State.myRoute     = Auth.getSession()?.username || '';
+        State.currentDay  = '';
+
+        // ซ่อน day-select bar + ลบปุ่ม back
+        SupervisorUI._showDayBar(false);
+        const backBtn = document.getElementById('sup-back-btn');
+        if (backBtn) backBtn.remove();
+
+        // clear route list + map markers
+        const c = document.getElementById('route-store-list');
+        if (c) c.innerHTML = '';
+        if (typeof mapMarkers !== 'undefined') {
+            mapMarkers.forEach(m => { try { m.remove(); } catch(e){} });
+            mapMarkers = [];
+        }
+
+        // กลับมาหน้า Tab3 พร้อม grid
+        UI.switchTab('route');
+    },
+
+    _showDayBar: (show) => {
+        // แถบ day-select + ปุ่มปฏิทิน
+        const dayBar = document.getElementById('day-select')?.closest('div[style*="border-bottom"]');
+        if (dayBar) dayBar.style.display = show ? 'flex' : 'none';
+        const editBtn = document.getElementById('edit-order-btn');
+        if (editBtn) editBtn.style.display = show ? 'block' : 'none';
+        const confBtn = document.getElementById('confirm-order-btn');
+        if (confBtn) confBtn.style.display = 'none';
+    },
+
+    // handleDrag สำหรับ Supervisor — save ลง Firestore เหมือน Sales
+    handleDrag: () => {
+        const routeId = SupervisorUI._selectedRoute;
+        if (!routeId) return;
+        let items   = document.querySelectorAll('#route-store-list > .store-item');
+        let updated = [...State.allStores];
+        items.forEach((item, index) => {
+            const id     = item.getAttribute('data-id');
+            const target = updated.find(s => s.id === id);
+            if (target) { if (!target.seqs) target.seqs = {}; target.seqs[State.currentDay] = index + 1; }
+        });
+        State.allRoutes[routeId] = updated;
+        const centerMatch  = routeId.match(/^(\d+)/);
+        const centerDocId  = centerMatch ? (centerMatch[1] + '_main') : 'v1_main';
+        db.collection('appData').doc(centerDocId).collection('routes').doc(routeId)
+            .set({ stores: updated })
+            .then(() => showSalesToast('✅ บันทึกลำดับเรียบร้อย'))
+            .catch(e => showSalesToast('❌ บันทึกไม่สำเร็จ: ' + e.message, true));
+    },
 };
 
 document.getElementById('day-select').addEventListener('change', (e) => {

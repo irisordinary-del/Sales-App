@@ -152,25 +152,38 @@ const SalesDashboard = {
     },
 
     // ─── โหลดข้อมูล Sellout เฉพาะ sCode ตัวเอง ───────────────────────────
-    _loadData: async (ym) => {
+    // ─── Shared chunk cache (ใช้ร่วมกันทั้ง SalesDashboard และ _renderCampaigns) ──
+    // key = YYYY_MM, value = rows[] ทั้งหมด (ไม่กรอง sCode)
+    _chunkCache: {},
+
+    _loadChunks: async (ym) => {
+        if (SalesDashboard._chunkCache[ym]) return SalesDashboard._chunkCache[ym];
         try {
             const metaDoc = await db.collection('sellout').doc(ym).get();
-            if (!metaDoc.exists) return;
-
+            if (!metaDoc.exists) { SalesDashboard._chunkCache[ym] = []; return []; }
             const chunks = await db.collection('sellout').doc(ym)
-                .collection('chunks').orderBy('index').get();
-
+                .collection('chunks').get();
             let rows = [];
-            chunks.forEach(doc => {
-                if (doc.data().rows) {
-                    // กรองเฉพาะสายตัวเอง
-                    const mine = doc.data().rows.filter(r =>
-                        String(r.sCode || '').toUpperCase() === SalesDashboard._username
-                    );
-                    rows = rows.concat(mine);
-                }
-            });
-            SalesDashboard._rows = rows;
+            chunks.docs
+                .sort((a,b) => (a.data().index||0) - (b.data().index||0))
+                .forEach(doc => rows = rows.concat(doc.data().rows || []));
+            SalesDashboard._chunkCache[ym] = rows;
+            return rows;
+        } catch(e) {
+            console.warn('SalesDashboard._loadChunks:', ym, e);
+            return [];
+        }
+    },
+
+    _loadData: async (ym) => {
+        try {
+            const allRows = await SalesDashboard._loadChunks(ym);
+            // กรองเฉพาะสายตัวเอง
+            SalesDashboard._rows = allRows.filter(r =>
+                String(r.sCode || '').toUpperCase() === SalesDashboard._username
+            );
+            // cache ให้ _renderCampaigns ใช้ด้วย
+            SalesDashboard._rowCache[ym] = SalesDashboard._rows;
         } catch (e) {
             console.warn('SalesDashboard._loadData:', e);
         }
@@ -204,15 +217,36 @@ const SalesDashboard = {
         }
         if (empty) empty.style.display = 'none';
 
-        const mainRows    = rows.filter(r => !SalesDashboard.EXCLUDED_CATS.has(r.catDesc));
-        const basketRows  = rows.filter(r => r.catDesc === 'กระเช้าของขวัญ');
-        const othersRows  = rows.filter(r => r.catDesc === 'อื่นๆ');
+        // แยก Invoiced vs Credit Note
+        const invoicedRows = rows.filter(r => r.invStatus === 'Invoiced');
+        const cnRows       = rows.filter(r => r.invStatus === 'Credit Note');
+
+        const mainRows    = invoicedRows.filter(r => !SalesDashboard.EXCLUDED_CATS.has(r.catDesc));
+        const basketRows  = invoicedRows.filter(r => r.catDesc === 'กระเช้าของขวัญ');
+        const othersRows  = invoicedRows.filter(r => r.catDesc === 'อื่นๆ');
 
         const total    = mainRows.reduce((s, r) => s + SalesDashboard._amt(r), 0);
-        const outletM  = SalesDashboard._calcOutletMetrics(rows);
+        const outletM  = SalesDashboard._calcOutletMetrics(invoicedRows);
         const invCount = new Set(mainRows.map(r => r.invNum)).size;
         const target   = SalesDashboard._target;
         const pct      = target > 0 ? (total / target * 100) : null;
+
+        // ─ Credit breakdown (สำหรับ C-route) ─
+        const myRoute = SalesDashboard._myRoute || SalesDashboard._username || '';
+        const isCredit = /C\d/i.test(myRoute);
+        if (isCredit) {
+            const cInv   = invoicedRows; // ยอด Confirm (Invoiced)
+            const cCN    = cnRows;       // Credit Note
+            const totalConfirm = cInv.reduce((s,r) => s + r.net, 0);
+            const totalSO      = cInv.reduce((s,r) => s + r.soNet, 0); // ยอดเปิดบิล (SO)
+            const totalCN      = cCN.reduce((s,r) => s + r.net, 0);   // CN ยอดติดลบ
+            const pendBills    = new Set(cCN.map(r => r.soNum).filter(Boolean)).size;
+            const confBills    = new Set(cInv.map(r => r.invNum).filter(Boolean)).size;
+
+            SalesDashboard._renderCreditSection({
+                totalConfirm, totalSO, totalCN, pendBills, confBills
+            });
+        }
 
         // ─ KPI Cards ─
         SalesDashboard._setText('db-kpi-total', SalesDashboard._fmt(total));
@@ -252,13 +286,50 @@ const SalesDashboard = {
         SalesDashboard._renderBars('db-cat-body', mainRows, '#2563eb');
 
         // ─ ShopType ─
-        SalesDashboard._renderBars('db-shop-body', rows, '#10b981', r => r.shopType);
+        SalesDashboard._renderBars('db-shop-body', invoicedRows, '#10b981', r => r.shopType);
 
         // ─ กระเช้า / อื่นๆ ─
         const basketAmt = basketRows.reduce((s, r) => s + SalesDashboard._amt(r), 0);
         const othersAmt = othersRows.reduce((s, r) => s + SalesDashboard._amt(r), 0);
         SalesDashboard._setText('db-basket-body', basketAmt > 0 ? SalesDashboard._fmt(basketAmt) : '—');
         SalesDashboard._setText('db-others-body', othersAmt > 0 ? SalesDashboard._fmt(othersAmt) : '—');
+    },
+
+    // ─── Credit Section (เฉพาะ C-route) ────────────────────────────────────
+    _renderCreditSection: ({ totalConfirm, totalSO, totalCN, pendBills, confBills }) => {
+        // inject หลัง db-target card ถ้ายังไม่มี
+        let el = document.getElementById('db-credit-section');
+        if (!el) {
+            const ref = document.getElementById('db-cat-body')?.closest('.db-card');
+            if (!ref) return;
+            el = document.createElement('div');
+            el.id = 'db-credit-section';
+            el.className = 'db-card';
+            el.style.borderLeft = '4px solid #7c3aed';
+            ref.parentElement.insertBefore(el, ref);
+        }
+        el.innerHTML = `
+            <div style="font-size:10px;font-weight:700;color:#7c3aed;margin-bottom:8px;">💳 Credit — รายละเอียด</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+                <div style="background:#f5f3ff;border-radius:10px;padding:10px;border:1px solid #ddd6fe;">
+                    <div style="font-size:9px;font-weight:700;color:#7c3aed;margin-bottom:2px;">✅ ยอด Confirm</div>
+                    <div style="font-size:18px;font-weight:900;color:#5b21b6;">${SalesDashboard._fmt(totalConfirm)}</div>
+                    <div style="font-size:10px;color:#9ca3af;margin-top:2px;">${confBills} บิล</div>
+                </div>
+                <div style="background:#fffbeb;border-radius:10px;padding:10px;border:1px solid #fde68a;">
+                    <div style="font-size:9px;font-weight:700;color:#b45309;margin-bottom:2px;">📋 ยอดเปิดบิล (SO)</div>
+                    <div style="font-size:18px;font-weight:900;color:#92400e;">${SalesDashboard._fmt(totalSO)}</div>
+                    <div style="font-size:10px;color:#9ca3af;margin-top:2px;">${confBills} SO</div>
+                </div>
+            </div>
+            ${totalCN !== 0 ? `
+            <div style="background:#fef2f2;border-radius:10px;padding:8px 10px;border:1px solid #fecaca;display:flex;justify-content:space-between;align-items:center;">
+                <div>
+                    <div style="font-size:9px;font-weight:700;color:#dc2626;">📝 Credit Note (CN)</div>
+                    <div style="font-size:10px;color:#9ca3af;margin-top:1px;">${pendBills} CN</div>
+                </div>
+                <div style="font-size:16px;font-weight:900;color:#dc2626;">${SalesDashboard._fmt(totalCN)}</div>
+            </div>` : ''}`;
     },
 
     // ─── Render horizontal bars ──────────────────────────────────────────
@@ -414,26 +485,17 @@ const SalesDashboard = {
             return months;
         };
 
-        // helper: โหลด rows ของเดือนนั้น (cached)
+        // helper: โหลด rows ของเดือนนั้น (ใช้ shared cache)
         const loadMonthRows = async (ym) => {
-            if (SalesDashboard._rowCache[ym]) return SalesDashboard._rowCache[ym];
-            try {
-                const chunks = await db.collection('sellout').doc(ym).collection('chunks').get();
-                let rows = [];
-                chunks.forEach(doc => rows = rows.concat(doc.data().rows || []));
-                // กรองเฉพาะร้านในสายตัวเอง (ยึดร้านเป็นหลัก)
-                const filtered = myStoreSet.size > 0
-                    ? rows.filter(r => myStoreSet.has(String(r.custCode || '')))
-                    : rows;
-                SalesDashboard._rowCache[ym] = filtered;
-                return filtered;
-            } catch(e) {
-                SalesDashboard._rowCache[ym] = [];
-                return [];
-            }
+            // ใช้ _chunkCache แล้วกรองเฉพาะร้านตัวเอง
+            const allRows = await SalesDashboard._loadChunks(ym);
+            const filtered = myStoreSet.size > 0
+                ? allRows.filter(r => myStoreSet.has(String(r.custCode || '')))
+                : allRows;
+            return filtered;
         };
 
-        // render แต่ละ campaign
+        // render แต่ละ campaign — โหลด months parallel ด้วย Promise.all
         const cardsHtml = await Promise.all(active.map(async campaign => {
             const groups        = campaign.groups || [];
             const targetUnit    = campaign.targetUnit || 'pct';
@@ -449,13 +511,10 @@ const SalesDashboard = {
                 : defaultTarget;
             const tgtCount = Math.round(tgtPct / 100 * totalStores);
 
-            // โหลด rows ทุกเดือนใน campaign range
+            // โหลด rows ทุกเดือนใน campaign range — parallel
             const months = getRange(campaign.startYM, campaign.endYM);
-            let allRows = [];
-            for (const ym of months) {
-                const r = await loadMonthRows(ym);
-                allRows = allRows.concat(r);
-            }
+            const monthResults = await Promise.all(months.map(ym => loadMonthRows(ym)));
+            let allRows = monthResults.flat();
 
             const groupBars = groups.map(g => {
                 const kws = (g.keywords || []).map(k => k.toLowerCase());
@@ -521,15 +580,303 @@ const SalesDashboard = {
 };
 
 // ─── Hook เข้า App.start() ── เรียก init หลัง login สำเร็จ ─────────────
-// รอ DOMContentLoaded แล้วค่อย patch
 document.addEventListener('DOMContentLoaded', () => {
-    // Poll จนกว่า App จะ init เสร็จ (State.isLoaded)
     const _tryInit = () => {
         if (typeof State !== 'undefined' && State.isLoaded) {
-            SalesDashboard.init();
+            if (typeof App !== 'undefined' && App.isSupervisor()) {
+                SupervisorDashboard.init();
+            } else {
+                SalesDashboard.init();
+            }
         } else {
             setTimeout(_tryInit, 500);
         }
     };
     setTimeout(_tryInit, 1000);
 });
+
+// ==========================================
+// 📊 SupervisorDashboard — Route Supervisor / ASM
+// เห็นทุกสาย แยก C (Credit) / V (Van)
+// Credit: ยอด Confirm + เปิดบิล + บิลรอ Confirm
+// ==========================================
+const SupervisorDashboard = {
+
+    _ym: '',
+    _allRows: [],       // rows ทุกสายของเดือนที่เลือก
+    _targets: {},       // { routeId: target }
+    _rowCache: {},      // { ym: rows[] }
+
+    EXCLUDED_CATS: new Set(['อื่นๆ', 'กระเช้าของขวัญ']),
+
+    init: () => {
+        const session = Auth.getSession();
+        const lbl = document.getElementById('db-route-label');
+        if (lbl) lbl.textContent = (State.viewMode === 'asm' ? 'ASM' : 'Supervisor') + ' · ศูนย์ ' + (State.centerId || '');
+        SupervisorDashboard._loadMonthList();
+    },
+
+    _loadMonthList: async () => {
+        try {
+            const snap = await db.collection('sellout').get();
+            const months = snap.docs.map(d => d.id).sort().reverse();
+            const sel = document.getElementById('db-month-sel');
+            if (!sel) return;
+            sel.innerHTML = '<option value="">-- เดือน --</option>' +
+                months.map(ym => {
+                    const [y, m] = ym.split('_');
+                    const label = new Date(+y, +m - 1, 1).toLocaleDateString('th-TH', { year:'numeric', month:'short' });
+                    return `<option value="${ym}">${label}</option>`;
+                }).join('');
+            if (months.length > 0) {
+                sel.value = months[0];
+                SupervisorDashboard.onMonthChange(months[0]);
+            }
+        } catch(e) { console.warn('SupervisorDashboard._loadMonthList:', e); }
+    },
+
+    onMonthChange: async (ym) => {
+        if (!ym) return;
+        SupervisorDashboard._ym = ym;
+        SupervisorDashboard._allRows = [];
+        await Promise.all([
+            SupervisorDashboard._loadData(ym),
+            SupervisorDashboard._loadTargets(ym),
+        ]);
+        SupervisorDashboard._render();
+    },
+
+    _loadData: async (ym) => {
+        try {
+            // ใช้ shared chunk cache จาก SalesDashboard
+            const allRows = await SalesDashboard._loadChunks(ym);
+            // กรองเฉพาะศูนย์นี้
+            const centerId = State.centerId || Auth.getSession()?.centerId || '';
+            const rows = centerId
+                ? allRows.filter(r => String(r.sCode||'').startsWith(centerId))
+                : allRows;
+            SupervisorDashboard._rowCache[ym] = rows;
+            SupervisorDashboard._allRows = rows;
+        } catch(e) {
+            console.warn('SupervisorDashboard._loadData:', e);
+            SupervisorDashboard._allRows = [];
+        }
+    },
+
+    _loadTargets: async (ym) => {
+        try {
+            const doc = await db.collection('targets').doc(ym).get();
+            SupervisorDashboard._targets = doc.exists ? (doc.data().routes || {}) : {};
+        } catch(e) { SupervisorDashboard._targets = {}; }
+    },
+
+    _fmt: (n) => !n ? '0' : Math.round(n).toLocaleString('th-TH'),
+
+    // ─── แยก C / V จาก sCode ─────────────────────────────────────────────
+    _routeType: (sCode) => {
+        const s = String(sCode||'').toUpperCase();
+        if (/C\d/.test(s)) return 'C';
+        if (/V\d/.test(s)) return 'V';
+        return 'other';
+    },
+
+    // ─── Render หลัก ─────────────────────────────────────────────────────
+    _render: () => {
+        const rows    = SupervisorDashboard._allRows;
+
+        // แยก Invoiced vs Credit Note
+        const invoicedRows = rows.filter(r => r.invStatus === 'Invoiced');
+        const cnRows       = rows.filter(r => r.invStatus === 'Credit Note');
+        const mainRows     = invoicedRows.filter(r => !SupervisorDashboard.EXCLUDED_CATS.has(r.catDesc));
+
+        // แยก C / V จาก sType หรือ sCode
+        const cInvoiced = invoicedRows.filter(r => r.sType === 'CreditSales' || /C\d/.test(r.sCode));
+        const vInvoiced = invoicedRows.filter(r => r.sType === 'VanSales'    || /V\d/.test(r.sCode));
+        const cCN       = cnRows.filter(r => r.sType === 'CreditSales' || /C\d/.test(r.sCode));
+
+        const totalAll = mainRows.reduce((s,r) => s + (r.net||0), 0);
+        const totalC   = cInvoiced.reduce((s,r) => s + (r.net||0), 0);
+        const totalV   = vInvoiced.reduce((s,r) => s + (r.net||0), 0);
+
+        // ─ Credit breakdown ─
+        const totalCConfirm = cInvoiced.reduce((s,r) => s + (r.net||0), 0);
+        const totalCSO      = cInvoiced.reduce((s,r) => s + (r.soNet||0), 0);
+        const totalCCN      = cCN.reduce((s,r) => s + (r.net||0), 0);
+        const confBills     = new Set(cInvoiced.map(r => r.invNum).filter(Boolean)).size;
+        const cnCount       = new Set(cCN.map(r => r.soNum || r.invNum).filter(Boolean)).size;
+        const invCountV     = new Set(vInvoiced.map(r => r.invNum).filter(Boolean)).size;
+        const invCountAll   = new Set(mainRows.map(r => r.invNum).filter(Boolean)).size;
+
+        // Target รวม
+        const targets = SupervisorDashboard._targets;
+        const totalTarget = Object.values(targets).reduce((s,v) => s + (v||0), 0);
+        const pctAll = totalTarget > 0 ? (totalAll / totalTarget * 100) : null;
+
+        // ─── Render KPI Summary ─────────────────────────────────────────
+        const dbEmpty = document.getElementById('db-empty');
+        if (dbEmpty) dbEmpty.style.display = 'none';
+
+        const setText = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
+        setText('db-kpi-total', SupervisorDashboard._fmt(totalAll));
+        setText('db-kpi-total-sub', 'ยอดรวมทุกสาย');
+        setText('db-kpi-inv', invCountAll.toLocaleString());
+        setText('db-kpi-shops', new Set(mainRows.map(r => r.custCode).filter(Boolean)).size.toLocaleString());
+
+        // ─ vs Target KPI card ─
+        const pctEl = document.getElementById('db-kpi-pct');
+        if (pctEl) {
+            if (pctAll !== null) {
+                pctEl.textContent = pctAll.toFixed(1) + '%';
+                pctEl.className = 'db-kpi-num ' + (pctAll >= 100 ? 'pct-good' : pctAll >= 80 ? 'pct-ok' : 'pct-bad');
+            } else {
+                pctEl.textContent = 'ไม่มี Target';
+                pctEl.className = 'db-kpi-num';
+                pctEl.style.fontSize = '13px';
+            }
+        }
+
+        // Target bar
+        const barEl = document.getElementById('db-target-bar');
+        if (barEl) {
+            barEl.style.width = (pctAll !== null ? Math.min(pctAll,100) : 0) + '%';
+            barEl.style.background = pctAll === null ? '#e5e7eb' : pctAll >= 100 ? '#059669' : pctAll >= 80 ? '#d97706' : '#dc2626';
+        }
+        setText('db-target-sold', 'รวม: ' + SupervisorDashboard._fmt(totalAll));
+        setText('db-target-goal', totalTarget > 0 ? 'Target: ' + SupervisorDashboard._fmt(totalTarget) : 'Target: ยังไม่ตั้ง');
+        const pctLbl = document.getElementById('db-target-pct-label');
+        if (pctLbl) pctLbl.textContent = pctAll !== null ? pctAll.toFixed(1) + '%' : '—';
+
+        // ─── Section C/V แบบ expandable ─────────────────────────────────
+        const dbCatBody = document.getElementById('db-cat-body');
+        if (dbCatBody) {
+            dbCatBody.innerHTML = `
+            <!-- ═══ CREDIT (C) ═══ -->
+            <div style="margin-bottom:16px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                    <span style="font-size:13px;font-weight:900;color:#7c3aed;">💳 Credit (C-routes)</span>
+                    <span style="font-size:14px;font-weight:900;color:#7c3aed;">${SupervisorDashboard._fmt(totalC)}</span>
+                </div>
+                <!-- Credit sub-cards -->
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+                    <div style="background:#f5f3ff;border-radius:12px;padding:10px 12px;border:1px solid #ddd6fe;">
+                        <div style="font-size:9px;font-weight:700;color:#7c3aed;margin-bottom:2px;">✅ ยอด Confirm</div>
+                        <div style="font-size:16px;font-weight:900;color:#5b21b6;">${SupervisorDashboard._fmt(totalCConfirm)}</div>
+                        <div style="font-size:10px;color:#9ca3af;margin-top:2px;">${confBills} บิล</div>
+                    </div>
+                    <div style="background:#fffbeb;border-radius:12px;padding:10px 12px;border:1px solid #fde68a;">
+                        <div style="font-size:9px;font-weight:700;color:#b45309;margin-bottom:2px;">📋 ยอดเปิดบิล (SO)</div>
+                        <div style="font-size:16px;font-weight:900;color:#92400e;">${SupervisorDashboard._fmt(totalCSO)}</div>
+                        <div style="font-size:10px;color:#9ca3af;margin-top:2px;">${confBills} SO</div>
+                    </div>
+                </div>
+                ${totalCCN !== 0 ? `
+                <div style="background:#fef2f2;border-radius:10px;padding:8px 12px;border:1px solid #fecaca;display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                    <div>
+                        <div style="font-size:9px;font-weight:700;color:#dc2626;">📝 Credit Note (CN)</div>
+                        <div style="font-size:10px;color:#9ca3af;">${cnCount} CN</div>
+                    </div>
+                    <div style="font-size:15px;font-weight:900;color:#dc2626;">${SupervisorDashboard._fmt(totalCCN)}</div>
+                </div>` : ''}
+                <!-- C route breakdown -->
+                ${SupervisorDashboard._renderRouteBreakdown(cInvoiced, '#7c3aed')}
+            </div>
+
+            <div style="height:1px;background:#f3f4f6;margin:12px 0;"></div>
+
+            <!-- ═══ VAN (V) ═══ -->
+            <div>
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                    <span style="font-size:13px;font-weight:900;color:#2563eb;">🚐 Van (V-routes)</span>
+                    <span style="font-size:14px;font-weight:900;color:#2563eb;">${SupervisorDashboard._fmt(totalV)}</span>
+                </div>
+                <div style="background:#eff6ff;border-radius:12px;padding:10px 12px;border:1px solid #bfdbfe;margin-bottom:8px;">
+                    <div style="font-size:9px;font-weight:700;color:#1d4ed8;margin-bottom:2px;">📋 บิลขาย</div>
+                    <div style="font-size:16px;font-weight:900;color:#1e40af;">${invCountV.toLocaleString()} บิล</div>
+                </div>
+                <!-- V route breakdown -->
+                ${SupervisorDashboard._renderRouteBreakdown(vInvoiced, '#2563eb')}
+            </div>`;
+        }
+
+        // ─── Route table ─────────────────────────────────────────────────
+        SupervisorDashboard._renderRouteTable(mainRows);
+    },
+    _renderRouteBreakdown: (rows, color) => {
+        // group by sCode
+        const byRoute = {};
+        rows.forEach(r => {
+            const s = String(r.sCode||'').toUpperCase();
+            if (!s) return;
+            if (!byRoute[s]) byRoute[s] = { net: 0, invs: new Set() };
+            byRoute[s].net += r.net || 0;
+            if (r.invNum) byRoute[s].invs.add(r.invNum);
+        });
+        const sorted = Object.entries(byRoute).sort((a,b) => b[1].net - a[1].net);
+        if (!sorted.length) return '<div style="font-size:11px;color:#9ca3af;padding:6px 0;">ไม่มีข้อมูล</div>';
+        const maxNet = sorted[0][1].net || 1;
+        return sorted.map(([route, d]) => {
+            const barW = Math.round((d.net / maxNet) * 100);
+            const tgt  = SupervisorDashboard._targets[route] || 0;
+            const pct  = tgt > 0 ? (d.net / tgt * 100) : null;
+            const pctTxt = pct !== null ? (pct.toFixed(0) + '%') : '';
+            return `
+            <div style="margin-bottom:8px;">
+                <div style="display:flex;justify-content:space-between;margin-bottom:3px;">
+                    <span style="font-size:11px;font-weight:800;color:#374151;">${route}</span>
+                    <span style="font-size:11px;font-weight:700;color:${color};">${SupervisorDashboard._fmt(d.net)} ${pctTxt ? '<span style="color:#9ca3af;font-weight:400;font-size:10px;">'+pctTxt+'</span>' : ''}</span>
+                </div>
+                <div style="height:6px;background:#f3f4f6;border-radius:99px;overflow:hidden;">
+                    <div style="height:6px;background:${color};border-radius:99px;width:${barW}%;opacity:0.7;"></div>
+                </div>
+            </div>`;
+        }).join('');
+    },
+
+    // ─── ตารางรายสายด้านล่าง ─────────────────────────────────────────────
+    _renderRouteTable: (mainRows) => {
+        const shopEl = document.getElementById('db-shop-body');
+        if (!shopEl) return;
+        const byRoute = {};
+        mainRows.forEach(r => {
+            const s = String(r.sCode||'').toUpperCase();
+            if (!s) return;
+            if (!byRoute[s]) byRoute[s] = { net: 0, outlets: new Set(), invs: new Set() };
+            byRoute[s].net += r.net || 0;
+            if (r.custCode) byRoute[s].outlets.add(String(r.custCode));
+            if (r.invNum)   byRoute[s].invs.add(r.invNum);
+        });
+        const sorted = Object.entries(byRoute).sort((a,b) => a[0].localeCompare(b[0],'th',{numeric:true}));
+        const targets = SupervisorDashboard._targets;
+        const maxNet = sorted.reduce((m,[,d]) => Math.max(m, d.net), 0) || 1;
+
+        shopEl.innerHTML = sorted.map(([route, d]) => {
+            const tgt   = targets[route] || 0;
+            const pct   = tgt > 0 ? (d.net / tgt * 100) : null;
+            const barW  = Math.round((d.net / maxNet) * 100);
+            const color = pct === null ? '#6366f1' : pct >= 100 ? '#059669' : pct >= 80 ? '#d97706' : '#dc2626';
+            const pctBadge = pct !== null
+                ? `<span style="font-size:9px;font-weight:800;color:${color};background:${color}18;padding:1px 5px;border-radius:6px;">${pct.toFixed(0)}%</span>`
+                : '';
+            return `
+            <div style="margin-bottom:10px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">
+                    <span style="font-size:12px;font-weight:800;color:#374151;">${route} ${pctBadge}</span>
+                    <span style="font-size:11px;font-weight:800;color:#111827;">${SupervisorDashboard._fmt(d.net)}</span>
+                </div>
+                <div style="height:5px;background:#f3f4f6;border-radius:99px;overflow:hidden;margin-bottom:3px;">
+                    <div style="height:5px;background:${color};border-radius:99px;width:${barW}%;"></div>
+                </div>
+                <div style="font-size:10px;color:#9ca3af;">
+                    ${d.outlets.size} ร้าน · ${d.invs.size} บิล
+                    ${tgt > 0 ? '· tgt ' + SupervisorDashboard._fmt(tgt) : ''}
+                </div>
+            </div>`;
+        }).join('') || '<div style="text-align:center;padding:12px;color:#9ca3af;font-size:12px;">ไม่มีข้อมูล</div>';
+
+        // ซ่อน basket/others สำหรับ supervisor
+        const basketEl = document.getElementById('db-basket-body');
+        const othersEl = document.getElementById('db-others-body');
+        if (basketEl) basketEl.closest?.('.db-card')?.style && (basketEl.closest('.db-card').style.display = 'none');
+        if (othersEl) othersEl.closest?.('.db-card')?.style && (othersEl.closest('.db-card').style.display = 'none');
+    },
+};

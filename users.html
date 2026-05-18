@@ -10,6 +10,13 @@
     <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <script src="app-config-init.js"></script>
     <script src="auth.js"></script>
+    <!-- PWA -->
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#6366f1">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="RoutePlan">
+    <link rel="apple-touch-icon" href="/icons/icon-192.png">
     <style>
         body { font-family: 'Prompt', sans-serif; }
         .role-admin      { background:#ede9fe; color:#5b21b6; }
@@ -134,6 +141,8 @@
                         <label class="block text-xs font-bold text-gray-500 uppercase mb-1.5">Role *</label>
                         <select id="f-role" onchange="UsersApp.onRoleChange()" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-300">
                             <option value="sales">Sales</option>
+                            <option value="route_supervisor">Route Supervisor</option>
+                            <option value="asm">ASM</option>
                             <option value="supervisor">Supervisor</option>
                             <option value="admin">Admin</option>
                         </select>
@@ -188,5 +197,6 @@
     </div>
 
     <script src="users.js"></script>
+    <script src="pwa-register.js"></script>
 </body>
 </html>

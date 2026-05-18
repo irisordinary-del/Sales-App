@@ -67,8 +67,8 @@ const Auth = {
             return null;
         }
         if (allowedRoles && !allowedRoles.includes(session.role)) {
-            // Sales พยายามเข้า admin → ส่งกลับ sales
-            if (session.role === 'sales') {
+            // Sales / route_supervisor / asm พยายามเข้า admin → ส่งกลับ sales
+            if (['sales','route_supervisor','asm'].includes(session.role)) {
                 window.location.replace('sales.html');
             } else {
                 window.location.replace('login.html');
@@ -128,10 +128,11 @@ const Auth = {
             throw new Error(`Username "${uname}" มีอยู่แล้ว`);
         }
         const hash = await Auth.sha256(password.trim());
+        const VALID_ROLES = ['sales','supervisor','admin','route_supervisor','asm'];
         users.push({
             username:    uname,
             passwordHash: hash,
-            role:        role || 'sales',
+            role:        VALID_ROLES.includes(role) ? role : 'sales',
             centerId:    centerId || null,
             displayName: displayName || uname,
             active:      true,
