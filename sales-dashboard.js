@@ -526,10 +526,282 @@ document.addEventListener('DOMContentLoaded', () => {
     // Poll จนกว่า App จะ init เสร็จ (State.isLoaded)
     const _tryInit = () => {
         if (typeof State !== 'undefined' && State.isLoaded) {
-            SalesDashboard.init();
+            if (App.isSupervisor()) {
+                SupervisorDashboard.init();
+            } else {
+                SalesDashboard.init();
+            }
         } else {
             setTimeout(_tryInit, 500);
         }
     };
     setTimeout(_tryInit, 1000);
 });
+
+// ==========================================
+// 📊 SupervisorDashboard — Route Supervisor / ASM
+// เห็นทุกสาย แยก C (Credit) / V (Van)
+// Credit: ยอด Confirm + เปิดบิล + บิลรอ Confirm
+// ==========================================
+const SupervisorDashboard = {
+
+    _ym: '',
+    _allRows: [],       // rows ทุกสายของเดือนที่เลือก
+    _targets: {},       // { routeId: target }
+    _rowCache: {},      // { ym: rows[] }
+
+    EXCLUDED_CATS: new Set(['อื่นๆ', 'กระเช้าของขวัญ']),
+
+    init: () => {
+        const session = Auth.getSession();
+        const lbl = document.getElementById('db-route-label');
+        if (lbl) lbl.textContent = (State.viewMode === 'asm' ? 'ASM' : 'Supervisor') + ' · ศูนย์ ' + (State.centerId || '');
+        SupervisorDashboard._loadMonthList();
+    },
+
+    _loadMonthList: async () => {
+        try {
+            const snap = await db.collection('sellout').get();
+            const months = snap.docs.map(d => d.id).sort().reverse();
+            const sel = document.getElementById('db-month-sel');
+            if (!sel) return;
+            sel.innerHTML = '<option value="">-- เดือน --</option>' +
+                months.map(ym => {
+                    const [y, m] = ym.split('_');
+                    const label = new Date(+y, +m - 1, 1).toLocaleDateString('th-TH', { year:'numeric', month:'short' });
+                    return `<option value="${ym}">${label}</option>`;
+                }).join('');
+            if (months.length > 0) {
+                sel.value = months[0];
+                SupervisorDashboard.onMonthChange(months[0]);
+            }
+        } catch(e) { console.warn('SupervisorDashboard._loadMonthList:', e); }
+    },
+
+    onMonthChange: async (ym) => {
+        if (!ym) return;
+        SupervisorDashboard._ym = ym;
+        SupervisorDashboard._allRows = [];
+        await Promise.all([
+            SupervisorDashboard._loadData(ym),
+            SupervisorDashboard._loadTargets(ym),
+        ]);
+        SupervisorDashboard._render();
+    },
+
+    _loadData: async (ym) => {
+        if (SupervisorDashboard._rowCache[ym]) {
+            SupervisorDashboard._allRows = SupervisorDashboard._rowCache[ym];
+            return;
+        }
+        try {
+            const chunks = await db.collection('sellout').doc(ym).collection('chunks').get();
+            let rows = [];
+            chunks.docs.sort((a,b) => (a.data().index||0)-(b.data().index||0))
+                .forEach(doc => rows = rows.concat(doc.data().rows || []));
+            // กรองเฉพาะศูนย์นี้ (ใช้ centerId prefix match sCode)
+            const prefix = State.centerId || '';
+            if (prefix) rows = rows.filter(r => String(r.sCode||'').startsWith(prefix));
+            SupervisorDashboard._allRows = rows;
+            SupervisorDashboard._rowCache[ym] = rows;
+        } catch(e) {
+            console.warn('SupervisorDashboard._loadData:', e);
+            SupervisorDashboard._allRows = [];
+        }
+    },
+
+    _loadTargets: async (ym) => {
+        try {
+            const doc = await db.collection('targets').doc(ym).get();
+            SupervisorDashboard._targets = doc.exists ? (doc.data().routes || {}) : {};
+        } catch(e) { SupervisorDashboard._targets = {}; }
+    },
+
+    _fmt: (n) => !n ? '0' : Math.round(n).toLocaleString('th-TH'),
+
+    // ─── แยก C / V จาก sCode ─────────────────────────────────────────────
+    _routeType: (sCode) => {
+        const s = String(sCode||'').toUpperCase();
+        if (/C\d/.test(s)) return 'C';
+        if (/V\d/.test(s)) return 'V';
+        return 'other';
+    },
+
+    // ─── Render หลัก ─────────────────────────────────────────────────────
+    _render: () => {
+        const rows    = SupervisorDashboard._allRows;
+        const mainRows = rows.filter(r => !SupervisorDashboard.EXCLUDED_CATS.has(r.catDesc));
+
+        // แยก C / V
+        const cRows = mainRows.filter(r => SupervisorDashboard._routeType(r.sCode) === 'C');
+        const vRows = mainRows.filter(r => SupervisorDashboard._routeType(r.sCode) === 'V');
+
+        const totalAll = mainRows.reduce((s,r) => s + (r.net||0), 0);
+        const totalC   = cRows.reduce((s,r) => s + (r.net||0), 0);
+        const totalV   = vRows.reduce((s,r) => s + (r.net||0), 0);
+
+        // ─ Credit: แยก Confirm vs รอ Confirm ─
+        // สมมติ: invStatus field — 'confirmed' = คอนเฟิร์มแล้ว, อื่นๆ = รอ
+        const cConfirm    = cRows.filter(r => String(r.invStatus||'').toLowerCase() === 'confirmed');
+        const cPending    = cRows.filter(r => String(r.invStatus||'').toLowerCase() !== 'confirmed');
+        const totalCConf  = cConfirm.reduce((s,r) => s + (r.net||0), 0);
+        const totalCPend  = cPending.reduce((s,r) => s + (r.net||0), 0);
+        const pendBillSet = new Set(cPending.map(r => r.invNum).filter(Boolean));
+        const pendBills   = pendBillSet.size;
+        const invCountV   = new Set(vRows.map(r => r.invNum).filter(Boolean)).size;
+        const invCountAll = new Set(mainRows.map(r => r.invNum).filter(Boolean)).size;
+
+        // Target รวม
+        const targets = SupervisorDashboard._targets;
+        const totalTarget = Object.values(targets).reduce((s,v) => s + (v||0), 0);
+        const pctAll = totalTarget > 0 ? (totalAll / totalTarget * 100) : null;
+
+        // ─── Render KPI Summary ─────────────────────────────────────────
+        const dbEmpty = document.getElementById('db-empty');
+        if (dbEmpty) dbEmpty.style.display = 'none';
+
+        const setText = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
+        setText('db-kpi-total', SupervisorDashboard._fmt(totalAll));
+        setText('db-kpi-total-sub', 'ยอดรวมทุกสาย');
+        setText('db-kpi-inv', invCountAll.toLocaleString());
+        setText('db-kpi-shops', new Set(mainRows.map(r => r.custCode).filter(Boolean)).size.toLocaleString());
+
+        // Target bar
+        const barEl = document.getElementById('db-target-bar');
+        if (barEl) {
+            barEl.style.width = (pctAll !== null ? Math.min(pctAll,100) : 0) + '%';
+            barEl.style.background = pctAll === null ? '#e5e7eb' : pctAll >= 100 ? '#059669' : pctAll >= 80 ? '#d97706' : '#dc2626';
+        }
+        setText('db-target-sold', 'รวม: ' + SupervisorDashboard._fmt(totalAll));
+        setText('db-target-goal', totalTarget > 0 ? 'Target: ' + SupervisorDashboard._fmt(totalTarget) : 'Target: ยังไม่ตั้ง');
+        const pctLbl = document.getElementById('db-target-pct-label');
+        if (pctLbl) pctLbl.textContent = pctAll !== null ? pctAll.toFixed(1) + '%' : '—';
+
+        // ─── Section C/V แบบ expandable ─────────────────────────────────
+        const dbCatBody = document.getElementById('db-cat-body');
+        if (dbCatBody) {
+            dbCatBody.innerHTML = `
+            <!-- ═══ CREDIT (C) ═══ -->
+            <div style="margin-bottom:16px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                    <span style="font-size:13px;font-weight:900;color:#7c3aed;">💳 Credit (C-routes)</span>
+                    <span style="font-size:14px;font-weight:900;color:#7c3aed;">${SupervisorDashboard._fmt(totalC)}</span>
+                </div>
+                <!-- Credit sub-cards -->
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+                    <div style="background:#f5f3ff;border-radius:12px;padding:10px 12px;border:1px solid #ddd6fe;">
+                        <div style="font-size:9px;font-weight:700;color:#7c3aed;margin-bottom:2px;">✅ ยอด Confirm</div>
+                        <div style="font-size:16px;font-weight:900;color:#5b21b6;">${SupervisorDashboard._fmt(totalCConf)}</div>
+                        <div style="font-size:10px;color:#9ca3af;margin-top:2px;">${new Set(cConfirm.map(r=>r.invNum).filter(Boolean)).size} บิล</div>
+                    </div>
+                    <div style="background:#fefce8;border-radius:12px;padding:10px 12px;border:1px solid #fde68a;">
+                        <div style="font-size:9px;font-weight:700;color:#b45309;margin-bottom:2px;">⏳ รอ Confirm</div>
+                        <div style="font-size:16px;font-weight:900;color:#92400e;">${SupervisorDashboard._fmt(totalCPend)}</div>
+                        <div style="font-size:10px;color:#9ca3af;margin-top:2px;">${pendBills} บิลรอ</div>
+                    </div>
+                </div>
+                <!-- C route breakdown -->
+                ${SupervisorDashboard._renderRouteBreakdown(cRows, '#7c3aed')}
+            </div>
+
+            <div style="height:1px;background:#f3f4f6;margin:12px 0;"></div>
+
+            <!-- ═══ VAN (V) ═══ -->
+            <div>
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                    <span style="font-size:13px;font-weight:900;color:#2563eb;">🚐 Van (V-routes)</span>
+                    <span style="font-size:14px;font-weight:900;color:#2563eb;">${SupervisorDashboard._fmt(totalV)}</span>
+                </div>
+                <div style="background:#eff6ff;border-radius:12px;padding:10px 12px;border:1px solid #bfdbfe;margin-bottom:8px;">
+                    <div style="font-size:9px;font-weight:700;color:#1d4ed8;margin-bottom:2px;">📋 บิลขาย</div>
+                    <div style="font-size:16px;font-weight:900;color:#1e40af;">${invCountV.toLocaleString()} บิล</div>
+                </div>
+                <!-- V route breakdown -->
+                ${SupervisorDashboard._renderRouteBreakdown(vRows, '#2563eb')}
+            </div>`;
+        }
+
+        // ─── Route table ─────────────────────────────────────────────────
+        SupervisorDashboard._renderRouteTable(mainRows);
+    },
+
+    // ─── แสดง bar แต่ละสายใน group ──────────────────────────────────────
+    _renderRouteBreakdown: (rows, color) => {
+        // group by sCode
+        const byRoute = {};
+        rows.forEach(r => {
+            const s = String(r.sCode||'').toUpperCase();
+            if (!s) return;
+            if (!byRoute[s]) byRoute[s] = { net: 0, invs: new Set() };
+            byRoute[s].net += r.net || 0;
+            if (r.invNum) byRoute[s].invs.add(r.invNum);
+        });
+        const sorted = Object.entries(byRoute).sort((a,b) => b[1].net - a[1].net);
+        if (!sorted.length) return '<div style="font-size:11px;color:#9ca3af;padding:6px 0;">ไม่มีข้อมูล</div>';
+        const maxNet = sorted[0][1].net || 1;
+        return sorted.map(([route, d]) => {
+            const barW = Math.round((d.net / maxNet) * 100);
+            const tgt  = SupervisorDashboard._targets[route] || 0;
+            const pct  = tgt > 0 ? (d.net / tgt * 100) : null;
+            const pctTxt = pct !== null ? (pct.toFixed(0) + '%') : '';
+            return `
+            <div style="margin-bottom:8px;">
+                <div style="display:flex;justify-content:space-between;margin-bottom:3px;">
+                    <span style="font-size:11px;font-weight:800;color:#374151;">${route}</span>
+                    <span style="font-size:11px;font-weight:700;color:${color};">${SupervisorDashboard._fmt(d.net)} ${pctTxt ? '<span style="color:#9ca3af;font-weight:400;font-size:10px;">'+pctTxt+'</span>' : ''}</span>
+                </div>
+                <div style="height:6px;background:#f3f4f6;border-radius:99px;overflow:hidden;">
+                    <div style="height:6px;background:${color};border-radius:99px;width:${barW}%;opacity:0.7;"></div>
+                </div>
+            </div>`;
+        }).join('');
+    },
+
+    // ─── ตารางรายสายด้านล่าง ─────────────────────────────────────────────
+    _renderRouteTable: (mainRows) => {
+        const shopEl = document.getElementById('db-shop-body');
+        if (!shopEl) return;
+        const byRoute = {};
+        mainRows.forEach(r => {
+            const s = String(r.sCode||'').toUpperCase();
+            if (!s) return;
+            if (!byRoute[s]) byRoute[s] = { net: 0, outlets: new Set(), invs: new Set() };
+            byRoute[s].net += r.net || 0;
+            if (r.custCode) byRoute[s].outlets.add(String(r.custCode));
+            if (r.invNum)   byRoute[s].invs.add(r.invNum);
+        });
+        const sorted = Object.entries(byRoute).sort((a,b) => a[0].localeCompare(b[0],'th',{numeric:true}));
+        const targets = SupervisorDashboard._targets;
+        const maxNet = sorted.reduce((m,[,d]) => Math.max(m, d.net), 0) || 1;
+
+        shopEl.innerHTML = sorted.map(([route, d]) => {
+            const tgt   = targets[route] || 0;
+            const pct   = tgt > 0 ? (d.net / tgt * 100) : null;
+            const barW  = Math.round((d.net / maxNet) * 100);
+            const color = pct === null ? '#6366f1' : pct >= 100 ? '#059669' : pct >= 80 ? '#d97706' : '#dc2626';
+            const pctBadge = pct !== null
+                ? `<span style="font-size:9px;font-weight:800;color:${color};background:${color}18;padding:1px 5px;border-radius:6px;">${pct.toFixed(0)}%</span>`
+                : '';
+            return `
+            <div style="margin-bottom:10px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">
+                    <span style="font-size:12px;font-weight:800;color:#374151;">${route} ${pctBadge}</span>
+                    <span style="font-size:11px;font-weight:800;color:#111827;">${SupervisorDashboard._fmt(d.net)}</span>
+                </div>
+                <div style="height:5px;background:#f3f4f6;border-radius:99px;overflow:hidden;margin-bottom:3px;">
+                    <div style="height:5px;background:${color};border-radius:99px;width:${barW}%;"></div>
+                </div>
+                <div style="font-size:10px;color:#9ca3af;">
+                    ${d.outlets.size} ร้าน · ${d.invs.size} บิล
+                    ${tgt > 0 ? '· tgt ' + SupervisorDashboard._fmt(tgt) : ''}
+                </div>
+            </div>`;
+        }).join('') || '<div style="text-align:center;padding:12px;color:#9ca3af;font-size:12px;">ไม่มีข้อมูล</div>';
+
+        // ซ่อน basket/others สำหรับ supervisor
+        const basketEl = document.getElementById('db-basket-body');
+        const othersEl = document.getElementById('db-others-body');
+        if (basketEl) basketEl.closest?.('.db-card')?.style && (basketEl.closest('.db-card').style.display = 'none');
+        if (othersEl) othersEl.closest?.('.db-card')?.style && (othersEl.closest('.db-card').style.display = 'none');
+    },
+};

@@ -257,7 +257,7 @@
         (function() {
             const session = Auth.getSession();
             if (!session) return;
-            if (session.role === 'sales') {
+            if (session.role === 'sales' || session.role === 'route_supervisor' || session.role === 'asm') {
                 window.location.replace('sales.html');
             } else if (session.role === 'admin') {
                 window.location.replace('center-select.html');
@@ -291,7 +291,7 @@
             try {
                 const user = await Auth.login(username, password);
                 // Redirect ตาม role
-                if (user.role === 'sales') {
+                if (user.role === 'sales' || user.role === 'route_supervisor' || user.role === 'asm') {
                     window.location.replace('sales.html');
                 } else if (user.role === 'admin') {
                     window.location.replace('center-select.html');
