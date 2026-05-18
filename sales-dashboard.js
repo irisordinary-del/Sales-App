@@ -646,22 +646,35 @@ const SupervisorDashboard = {
     },
 
     _loadData: async (ym) => {
+        // ใช้ cache ถ้ามีแล้ว
         if (SupervisorDashboard._rowCache[ym]) {
             SupervisorDashboard._allRows = SupervisorDashboard._rowCache[ym];
             return;
         }
         try {
-            const chunks = await db.collection('sellout').doc(ym).collection('chunks').get();
+            const metaDoc = await db.collection('sellout').doc(ym).get();
+            if (!metaDoc.exists) {
+                SupervisorDashboard._rowCache[ym] = [];
+                SupervisorDashboard._allRows = [];
+                return;
+            }
+            const chunks = await db.collection('sellout').doc(ym)
+                .collection('chunks').get();
             let rows = [];
-            chunks.docs.sort((a,b) => (a.data().index||0)-(b.data().index||0))
+            chunks.docs
+                .sort((a,b) => (a.data().index||0) - (b.data().index||0))
                 .forEach(doc => rows = rows.concat(doc.data().rows || []));
-            // กรองเฉพาะศูนย์นี้ (ใช้ centerId prefix match sCode)
-            const prefix = State.centerId || '';
-            if (prefix) rows = rows.filter(r => String(r.sCode||'').startsWith(prefix));
-            SupervisorDashboard._allRows = rows;
+
+            // กรองเฉพาะศูนย์นี้ — ใช้ centerId จาก session ถ้า State.centerId ว่าง
+            const centerId = State.centerId || Auth.getSession()?.centerId || '';
+            if (centerId) {
+                rows = rows.filter(r => String(r.sCode||'').startsWith(centerId));
+            }
             SupervisorDashboard._rowCache[ym] = rows;
+            SupervisorDashboard._allRows = rows;
         } catch(e) {
             console.warn('SupervisorDashboard._loadData:', e);
+            // ไม่ cache error — ให้ลองใหม่ได้
             SupervisorDashboard._allRows = [];
         }
     },
@@ -724,6 +737,19 @@ const SupervisorDashboard = {
         setText('db-kpi-total-sub', 'ยอดรวมทุกสาย');
         setText('db-kpi-inv', invCountAll.toLocaleString());
         setText('db-kpi-shops', new Set(mainRows.map(r => r.custCode).filter(Boolean)).size.toLocaleString());
+
+        // ─ vs Target KPI card ─
+        const pctEl = document.getElementById('db-kpi-pct');
+        if (pctEl) {
+            if (pctAll !== null) {
+                pctEl.textContent = pctAll.toFixed(1) + '%';
+                pctEl.className = 'db-kpi-num ' + (pctAll >= 100 ? 'pct-good' : pctAll >= 80 ? 'pct-ok' : 'pct-bad');
+            } else {
+                pctEl.textContent = 'ไม่มี Target';
+                pctEl.className = 'db-kpi-num';
+                pctEl.style.fontSize = '13px';
+            }
+        }
 
         // Target bar
         const barEl = document.getElementById('db-target-bar');
