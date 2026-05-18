@@ -222,8 +222,6 @@ const SalesDashboard = {
         const cnRows       = rows.filter(r => r.invStatus === 'Credit Note');
 
         const mainRows    = invoicedRows.filter(r => !SalesDashboard.EXCLUDED_BRANDS.has(r.brandDesc));
-        const basketRows  = invoicedRows.filter(r => r.brandDesc === 'กระเช้าของขวัญ');
-        const othersRows  = invoicedRows.filter(r => r.brandDesc === 'อื่นๆ');
 
         const total    = mainRows.reduce((s, r) => s + SalesDashboard._amt(r), 0);
         const outletM  = SalesDashboard._calcOutletMetrics(invoicedRows);
@@ -290,11 +288,7 @@ const SalesDashboard = {
         // ─ ShopType ─
         SalesDashboard._renderBars('db-shop-body', invoicedRows, '#10b981', r => r.shopType);
 
-        // ─ กระเช้า / อื่นๆ ─
-        const basketAmt = basketRows.reduce((s, r) => s + SalesDashboard._amt(r), 0);
-        const othersAmt = othersRows.reduce((s, r) => s + SalesDashboard._amt(r), 0);
-        SalesDashboard._setText('db-basket-body', basketAmt > 0 ? SalesDashboard._fmt(basketAmt) : '—');
-        SalesDashboard._setText('db-others-body', othersAmt > 0 ? SalesDashboard._fmt(othersAmt) : '—');
+
     },
 
     // ─── Credit Section (เฉพาะ C-route) ────────────────────────────────────
@@ -745,9 +739,9 @@ const SupervisorDashboard = {
         const mainRows     = invoicedRows.filter(r => !SupervisorDashboard.EXCLUDED_BRANDS.has(r.brandDesc));
 
         // แยก C / V จาก sType หรือ sCode
-        const cInvoiced = invoicedRows.filter(r => r.sType === 'CreditSales' || /C\d/.test(r.sCode));
-        const vInvoiced = invoicedRows.filter(r => r.sType === 'VanSales'    || /V\d/.test(r.sCode));
-        const cCN       = cnRows.filter(r => r.sType === 'CreditSales' || /C\d/.test(r.sCode));
+        const cInvoiced = invoicedRows.filter(r => /C\d/.test(r.sCode));
+        const vInvoiced = invoicedRows.filter(r => /V\d/.test(r.sCode));
+        const cCN       = cnRows.filter(r => /C\d/.test(r.sCode));
 
         const totalAll = mainRows.reduce((s,r) => s + (r.net||0), 0);
         const totalC   = cInvoiced.reduce((s,r) => s + (r.net||0), 0);

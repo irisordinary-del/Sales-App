@@ -47,8 +47,6 @@ const Dashboard = {
     // Categories ที่ต้องแยกออก ไม่รวมยอดหลัก
     // ── ยกเว้น brand ที่ไม่นับในยอดหลัก ──────────────────────────────────
     EXCLUDED_BRANDS: new Set(['อื่นๆ', 'กระเช้าของขวัญ']),
-    // compat alias
-    get EXCLUDED_CATS() { return Dashboard.EXCLUDED_BRANDS; },
 
     // ยอดขาย / SKU เฉลี่ยต่อร้าน แยก V-route และ C-route
     // outlet = custCode ที่มียอดในเดือน
@@ -427,7 +425,6 @@ const Dashboard = {
                 // ─ Product ─
                 prodCode:       String(r['SO Product Code'] || '').trim(),
                 prodName:       String(r['SO Product Name'] || '').trim(),
-                catDesc:        String(r['Category Description'] || '').trim(),
                 brandDesc:      String(r['Brand Description'] || '').trim(),
                 carToEA:        parseFloat(r['CAR to EA']) || 0,
                 // ─ Invoice ─
@@ -773,20 +770,16 @@ const Dashboard = {
 
     _renderCategories: () => {
         const mainEl    = document.getElementById('db-category-body');
-        const basketEl  = document.getElementById('db-basket-body');
-        const othersEl  = document.getElementById('db-others-body');
         if (!mainEl) return;
 
         const rows = Dashboard._getFilteredRows();
         if (!rows.length) {
-            [mainEl, basketEl, othersEl].forEach(el => { if(el) el.innerHTML = '<p class="text-center text-gray-400 text-xs py-4">ยังไม่มีข้อมูล</p>'; });
+            if(mainEl) mainEl.innerHTML = '<p class="text-center text-gray-400 text-xs py-4">ยังไม่มีข้อมูล</p>';
             return;
         }
 
         // ใช้ brandDesc แทน catDesc สำหรับ breakdown หลัก
         const mainRows   = rows.filter(r => !Dashboard.EXCLUDED_BRANDS.has(r.brandDesc));
-        const basketRows = rows.filter(r => r.brandDesc === 'กระเช้าของขวัญ');
-        const othersRows = rows.filter(r => r.brandDesc === 'อื่นๆ');
 
         // แยก Confirm vs Pending ใน Credit rows
         const creditRows   = mainRows.filter(r => /C\d/.test(String(r.sCode||'')));
@@ -847,8 +840,7 @@ const Dashboard = {
         };
 
         renderBrandBars(mainRows, mainEl);
-        if (basketEl) renderBrandBars(basketRows, basketEl);
-        if (othersEl) renderBrandBars(othersRows, othersEl);
+
     },
 
     // ─── Pending Invoice Modal ──────────────────────────────────────────────
