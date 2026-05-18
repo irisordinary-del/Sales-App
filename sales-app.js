@@ -32,7 +32,16 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 
-db.enablePersistence({ synchronizeTabs: true }).catch(function(err) { console.warn("Cache Warning: ", err); });
+// ใช้ MultiTab persistence ที่ถูกต้อง — ลด WebChannel reconnect
+db.enableMultiTabIndexedDbPersistence().catch(err => {
+    if (err.code === 'unimplemented') {
+        // fallback: single-tab persistence
+        db.enablePersistence().catch(() => {});
+    }
+});
+
+// Firestore settings — ลด long-polling reconnect noise
+db.settings({ experimentalForceLongPolling: false, merge: true });
 
 let docMain = db.collection('appData').doc('v1_main');
 const colSales = db.collection('v1_sales_chunks');
@@ -279,24 +288,24 @@ const App = {
 
         LoadBar.setProgress(30, 'โหลดข้อมูลร้านทุกสาย...');
 
-        // โหลดร้านทุกสาย
-        const routes = State.routeList;
+        // โหลดแบบ batch ทีละ 5 สาย — ไม่ยิง 15 requests พร้อมกัน
+        const BATCH = 5;
         let loaded = 0;
         State.allRoutes = {};
         State.allStores = [];
-
-        if (routes.length > 0) {
-            await Promise.all(routes.map(async (routeId) => {
+        for (let i = 0; i < routes.length; i += BATCH) {
+            const chunk = routes.slice(i, i + BATCH);
+            await Promise.all(chunk.map(async (routeId) => {
                 try {
                     const rd = await routeColRef.doc(routeId).get();
                     State.allRoutes[routeId] = rd.exists ? (rd.data().stores || []) : [];
                 } catch(e) { State.allRoutes[routeId] = []; }
-                loaded++;
-                LoadBar.setProgress(30 + Math.round(loaded / routes.length * 40), `โหลด ${loaded}/${routes.length} สาย...`);
             }));
-            // รวมทุกร้านสำหรับ map
-            State.allStores = Object.values(State.allRoutes).flat();
+            loaded += chunk.length;
+            LoadBar.setProgress(30 + Math.round(loaded / routes.length * 40), `โหลด ${loaded}/${routes.length} สาย...`);
         }
+        // รวมทุกร้านสำหรับ Tab2
+        State.allStores = Object.values(State.allRoutes).flat();
 
         LoadBar.setProgress(75, 'โหลดยอดขาย...');
 
@@ -427,35 +436,44 @@ const App = {
         }
 
         LoadBar.setProgress(20, 'กำลังดึงข้อมูลร้านค้า...');
-        docMain.onSnapshot(async doc => {
-            if (!doc.exists) { State.allStores = []; isMainLoaded = true; checkReady(); return; }
-            const data = doc.data();
-            if (data.routes && data.routes[State.myRoute]) {
-                State.allStores = data.routes[State.myRoute] || [];
-                isMainLoaded = true; checkReady();
+
+        // ใช้ get() แทน onSnapshot — ไม่เปิด listener ค้างไว้ (ลด WebChannel)
+        // onSnapshot เฉพาะ routeColRef เพื่อ real-time update ลำดับวิ่ง
+        try {
+            const doc = await docMain.get();
+            if (!doc.exists) {
+                State.allStores = [];
             } else {
-                LoadBar.setProgress(35, 'ดึงข้อมูลจาก subcollection...');
-                try {
+                const data = doc.data();
+                if (data.routes && data.routes[State.myRoute]) {
+                    State.allStores = data.routes[State.myRoute] || [];
+                } else {
+                    LoadBar.setProgress(35, 'ดึงข้อมูลจาก subcollection...');
                     const rd = await routeColRef.doc(State.myRoute).get();
                     State.allStores = rd.exists ? (rd.data().stores || []) : [];
-                } catch (e) { State.allStores = []; }
-                isMainLoaded = true; checkReady();
+                }
             }
-        });
+        } catch(e) { State.allStores = []; }
+        isMainLoaded = true; checkReady();
 
-        routeColRef.doc(State.myRoute).onSnapshot(rd => {
+        // onSnapshot เฉพาะ route ของตัวเอง — update real-time เมื่อ Admin แก้ลำดับ
+        // เก็บ unsubscribe ไว้เรียกได้ถ้าจำเป็น
+        App._unsubRoute = routeColRef.doc(State.myRoute).onSnapshot(rd => {
             if (!rd.exists) return;
             State.allStores = rd.data().stores || [];
-            if (isMainLoaded) Processor.run();
+            if (State.isLoaded) Processor.run();
         });
 
         LoadBar.setProgress(30, 'กำลังโหลดข้อมูลยอดขาย...');
-        colSales.onSnapshot(snap => {
+
+        // colSales ใช้ get() แทน onSnapshot — ข้อมูล KPI ไม่ต้อง real-time
+        try {
+            const snap = await colSales.get();
             let merged = {};
             snap.forEach(doc => { Object.assign(merged, doc.data()); });
             State.sales = merged;
-            isSalesLoaded = true; checkReady();
-        });
+        } catch(e) { State.sales = {}; }
+        isSalesLoaded = true; checkReady();
     }
 };
 
