@@ -5,7 +5,7 @@
 ระบบวางแผนสายวิ่ง (Route Planner) สำหรับฝ่ายขาย ประกอบด้วย 3 หน้าหลัก
 
 - **Admin/Supervisor** (`index.html`) — วางแผนสายวิ่ง, จัดการ Draft/Active plan, ดู Dashboard, ย้ายร้านระหว่างสาย, ติดตามการกระจายสินค้า
-- **Sales** (`sales.html`) — ดูคิวงานประจำวัน, ดู KPI ยอดขาย, ปฏิทินวิ่งสาย, ดู Campaign coverage ของสายตัวเอง
+- **Sales / Route Supervisor / ASM** (`sales.html`) — ดูคิวงานประจำวัน, ดู KPI ยอดขาย, ปฏิทินวิ่งสาย, ดู Campaign coverage — แสดงข้อมูลต่างกันตาม role
 - **User Management** (`users.html`) — จัดการ user ทุก role
 
 ## Stack
@@ -20,43 +20,50 @@
 
 ```
 index.html          — Admin: วางแผนคิวงาน + Dashboard + ภาพรวมทุกสาย + กระจายสินค้า
-sales.html          — Sales: ยอดขาย, ร้านค้า, คิวงาน, ปฏิทิน, Campaign coverage
+sales.html          — Sales/RouteSup/ASM: ยอดขาย, ร้านค้า, คิวงาน, ปฏิทิน, Campaign coverage
 users.html          — User management
 login.html          — หน้า Login
 center-select.html  — Admin เลือกศูนย์
 
 app-config.js       — Firebase init, DAY_COLORS, State object, Center selector
-app-config-init.js  — Firebase init สำหรับ center-select.html (ไม่มี redirect)
+app-config-init.js  — Firebase init สำหรับ login.html, users.html, center-select.html (ไม่มี redirect)
+                      ⚠️ ต้องมีไฟล์นี้ใน repo — login.html โหลดไฟล์นี้ ไม่ใช่ app-config.js
 auth.js             — Auth module: login, session, SHA-256, user CRUD
+                      roles: admin, supervisor, sales, route_supervisor, asm
 admin-data.js       — App object: saveDB, loadDB, switchRoute, Plan Mode (Draft/Active/History)
                       + StoreTrans: ย้ายร้านระหว่างสาย
                       + ExportCtrl: export เลือก plan/route ได้
                       + DateUtil: utility แปลง YYYY_MM → ชื่อเดือนไทย
-admin-ui.js         — UI object: render, tabs, modals, toast (ไม่มี duplicate แล้ว)
+admin-ui.js         — UI object: render, tabs, modals, toast
 admin-map.js        — MapCtrl, Lasso tool
 admin-ai.js         — AI route builder (K-Means++)
 admin-style.css     — Admin styles
 dashboard.js        — Dashboard: Sellout upload, KPI render, drill-down
-                      + _renderCampaignSection: Campaign widget รวมทุกสาย (ยอดรวมทั้งช่วง)
-                      + _rowCache: cache rows รายเดือนไม่โหลดซ้ำ
+                      + _CHUNK_SIZE: 500 (rows/chunk)
+                      + _renderCampaignSection: Campaign widget รวมทุกสาย
+                      + ไม่ใช้ orderBy — sort ใน JS แทน
 file-manager.js     — FileManager: bulkImport Excel, exportAllRoutes
-firebase-chunks.js  — ChunkDB: save/load ข้อมูลแบบ chunked (dead code — ไม่ได้ใช้ใน flow หลัก)
+firebase-chunks.js  — ChunkDB: dead code — ไม่ได้ใช้ใน flow หลัก
 store-history.js    — StoreHistory: ประวัติซื้อรายร้าน
+                      Supervisor/ASM โหลดทุกสาย (ไม่กรอง sCode)
 users.js            — UsersApp: user management UI
 center-select.js    — Center selector logic
-sales-app.js        — Sales app: State, UI, MapCtrl, CalendarCtrl, Processor
+sales-app.js        — Sales/Supervisor app: State, UI, MapCtrl, CalendarCtrl, Processor
+                      + SupervisorUI: Tab2 ร้านค้าทุกสาย, Tab3 grid เลือกสาย → คิวงาน
 sales-dashboard.js  — SalesDashboard: KPI ยอดขายฝั่ง Sales
-                      + _renderCampaigns: Campaign widget เฉพาะสายตัวเอง (ยอดรวมทั้งช่วง)
-                      + _waitAndLoadCampaigns: รอ State.isLoaded ก่อนโหลด
-                      + _rowCache: cache rows รายเดือน
+                      + _chunkCache: shared chunk cache ใช้ร่วมกันทุกที่ (ไม่โหลดซ้ำ)
+                      + _loadChunks(ym): โหลด chunks แล้ว cache — เรียกแทน fetch ตรง
+                      + SupervisorDashboard: KPI ยอดขายทุกสาย แยก C/V, Credit section
+                      + _renderCampaigns: Campaign widget เฉพาะสายตัวเอง
 sales-style.css     — Sales styles
 sku-distribution.js — SkuDist: ระบบติดตามการกระจายสินค้า (SKU Distribution)
-firestore.rules     — Firestore security rules (+ auditLogs rule Session 3)
-audit-log.js        — Audit Log: บันทึก action ทุกอย่าง + หน้าแสดง log (Session 3)
-pwa-register.js     — PWA: register SW, install prompt, update banner (Session 3)
-manifest.json       — PWA manifest (Session 3)
-sw.js               — Service Worker: offline cache strategies (Session 3)
-icons/              — PWA icons 72/96/128/192/512px (Session 3)
+firestore.rules     — Firestore security rules
+                      ⚠️ chunks rows.size() <= 550 (รองรับ CHUNK_SIZE=500)
+audit-log.js        — Audit Log: บันทึก action + หน้าแสดง log
+pwa-register.js     — PWA: register SW, install prompt, update banner
+manifest.json       — PWA manifest
+sw.js               — Service Worker: offline cache strategies
+icons/              — PWA icons 72/96/128/192/512px
 ```
 
 ## Firestore Structure
@@ -74,7 +81,11 @@ appData/
 
 sellout/{YYYY_MM}                     ← Sellout metadata
   chunks/{chunkId}                    ← Sellout rows (rows: [...], index: N)
-                                        fields: sCode, custCode, prodCode, prodName, net, gross, invNum
+                                        fields: sCode, sType, custCode, custName, shopType,
+                                                invDate, invNum, soNum, soStatus, invStatus,
+                                                catDesc, brandDesc, prodCode, prodName,
+                                                gross, net, soNet, qtyEA
+                                        ⚠️ CHUNK_SIZE=500 → ต้องตั้ง Firestore rule <= 550
 
 targets/{YYYY_MM}                     ← Target รายสาย { routes: { "402V01": 500000 } }
 
@@ -86,6 +97,36 @@ skuDistribution/{campaignId}          ← SKU Distribution Campaigns
 v1_raw_chunks/{chunkId}               ← Raw sales data
 v1_sales_chunks/{chunkId}             ← Processed KPI
 ```
+
+## Sellout Row Fields (หลัง normalize ใน dashboard.js)
+
+```javascript
+{
+  sCode:    "402V01",           // Salesman Code
+  sType:    "VanSales",         // "VanSales" | "CreditSales"
+  custCode: "4020000690",       // Customer Code
+  custName: "ร้านสายสุนีย์",
+  shopType: "Retails",
+  invDate:  "2026-05-04",
+  invNum:   "402V01123853",     // Invoice Number
+  soNum:    "402V01123853",     // SO Number
+  soStatus: "Processed - Invoice",  // "Processed - Invoice" | "Credit Note"
+  invStatus:"Invoiced",         // "Invoiced" | "Credit Note"
+  catDesc:  "ซุปไก่สกัด",
+  brandDesc:"แบรนด์ซุปไก่สกัด",
+  prodCode: "14009569",
+  prodName: "แบรนด์ซุปไก่สกัดต้นตำรับ 65มล.",
+  gross:    286.02,             // Invoice Gross Amount
+  net:      248.66,             // Invoice Net Amount  ← ใช้เป็นยอดหลัก
+  soNet:    248.66,             // SO NET Amount (ยอดก่อน Confirm)
+  qtyEA:    6,
+}
+```
+
+**Credit Logic:**
+- `invStatus === 'Invoiced'` → ยอด Confirm (Invoice Net)
+- `invStatus === 'Credit Note'` → CN ลดยอด (ติดลบ)
+- `soNet` → ยอดเปิดบิล SO (ก่อน Confirm)
 
 ## Store Object Structure
 
@@ -107,9 +148,67 @@ v1_sales_chunks/{chunkId}             ← Processed KPI
 ## Role System
 
 ```
-admin       → เข้าได้ทุกหน้า, เลือกศูนย์ได้อิสระ
-supervisor  → เข้า index.html ได้ แต่ล็อคกับ centerId จาก session
-sales       → เข้าได้แค่ sales.html
+admin            → index.html (เลือกศูนย์ได้อิสระ)
+supervisor       → index.html (ล็อคกับ centerId จาก session)
+route_supervisor → sales.html (เห็นทุกสาย, SupervisorUI)
+asm              → sales.html (เห็นทุกสาย, SupervisorUI)
+sales            → sales.html (เห็นแค่สายตัวเอง)
+```
+
+**Login redirect:**
+- `sales`, `route_supervisor`, `asm` → `sales.html`
+- `admin` → `center-select.html`
+- `supervisor` → `index.html?center={centerId}`
+
+## SupervisorUI (sales-app.js) — Route Supervisor / ASM
+
+```javascript
+// Tab1: Dashboard — SupervisorDashboard (เห็นทุกสาย แยก C/V)
+// Tab2: ร้านค้า — หน้าตาเหมือน Sales แต่รวมทุกสาย + badge บอกสาย
+// Tab3: สายวิ่ง — Grid card เลือกสาย → หน้าคิวงาน + แผนที่ (เหมือน Sales)
+
+SupervisorUI.selectRoute(routeId)  // เลือกสาย → switchTab('route')
+SupervisorUI.clearRoute()          // ย้อนกลับ grid
+SupervisorUI.handleDrag()          // save ลำดับลง Firestore ของสายนั้น
+SupervisorUI.renderAllStores()     // Tab2: ร้านทุกสายรวม + badge
+SupervisorUI.renderRouteGrid()     // Tab3: grid card แบ่ง C/V
+```
+
+**State เพิ่มเติมสำหรับ Supervisor:**
+```javascript
+State.viewMode    // 'sales' | 'route_supervisor' | 'asm'
+State.centerId    // centerId ที่ผูกไว้
+State.allRoutes   // { routeId: [store, ...] } ทุกสาย
+State.routeList   // ['402C01','402C02','402V01',...] รายชื่อสายทั้งหมด
+```
+
+## SupervisorDashboard (sales-dashboard.js)
+
+```javascript
+SupervisorDashboard.init()               // เรียกหลัง startSupervisor()
+SupervisorDashboard.onMonthChange(ym)    // เปลี่ยนเดือน
+SupervisorDashboard._loadData(ym)        // โหลด chunks ผ่าน SalesDashboard._loadChunks (shared cache)
+SupervisorDashboard._render()            // render KPI + C/V section + route table
+```
+
+**Credit Section:**
+- ✅ ยอด Confirm = `invStatus === 'Invoiced'` net รวม
+- 📋 ยอดเปิดบิล (SO) = `soNet` รวม
+- 📝 Credit Note = `invStatus === 'Credit Note'` (ติดลบ)
+
+## Shared Chunk Cache (ประสิทธิภาพ)
+
+```javascript
+// SalesDashboard._loadChunks(ym) — โหลด 1 ครั้ง cache ไว้ใช้ร่วมกัน
+// ทุก function ที่ต้องการ rows ของเดือนนั้นให้เรียกผ่านนี้:
+SalesDashboard._chunkCache          // { 'YYYY_MM': rows[] } ทั้งหมดไม่กรอง
+SalesDashboard._loadChunks(ym)      // return rows[] (from cache or Firestore)
+
+// ใช้ใน:
+// - SalesDashboard._loadData (กรอง sCode หลัง load)
+// - _renderCampaigns loadMonthRows (กรอง custCode)
+// - SupervisorDashboard._loadData (กรอง centerId prefix)
+// campaign months โหลด parallel ด้วย Promise.all
 ```
 
 ## Plan Mode System (สำคัญมาก)
@@ -131,30 +230,12 @@ App.routesCol()         // ❌ เป็น active เท่านั้น
 
 ## Calendar Config
 
-เก็บใน draft document หรือ active metadata
-
 ```javascript
-// โหมด A: Cycle (Day X = วันที่ X ของเดือน)
-calendarConfig: {
-  mode: 'cycle',
-  startDay: 1,
-  startDayNum: 1,
-  cycleDays: 24,
-  holidays: [5, 12]
-}
+// โหมด A: Cycle
+calendarConfig: { mode:'cycle', startDay:1, startDayNum:1, cycleDays:24, holidays:[5,12] }
 
 // โหมด B: Fixed
-calendarConfig: {
-  mode: 'fixed',
-  mapping: { "1": "Day 5", "8": "Day 6" }
-}
-```
-
-## Auto-Switch (ฝั่ง Sales)
-
-```javascript
-// ถ้ามี draft ของเดือนปัจจุบัน → ใช้ draft
-// ถ้าไม่มี → ใช้ active ปกติ
+calendarConfig: { mode:'fixed', mapping: { "1": "Day 5", "8": "Day 6" } }
 ```
 
 ## Session & Auth
@@ -162,6 +243,7 @@ calendarConfig: {
 ```javascript
 Auth.getSession()     // { username, role, centerId, expiresAt }
 Auth.guard(['admin']) // redirect ถ้าไม่ใช่ role ที่อนุญาต
+App.isSupervisor()    // true ถ้า role = route_supervisor | asm
 window.CENTER_DOC     // เช่น "402_main"
 window.CENTER_ID      // เช่น "402"
 ```
@@ -177,130 +259,29 @@ State.activeRoadDay    // Day ที่กำลังแสดง road
 State.sales            // KPI data
 ```
 
-## Key Global State (Sales)
+## Key Global State (Sales / Supervisor)
 
 ```javascript
-State.myRoute          // สายของ sales เช่น "402V01"
-State.allStores        // ร้านทั้งหมดของสายนั้น ← ใช้อันนี้ ไม่ใช่ State.db.routes
+State.myRoute          // สายของ sales หรือสายที่ Supervisor เลือกอยู่
+State.allStores        // ร้านทั้งหมดของสายที่กำลังดู
 State.currentDay       // Day ที่เลือกอยู่
-State.calendarConfig   // config ปฏิทินของเดือนนั้น
+State.calendarConfig   // config ปฏิทิน
 State.activePlanMode   // 'active' | 'draft'
-State.isLoaded         // true เมื่อ routes โหลดเสร็จแล้ว
+State.isLoaded         // true เมื่อโหลดเสร็จ
+State.viewMode         // 'sales' | 'route_supervisor' | 'asm'
+State.centerId         // centerId (Supervisor เท่านั้น)
+State.allRoutes        // { routeId: stores[] } (Supervisor เท่านั้น)
+State.routeList        // ['402V01',...] (Supervisor เท่านั้น)
 ```
 
-**สำคัญ**: ฝั่ง Sales ใช้ `State.allStores` เท่านั้น — `State.db` ไม่มีใน sales-app.js
-
-## StoreTrans — ย้ายร้านระหว่างสาย
+## SkuDist — Target Bug Fix
 
 ```javascript
-StoreTrans.open()      // เปิด modal เลือก src/dst route + ร้านที่ต้องการย้าย
-StoreTrans.confirm()   // ย้ายร้านที่เลือก reset days/seqs อัตโนมัติ
-                       // บันทึกทั้ง src และ dst ใน currentRoutesCol()
-```
+// Bug เดิม: _setRouteTarget ล็อค n <= 100 ทำให้ตั้งจำนวนร้าน > 100 ไม่ได้
+// แก้แล้ว: maxVal = targetUnit === 'pct' ? 100 : 99999
 
-**ข้อควรระวัง**: ร้านที่ย้ายจะถูก reset days/seqs — Admin ต้องจัดวันใหม่
-
-## ExportCtrl — Export Excel เลือก Plan ได้
-
-```javascript
-ExportCtrl.openModal()     // เลือก plan (current/active) และ route (เดียว/ทุกสาย)
-ExportCtrl.doExport()      // export — ถ้าเลือก active แต่อยู่ใน draft จะโหลดจาก Firestore
-ExportCtrl.exportCurrent() // backward compat
-```
-
-- Export ทุกสาย → มี column "Route" เพิ่มในไฟล์
-- Fix typo: `Longtitude` → `Longitude`
-
-## DateUtil — แปลงวันที่
-
-```javascript
-DateUtil.ymToThai('2026_06')      // "มิถุนายน 2569"
-DateUtil.ymToThaiShort('2026_06') // "มิ.ย. 2569"
-DateUtil.currentYM()              // "2026_05"
-```
-
-## SkuDist — ระบบติดตามการกระจายสินค้า
-
-### โครงสร้าง Campaign
-
-```javascript
-{
-  id: "xxx",
-  name: "Campaign กระจายน้ำดื่ม Q2/2568",
-  startYM: "2026_01",
-  endYM: "2026_06",
-  centerId: "402_main",
-  defaultTarget: 80,           // % default สำหรับทุกสาย
-  targetUnit: "pct",           // "pct" | "count"
-  routeTargets: {              // target รายสาย (optional)
-    "402V01": 75,
-    "402V12": 90
-  },
-  groups: [
-    {
-      id: "g_xxx",
-      name: "น้ำดื่ม",
-      keywords: ["WTR600ML", "WTR"]   // OR + contains
-    }
-  ]
-}
-```
-
-### ตรรกะการคำนวณ — ยึดร้านเป็นหลัก ไม่ใช่ sCode
-
-```javascript
-// 1. build custCode → route index จาก State.db.routes (plan ปัจจุบัน)
-// 2. tag ทุก row ด้วย _route จาก custCode (ไม่ใช้ sCode)
-// 3. โหลด rows ทุกเดือนใน startYM → endYM (ยอดรวมทั้งช่วง)
-
-// Store coverage = unique custCode ที่ซื้อ ÷ ร้านทั้งหมดในสาย (รวมร้านที่ไม่มียอด)
-// SKU coverage   = unique prodCode ที่ขาย ÷ prodCode ที่ match keyword ใน allProdOptions
-
-// target แปลงเป็น % เสมอ:
-// targetUnit='count' → tgtPct = rawTarget / totalStores * 100
-// targetUnit='pct'   → tgtPct = rawTarget
-```
-
-**ข้อควรระวัง**:
-- keyword กว้างเกิน → match สินค้าไม่ตั้งใจ — กด Preview ก่อน save เสมอ
-- allProdOptions โหลดจากเดือนล่าสุดเท่านั้น — สินค้าใหม่อาจไม่ติด SKU coverage
-- ร้านที่ไม่มียอดเลยก็นับเป็นตัวหาร store coverage
-
-### Campaign Widget บนหน้า Dashboard
-
-**Admin/Supervisor** (`dashboard.js → _renderCampaignSection`):
-- แสดงทุก campaign ที่ `endYM >= เดือนปัจจุบัน`
-- โหลด rows ทุกเดือนใน range (**ไม่ขึ้นกับ dropdown เดือน**)
-- คำนวณรวมทุกสาย — ยอดรวมทั้งช่วง campaign
-- `_rowCache` cache rows ไม่โหลดซ้ำ
-- render ครั้งแรก 1.5 วินาทีหลัง init
-
-**Sales** (`sales-dashboard.js → _renderCampaigns`):
-- แสดงเฉพาะสายตัวเอง — ใช้ `State.allStores` เป็น store set
-- โหลด rows ทุกเดือนใน range เช่นกัน (**ไม่ขึ้นกับ dropdown**)
-- รอ `State.isLoaded = true` ก่อนผ่าน `_waitAndLoadCampaigns()`
-- `_rowCache` cache rows ไม่โหลดซ้ำ
-
-```javascript
-// ⚠️ ต้องรอ State พร้อมก่อนเสมอ
-_waitAndLoadCampaigns: () => {
-    const check = () => {
-        if (State.isLoaded && State.myRoute && State.allStores?.length > 0) {
-            SalesDashboard._loadCampaigns();
-        } else {
-            setTimeout(check, 500);
-        }
-    };
-    setTimeout(check, 500);
-}
-```
-
-## UI Tab System (แก้บัคแล้ว)
-
-```javascript
-UI.switchTab(id)       // เปลี่ยน tab — guard ไม่ reset tab ที่ user อยู่
-UI.userSwitchTab(id)   // เรียกเมื่อ user กดเอง (force=true)
-UI._currentTab         // track tab ปัจจุบัน
+// Bug เดิม: saveCampaign ใช้ merge:true ทำให้ routeTargets ข้าม Campaign
+// แก้แล้ว: ใช้ .set(data) แบบ overwrite
 ```
 
 ## Convention สำคัญ
@@ -314,51 +295,54 @@ UI._currentTab         // track tab ปัจจุบัน
 - **ห้ามใช้ `App.routesCol()` โดยตรง** — ใช้ `App.currentRoutesCol()`
 - **Sales ใช้ `State.allStores`** — ไม่ใช่ `State.db.routes[route]`
 - **Campaign coverage ยึดร้านเป็นหลัก** — ร้านย้ายสาย ยอดตามร้าน ไม่ตามพนักงาน
-- **Campaign widget แสดงยอดรวมทั้งช่วง** — ไม่ขึ้นกับ dropdown เดือน
+- **Sellout chunks โหลดผ่าน `SalesDashboard._loadChunks(ym)`** — ห้าม fetch ตรง
+- **CHUNK_SIZE = 500** — Firestore rule ต้องตั้ง `rows.size() <= 550`
+- **Re-upload Excel ทุกเดือนหลังเปลี่ยน CHUNK_SIZE** — เพื่อ rebuild chunks
 
 ## สิ่งที่ยังค้างอยู่ (TODO)
 
 - [ ] favicon.ico (404 ใน console แต่ไม่กระทบ)
-- [x] Audit Log — บันทึกว่าใครแก้อะไรเมื่อไร ✅ Session 3
-- [x] PWA manifest + Service Worker ✅ Session 3
+- [x] Audit Log ✅
+- [x] PWA manifest + Service Worker ✅
+- [x] Role route_supervisor + asm ✅
+- [x] SupervisorUI: Tab2 ร้านค้า + Tab3 grid เลือกสาย ✅
+- [x] SupervisorDashboard: C/V แยก + Credit Confirm/SO/CN ✅
+- [x] Shared chunk cache (ลด Firestore reads) ✅
+- [x] CHUNK_SIZE 300 → 500 ✅
 - [ ] SkuDist: allProdOptions ควร union prodCode จากทุกเดือนใน range
-- [ ] KPIMgr: product focus field ควรเก็บใน config document ของ center แทน hardcode
-- [ ] Campaign widget: refresh อัตโนมัติเมื่อ Admin สร้าง/ลบ campaign (ตอนนี้ต้อง reload)
+- [ ] KPIMgr: product focus field ควรเก็บใน config document ของ center
+- [ ] Campaign widget: refresh อัตโนมัติเมื่อสร้าง/ลบ campaign (ตอนนี้ต้อง reload)
+- [ ] Supervisor: ปฏิทินการทำงาน (calendar tab)
 
-## Session 3 — Bug Fix (sales-app.js)
+## Session 4 — สิ่งที่เพิ่ม/แก้
 
-### Drag & Drop กระตุก (`Processor.routeList`)
-**ปัญหา:** การลากเรียงร้านค้าในหน้า Sales กระตุก / ร้านหลุดไปท้ายสุด
-**สาเหตุ:**
-- `onChange` เรียก `MapCtrl.drawMap()` ทุก pixel ที่ลาก → หนักมากบนมือถือ
-- `onEnd` เรียก `drawMap()` ซ้ำอีกรอบ (2 รอบรวม)
-- `sortableList.destroy()` ไม่ทำงาน เพราะ instance ถูก assign ลง `window._sortableInstance` แต่ check จาก `sortableList`
+### Role ใหม่: route_supervisor, asm
+- `auth.js`: เพิ่มใน VALID_ROLES, guard redirect → sales.html
+- `login.html`: redirect role ใหม่ → sales.html
+- `users.html`: dropdown เพิ่ม Route Supervisor, ASM
 
-**แก้:**
-- ลบ `onChange` ออก
-- `onEnd` → เรียกแค่ `_updateSeqBadgesOnly()` (อัปเดตเลข badge, ไม่ redraw map)
-- `drawMap()` เรียกครั้งเดียวตอนกด "ยืนยัน ✓" เท่านั้น
-- แยก `_updateSeqBadgesOnly()` (ไม่ drawMap) ออกจาก `_updateSeqBadges()` (drawMap)
-- แก้ตัวแปร `sortableList` ให้ตรงกัน destroy ได้ถูกต้อง
+### SupervisorUI (sales-app.js)
+- Tab2: ร้านค้าทุกสาย หน้าตาเหมือน Sales + badge สาย (C=ม่วง, V=น้ำเงิน)
+- Tab3: Grid card เลือกสาย แบ่ง C/V → กดแล้วเข้าหน้าคิวงานทันที
+  - ปุ่ม "← เลือกสายใหม่" ใน route tab
+  - Drag reorder + save Firestore ได้
+- `store-history.js`: Supervisor ไม่กรอง sCode → ยอดขายรายร้านขึ้นครบ
 
----
+### SupervisorDashboard (sales-dashboard.js)
+- เห็นยอดทุกสาย แยก Credit (C) vs Van (V)
+- Credit: ✅ Confirm + 📋 เปิดบิล SO + 📝 CN
+- ตารางรายสาย + % vs Target
+- `db-kpi-pct` แสดง % vs Target รวม
+- `db-month-sel onchange` รองรับทั้ง Sales และ Supervisor
 
-## Session 3 — สิ่งที่เพิ่มใหม่
+### dashboard.js
+- `_normalizeRows`: เพิ่ม soNum, soStatus, soNet, sType, include Credit Note
+- `_CHUNK_SIZE`: 300 → 500
+- ลบ `orderBy` ออก sort ใน JS
 
-### Audit Log (`audit-log.js`)
-- `AuditLog.write(actionKey, details)` — บันทึกลง `auditLogs/{centerId}/logs/` (fire-and-forget)
-- `_patchAuditLog()` — monkey-patch ฟังก์ชันหลักทั้งหมด (App, StoreMgr, AI, KPIMgr, SkuDist ฯลฯ)
-- `AuditLog.renderPage()` — หน้า admin แสดง log พร้อม filter user/action + export CSV
-- Firestore rule: create only, ลบ/แก้ไขไม่ได้ — audit trail ปลอดภัย
-- เพิ่ม nav `auditlog` ใน sidebar + `page-auditlog` div ใน index.html
+### sku-distribution.js
+- `_setRouteTarget`: แก้ maxVal ตาม unit (pct=100, count=99999)
+- `saveCampaign`: ลบ `merge:true` → overwrite แทน
 
-### PWA (`manifest.json`, `sw.js`, `pwa-register.js`)
-- **manifest.json**: name, icons 5 ขนาด, shortcuts (Sales / Admin), theme #6366f1
-- **sw.js**: 4 strategies — Cache First (static), Cache First+update (CDN), Stale-While-Revalidate (tiles), Network Only (Firebase)
-  - offline fallback page (ภาษาไทย) สำหรับ navigate request
-  - message handler: SKIP_WAITING, CLEAR_CACHE, GET_CACHE_SIZE
-- **pwa-register.js**: register SW, install prompt button, update banner, PWA.install()/update()/clearCache()
-- **icons/**: PNG 72, 96, 128, 192, 512px
-
-### การ integrate
-ดู `INTEGRATION_GUIDE.md` สำหรับ snippet ที่ต้องเพิ่มใน HTML
+### Firestore Rules
+- `sellout/chunks`: `rows.size() <= 550` (รองรับ CHUNK_SIZE=500)
