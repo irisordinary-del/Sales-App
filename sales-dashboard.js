@@ -152,25 +152,38 @@ const SalesDashboard = {
     },
 
     // ─── โหลดข้อมูล Sellout เฉพาะ sCode ตัวเอง ───────────────────────────
-    _loadData: async (ym) => {
+    // ─── Shared chunk cache (ใช้ร่วมกันทั้ง SalesDashboard และ _renderCampaigns) ──
+    // key = YYYY_MM, value = rows[] ทั้งหมด (ไม่กรอง sCode)
+    _chunkCache: {},
+
+    _loadChunks: async (ym) => {
+        if (SalesDashboard._chunkCache[ym]) return SalesDashboard._chunkCache[ym];
         try {
             const metaDoc = await db.collection('sellout').doc(ym).get();
-            if (!metaDoc.exists) return;
-
+            if (!metaDoc.exists) { SalesDashboard._chunkCache[ym] = []; return []; }
             const chunks = await db.collection('sellout').doc(ym)
-                .collection('chunks').orderBy('index').get();
-
+                .collection('chunks').get();
             let rows = [];
-            chunks.forEach(doc => {
-                if (doc.data().rows) {
-                    // กรองเฉพาะสายตัวเอง
-                    const mine = doc.data().rows.filter(r =>
-                        String(r.sCode || '').toUpperCase() === SalesDashboard._username
-                    );
-                    rows = rows.concat(mine);
-                }
-            });
-            SalesDashboard._rows = rows;
+            chunks.docs
+                .sort((a,b) => (a.data().index||0) - (b.data().index||0))
+                .forEach(doc => rows = rows.concat(doc.data().rows || []));
+            SalesDashboard._chunkCache[ym] = rows;
+            return rows;
+        } catch(e) {
+            console.warn('SalesDashboard._loadChunks:', ym, e);
+            return [];
+        }
+    },
+
+    _loadData: async (ym) => {
+        try {
+            const allRows = await SalesDashboard._loadChunks(ym);
+            // กรองเฉพาะสายตัวเอง
+            SalesDashboard._rows = allRows.filter(r =>
+                String(r.sCode || '').toUpperCase() === SalesDashboard._username
+            );
+            // cache ให้ _renderCampaigns ใช้ด้วย
+            SalesDashboard._rowCache[ym] = SalesDashboard._rows;
         } catch (e) {
             console.warn('SalesDashboard._loadData:', e);
         }
@@ -472,26 +485,17 @@ const SalesDashboard = {
             return months;
         };
 
-        // helper: โหลด rows ของเดือนนั้น (cached)
+        // helper: โหลด rows ของเดือนนั้น (ใช้ shared cache)
         const loadMonthRows = async (ym) => {
-            if (SalesDashboard._rowCache[ym]) return SalesDashboard._rowCache[ym];
-            try {
-                const chunks = await db.collection('sellout').doc(ym).collection('chunks').get();
-                let rows = [];
-                chunks.forEach(doc => rows = rows.concat(doc.data().rows || []));
-                // กรองเฉพาะร้านในสายตัวเอง (ยึดร้านเป็นหลัก)
-                const filtered = myStoreSet.size > 0
-                    ? rows.filter(r => myStoreSet.has(String(r.custCode || '')))
-                    : rows;
-                SalesDashboard._rowCache[ym] = filtered;
-                return filtered;
-            } catch(e) {
-                SalesDashboard._rowCache[ym] = [];
-                return [];
-            }
+            // ใช้ _chunkCache แล้วกรองเฉพาะร้านตัวเอง
+            const allRows = await SalesDashboard._loadChunks(ym);
+            const filtered = myStoreSet.size > 0
+                ? allRows.filter(r => myStoreSet.has(String(r.custCode || '')))
+                : allRows;
+            return filtered;
         };
 
-        // render แต่ละ campaign
+        // render แต่ละ campaign — โหลด months parallel ด้วย Promise.all
         const cardsHtml = await Promise.all(active.map(async campaign => {
             const groups        = campaign.groups || [];
             const targetUnit    = campaign.targetUnit || 'pct';
@@ -507,13 +511,10 @@ const SalesDashboard = {
                 : defaultTarget;
             const tgtCount = Math.round(tgtPct / 100 * totalStores);
 
-            // โหลด rows ทุกเดือนใน campaign range
+            // โหลด rows ทุกเดือนใน campaign range — parallel
             const months = getRange(campaign.startYM, campaign.endYM);
-            let allRows = [];
-            for (const ym of months) {
-                const r = await loadMonthRows(ym);
-                allRows = allRows.concat(r);
-            }
+            const monthResults = await Promise.all(months.map(ym => loadMonthRows(ym)));
+            let allRows = monthResults.flat();
 
             const groupBars = groups.map(g => {
                 const kws = (g.keywords || []).map(k => k.toLowerCase());
@@ -646,35 +647,18 @@ const SupervisorDashboard = {
     },
 
     _loadData: async (ym) => {
-        // ใช้ cache ถ้ามีแล้ว
-        if (SupervisorDashboard._rowCache[ym]) {
-            SupervisorDashboard._allRows = SupervisorDashboard._rowCache[ym];
-            return;
-        }
         try {
-            const metaDoc = await db.collection('sellout').doc(ym).get();
-            if (!metaDoc.exists) {
-                SupervisorDashboard._rowCache[ym] = [];
-                SupervisorDashboard._allRows = [];
-                return;
-            }
-            const chunks = await db.collection('sellout').doc(ym)
-                .collection('chunks').get();
-            let rows = [];
-            chunks.docs
-                .sort((a,b) => (a.data().index||0) - (b.data().index||0))
-                .forEach(doc => rows = rows.concat(doc.data().rows || []));
-
-            // กรองเฉพาะศูนย์นี้ — ใช้ centerId จาก session ถ้า State.centerId ว่าง
+            // ใช้ shared chunk cache จาก SalesDashboard
+            const allRows = await SalesDashboard._loadChunks(ym);
+            // กรองเฉพาะศูนย์นี้
             const centerId = State.centerId || Auth.getSession()?.centerId || '';
-            if (centerId) {
-                rows = rows.filter(r => String(r.sCode||'').startsWith(centerId));
-            }
+            const rows = centerId
+                ? allRows.filter(r => String(r.sCode||'').startsWith(centerId))
+                : allRows;
             SupervisorDashboard._rowCache[ym] = rows;
             SupervisorDashboard._allRows = rows;
         } catch(e) {
             console.warn('SupervisorDashboard._loadData:', e);
-            // ไม่ cache error — ให้ลองใหม่ได้
             SupervisorDashboard._allRows = [];
         }
     },
