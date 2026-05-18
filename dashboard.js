@@ -1195,7 +1195,7 @@ const Dashboard = {
         try {
             await Dashboard._saveSkuWhitelist(codes);
             Dashboard.closeSkuWhitelistModal();
-            Dashboard._renderKPI();
+            Dashboard._render();
             UI.showSaveToast('✅ บันทึกแล้ว — ' + (codes.length ? codes.length + ' SKU' : 'ใช้ทุก SKU'));
         } catch(e) {
             UI.showErrorToast('❌ บันทึกไม่สำเร็จ: ' + e.message);
