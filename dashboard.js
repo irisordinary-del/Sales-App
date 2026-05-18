@@ -19,6 +19,31 @@ const Dashboard = {
     _targets: {},             // { routeCode: amount }
     _CHUNK_SIZE: 500,
 
+    // ─── SKU Whitelist — prodCode ที่นับใน SKU เฉลี่ย/ร้าน ────────────────
+    _skuWhitelist: null,   // null = ใช้ทุก SKU, Set = กรองเฉพาะที่เลือก
+
+    // โหลด whitelist จาก Firestore
+    _loadSkuWhitelist: async () => {
+        try {
+            const centerId = window.CENTER_DOC || 'v1_main';
+            const doc = await cloudDB.collection('appData').doc(centerId).get();
+            const list = doc.exists ? (doc.data().skuWhitelist || null) : null;
+            Dashboard._skuWhitelist = list ? new Set(list) : null;
+        } catch(e) {
+            Dashboard._skuWhitelist = null;
+        }
+    },
+
+    // save whitelist ลง Firestore
+    _saveSkuWhitelist: async (codes) => {
+        const centerId = window.CENTER_DOC || 'v1_main';
+        await cloudDB.collection('appData').doc(centerId).set(
+            { skuWhitelist: codes },
+            { merge: true }
+        );
+        Dashboard._skuWhitelist = codes.length ? new Set(codes) : null;
+    },
+
     // Categories ที่ต้องแยกออก ไม่รวมยอดหลัก
     EXCLUDED_CATS: new Set(['อื่นๆ', 'กระเช้าของขวัญ']),
 
@@ -28,14 +53,17 @@ const Dashboard = {
         const filtered = useMainOnly
             ? rows.filter(r => !Dashboard.EXCLUDED_CATS.has(r.catDesc))
             : rows;
+        const wl = Dashboard._skuWhitelist; // null = ไม่กรอง
         const byOutlet = {}, byOutletV = {}, byOutletC = {};
         filtered.forEach(r => {
             const key = String(r.custCode || '').trim() || String(r.custName || '').trim();
             if (!key) return;
-            const sku  = String(r.prodCode || '').trim();
-            const amt  = Dashboard._amt(r);
+            const sku   = String(r.prodCode || '').trim();
+            const amt   = Dashboard._amt(r);
             const sCode = String(r.sCode || '').toUpperCase();
             const rType = /C\d/.test(sCode) ? 'C' : /V\d/.test(sCode) ? 'V' : null;
+            // กรอง SKU ตาม whitelist (ถ้ามี)
+            const skuValid = sku && (!wl || wl.has(sku));
             [
                 [byOutlet, true],
                 [byOutletV, rType === 'V'],
@@ -43,7 +71,7 @@ const Dashboard = {
             ].forEach(([map, use]) => {
                 if (!use) return;
                 if (!map[key]) map[key] = { skus: new Set(), vol: 0 };
-                if (sku) map[key].skus.add(sku);
+                if (skuValid) map[key].skus.add(sku);
                 map[key].vol += amt;
             });
         });
@@ -51,9 +79,11 @@ const Dashboard = {
             const list = Object.values(map);
             const n = list.length;
             if (!n) return { outletCount: 0, avgSku: 0, avgVol: 0 };
+            // สูตรใหม่: SKU ที่ขายได้ทั้งหมด ÷ ร้านที่มียอด (ตรงกับ report บ.)
+            const totalSkus = list.reduce((s, o) => s + o.skus.size, 0);
             return {
                 outletCount: n,
-                avgSku: list.reduce((s, o) => s + o.skus.size, 0) / n,
+                avgSku: totalSkus / n,
                 avgVol: list.reduce((s, o) => s + o.vol, 0) / n,
             };
         };
@@ -68,12 +98,12 @@ const Dashboard = {
         Dashboard._session = Auth.getSession();
         if (!Dashboard._session) return;
 
-        // ตั้งค่าเดือนปัจจุบัน (default = เดือนล่าสุดที่โหลด หรือเดือนนี้)
         const now = new Date();
         Dashboard._currentYM = `${now.getFullYear()}_${String(now.getMonth() + 1).padStart(2, '0')}`;
 
         Dashboard._renderShell();
-        // โหลด campaign section แบบ async ไม่บล็อก UI
+        // โหลด whitelist + campaign async
+        Dashboard._loadSkuWhitelist();
         setTimeout(() => Dashboard._renderCampaignSection(), 1500);
         Dashboard._loadMonthList();
     },
@@ -584,7 +614,9 @@ const Dashboard = {
             { icon:'💰', label: `ยอด ${modeLabel} (หลัก)`, val: Dashboard._fmt(total), sub: '', color:'emerald' },
             { icon:'🎯', label: 'MTD vs Target', val: pct !== null ? Dashboard._pctBadge(pct) : '—', sub: targetAmt > 0 ? `Target: ${Dashboard._fmt(targetAmt)}` : 'ยังไม่ตั้ง Target', color:'amber', raw:true },
             { icon:'🏪', label: 'ร้านค้าทั้งหมด', val: outletM.outletCount.toLocaleString(), sub:'ร้านที่มียอด', color:'blue' },
-            { icon:'📦', label: 'SKU เฉลี่ย/ร้าน', val: Dashboard._fmtSku(outletM.avgSku), sub:'SKU รวมเฉลี่ยต่อร้าน', color:'cyan' },
+            { icon:'📦', label: 'SKU เฉลี่ย/ร้าน', val: Dashboard._fmtSku(outletM.avgSku),
+              sub: Dashboard._skuWhitelist ? `กรอง ${Dashboard._skuWhitelist.size} SKU · <span style="color:#6366f1;cursor:pointer;font-weight:800;" onclick="Dashboard.openSkuWhitelistModal()">⚙️ แก้ไข</span>` : `ทุก SKU · <span style="color:#6366f1;cursor:pointer;font-weight:800;" onclick="Dashboard.openSkuWhitelistModal()">⚙️ ตั้งค่า</span>`,
+              color:'cyan', rawSub: true },
             { icon:'🚐', label: 'ยอด/ร้าน สาย V', val: fmtFull(outletM.v.avgVol), sub: volVsub, color:'pink' },
             { icon:'🏪', label: 'ยอด/ร้าน สาย C', val: fmtFull(outletM.c.avgVol), sub: volCsub, color:'orange' },
             { icon:'📄', label: 'Invoice', val: invCount.toLocaleString(), sub:'ใบ', color:'violet' },
@@ -595,7 +627,7 @@ const Dashboard = {
                     <span class="text-xs font-bold text-gray-500 uppercase tracking-wide">${k.label}</span>
                 </div>
                 <div class="text-2xl font-black text-gray-800">${k.raw ? k.val : k.val}</div>
-                ${k.sub ? `<div class="text-xs text-gray-400 mt-0.5">${k.sub}</div>` : ''}
+                ${k.sub ? `<div class="text-xs text-gray-400 mt-0.5">${k.rawSub ? k.sub : k.sub}</div>` : ''}
             </div>
         `).join('');
     },
@@ -1051,6 +1083,124 @@ const Dashboard = {
         }
     },
 
+
+    // ─── SKU Whitelist Modal ──────────────────────────────────────────────
+    openSkuWhitelistModal: async () => {
+        let modal = document.getElementById('sku-whitelist-modal');
+        if (!modal) {
+            modal = document.createElement('div');
+            modal.id = 'sku-whitelist-modal';
+            modal.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);z-index:9999;align-items:center;justify-content:center;padding:16px;';
+            modal.innerHTML = `
+            <div style="background:#fff;border-radius:24px;width:100%;max-width:560px;max-height:88dvh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 80px rgba(0,0,0,0.3);">
+                <div style="padding:18px 20px;border-bottom:1px solid #f1f5f9;display:flex;justify-content:space-between;align-items:center;flex-shrink:0;">
+                    <div>
+                        <div style="font-size:15px;font-weight:900;color:#111827;">📦 SKU สำหรับคำนวณเฉลี่ย/ร้าน</div>
+                        <div style="font-size:11px;color:#9ca3af;margin-top:2px;">ติ๊กเลือก SKU ที่ต้องการนับ — ไม่ติ๊กทั้งหมด = ใช้ทุก SKU</div>
+                    </div>
+                    <button onclick="Dashboard.closeSkuWhitelistModal()" style="width:30px;height:30px;border-radius:50%;border:1px solid #e5e7eb;background:#fff;color:#9ca3af;font-size:14px;cursor:pointer;font-weight:700;">✕</button>
+                </div>
+                <div style="padding:12px 20px;border-bottom:1px solid #f1f5f9;flex-shrink:0;display:flex;gap:8px;align-items:center;">
+                    <input id="sku-wl-search" type="text" placeholder="🔍 ค้นหา prodCode หรือชื่อสินค้า..."
+                        oninput="Dashboard._filterSkuList(this.value)"
+                        style="flex:1;background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;padding:8px 12px;font-size:12px;outline:none;font-family:inherit;">
+                    <button onclick="Dashboard._selectAllSku(true)" style="background:#f3f4f6;border:1px solid #e5e7eb;border-radius:8px;padding:6px 10px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;">ทั้งหมด</button>
+                    <button onclick="Dashboard._selectAllSku(false)" style="background:#f3f4f6;border:1px solid #e5e7eb;border-radius:8px;padding:6px 10px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;">ล้าง</button>
+                </div>
+                <div style="padding:8px 20px;background:#f8fafc;flex-shrink:0;border-bottom:1px solid #f1f5f9;">
+                    <span id="sku-wl-count" style="font-size:11px;font-weight:700;color:#6366f1;"></span>
+                </div>
+                <div id="sku-wl-list" style="flex:1;overflow-y:auto;padding:12px 20px;"></div>
+                <div style="padding:14px 20px;border-top:1px solid #f1f5f9;display:flex;gap:10px;flex-shrink:0;">
+                    <button onclick="Dashboard.closeSkuWhitelistModal()" style="flex:1;border:1px solid #e5e7eb;border-radius:12px;padding:11px;font-size:13px;font-weight:700;color:#6b7280;background:#fff;cursor:pointer;font-family:inherit;">ยกเลิก</button>
+                    <button onclick="Dashboard.saveSkuWhitelist()" style="flex:1;border:none;border-radius:12px;padding:11px;font-size:13px;font-weight:700;color:#fff;background:#6366f1;cursor:pointer;font-family:inherit;">💾 บันทึก</button>
+                </div>
+            </div>`;
+            document.body.appendChild(modal);
+        }
+        modal.style.display = 'flex';
+        const listEl = document.getElementById('sku-wl-list');
+        listEl.innerHTML = '<div style="text-align:center;padding:24px;color:#9ca3af;font-size:13px;">⏳ กำลังโหลด...</div>';
+        await Dashboard._ensureSkuOptions();
+        Dashboard._renderSkuList('');
+    },
+
+    _skuOptions: [],
+
+    _ensureSkuOptions: async () => {
+        if (Dashboard._skuOptions.length > 0) return;
+        try {
+            const snap = await cloudDB.collection('sellout').get();
+            const months = snap.docs.map(d => d.id).filter(id => /^\d{4}_\d{2}$/.test(id)).sort().reverse();
+            if (!months.length) return;
+            const chunks = await cloudDB.collection('sellout').doc(months[0]).collection('chunks').get();
+            const seen = new Map();
+            chunks.docs.sort((a,b) => (a.data().index||0)-(b.data().index||0))
+                .forEach(doc => (doc.data().rows||[]).forEach(r => {
+                    const code = String(r.prodCode||'').trim();
+                    const name = String(r.prodName||'').trim();
+                    if (code && !seen.has(code)) seen.set(code, name);
+                }));
+            Dashboard._skuOptions = [...seen.entries()]
+                .map(([code, name]) => ({ code, name }))
+                .sort((a,b) => a.code.localeCompare(b.code));
+        } catch(e) { console.warn('_ensureSkuOptions:', e); }
+    },
+
+    _renderSkuList: (q) => {
+        const listEl  = document.getElementById('sku-wl-list');
+        const countEl = document.getElementById('sku-wl-count');
+        if (!listEl) return;
+        const wl   = Dashboard._skuWhitelist;
+        const opts = Dashboard._skuOptions;
+        const filtered = q ? opts.filter(p => p.code.toLowerCase().includes(q) || p.name.toLowerCase().includes(q)) : opts;
+        if (countEl) countEl.textContent = wl
+            ? 'เลือกไว้ ' + wl.size + ' / ' + opts.length + ' SKU'
+            : 'ใช้ทุก SKU (' + opts.length + ' รายการ)';
+        listEl.innerHTML = filtered.map(p => {
+            const checked = !wl || wl.has(p.code);
+            return '<label style="display:flex;align-items:center;gap:10px;padding:8px 4px;border-bottom:1px solid #f9fafb;cursor:pointer;">' +
+                '<input type="checkbox" value="' + p.code + '" ' + (checked ? 'checked' : '') + ' onchange="Dashboard._onSkuCheck()" style="width:16px;height:16px;accent-color:#6366f1;flex-shrink:0;">' +
+                '<span style="font-family:monospace;font-size:11px;color:#6366f1;background:#ede9fe;padding:1px 6px;border-radius:5px;flex-shrink:0;">' + p.code + '</span>' +
+                '<span style="font-size:12px;color:#374151;font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + p.name + '">' + p.name + '</span>' +
+                '</label>';
+        }).join('') || '<div style="text-align:center;padding:20px;color:#9ca3af;font-size:12px;">ไม่พบสินค้า</div>';
+    },
+
+    _filterSkuList: (q) => Dashboard._renderSkuList(q.trim().toLowerCase()),
+
+    _selectAllSku: (checked) => {
+        document.querySelectorAll('#sku-wl-list input[type=checkbox]').forEach(cb => cb.checked = checked);
+        Dashboard._onSkuCheck();
+    },
+
+    _onSkuCheck: () => {
+        const countEl = document.getElementById('sku-wl-count');
+        const checked = document.querySelectorAll('#sku-wl-list input[type=checkbox]:checked').length;
+        const total   = Dashboard._skuOptions.length;
+        if (countEl) countEl.textContent = checked === total
+            ? 'ใช้ทุก SKU (' + total + ' รายการ)'
+            : 'เลือกไว้ ' + checked + ' / ' + total + ' SKU';
+    },
+
+    closeSkuWhitelistModal: () => {
+        const modal = document.getElementById('sku-whitelist-modal');
+        if (modal) modal.style.display = 'none';
+    },
+
+    saveSkuWhitelist: async () => {
+        const all     = Dashboard._skuOptions.map(p => p.code);
+        const checked = [...document.querySelectorAll('#sku-wl-list input[type=checkbox]:checked')].map(cb => cb.value);
+        const codes   = checked.length === all.length ? [] : checked;
+        try {
+            await Dashboard._saveSkuWhitelist(codes);
+            Dashboard.closeSkuWhitelistModal();
+            Dashboard._renderKPI();
+            UI.showSaveToast('✅ บันทึกแล้ว — ' + (codes.length ? codes.length + ' SKU' : 'ใช้ทุก SKU'));
+        } catch(e) {
+            UI.showErrorToast('❌ บันทึกไม่สำเร็จ: ' + e.message);
+        }
+    },
 
 };
 
