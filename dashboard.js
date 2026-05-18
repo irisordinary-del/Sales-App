@@ -378,7 +378,8 @@ const Dashboard = {
 
     _normalizeRows: (raw) => {
         return raw
-            .filter(r => r['Invoice  Status'] === 'Invoiced' || r['Invoice  Status'] === 'Invoiced')
+            // รวม Invoiced + Credit Note (ไม่กรองทิ้ง Credit Note)
+            .filter(r => r['Invoice  Status'] === 'Invoiced' || r['Invoice  Status'] === 'Credit Note')
             .map(r => ({
                 sCode:    String(r['Salesman Code'] || '').trim().toUpperCase(),
                 sType:    String(r['Salesman Type'] || '').trim(),
@@ -387,13 +388,16 @@ const Dashboard = {
                 shopType: String(r['Shop Type Desc'] || '').trim(),
                 invDate:  r['Invoice Date'] ? String(r['Invoice Date']).slice(0, 10) : '',
                 invNum:   String(r['Invoice Number'] || '').trim(),
-                invStatus:String(r['Invoice  Status'] || '').trim(),
+                soNum:    String(r['SO Number'] || '').trim(),
+                soStatus: String(r['SO Status'] || '').trim(),       // 'Processed - Invoice' | 'Credit Note'
+                invStatus:String(r['Invoice  Status'] || '').trim(), // 'Invoiced' | 'Credit Note'
                 catDesc:  String(r['Category Description'] || '').trim(),
                 brandDesc:String(r['Brand Description'] || '').trim(),
                 prodCode: String(r['SO Product Code'] || '').trim(),
                 prodName: String(r['SO Product Name'] || '').trim(),
                 gross:    parseFloat(r['Invoice  Gross Amount']) || 0,
                 net:      parseFloat(r['Invoice Net Amount']) || 0,
+                soNet:    parseFloat(r['SO NET Amount']) || 0,        // ยอด SO ก่อน Confirm
                 qtyEA:    parseFloat(r['Delivery Total  QTY EA']) || 0,
             }));
     },

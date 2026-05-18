@@ -204,15 +204,36 @@ const SalesDashboard = {
         }
         if (empty) empty.style.display = 'none';
 
-        const mainRows    = rows.filter(r => !SalesDashboard.EXCLUDED_CATS.has(r.catDesc));
-        const basketRows  = rows.filter(r => r.catDesc === 'กระเช้าของขวัญ');
-        const othersRows  = rows.filter(r => r.catDesc === 'อื่นๆ');
+        // แยก Invoiced vs Credit Note
+        const invoicedRows = rows.filter(r => r.invStatus === 'Invoiced');
+        const cnRows       = rows.filter(r => r.invStatus === 'Credit Note');
+
+        const mainRows    = invoicedRows.filter(r => !SalesDashboard.EXCLUDED_CATS.has(r.catDesc));
+        const basketRows  = invoicedRows.filter(r => r.catDesc === 'กระเช้าของขวัญ');
+        const othersRows  = invoicedRows.filter(r => r.catDesc === 'อื่นๆ');
 
         const total    = mainRows.reduce((s, r) => s + SalesDashboard._amt(r), 0);
-        const outletM  = SalesDashboard._calcOutletMetrics(rows);
+        const outletM  = SalesDashboard._calcOutletMetrics(invoicedRows);
         const invCount = new Set(mainRows.map(r => r.invNum)).size;
         const target   = SalesDashboard._target;
         const pct      = target > 0 ? (total / target * 100) : null;
+
+        // ─ Credit breakdown (สำหรับ C-route) ─
+        const myRoute = SalesDashboard._myRoute || SalesDashboard._username || '';
+        const isCredit = /C\d/i.test(myRoute);
+        if (isCredit) {
+            const cInv   = invoicedRows; // ยอด Confirm (Invoiced)
+            const cCN    = cnRows;       // Credit Note
+            const totalConfirm = cInv.reduce((s,r) => s + r.net, 0);
+            const totalSO      = cInv.reduce((s,r) => s + r.soNet, 0); // ยอดเปิดบิล (SO)
+            const totalCN      = cCN.reduce((s,r) => s + r.net, 0);   // CN ยอดติดลบ
+            const pendBills    = new Set(cCN.map(r => r.soNum).filter(Boolean)).size;
+            const confBills    = new Set(cInv.map(r => r.invNum).filter(Boolean)).size;
+
+            SalesDashboard._renderCreditSection({
+                totalConfirm, totalSO, totalCN, pendBills, confBills
+            });
+        }
 
         // ─ KPI Cards ─
         SalesDashboard._setText('db-kpi-total', SalesDashboard._fmt(total));
@@ -252,13 +273,50 @@ const SalesDashboard = {
         SalesDashboard._renderBars('db-cat-body', mainRows, '#2563eb');
 
         // ─ ShopType ─
-        SalesDashboard._renderBars('db-shop-body', rows, '#10b981', r => r.shopType);
+        SalesDashboard._renderBars('db-shop-body', invoicedRows, '#10b981', r => r.shopType);
 
         // ─ กระเช้า / อื่นๆ ─
         const basketAmt = basketRows.reduce((s, r) => s + SalesDashboard._amt(r), 0);
         const othersAmt = othersRows.reduce((s, r) => s + SalesDashboard._amt(r), 0);
         SalesDashboard._setText('db-basket-body', basketAmt > 0 ? SalesDashboard._fmt(basketAmt) : '—');
         SalesDashboard._setText('db-others-body', othersAmt > 0 ? SalesDashboard._fmt(othersAmt) : '—');
+    },
+
+    // ─── Credit Section (เฉพาะ C-route) ────────────────────────────────────
+    _renderCreditSection: ({ totalConfirm, totalSO, totalCN, pendBills, confBills }) => {
+        // inject หลัง db-target card ถ้ายังไม่มี
+        let el = document.getElementById('db-credit-section');
+        if (!el) {
+            const ref = document.getElementById('db-cat-body')?.closest('.db-card');
+            if (!ref) return;
+            el = document.createElement('div');
+            el.id = 'db-credit-section';
+            el.className = 'db-card';
+            el.style.borderLeft = '4px solid #7c3aed';
+            ref.parentElement.insertBefore(el, ref);
+        }
+        el.innerHTML = `
+            <div style="font-size:10px;font-weight:700;color:#7c3aed;margin-bottom:8px;">💳 Credit — รายละเอียด</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+                <div style="background:#f5f3ff;border-radius:10px;padding:10px;border:1px solid #ddd6fe;">
+                    <div style="font-size:9px;font-weight:700;color:#7c3aed;margin-bottom:2px;">✅ ยอด Confirm</div>
+                    <div style="font-size:18px;font-weight:900;color:#5b21b6;">${SalesDashboard._fmt(totalConfirm)}</div>
+                    <div style="font-size:10px;color:#9ca3af;margin-top:2px;">${confBills} บิล</div>
+                </div>
+                <div style="background:#fffbeb;border-radius:10px;padding:10px;border:1px solid #fde68a;">
+                    <div style="font-size:9px;font-weight:700;color:#b45309;margin-bottom:2px;">📋 ยอดเปิดบิล (SO)</div>
+                    <div style="font-size:18px;font-weight:900;color:#92400e;">${SalesDashboard._fmt(totalSO)}</div>
+                    <div style="font-size:10px;color:#9ca3af;margin-top:2px;">${confBills} SO</div>
+                </div>
+            </div>
+            ${totalCN !== 0 ? `
+            <div style="background:#fef2f2;border-radius:10px;padding:8px 10px;border:1px solid #fecaca;display:flex;justify-content:space-between;align-items:center;">
+                <div>
+                    <div style="font-size:9px;font-weight:700;color:#dc2626;">📝 Credit Note (CN)</div>
+                    <div style="font-size:10px;color:#9ca3af;margin-top:1px;">${pendBills} CN</div>
+                </div>
+                <div style="font-size:16px;font-weight:900;color:#dc2626;">${SalesDashboard._fmt(totalCN)}</div>
+            </div>` : ''}`;
     },
 
     // ─── Render horizontal bars ──────────────────────────────────────────
@@ -462,64 +520,6 @@ const SalesDashboard = {
                 const matched = allRows.filter(r => {
                     const code = (r.prodCode || '').toLowerCase();
                     const name = (r.prodName || '').toLowerCase();
-                    return kws.some(k => code.includes(k) || name.includes(k));
-                });
-                const bought      = new Set(matched.map(r => String(r.custCode)));
-                const boughtCount = bought.size;
-                const pct         = totalStores > 0 ? Math.round(boughtCount / totalStores * 100) : 0;
-                const vs          = pct - tgtPct;
-                const color       = pct >= tgtPct ? '#10b981' : pct >= tgtPct * 0.8 ? '#f59e0b' : '#ef4444';
-
-                // SKU coverage
-                const targetSkus = new Set(prodOptions
-                    .filter(p => kws.some(k =>
-                        p.code.toLowerCase().includes(k) || p.name.toLowerCase().includes(k)))
-                    .map(p => p.code));
-                const soldSkus  = new Set(matched.map(r => r.prodCode).filter(Boolean));
-                const skuPct    = targetSkus.size > 0
-                    ? Math.round(soldSkus.size / targetSkus.size * 100)
-                    : (soldSkus.size > 0 ? 100 : 0);
-
-                return `
-                <div style="margin-bottom:14px;">
-                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;">
-                        <span style="font-size:12px;font-weight:700;color:#374151;">${g.name}</span>
-                        <span style="font-size:14px;font-weight:900;color:${color};">${pct}%</span>
-                    </div>
-                    <div style="position:relative;height:10px;background:#e5e7eb;border-radius:99px;overflow:visible;margin-bottom:5px;">
-                        <div style="width:${Math.min(pct,100)}%;height:10px;background:${color};border-radius:99px;"></div>
-                        <div style="position:absolute;left:${Math.min(tgtPct,100)}%;top:-3px;width:2px;height:16px;background:#6366f1;border-radius:1px;" title="target ${tgtPct}%"></div>
-                    </div>
-                    <div style="display:flex;justify-content:space-between;font-size:10px;">
-                        <span style="color:#111827;font-weight:700;">${boughtCount}<span style="color:#9ca3af;font-weight:400;">/${tgtCount} ร้าน (target)</span></span>
-                        <span style="color:${vs >= 0 ? '#10b981' : '#ef4444'};font-weight:700;">${vs >= 0 ? '+' : ''}${vs}% vs target</span>
-                    </div>
-                    <div style="font-size:10px;color:#9ca3af;margin-top:3px;">
-                        ร้านทั้งหมดในสาย ${totalStores} ร้าน &nbsp;|&nbsp;
-                        SKU coverage: <span style="font-weight:700;color:#6366f1;">${skuPct}% (${soldSkus.size}/${targetSkus.size} SKU)</span>
-                    </div>
-                </div>`;
-            }).join('');
-
-            const startLbl = typeof DateUtil !== 'undefined' ? DateUtil.ymToThaiShort(campaign.startYM) : campaign.startYM;
-            const endLbl   = typeof DateUtil !== 'undefined' ? DateUtil.ymToThaiShort(campaign.endYM)   : campaign.endYM;
-
-            return `
-            <div class="db-card" style="flex-shrink:0;margin-bottom:12px;border-left:4px solid #ec4899;">
-                <div style="margin-bottom:12px;">
-                    <div style="font-size:12px;font-weight:900;color:#111827;">🎯 ${campaign.name}</div>
-                    <div style="font-size:10px;color:#9ca3af;margin-top:2px;">${startLbl} → ${endLbl} &nbsp;·&nbsp; ยอดรวมทั้งช่วง</div>
-                </div>
-                ${groupBars}
-            </div>`;
-        }));
-
-        el.innerHTML = cardsHtml.join('');
-    },
-
-
-};
-
 // ─── Hook เข้า App.start() ── เรียก init หลัง login สำเร็จ ─────────────
 // รอ DOMContentLoaded แล้วค่อย patch
 document.addEventListener('DOMContentLoaded', () => {
@@ -630,26 +630,29 @@ const SupervisorDashboard = {
     // ─── Render หลัก ─────────────────────────────────────────────────────
     _render: () => {
         const rows    = SupervisorDashboard._allRows;
-        const mainRows = rows.filter(r => !SupervisorDashboard.EXCLUDED_CATS.has(r.catDesc));
 
-        // แยก C / V
-        const cRows = mainRows.filter(r => SupervisorDashboard._routeType(r.sCode) === 'C');
-        const vRows = mainRows.filter(r => SupervisorDashboard._routeType(r.sCode) === 'V');
+        // แยก Invoiced vs Credit Note
+        const invoicedRows = rows.filter(r => r.invStatus === 'Invoiced');
+        const cnRows       = rows.filter(r => r.invStatus === 'Credit Note');
+        const mainRows     = invoicedRows.filter(r => !SupervisorDashboard.EXCLUDED_CATS.has(r.catDesc));
+
+        // แยก C / V จาก sType หรือ sCode
+        const cInvoiced = invoicedRows.filter(r => r.sType === 'CreditSales' || /C\d/.test(r.sCode));
+        const vInvoiced = invoicedRows.filter(r => r.sType === 'VanSales'    || /V\d/.test(r.sCode));
+        const cCN       = cnRows.filter(r => r.sType === 'CreditSales' || /C\d/.test(r.sCode));
 
         const totalAll = mainRows.reduce((s,r) => s + (r.net||0), 0);
-        const totalC   = cRows.reduce((s,r) => s + (r.net||0), 0);
-        const totalV   = vRows.reduce((s,r) => s + (r.net||0), 0);
+        const totalC   = cInvoiced.reduce((s,r) => s + (r.net||0), 0);
+        const totalV   = vInvoiced.reduce((s,r) => s + (r.net||0), 0);
 
-        // ─ Credit: แยก Confirm vs รอ Confirm ─
-        // สมมติ: invStatus field — 'confirmed' = คอนเฟิร์มแล้ว, อื่นๆ = รอ
-        const cConfirm    = cRows.filter(r => String(r.invStatus||'').toLowerCase() === 'confirmed');
-        const cPending    = cRows.filter(r => String(r.invStatus||'').toLowerCase() !== 'confirmed');
-        const totalCConf  = cConfirm.reduce((s,r) => s + (r.net||0), 0);
-        const totalCPend  = cPending.reduce((s,r) => s + (r.net||0), 0);
-        const pendBillSet = new Set(cPending.map(r => r.invNum).filter(Boolean));
-        const pendBills   = pendBillSet.size;
-        const invCountV   = new Set(vRows.map(r => r.invNum).filter(Boolean)).size;
-        const invCountAll = new Set(mainRows.map(r => r.invNum).filter(Boolean)).size;
+        // ─ Credit breakdown ─
+        const totalCConfirm = cInvoiced.reduce((s,r) => s + (r.net||0), 0);
+        const totalCSO      = cInvoiced.reduce((s,r) => s + (r.soNet||0), 0);
+        const totalCCN      = cCN.reduce((s,r) => s + (r.net||0), 0);
+        const confBills     = new Set(cInvoiced.map(r => r.invNum).filter(Boolean)).size;
+        const cnCount       = new Set(cCN.map(r => r.soNum || r.invNum).filter(Boolean)).size;
+        const invCountV     = new Set(vInvoiced.map(r => r.invNum).filter(Boolean)).size;
+        const invCountAll   = new Set(mainRows.map(r => r.invNum).filter(Boolean)).size;
 
         // Target รวม
         const targets = SupervisorDashboard._targets;
@@ -691,17 +694,25 @@ const SupervisorDashboard = {
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
                     <div style="background:#f5f3ff;border-radius:12px;padding:10px 12px;border:1px solid #ddd6fe;">
                         <div style="font-size:9px;font-weight:700;color:#7c3aed;margin-bottom:2px;">✅ ยอด Confirm</div>
-                        <div style="font-size:16px;font-weight:900;color:#5b21b6;">${SupervisorDashboard._fmt(totalCConf)}</div>
-                        <div style="font-size:10px;color:#9ca3af;margin-top:2px;">${new Set(cConfirm.map(r=>r.invNum).filter(Boolean)).size} บิล</div>
+                        <div style="font-size:16px;font-weight:900;color:#5b21b6;">${SupervisorDashboard._fmt(totalCConfirm)}</div>
+                        <div style="font-size:10px;color:#9ca3af;margin-top:2px;">${confBills} บิล</div>
                     </div>
-                    <div style="background:#fefce8;border-radius:12px;padding:10px 12px;border:1px solid #fde68a;">
-                        <div style="font-size:9px;font-weight:700;color:#b45309;margin-bottom:2px;">⏳ รอ Confirm</div>
-                        <div style="font-size:16px;font-weight:900;color:#92400e;">${SupervisorDashboard._fmt(totalCPend)}</div>
-                        <div style="font-size:10px;color:#9ca3af;margin-top:2px;">${pendBills} บิลรอ</div>
+                    <div style="background:#fffbeb;border-radius:12px;padding:10px 12px;border:1px solid #fde68a;">
+                        <div style="font-size:9px;font-weight:700;color:#b45309;margin-bottom:2px;">📋 ยอดเปิดบิล (SO)</div>
+                        <div style="font-size:16px;font-weight:900;color:#92400e;">${SupervisorDashboard._fmt(totalCSO)}</div>
+                        <div style="font-size:10px;color:#9ca3af;margin-top:2px;">${confBills} SO</div>
                     </div>
                 </div>
+                ${totalCCN !== 0 ? `
+                <div style="background:#fef2f2;border-radius:10px;padding:8px 12px;border:1px solid #fecaca;display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                    <div>
+                        <div style="font-size:9px;font-weight:700;color:#dc2626;">📝 Credit Note (CN)</div>
+                        <div style="font-size:10px;color:#9ca3af;">${cnCount} CN</div>
+                    </div>
+                    <div style="font-size:15px;font-weight:900;color:#dc2626;">${SupervisorDashboard._fmt(totalCCN)}</div>
+                </div>` : ''}
                 <!-- C route breakdown -->
-                ${SupervisorDashboard._renderRouteBreakdown(cRows, '#7c3aed')}
+                ${SupervisorDashboard._renderRouteBreakdown(cInvoiced, '#7c3aed')}
             </div>
 
             <div style="height:1px;background:#f3f4f6;margin:12px 0;"></div>
@@ -717,15 +728,13 @@ const SupervisorDashboard = {
                     <div style="font-size:16px;font-weight:900;color:#1e40af;">${invCountV.toLocaleString()} บิล</div>
                 </div>
                 <!-- V route breakdown -->
-                ${SupervisorDashboard._renderRouteBreakdown(vRows, '#2563eb')}
+                ${SupervisorDashboard._renderRouteBreakdown(vInvoiced, '#2563eb')}
             </div>`;
         }
 
         // ─── Route table ─────────────────────────────────────────────────
         SupervisorDashboard._renderRouteTable(mainRows);
     },
-
-    // ─── แสดง bar แต่ละสายใน group ──────────────────────────────────────
     _renderRouteBreakdown: (rows, color) => {
         // group by sCode
         const byRoute = {};
