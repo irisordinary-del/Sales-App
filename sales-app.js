@@ -1294,34 +1294,74 @@ const SupervisorUI = {
     // ─── เลือกสาย → แสดงคิวงาน + แผนที่ ──────────────────────────────────
     selectRoute: (routeId) => {
         SupervisorUI._selectedRoute = routeId;
-        State.allStores  = State.allRoutes[routeId] || [];
-        State.myRoute    = routeId;
+        State.allStores   = State.allRoutes[routeId] || [];
+        State.myRoute     = routeId;
+        State.currentDay  = '';
+        State.mapNeedsFit = true;
 
-        // setup day-select เหมือน Sales
+        // แสดง day-select bar + edit btn
         SupervisorUI._showDayBar(true);
-        document.getElementById('route-title') && (document.getElementById('route-title').innerText = routeId);
 
-        // setup Processor เหมือน Sales
+        // inject ปุ่ม "← เลือกสายใหม่" ถ้ายังไม่มี
+        SupervisorUI._injectBackBtn(routeId);
+
+        // setup day dropdown เหมือน Sales
         Processor.setupRoute();
 
-        // re-render grid เพื่ออัปเดต active card
-        SupervisorUI.renderRouteGrid();
+        // switch ไปหน้าคิวงานทันที
+        UI.switchTab('route');
+    },
 
-        // แสดงปุ่ม edit order
-        const editBtn = document.getElementById('edit-order-btn');
-        if (editBtn) editBtn.style.display = 'block';
+    _injectBackBtn: (routeId) => {
+        // ลบปุ่มเก่าก่อน (กรณีเปลี่ยนสาย)
+        const old = document.getElementById('sup-back-btn');
+        if (old) old.remove();
+
+        const splitContainer = document.getElementById('split-container');
+        if (!splitContainer) return;
+        const btn = document.createElement('div');
+        btn.id = 'sup-back-btn';
+        btn.onclick = SupervisorUI.clearRoute;
+        btn.style.cssText = [
+            'display:flex', 'align-items:center', 'gap:8px',
+            'padding:8px 14px', 'background:#f8fafc',
+            'border-bottom:1px solid #e5e7eb', 'cursor:pointer',
+            'font-weight:700', 'font-size:12px', 'color:#374151',
+            'flex-shrink:0', 'z-index:30',
+        ].join(';');
+        const isC = /C\d/.test(routeId);
+        const badgeColor = isC ? '#7c3aed' : '#2563eb';
+        const badgeBg    = isC ? '#ede9fe'  : '#dbeafe';
+        btn.innerHTML = `
+            <span style="font-size:14px;">←</span>
+            <span style="color:#9ca3af;">เลือกสายใหม่</span>
+            <span style="background:${badgeBg};color:${badgeColor};font-size:10px;font-weight:900;
+                         padding:2px 10px;border-radius:8px;">${routeId}</span>`;
+        // แทรกก่อน split-container
+        splitContainer.parentElement.insertBefore(btn, splitContainer);
     },
 
     clearRoute: () => {
         SupervisorUI._selectedRoute = null;
-        State.allStores = [];
-        State.myRoute   = Auth.getSession()?.username || '';
+        State.allStores   = [];
+        State.myRoute     = Auth.getSession()?.username || '';
+        State.currentDay  = '';
+
+        // ซ่อน day-select bar + ลบปุ่ม back
         SupervisorUI._showDayBar(false);
-        SupervisorUI.renderRouteGrid();
-        // clear route list
+        const backBtn = document.getElementById('sup-back-btn');
+        if (backBtn) backBtn.remove();
+
+        // clear route list + map markers
         const c = document.getElementById('route-store-list');
         if (c) c.innerHTML = '';
-        if (map) { map.invalidateSize(); }
+        if (typeof mapMarkers !== 'undefined') {
+            mapMarkers.forEach(m => { try { m.remove(); } catch(e){} });
+            mapMarkers = [];
+        }
+
+        // กลับมาหน้า Tab3 พร้อม grid
+        UI.switchTab('route');
     },
 
     _showDayBar: (show) => {

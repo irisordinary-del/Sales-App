@@ -57,7 +57,11 @@ const StoreHistory = {
         if (StoreHistory._monthCache[ym]) return; // ใช้ cache
 
         try {
-            const username = Auth.getSession()?.username?.toUpperCase() || '';
+            const session  = Auth.getSession();
+            const username = session?.username?.toUpperCase() || '';
+            // Supervisor/ASM → โหลดทุกสาย ไม่กรอง sCode
+            const isSup = ['route_supervisor','asm'].includes(session?.role);
+
             const chunks = await db.collection('sellout').doc(ym)
                 .collection('chunks').orderBy('index').get();
 
@@ -65,9 +69,11 @@ const StoreHistory = {
             chunks.forEach(doc => {
                 if (doc.data().rows) {
                     rows = rows.concat(
-                        doc.data().rows.filter(r =>
-                            String(r.sCode || '').toUpperCase() === username
-                        )
+                        isSup
+                            ? doc.data().rows  // ทุก row ไม่กรอง
+                            : doc.data().rows.filter(r =>
+                                String(r.sCode || '').toUpperCase() === username
+                              )
                     );
                 }
             });
