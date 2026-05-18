@@ -45,13 +45,16 @@ const Dashboard = {
     },
 
     // Categories ที่ต้องแยกออก ไม่รวมยอดหลัก
-    EXCLUDED_CATS: new Set(['อื่นๆ', 'กระเช้าของขวัญ']),
+    // ── ยกเว้น brand ที่ไม่นับในยอดหลัก ──────────────────────────────────
+    EXCLUDED_BRANDS: new Set(['อื่นๆ', 'กระเช้าของขวัญ']),
+    // compat alias
+    get EXCLUDED_CATS() { return Dashboard.EXCLUDED_BRANDS; },
 
     // ยอดขาย / SKU เฉลี่ยต่อร้าน แยก V-route และ C-route
     // outlet = custCode ที่มียอดในเดือน
     _calcOutletMetrics: (rows, useMainOnly = true) => {
         const filtered = useMainOnly
-            ? rows.filter(r => !Dashboard.EXCLUDED_CATS.has(r.catDesc))
+            ? rows.filter(r => !Dashboard.EXCLUDED_BRANDS.has(r.brandDesc))
             : rows;
         const wl = Dashboard._skuWhitelist; // null = ไม่กรอง
         const byOutlet = {}, byOutletV = {}, byOutletC = {};
@@ -409,23 +412,36 @@ const Dashboard = {
 
     _normalizeRows: (raw) => {
         return raw
-            .filter(r => r['Invoice  Status'] === 'Invoiced' || r['Invoice  Status'] === 'Invoiced')
+            .filter(r => r['Invoice  Status'] === 'Invoiced' || r['Invoice  Status'] === 'Credit Note')
             .map(r => ({
-                sCode:    String(r['Salesman Code'] || '').trim().toUpperCase(),
-                sType:    String(r['Salesman Type'] || '').trim(),
-                custCode: String(r['Customer Code'] || '').trim(),
-                custName: String(r['Customer Name'] || '').trim(),
-                shopType: String(r['Shop Type Desc'] || '').trim(),
-                invDate:  r['Invoice Date'] ? String(r['Invoice Date']).slice(0, 10) : '',
-                invNum:   String(r['Invoice Number'] || '').trim(),
-                invStatus:String(r['Invoice  Status'] || '').trim(),
-                catDesc:  String(r['Category Description'] || '').trim(),
-                brandDesc:String(r['Brand Description'] || '').trim(),
-                prodCode: String(r['SO Product Code'] || '').trim(),
-                prodName: String(r['SO Product Name'] || '').trim(),
-                gross:    parseFloat(r['Invoice  Gross Amount']) || 0,
-                net:      parseFloat(r['Invoice Net Amount']) || 0,
-                qtyEA:    parseFloat(r['Delivery Total  QTY EA']) || 0,
+                // ─ Salesman ─
+                sCode:          String(r['Salesman Code'] || '').trim().toUpperCase(),
+                // ─ Customer ─
+                custCode:       String(r['Customer Code'] || '').trim(),
+                custName:       String(r['Customer Name'] || '').trim(),
+                shopType:       String(r['Shop Type Desc'] || '').trim(),
+                // ─ SO ─
+                soStatus:       String(r['SO Status'] || '').trim(),
+                soNet:          parseFloat(r['SO NET Amount']) || 0,
+                soNum:          String(r['SO Number'] || '').trim(),
+                // ─ Product ─
+                prodCode:       String(r['SO Product Code'] || '').trim(),
+                prodName:       String(r['SO Product Name'] || '').trim(),
+                catDesc:        String(r['Category Description'] || '').trim(),
+                brandDesc:      String(r['Brand Description'] || '').trim(),
+                carToEA:        parseFloat(r['CAR to EA']) || 0,
+                // ─ Invoice ─
+                invNum:         String(r['Invoice Number'] || '').trim(),
+                invStatus:      String(r['Invoice  Status'] || '').trim(),
+                gross:          parseFloat(r['Invoice  Gross Amount']) || 0,
+                net:            parseFloat(r['Invoice Net Amount']) || 0,
+                // ─ Delivery ─
+                deliveryStatus: String(r['Delivery Status'] || '').trim(),
+                qtyEA:          parseFloat(r['Delivery Total  QTY EA']) || 0,
+                // ─ KPI / Bonus ─
+                kpiDate:        r['KPI Date'] ? String(r['KPI Date']).slice(0, 10) : '',
+                brandBonus:     parseFloat(r['Brand Bonus']) || 0,
+                bbPoint:        parseFloat(r['BB Point']) || 0,
             }));
     },
 
@@ -585,7 +601,7 @@ const Dashboard = {
         const el = document.getElementById('db-kpi-row');
         if (!el) return;
         const rows = Dashboard._getFilteredRows();
-        const mainRows = rows.filter(r => !Dashboard.EXCLUDED_CATS.has(r.catDesc));
+        const mainRows = rows.filter(r => !Dashboard.EXCLUDED_BRANDS.has(r.brandDesc));
         const total = mainRows.reduce((s, r) => s + Dashboard._amt(r), 0);
         const totalAll = rows.reduce((s, r) => s + Dashboard._amt(r), 0);
 
@@ -648,7 +664,7 @@ const Dashboard = {
         }
 
         const rowData = routes.map(r => {
-            const rows = Dashboard._rows.filter(rx => rx.sCode === r && !Dashboard.EXCLUDED_CATS.has(rx.catDesc));
+            const rows = Dashboard._rows.filter(rx => rx.sCode === r && !Dashboard.EXCLUDED_BRANDS.has(rx.brandDesc));
             const amt  = rows.reduce((s,rx) => s + Dashboard._amt(rx), 0);
             const tgt  = Dashboard._targets[r] || 0;
             const pct  = tgt > 0 ? (amt / tgt * 100) : null;
@@ -689,7 +705,7 @@ const Dashboard = {
         const totalAmt = rowData.reduce((s,d) => s + d.amt, 0);
         const totalTgt = rowData.reduce((s,d) => s + d.tgt, 0);
         const totalPct = totalTgt > 0 ? totalAmt/totalTgt*100 : null;
-        const filteredRows = Dashboard._getFilteredRows().filter(r => !Dashboard.EXCLUDED_CATS.has(r.catDesc));
+        const filteredRows = Dashboard._getFilteredRows().filter(r => !Dashboard.EXCLUDED_BRANDS.has(r.brandDesc));
         const totalOm = Dashboard._calcOutletMetrics(filteredRows);
         tbody.innerHTML += `
         <tr class="border-t-2 border-gray-200 bg-gray-50 font-black">
@@ -767,28 +783,59 @@ const Dashboard = {
             return;
         }
 
-        const mainRows   = rows.filter(r => !Dashboard.EXCLUDED_CATS.has(r.catDesc));
-        const basketRows = rows.filter(r => r.catDesc === 'กระเช้าของขวัญ');
-        const othersRows = rows.filter(r => r.catDesc === 'อื่นๆ');
+        // ใช้ brandDesc แทน catDesc สำหรับ breakdown หลัก
+        const mainRows   = rows.filter(r => !Dashboard.EXCLUDED_BRANDS.has(r.brandDesc));
+        const basketRows = rows.filter(r => r.brandDesc === 'กระเช้าของขวัญ');
+        const othersRows = rows.filter(r => r.brandDesc === 'อื่นๆ');
 
-        const renderCatBars = (catRows, el) => {
-            if (!catRows.length) { el.innerHTML = '<p class="text-center text-gray-400 text-xs py-4">ไม่มียอด</p>'; return; }
-            const byCat = {};
-            catRows.forEach(r => { byCat[r.catDesc] = (byCat[r.catDesc] || 0) + Dashboard._amt(r); });
-            const sorted = Object.entries(byCat).sort((a,b) => b[1]-a[1]);
-            const total = sorted.reduce((s,[,v]) => s + v, 0);
-            const max   = sorted[0]?.[1] || 1;
+        // แยก Confirm vs Pending ใน Credit rows
+        const creditRows   = mainRows.filter(r => /C\d/.test(String(r.sCode||'')));
+        const confirmRows  = creditRows.filter(r => String(r.deliveryStatus||'').toLowerCase() === 'confirm');
+        const pendingRows  = creditRows.filter(r => String(r.deliveryStatus||'').toLowerCase() === 'pending');
+        const totalConfirm = confirmRows.reduce((s,r) => s + Dashboard._amt(r), 0);
+        const totalPending = pendingRows.reduce((s,r) => s + Dashboard._amt(r), 0);
+        const pendInvCount = new Set(pendingRows.map(r => r.invNum).filter(Boolean)).size;
+
+        // inject Credit Delivery Status section ถ้ามี credit rows
+        const creditStatusEl = document.getElementById('db-credit-delivery');
+        if (creditStatusEl && creditRows.length > 0) {
+            creditStatusEl.style.display = 'block';
+            creditStatusEl.innerHTML = `
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">
+                <div class="bg-emerald-50 border border-emerald-100 rounded-xl p-3">
+                    <div class="text-xs font-bold text-emerald-700 mb-1">✅ Confirm</div>
+                    <div class="text-lg font-black text-emerald-800">${Dashboard._fmt(totalConfirm)}</div>
+                    <div class="text-xs text-gray-400">${confirmRows.length} รายการ</div>
+                </div>
+                <div class="bg-amber-50 border border-amber-100 rounded-xl p-3 cursor-pointer hover:bg-amber-100 transition"
+                     onclick="Dashboard._showPendingInvoices()">
+                    <div class="text-xs font-bold text-amber-700 mb-1">⏳ รอ Confirm</div>
+                    <div class="text-lg font-black text-amber-800">${Dashboard._fmt(totalPending)}</div>
+                    <div class="text-xs text-gray-400">${pendInvCount} invoice · <span class="text-indigo-500 font-bold">ดูรายละเอียด →</span></div>
+                </div>
+            </div>`;
+        } else if (creditStatusEl) {
+            creditStatusEl.style.display = 'none';
+        }
+
+        const renderBrandBars = (brandRows, el) => {
+            if (!brandRows.length) { el.innerHTML = '<p class="text-center text-gray-400 text-xs py-4">ไม่มียอด</p>'; return; }
+            const byBrand = {};
+            brandRows.forEach(r => { byBrand[r.brandDesc] = (byBrand[r.brandDesc] || 0) + Dashboard._amt(r); });
+            const sorted = Object.entries(byBrand).sort((a,b) => b[1]-a[1]);
+            const total  = sorted.reduce((s,[,v]) => s + v, 0);
+            const max    = sorted[0]?.[1] || 1;
 
             el.innerHTML = `<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">` +
-                sorted.map(([cat, amt]) => {
-                    const pct = (amt / total * 100).toFixed(1);
+                sorted.map(([brand, amt]) => {
+                    const pct  = (amt / total * 100).toFixed(1);
                     const barW = Math.round((amt / max) * 100);
-                    const isActive = Dashboard._drillCategory === cat;
+                    const isActive = Dashboard._drillCategory === brand;
                     return `
                     <div class="cursor-pointer bg-gray-50 hover:bg-indigo-50 rounded-xl p-3 transition border border-transparent ${isActive ? 'border-indigo-300 bg-indigo-50' : ''}"
-                         onclick="Dashboard._drillToCategory('${cat.replace(/'/g,"\\'")}')">
+                         onclick="Dashboard._drillToCategory('${brand.replace(/'/g,"\\'")}')">
                         <div class="flex items-center justify-between mb-1">
-                            <span class="text-xs font-black text-gray-700">${cat}</span>
+                            <span class="text-xs font-black text-gray-700">${brand}</span>
                             <span class="text-xs text-gray-500">${pct}%</span>
                         </div>
                         <div class="h-2 bg-gray-200 rounded-full mb-1.5">
@@ -799,9 +846,65 @@ const Dashboard = {
                 }).join('') + `</div>`;
         };
 
-        renderCatBars(mainRows, mainEl);
-        renderCatBars(basketRows, basketEl);
-        renderCatBars(othersRows, othersEl);
+        renderBrandBars(mainRows, mainEl);
+        if (basketEl) renderBrandBars(basketRows, basketEl);
+        if (othersEl) renderBrandBars(othersRows, othersEl);
+    },
+
+    // ─── Pending Invoice Modal ──────────────────────────────────────────────
+    _showPendingInvoices: () => {
+        const rows = Dashboard._getFilteredRows()
+            .filter(r => /C\d/.test(String(r.sCode||'')) && String(r.deliveryStatus||'').toLowerCase() === 'pending');
+
+        // group by invNum
+        const byInv = {};
+        rows.forEach(r => {
+            const inv = r.invNum || r.soNum || '—';
+            if (!byInv[inv]) byInv[inv] = { sCode: r.sCode, custName: r.custName, net: 0, items: 0, kpiDate: r.kpiDate };
+            byInv[inv].net   += r.net || 0;
+            byInv[inv].items++;
+        });
+        const sorted = Object.entries(byInv).sort((a,b) => b[1].net - a[1].net);
+
+        let modal = document.getElementById('db-pending-modal');
+        if (!modal) {
+            modal = document.createElement('div');
+            modal.id = 'db-pending-modal';
+            modal.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);z-index:9999;align-items:center;justify-content:center;padding:16px;';
+            document.body.appendChild(modal);
+        }
+
+        const totalPending = sorted.reduce((s,[,d]) => s + d.net, 0);
+        modal.innerHTML = `
+        <div style="background:#fff;border-radius:24px;width:100%;max-width:560px;max-height:88dvh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 80px rgba(0,0,0,0.3);">
+            <div style="padding:18px 20px;border-bottom:1px solid #f1f5f9;display:flex;justify-content:space-between;align-items:center;flex-shrink:0;">
+                <div>
+                    <div style="font-size:15px;font-weight:900;color:#111827;">⏳ Invoice รอ Confirm</div>
+                    <div style="font-size:11px;color:#9ca3af;margin-top:2px;">${sorted.length} invoice · รวม ${Dashboard._fmt(totalPending)}</div>
+                </div>
+                <button onclick="document.getElementById('db-pending-modal').style.display='none'"
+                    style="width:30px;height:30px;border-radius:50%;border:1px solid #e5e7eb;background:#fff;color:#9ca3af;font-size:14px;cursor:pointer;font-weight:700;">✕</button>
+            </div>
+            <div style="flex:1;overflow-y:auto;padding:12px 20px;">
+                ${sorted.length === 0
+                    ? '<div style="text-align:center;padding:24px;color:#9ca3af;">ไม่มี invoice รอ Confirm</div>'
+                    : sorted.map(([inv, d]) => `
+                    <div style="background:#fefce8;border:1px solid #fde68a;border-radius:12px;padding:10px 14px;margin-bottom:8px;">
+                        <div style="display:flex;justify-content:space-between;align-items:center;">
+                            <div>
+                                <div style="font-size:12px;font-weight:900;color:#111827;font-family:monospace;">${inv}</div>
+                                <div style="font-size:11px;color:#6b7280;margin-top:2px;">${d.sCode} · ${d.custName || '—'}</div>
+                                ${d.kpiDate ? `<div style="font-size:10px;color:#9ca3af;">${d.kpiDate}</div>` : ''}
+                            </div>
+                            <div style="text-align:right;">
+                                <div style="font-size:14px;font-weight:900;color:#b45309;">${Dashboard._fmt(d.net)}</div>
+                                <div style="font-size:10px;color:#9ca3af;">${d.items} รายการ</div>
+                            </div>
+                        </div>
+                    </div>`).join('')}
+            </div>
+        </div>`;
+        modal.style.display = 'flex';
     },
 
     _drillToCategory: (cat) => {
@@ -818,22 +921,26 @@ const Dashboard = {
 
         if (!Dashboard._drillCategory) { panel.classList.add('hidden'); return; }
         panel.classList.remove('hidden');
-        if (title) title.textContent = `🏷️ Brand — ${Dashboard._drillCategory}`;
+        if (title) title.textContent = `🏷️ SKU — ${Dashboard._drillCategory}`;
 
-        const rows = Dashboard._getFilteredRows().filter(r => r.catDesc === Dashboard._drillCategory);
-        const byBrand = {};
-        rows.forEach(r => { byBrand[r.brandDesc] = (byBrand[r.brandDesc] || 0) + Dashboard._amt(r); });
-        const sorted = Object.entries(byBrand).sort((a,b) => b[1]-a[1]);
+        // drill จาก brandDesc → แสดง prodName ย่อย
+        const rows = Dashboard._getFilteredRows().filter(r => r.brandDesc === Dashboard._drillCategory);
+        const byProd = {};
+        rows.forEach(r => {
+            const key = r.prodName || r.prodCode || '—';
+            byProd[key] = (byProd[key] || 0) + Dashboard._amt(r);
+        });
+        const sorted = Object.entries(byProd).sort((a,b) => b[1]-a[1]);
         const max = sorted[0]?.[1] || 1;
 
-        body.innerHTML = `<div class="flex flex-wrap gap-2">` + sorted.map(([brand, amt]) => {
+        body.innerHTML = `<div class="flex flex-wrap gap-2">` + sorted.map(([prod, amt]) => {
             const barW = Math.round((amt / max) * 100);
-            const isActive = Dashboard._drillBrand === brand;
+            const isActive = Dashboard._drillBrand === prod;
             return `
             <div class="cursor-pointer flex-1 min-w-[160px] bg-gray-50 hover:bg-indigo-50 border border-transparent ${isActive ? 'border-indigo-300 bg-indigo-50' : ''} rounded-xl p-3 transition"
-                 onclick="Dashboard._drillToBrand('${brand.replace(/'/g,"\\'")}')">
+                 onclick="Dashboard._drillToBrand('${prod.replace(/'/g,"\\'")}')">
                 <div class="flex items-center justify-between mb-1">
-                    <span class="text-xs font-black text-gray-700 leading-tight">${brand}</span>
+                    <span class="text-xs font-black text-gray-700 leading-tight">${prod}</span>
                 </div>
                 <div class="h-1.5 bg-gray-200 rounded-full mb-1.5">
                     <div class="h-1.5 rounded-full bg-indigo-400" style="width:${barW}%"></div>
@@ -859,7 +966,7 @@ const Dashboard = {
         if (title) title.textContent = `📦 ${Dashboard._drillBrand}`;
 
         const rows = Dashboard._getFilteredRows()
-            .filter(r => r.catDesc === Dashboard._drillCategory && r.brandDesc === Dashboard._drillBrand);
+            .filter(r => r.brandDesc === Dashboard._drillCategory && r.prodName === Dashboard._drillBrand);
 
         const byProd = {};
         rows.forEach(r => {

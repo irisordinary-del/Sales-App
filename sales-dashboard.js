@@ -17,10 +17,10 @@ const SalesDashboard = {
     _rowCache: {},       // { 'YYYY_MM': rows[] } cache ไม่ต้องโหลดซ้ำ
     _ready: false,
 
-    EXCLUDED_CATS: new Set(['อื่นๆ', 'กระเช้าของขวัญ']),
+    EXCLUDED_BRANDS: new Set(['อื่นๆ', 'กระเช้าของขวัญ']),
 
     _calcOutletMetrics: (rows) => {
-        const filtered = rows.filter(r => !SalesDashboard.EXCLUDED_CATS.has(r.catDesc));
+        const filtered = rows.filter(r => !SalesDashboard.EXCLUDED_BRANDS.has(r.brandDesc));
         const byOutlet = {}, byOutletV = {}, byOutletC = {};
         filtered.forEach(r => {
             const key = String(r.custCode || '').trim() || String(r.custName || '').trim();
@@ -221,9 +221,9 @@ const SalesDashboard = {
         const invoicedRows = rows.filter(r => r.invStatus === 'Invoiced');
         const cnRows       = rows.filter(r => r.invStatus === 'Credit Note');
 
-        const mainRows    = invoicedRows.filter(r => !SalesDashboard.EXCLUDED_CATS.has(r.catDesc));
-        const basketRows  = invoicedRows.filter(r => r.catDesc === 'กระเช้าของขวัญ');
-        const othersRows  = invoicedRows.filter(r => r.catDesc === 'อื่นๆ');
+        const mainRows    = invoicedRows.filter(r => !SalesDashboard.EXCLUDED_BRANDS.has(r.brandDesc));
+        const basketRows  = invoicedRows.filter(r => r.brandDesc === 'กระเช้าของขวัญ');
+        const othersRows  = invoicedRows.filter(r => r.brandDesc === 'อื่นๆ');
 
         const total    = mainRows.reduce((s, r) => s + SalesDashboard._amt(r), 0);
         const outletM  = SalesDashboard._calcOutletMetrics(invoicedRows);
@@ -232,19 +232,21 @@ const SalesDashboard = {
         const pct      = target > 0 ? (total / target * 100) : null;
 
         // ─ Credit breakdown (สำหรับ C-route) ─
-        const myRoute = SalesDashboard._myRoute || SalesDashboard._username || '';
         const isCredit = /C\d/i.test(myRoute);
         if (isCredit) {
-            const cInv   = invoicedRows; // ยอด Confirm (Invoiced)
-            const cCN    = cnRows;       // Credit Note
-            const totalConfirm = cInv.reduce((s,r) => s + r.net, 0);
-            const totalSO      = cInv.reduce((s,r) => s + r.soNet, 0); // ยอดเปิดบิล (SO)
-            const totalCN      = cCN.reduce((s,r) => s + r.net, 0);   // CN ยอดติดลบ
-            const pendBills    = new Set(cCN.map(r => r.soNum).filter(Boolean)).size;
-            const confBills    = new Set(cInv.map(r => r.invNum).filter(Boolean)).size;
+            // ใช้ deliveryStatus แยก Confirm vs Pending
+            const cConfirm  = invoicedRows.filter(r => String(r.deliveryStatus||'').toLowerCase() === 'confirm');
+            const cPending  = invoicedRows.filter(r => String(r.deliveryStatus||'').toLowerCase() === 'pending');
+            const cCN       = cnRows;
+            const totalConfirm = cConfirm.reduce((s,r) => s + r.net, 0);
+            const totalSO      = invoicedRows.reduce((s,r) => s + r.soNet, 0);
+            const totalCN      = cCN.reduce((s,r) => s + r.net, 0);
+            const pendBills    = new Set(cPending.map(r => r.invNum || r.soNum).filter(Boolean)).size;
+            const confBills    = new Set(cConfirm.map(r => r.invNum).filter(Boolean)).size;
+            const pendRows     = cPending; // ส่งให้ modal ดูรายละเอียด
 
             SalesDashboard._renderCreditSection({
-                totalConfirm, totalSO, totalCN, pendBills, confBills
+                totalConfirm, totalSO, totalCN, pendBills, confBills, pendRows
             });
         }
 
@@ -296,8 +298,7 @@ const SalesDashboard = {
     },
 
     // ─── Credit Section (เฉพาะ C-route) ────────────────────────────────────
-    _renderCreditSection: ({ totalConfirm, totalSO, totalCN, pendBills, confBills }) => {
-        // inject หลัง db-target card ถ้ายังไม่มี
+    _renderCreditSection: ({ totalConfirm, totalSO, totalCN, pendBills, confBills, pendRows = [] }) => {
         let el = document.getElementById('db-credit-section');
         if (!el) {
             const ref = document.getElementById('db-cat-body')?.closest('.db-card');
@@ -308,6 +309,7 @@ const SalesDashboard = {
             el.style.borderLeft = '4px solid #7c3aed';
             ref.parentElement.insertBefore(el, ref);
         }
+        const totalPending = pendRows.reduce((s,r) => s + (r.net||0), 0);
         el.innerHTML = `
             <div style="font-size:10px;font-weight:700;color:#7c3aed;margin-bottom:8px;">💳 Credit — รายละเอียด</div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
@@ -316,20 +318,73 @@ const SalesDashboard = {
                     <div style="font-size:18px;font-weight:900;color:#5b21b6;">${SalesDashboard._fmt(totalConfirm)}</div>
                     <div style="font-size:10px;color:#9ca3af;margin-top:2px;">${confBills} บิล</div>
                 </div>
-                <div style="background:#fffbeb;border-radius:10px;padding:10px;border:1px solid #fde68a;">
-                    <div style="font-size:9px;font-weight:700;color:#b45309;margin-bottom:2px;">📋 ยอดเปิดบิล (SO)</div>
-                    <div style="font-size:18px;font-weight:900;color:#92400e;">${SalesDashboard._fmt(totalSO)}</div>
-                    <div style="font-size:10px;color:#9ca3af;margin-top:2px;">${confBills} SO</div>
+                <div style="background:#fffbeb;border-radius:10px;padding:10px;border:1px solid #fde68a;cursor:pointer;"
+                     onclick="SalesDashboard._showPendingModal()">
+                    <div style="font-size:9px;font-weight:700;color:#b45309;margin-bottom:2px;">⏳ รอ Confirm</div>
+                    <div style="font-size:18px;font-weight:900;color:#92400e;">${SalesDashboard._fmt(totalPending)}</div>
+                    <div style="font-size:10px;color:#9ca3af;margin-top:2px;">${pendBills} บิล · <span style="color:#6366f1;font-weight:800;">ดูรายการ →</span></div>
                 </div>
+            </div>
+            <div style="background:#f8fafc;border-radius:10px;padding:8px 10px;border:1px solid #e5e7eb;display:flex;justify-content:space-between;align-items:center;${totalCN !== 0 ? ';margin-bottom:8px' : ''};">
+                <div style="font-size:9px;font-weight:700;color:#374151;">📋 ยอดเปิดบิล (SO)</div>
+                <div style="font-size:14px;font-weight:900;color:#374151;">${SalesDashboard._fmt(totalSO)}</div>
             </div>
             ${totalCN !== 0 ? `
             <div style="background:#fef2f2;border-radius:10px;padding:8px 10px;border:1px solid #fecaca;display:flex;justify-content:space-between;align-items:center;">
-                <div>
-                    <div style="font-size:9px;font-weight:700;color:#dc2626;">📝 Credit Note (CN)</div>
-                    <div style="font-size:10px;color:#9ca3af;margin-top:1px;">${pendBills} CN</div>
-                </div>
+                <div style="font-size:9px;font-weight:700;color:#dc2626;">📝 Credit Note (CN)</div>
                 <div style="font-size:16px;font-weight:900;color:#dc2626;">${SalesDashboard._fmt(totalCN)}</div>
             </div>` : ''}`;
+        SalesDashboard._pendingRows = pendRows;
+    },
+
+    _pendingRows: [],
+
+    _showPendingModal: () => {
+        const rows = SalesDashboard._pendingRows || [];
+        const byInv = {};
+        rows.forEach(r => {
+            const inv = r.invNum || r.soNum || '—';
+            if (!byInv[inv]) byInv[inv] = { custName: r.custName, net: 0, items: 0, kpiDate: r.kpiDate };
+            byInv[inv].net += r.net || 0;
+            byInv[inv].items++;
+        });
+        const sorted = Object.entries(byInv).sort((a,b) => b[1].net - a[1].net);
+        const totalPend = sorted.reduce((s,[,d]) => s + d.net, 0);
+        let modal = document.getElementById('sales-pending-modal');
+        if (!modal) {
+            modal = document.createElement('div');
+            modal.id = 'sales-pending-modal';
+            modal.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);z-index:9999;align-items:center;justify-content:center;padding:16px;';
+            document.body.appendChild(modal);
+        }
+        modal.innerHTML = `
+        <div style="background:#fff;border-radius:24px;width:100%;max-width:480px;max-height:88dvh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 80px rgba(0,0,0,0.3);">
+            <div style="padding:16px 18px;border-bottom:1px solid #f1f5f9;display:flex;justify-content:space-between;align-items:center;flex-shrink:0;">
+                <div>
+                    <div style="font-size:14px;font-weight:900;color:#111827;">⏳ Invoice รอ Confirm</div>
+                    <div style="font-size:11px;color:#9ca3af;">${sorted.length} invoice · ${SalesDashboard._fmt(totalPend)}</div>
+                </div>
+                <button onclick="document.getElementById('sales-pending-modal').style.display='none'"
+                    style="width:28px;height:28px;border-radius:50%;border:1px solid #e5e7eb;background:#fff;color:#9ca3af;font-size:13px;cursor:pointer;font-weight:700;">✕</button>
+            </div>
+            <div style="flex:1;overflow-y:auto;padding:10px 16px;">
+                ${sorted.length === 0
+                    ? '<div style="text-align:center;padding:20px;color:#9ca3af;font-size:12px;">ไม่มี invoice รอ Confirm</div>'
+                    : sorted.map(([inv, d]) => `
+                    <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:9px 12px;margin-bottom:7px;display:flex;justify-content:space-between;align-items:center;">
+                        <div>
+                            <div style="font-size:11px;font-weight:900;color:#111827;font-family:monospace;">${inv}</div>
+                            <div style="font-size:10px;color:#6b7280;">${d.custName || '—'}</div>
+                            ${d.kpiDate ? `<div style="font-size:10px;color:#9ca3af;">${d.kpiDate}</div>` : ''}
+                        </div>
+                        <div style="text-align:right;">
+                            <div style="font-size:13px;font-weight:900;color:#b45309;">${SalesDashboard._fmt(d.net)}</div>
+                            <div style="font-size:10px;color:#9ca3af;">${d.items} รายการ</div>
+                        </div>
+                    </div>`).join('')}
+            </div>
+        </div>`;
+        modal.style.display = 'flex';
     },
 
     // ─── Render horizontal bars ──────────────────────────────────────────
@@ -339,7 +394,7 @@ const SalesDashboard = {
         if (!rows.length) { el.innerHTML = '<div style="text-align:center;padding:12px;color:#9ca3af;font-size:12px;">ไม่มียอด</div>'; return; }
 
         // Group by category or custom key
-        const getKey = keyFn || (r => r.catDesc);
+        const getKey = keyFn || (r => r.brandDesc);
         const byKey = {};
         rows.forEach(r => { byKey[getKey(r)] = (byKey[getKey(r)] || 0) + SalesDashboard._amt(r); });
         const sorted = Object.entries(byKey).sort((a, b) => b[1] - a[1]);
@@ -607,7 +662,7 @@ const SupervisorDashboard = {
     _targets: {},       // { routeId: target }
     _rowCache: {},      // { ym: rows[] }
 
-    EXCLUDED_CATS: new Set(['อื่นๆ', 'กระเช้าของขวัญ']),
+    EXCLUDED_BRANDS: new Set(['อื่นๆ', 'กระเช้าของขวัญ']),
 
     init: () => {
         const session = Auth.getSession();
@@ -687,7 +742,7 @@ const SupervisorDashboard = {
         // แยก Invoiced vs Credit Note
         const invoicedRows = rows.filter(r => r.invStatus === 'Invoiced');
         const cnRows       = rows.filter(r => r.invStatus === 'Credit Note');
-        const mainRows     = invoicedRows.filter(r => !SupervisorDashboard.EXCLUDED_CATS.has(r.catDesc));
+        const mainRows     = invoicedRows.filter(r => !SupervisorDashboard.EXCLUDED_BRANDS.has(r.brandDesc));
 
         // แยก C / V จาก sType หรือ sCode
         const cInvoiced = invoicedRows.filter(r => r.sType === 'CreditSales' || /C\d/.test(r.sCode));
