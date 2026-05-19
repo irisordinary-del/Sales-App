@@ -212,7 +212,16 @@ const Dashboard = {
 
             </div>
 
-            <!-- Category breakdown (main) -->
+                <!-- ShopType bars -->
+                <div class="lg:col-span-2 bg-white rounded-2xl shadow-sm border border-gray-100" id="db-shoptype-panel">
+                    <div class="px-4 py-3 border-b border-gray-100 bg-gray-50">
+                        <span class="text-sm font-black text-gray-700">🏪 ประเภทร้าน</span>
+                    </div>
+                    <div class="p-4 space-y-2.5" id="db-shoptype-body">
+                        <p class="text-center text-gray-400 text-xs py-4">ยังไม่มีข้อมูล</p>
+                    </div>
+                </div>
+            </div>
             <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
                 <div class="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gray-50">
                     <span class="text-sm font-black text-gray-700">🏷️ Brand Breakdown</span>
@@ -538,6 +547,7 @@ const Dashboard = {
         Dashboard._renderBreadcrumb();
         Dashboard._renderKPIs();
         Dashboard._renderRouteTable();
+        Dashboard._renderShopTypes();
         Dashboard._renderCategories();
         Dashboard._renderBrands();
         Dashboard._renderProducts();
@@ -695,6 +705,38 @@ const Dashboard = {
         Dashboard._drillCategory = null;
         Dashboard._drillBrand = null;
         Dashboard._render();
+    },
+
+    _renderShopTypes: () => {
+        const el = document.getElementById('db-shoptype-body');
+        if (!el) return;
+        const rows = Dashboard._getFilteredRows();
+        if (!rows.length) { el.innerHTML = '<p class="text-center text-gray-400 text-xs py-4">ยังไม่มีข้อมูล</p>'; return; }
+
+        const byType = {};
+        rows.forEach(r => {
+            const t = r.shopType || 'Other';
+            byType[t] = (byType[t] || 0) + Dashboard._amt(r);
+        });
+        const sorted = Object.entries(byType).sort((a,b) => b[1]-a[1]);
+        const total  = sorted.reduce((s,[,v]) => s + v, 0);
+        const max    = sorted[0]?.[1] || 1;
+
+        el.innerHTML = sorted.map(([type, amt]) => {
+            const pct  = (amt / total * 100).toFixed(1);
+            const barW = Math.round((amt / max) * 100);
+            return `
+            <div>
+                <div class="flex items-center justify-between mb-0.5">
+                    <span class="text-xs font-bold text-gray-700">${type}</span>
+                    <span class="text-xs tabular-nums text-gray-500">${pct}%</span>
+                </div>
+                <div class="h-2 bg-gray-100 rounded-full overflow-hidden">
+                    <div class="h-2 rounded-full bg-blue-400" style="width:${barW}%"></div>
+                </div>
+                <div class="text-[10px] text-gray-400 mt-0.5 tabular-nums">${Dashboard._fmt(amt)}</div>
+            </div>`;
+        }).join('');
     },
 
     _renderCategories: () => {
