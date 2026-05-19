@@ -580,7 +580,22 @@ const Dashboard = {
     _renderKPIs: () => {
         const el = document.getElementById('db-kpi-row');
         if (!el) return;
+
+        // KPI หัว = ยอดรวมทั้งหมด ไม่เปลี่ยนตาม filter
+        const savedRoute    = Dashboard._drillRoute;
+        const savedShopType = Dashboard._drillShopType;
+        const savedCat      = Dashboard._drillCategory;
+        const savedBrand    = Dashboard._drillBrand;
+        Dashboard._drillRoute    = null;
+        Dashboard._drillShopType = null;
+        Dashboard._drillCategory = null;
+        Dashboard._drillBrand    = null;
         const rows = Dashboard._getFilteredRows();
+        Dashboard._drillRoute    = savedRoute;
+        Dashboard._drillShopType = savedShopType;
+        Dashboard._drillCategory = savedCat;
+        Dashboard._drillBrand    = savedBrand;
+
         const mainRows = rows.filter(r => !Dashboard.EXCLUDED_BRANDS.has(r.brandDesc));
         const total = mainRows.reduce((s, r) => s + Dashboard._amt(r), 0);
         const totalAll = rows.reduce((s, r) => s + Dashboard._amt(r), 0);
