@@ -11,7 +11,6 @@ const Dashboard = {
     _rowCache: {},            // { 'YYYY_MM': rows[] } cache สำหรับ campaign
     _amountMode: 'gross',     // 'gross' | 'net'
     _drillRoute: null,        // null = ศูนย์ทั้งหมด
-    _drillShopType: null,
     _drillCategory: null,
     _drillBrand: null,
     _rows: [],                // flat filtered rows (current month)
@@ -210,47 +209,21 @@ const Dashboard = {
                     </div>
                 </div>
 
-                <!-- ShopType bars -->
-                <div class="lg:col-span-2 bg-white rounded-2xl shadow-sm border border-gray-100" id="db-shoptype-panel">
-                    <div class="px-4 py-3 border-b border-gray-100 bg-gray-50">
-                        <span class="text-sm font-black text-gray-700">🏪 ประเภทร้าน</span>
-                    </div>
-                    <div class="p-4 space-y-2.5" id="db-shoptype-body">
-                        <p class="text-center text-gray-400 text-xs py-4">ยังไม่มีข้อมูล</p>
-                    </div>
-                </div>
+
             </div>
 
             <!-- Category breakdown (main) -->
             <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
                 <div class="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gray-50">
-                    <span class="text-sm font-black text-gray-700">📦 Category หลัก</span>
-                    <span class="text-xs text-gray-400">(ไม่รวม อื่นๆ / กระเช้า)</span>
+                    <span class="text-sm font-black text-gray-700">🏷️ Brand Breakdown</span>
+                    <span class="text-xs text-gray-400">แยกตาม Brand</span>
                 </div>
                 <div class="p-4" id="db-category-body">
                     <p class="text-center text-gray-400 text-xs py-4">ยังไม่มีข้อมูล</p>
                 </div>
             </div>
 
-            <!-- Excluded categories (อื่นๆ / กระเช้า) -->
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div class="bg-white rounded-2xl shadow-sm border border-orange-100 overflow-hidden">
-                    <div class="px-4 py-3 border-b border-orange-100 bg-orange-50">
-                        <span class="text-sm font-black text-orange-700">🎁 กระเช้าของขวัญ</span>
-                    </div>
-                    <div class="p-4" id="db-basket-body">
-                        <p class="text-center text-gray-400 text-xs py-4">ยังไม่มีข้อมูล</p>
-                    </div>
-                </div>
-                <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-                    <div class="px-4 py-3 border-b border-gray-100 bg-gray-50">
-                        <span class="text-sm font-black text-gray-700">🔖 อื่นๆ</span>
-                    </div>
-                    <div class="p-4" id="db-others-body">
-                        <p class="text-center text-gray-400 text-xs py-4">ยังไม่มีข้อมูล</p>
-                    </div>
-                </div>
-            </div>
+
 
             <!-- Brand drill-down (shows when drillCategory is set) -->
             <div id="db-brand-panel" class="hidden bg-white rounded-2xl shadow-sm border border-indigo-100 overflow-hidden">
@@ -319,7 +292,6 @@ const Dashboard = {
         if (!ym) return;
         Dashboard._currentYM = ym;
         Dashboard._drillRoute = Dashboard._session.role === 'sales' ? Dashboard._session.username : null;
-        Dashboard._drillShopType = null;
         Dashboard._drillCategory = null;
         Dashboard._drillBrand = null;
         await Dashboard._loadMonth(ym);
@@ -527,7 +499,6 @@ const Dashboard = {
         } else if (Dashboard._drillRoute) {
             rows = rows.filter(r => r.sCode === Dashboard._drillRoute);
         }
-        if (Dashboard._drillShopType) rows = rows.filter(r => r.shopType === Dashboard._drillShopType);
         return rows;
     },
 
@@ -548,7 +519,6 @@ const Dashboard = {
 
     _resetDrill: () => {
         Dashboard._drillRoute = null;
-        Dashboard._drillShopType = null;
         Dashboard._drillCategory = null;
         Dashboard._drillBrand = null;
         Dashboard._render();
@@ -568,7 +538,6 @@ const Dashboard = {
         Dashboard._renderBreadcrumb();
         Dashboard._renderKPIs();
         Dashboard._renderRouteTable();
-        Dashboard._renderShopTypes();
         Dashboard._renderCategories();
         Dashboard._renderBrands();
         Dashboard._renderProducts();
@@ -581,7 +550,6 @@ const Dashboard = {
 
         const parts = [];
         if (Dashboard._drillRoute) parts.push(`🚚 ${Dashboard._drillRoute}`);
-        if (Dashboard._drillShopType) parts.push(`🏪 ${Dashboard._drillShopType}`);
         if (Dashboard._drillCategory) parts.push(`📦 ${Dashboard._drillCategory}`);
         if (Dashboard._drillBrand) parts.push(`🏷️ ${Dashboard._drillBrand}`);
 
@@ -724,45 +692,6 @@ const Dashboard = {
 
     _drillToRoute: (r) => {
         Dashboard._drillRoute = Dashboard._drillRoute === r ? null : r;
-        Dashboard._drillShopType = null;
-        Dashboard._drillCategory = null;
-        Dashboard._drillBrand = null;
-        Dashboard._render();
-    },
-
-    _renderShopTypes: () => {
-        const el = document.getElementById('db-shoptype-body');
-        if (!el) return;
-        const rows = Dashboard._getFilteredRows();
-        if (!rows.length) { el.innerHTML = '<p class="text-center text-gray-400 text-xs py-4">ยังไม่มีข้อมูล</p>'; return; }
-
-        const byType = {};
-        rows.forEach(r => { byType[r.shopType] = (byType[r.shopType] || 0) + Dashboard._amt(r); });
-        const sorted = Object.entries(byType).sort((a,b) => b[1]-a[1]);
-        const max = sorted[0]?.[1] || 1;
-        const total = sorted.reduce((s,[,v]) => s + v, 0);
-
-        el.innerHTML = sorted.map(([type, amt]) => {
-            const pct = (amt / total * 100).toFixed(1);
-            const barW = Math.round((amt / max) * 100);
-            const isActive = Dashboard._drillShopType === type;
-            return `
-            <div class="cursor-pointer group ${isActive ? 'opacity-100' : 'opacity-90 hover:opacity-100'} transition"
-                 onclick="Dashboard._drillToShopType('${type.replace(/'/g,"\\'")}')">
-                <div class="flex items-center justify-between mb-0.5">
-                    <span class="text-xs font-bold text-gray-700 group-hover:text-indigo-700 transition ${isActive ? 'text-indigo-700' : ''}">${type}</span>
-                    <span class="text-xs tabular-nums text-gray-500">${pct}%</span>
-                </div>
-                <div class="h-2 bg-gray-100 rounded-full overflow-hidden">
-                    <div class="h-2 rounded-full transition-all ${isActive ? 'bg-indigo-500' : 'bg-blue-400'}" style="width:${barW}%"></div>
-                </div>
-                <div class="text-[10px] text-gray-400 mt-0.5 tabular-nums">${Dashboard._fmt(amt)}</div>
-            </div>`;
-        }).join('');
-    },
-
-    _drillToShopType: (type) => {
-        Dashboard._drillShopType = Dashboard._drillShopType === type ? null : type;
         Dashboard._drillCategory = null;
         Dashboard._drillBrand = null;
         Dashboard._render();

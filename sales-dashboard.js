@@ -285,8 +285,6 @@ const SalesDashboard = {
         // ─ Category หลัก ─
         SalesDashboard._renderBars('db-cat-body', mainRows, '#2563eb');
 
-        // ─ ShopType ─
-        SalesDashboard._renderBars('db-shop-body', invoicedRows, '#10b981', r => r.shopType);
 
 
     },
@@ -423,8 +421,6 @@ const SalesDashboard = {
             const el = document.getElementById(id);
             if (el) el.innerHTML = '<div style="text-align:center;padding:12px;color:#9ca3af;font-size:12px;">ยังไม่มีข้อมูล</div>';
         });
-        SalesDashboard._setText('db-basket-body', '—');
-        SalesDashboard._setText('db-others-body', '—');
         const bar = document.getElementById('db-target-bar');
         if (bar) bar.style.width = '0%';
     },
@@ -720,39 +716,50 @@ const SupervisorDashboard = {
     },
 
     _fmt: (n) => !n ? '0' : Math.round(n).toLocaleString('th-TH'),
-
-    // ─── แยก C / V จาก sCode ─────────────────────────────────────────────
-    _routeType: (sCode) => {
-        const s = String(sCode||'').toUpperCase();
-        if (/C\d/.test(s)) return 'C';
-        if (/V\d/.test(s)) return 'V';
-        return 'other';
+    _amtMode: 'net',  // 'gross' | 'net'
+    _amt: (r) => SupervisorDashboard._amtMode === 'gross' ? (r.gross||0) : (r.net||0),
+    setAmtMode: (mode) => {
+        SupervisorDashboard._amtMode = mode;
+        // อัป toggle button
+        ['gross','net'].forEach(m => {
+            const btn = document.getElementById('sup-db-btn-' + m);
+            if (btn) btn.style.background = m === mode ? '#6366f1' : '#f3f4f6';
+            if (btn) btn.style.color = m === mode ? '#fff' : '#374151';
+        });
+        SupervisorDashboard._render();
     },
 
     // ─── Render หลัก ─────────────────────────────────────────────────────
     _render: () => {
-        const rows    = SupervisorDashboard._allRows;
+        const rows = SupervisorDashboard._allRows;
+        const amt  = r => SupervisorDashboard._amt(r);
 
         // แยก Invoiced vs Credit Note
         const invoicedRows = rows.filter(r => r.invStatus === 'Invoiced');
         const cnRows       = rows.filter(r => r.invStatus === 'Credit Note');
         const mainRows     = invoicedRows.filter(r => !SupervisorDashboard.EXCLUDED_BRANDS.has(r.brandDesc));
 
-        // แยก C / V จาก sType หรือ sCode
+        // แยก C / V / L จาก sCode
         const cInvoiced = invoicedRows.filter(r => /C\d/.test(r.sCode));
         const vInvoiced = invoicedRows.filter(r => /V\d/.test(r.sCode));
+        const lInvoiced = invoicedRows.filter(r => /L\d/.test(r.sCode));
         const cCN       = cnRows.filter(r => /C\d/.test(r.sCode));
 
-        const totalAll = mainRows.reduce((s,r) => s + (r.net||0), 0);
-        const totalC   = cInvoiced.reduce((s,r) => s + (r.net||0), 0);
-        const totalV   = vInvoiced.reduce((s,r) => s + (r.net||0), 0);
+        const totalAll = mainRows.reduce((s,r) => s + amt(r), 0);
+        const totalC   = cInvoiced.reduce((s,r) => s + amt(r), 0);
+        const totalV   = vInvoiced.reduce((s,r) => s + amt(r), 0);
+        const totalL   = lInvoiced.reduce((s,r) => s + amt(r), 0);
 
         // ─ Credit breakdown ─
-        const totalCConfirm = cInvoiced.reduce((s,r) => s + (r.net||0), 0);
+        const cConfirm  = cInvoiced.filter(r => String(r.deliveryStatus||'').toLowerCase() === 'confirm');
+        const cPending  = cInvoiced.filter(r => String(r.deliveryStatus||'').toLowerCase() === 'pending');
+        const totalCConfirm = cConfirm.reduce((s,r) => s + amt(r), 0);
+        const totalCPending = cPending.reduce((s,r) => s + amt(r), 0);
         const totalCSO      = cInvoiced.reduce((s,r) => s + (r.soNet||0), 0);
-        const totalCCN      = cCN.reduce((s,r) => s + (r.net||0), 0);
-        const confBills     = new Set(cInvoiced.map(r => r.invNum).filter(Boolean)).size;
-        const cnCount       = new Set(cCN.map(r => r.soNum || r.invNum).filter(Boolean)).size;
+        const totalCCN      = cCN.reduce((s,r) => s + amt(r), 0);
+        const confBills     = new Set(cConfirm.map(r => r.invNum).filter(Boolean)).size;
+        const pendBills     = new Set(cPending.map(r => r.invNum||r.soNum).filter(Boolean)).size;
+        const cnCount       = new Set(cCN.map(r => r.soNum||r.invNum).filter(Boolean)).size;
         const invCountV     = new Set(vInvoiced.map(r => r.invNum).filter(Boolean)).size;
         const invCountAll   = new Set(mainRows.map(r => r.invNum).filter(Boolean)).size;
 
@@ -766,12 +773,37 @@ const SupervisorDashboard = {
         if (dbEmpty) dbEmpty.style.display = 'none';
 
         const setText = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
+
+        // ─ Gross/Net toggle inject ─
+        let toggleEl = document.getElementById('sup-gross-net-toggle');
+        if (!toggleEl) {
+            const kpiRow = document.getElementById('db-kpi-row');
+            if (kpiRow) {
+                toggleEl = document.createElement('div');
+                toggleEl.id = 'sup-gross-net-toggle';
+                toggleEl.style.cssText = 'display:flex;gap:6px;margin-bottom:8px;';
+                toggleEl.innerHTML = `
+                    <button id="sup-db-btn-gross" onclick="SupervisorDashboard.setAmtMode('gross')"
+                        style="padding:5px 14px;border-radius:8px;font-size:12px;font-weight:800;border:none;cursor:pointer;font-family:inherit;transition:all 0.15s;background:#f3f4f6;color:#374151;">Gross</button>
+                    <button id="sup-db-btn-net" onclick="SupervisorDashboard.setAmtMode('net')"
+                        style="padding:5px 14px;border-radius:8px;font-size:12px;font-weight:800;border:none;cursor:pointer;font-family:inherit;transition:all 0.15s;background:#6366f1;color:#fff;">Net</button>`;
+                kpiRow.parentElement.insertBefore(toggleEl, kpiRow);
+            }
+        }
+        // sync toggle state
+        ['gross','net'].forEach(m => {
+            const btn = document.getElementById('sup-db-btn-' + m);
+            if (btn) {
+                btn.style.background = m === SupervisorDashboard._amtMode ? '#6366f1' : '#f3f4f6';
+                btn.style.color      = m === SupervisorDashboard._amtMode ? '#fff' : '#374151';
+            }
+        });
+
         setText('db-kpi-total', SupervisorDashboard._fmt(totalAll));
-        setText('db-kpi-total-sub', 'ยอดรวมทุกสาย');
+        setText('db-kpi-total-sub', SupervisorDashboard._amtMode === 'gross' ? 'ยอด Gross รวมทุกสาย' : 'ยอด Net รวมทุกสาย');
         setText('db-kpi-inv', invCountAll.toLocaleString());
         setText('db-kpi-shops', new Set(mainRows.map(r => r.custCode).filter(Boolean)).size.toLocaleString());
 
-        // ─ vs Target KPI card ─
         const pctEl = document.getElementById('db-kpi-pct');
         if (pctEl) {
             if (pctAll !== null) {
@@ -784,7 +816,6 @@ const SupervisorDashboard = {
             }
         }
 
-        // Target bar
         const barEl = document.getElementById('db-target-bar');
         if (barEl) {
             barEl.style.width = (pctAll !== null ? Math.min(pctAll,100) : 0) + '%';
@@ -795,28 +826,44 @@ const SupervisorDashboard = {
         const pctLbl = document.getElementById('db-target-pct-label');
         if (pctLbl) pctLbl.textContent = pctAll !== null ? pctAll.toFixed(1) + '%' : '—';
 
-        // ─── Section C/V แบบ expandable ─────────────────────────────────
+        // ─── Section L / C / V ───────────────────────────────────────────
         const dbCatBody = document.getElementById('db-cat-body');
         if (dbCatBody) {
+            const fmt = SupervisorDashboard._fmt;
             dbCatBody.innerHTML = `
+            <!-- ═══ L-routes (สีส้ม แยกต่างหาก) ═══ -->
+            ${lInvoiced.length > 0 ? `
+            <div style="margin-bottom:16px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                    <span style="font-size:13px;font-weight:900;color:#ea580c;">📦 L-routes</span>
+                    <span style="font-size:14px;font-weight:900;color:#ea580c;">${fmt(totalL)}</span>
+                </div>
+                ${SupervisorDashboard._renderRouteBreakdown(lInvoiced, '#ea580c')}
+            </div>
+            <div style="height:1px;background:#f3f4f6;margin:12px 0;"></div>` : ''}
+
             <!-- ═══ CREDIT (C) ═══ -->
             <div style="margin-bottom:16px;">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
                     <span style="font-size:13px;font-weight:900;color:#7c3aed;">💳 Credit (C-routes)</span>
-                    <span style="font-size:14px;font-weight:900;color:#7c3aed;">${SupervisorDashboard._fmt(totalC)}</span>
+                    <span style="font-size:14px;font-weight:900;color:#7c3aed;">${fmt(totalC)}</span>
                 </div>
-                <!-- Credit sub-cards -->
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
                     <div style="background:#f5f3ff;border-radius:12px;padding:10px 12px;border:1px solid #ddd6fe;">
                         <div style="font-size:9px;font-weight:700;color:#7c3aed;margin-bottom:2px;">✅ ยอด Confirm</div>
-                        <div style="font-size:16px;font-weight:900;color:#5b21b6;">${SupervisorDashboard._fmt(totalCConfirm)}</div>
+                        <div style="font-size:16px;font-weight:900;color:#5b21b6;">${fmt(totalCConfirm)}</div>
                         <div style="font-size:10px;color:#9ca3af;margin-top:2px;">${confBills} บิล</div>
                     </div>
-                    <div style="background:#fffbeb;border-radius:12px;padding:10px 12px;border:1px solid #fde68a;">
-                        <div style="font-size:9px;font-weight:700;color:#b45309;margin-bottom:2px;">📋 ยอดเปิดบิล (SO)</div>
-                        <div style="font-size:16px;font-weight:900;color:#92400e;">${SupervisorDashboard._fmt(totalCSO)}</div>
-                        <div style="font-size:10px;color:#9ca3af;margin-top:2px;">${confBills} SO</div>
+                    <div style="background:#fffbeb;border-radius:12px;padding:10px 12px;border:1px solid #fde68a;cursor:pointer;"
+                         onclick="SupervisorDashboard._showPendingModal()">
+                        <div style="font-size:9px;font-weight:700;color:#b45309;margin-bottom:2px;">⏳ รอ Confirm</div>
+                        <div style="font-size:16px;font-weight:900;color:#92400e;">${fmt(totalCPending)}</div>
+                        <div style="font-size:10px;color:#9ca3af;margin-top:2px;">${pendBills} บิล · <span style="color:#6366f1;font-weight:800;">ดูรายการ →</span></div>
                     </div>
+                </div>
+                <div style="background:#f8fafc;border-radius:10px;padding:7px 10px;border:1px solid #e5e7eb;display:flex;justify-content:space-between;margin-bottom:8px;">
+                    <span style="font-size:9px;font-weight:700;color:#374151;">📋 ยอดเปิดบิล (SO)</span>
+                    <span style="font-size:13px;font-weight:900;color:#374151;">${fmt(totalCSO)}</span>
                 </div>
                 ${totalCCN !== 0 ? `
                 <div style="background:#fef2f2;border-radius:10px;padding:8px 12px;border:1px solid #fecaca;display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
@@ -824,9 +871,8 @@ const SupervisorDashboard = {
                         <div style="font-size:9px;font-weight:700;color:#dc2626;">📝 Credit Note (CN)</div>
                         <div style="font-size:10px;color:#9ca3af;">${cnCount} CN</div>
                     </div>
-                    <div style="font-size:15px;font-weight:900;color:#dc2626;">${SupervisorDashboard._fmt(totalCCN)}</div>
+                    <div style="font-size:15px;font-weight:900;color:#dc2626;">${fmt(totalCCN)}</div>
                 </div>` : ''}
-                <!-- C route breakdown -->
                 ${SupervisorDashboard._renderRouteBreakdown(cInvoiced, '#7c3aed')}
             </div>
 
@@ -836,43 +882,94 @@ const SupervisorDashboard = {
             <div>
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
                     <span style="font-size:13px;font-weight:900;color:#2563eb;">🚐 Van (V-routes)</span>
-                    <span style="font-size:14px;font-weight:900;color:#2563eb;">${SupervisorDashboard._fmt(totalV)}</span>
+                    <span style="font-size:14px;font-weight:900;color:#2563eb;">${fmt(totalV)}</span>
                 </div>
                 <div style="background:#eff6ff;border-radius:12px;padding:10px 12px;border:1px solid #bfdbfe;margin-bottom:8px;">
                     <div style="font-size:9px;font-weight:700;color:#1d4ed8;margin-bottom:2px;">📋 บิลขาย</div>
                     <div style="font-size:16px;font-weight:900;color:#1e40af;">${invCountV.toLocaleString()} บิล</div>
                 </div>
-                <!-- V route breakdown -->
                 ${SupervisorDashboard._renderRouteBreakdown(vInvoiced, '#2563eb')}
             </div>`;
         }
 
         // ─── Route table ─────────────────────────────────────────────────
         SupervisorDashboard._renderRouteTable(mainRows);
+        // เก็บ pendingRows ไว้ให้ modal
+        SupervisorDashboard._pendingRows = cPending;
     },
+
+    _pendingRows: [],
+
+    _showPendingModal: () => {
+        const rows = SupervisorDashboard._pendingRows || [];
+        const byInv = {};
+        rows.forEach(r => {
+            const inv = r.invNum || r.soNum || '—';
+            if (!byInv[inv]) byInv[inv] = { sCode: r.sCode, custName: r.custName, net: 0, items: 0, kpiDate: r.kpiDate };
+            byInv[inv].net += r.net || 0;
+            byInv[inv].items++;
+        });
+        const sorted = Object.entries(byInv).sort((a,b) => b[1].net - a[1].net);
+        const totalPend = sorted.reduce((s,[,d]) => s + d.net, 0);
+        let modal = document.getElementById('sup-pending-modal');
+        if (!modal) {
+            modal = document.createElement('div');
+            modal.id = 'sup-pending-modal';
+            modal.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);z-index:9999;align-items:center;justify-content:center;padding:16px;';
+            document.body.appendChild(modal);
+        }
+        modal.innerHTML = `
+        <div style="background:#fff;border-radius:24px;width:100%;max-width:520px;max-height:88dvh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 80px rgba(0,0,0,0.3);">
+            <div style="padding:16px 18px;border-bottom:1px solid #f1f5f9;display:flex;justify-content:space-between;align-items:center;flex-shrink:0;">
+                <div>
+                    <div style="font-size:14px;font-weight:900;color:#111827;">⏳ Invoice รอ Confirm</div>
+                    <div style="font-size:11px;color:#9ca3af;">${sorted.length} invoice · ${SupervisorDashboard._fmt(totalPend)}</div>
+                </div>
+                <button onclick="document.getElementById('sup-pending-modal').style.display='none'"
+                    style="width:28px;height:28px;border-radius:50%;border:1px solid #e5e7eb;background:#fff;color:#9ca3af;font-size:13px;cursor:pointer;font-weight:700;">✕</button>
+            </div>
+            <div style="flex:1;overflow-y:auto;padding:10px 16px;">
+                ${sorted.length === 0
+                    ? '<div style="text-align:center;padding:20px;color:#9ca3af;font-size:12px;">ไม่มี invoice รอ Confirm</div>'
+                    : sorted.map(([inv, d]) => `
+                    <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:9px 12px;margin-bottom:7px;display:flex;justify-content:space-between;align-items:center;">
+                        <div>
+                            <div style="font-size:11px;font-weight:900;color:#111827;font-family:monospace;">${inv}</div>
+                            <div style="font-size:10px;color:#6b7280;">${d.sCode} · ${d.custName||'—'}</div>
+                            ${d.kpiDate ? `<div style="font-size:10px;color:#9ca3af;">${d.kpiDate}</div>` : ''}
+                        </div>
+                        <div style="text-align:right;">
+                            <div style="font-size:13px;font-weight:900;color:#b45309;">${SupervisorDashboard._fmt(d.net)}</div>
+                            <div style="font-size:10px;color:#9ca3af;">${d.items} รายการ</div>
+                        </div>
+                    </div>`).join('')}
+            </div>
+        </div>`;
+        modal.style.display = 'flex';
+    },
+
     _renderRouteBreakdown: (rows, color) => {
-        // group by sCode
         const byRoute = {};
         rows.forEach(r => {
             const s = String(r.sCode||'').toUpperCase();
             if (!s) return;
-            if (!byRoute[s]) byRoute[s] = { net: 0, invs: new Set() };
-            byRoute[s].net += r.net || 0;
+            if (!byRoute[s]) byRoute[s] = { amt: 0, invs: new Set() };
+            byRoute[s].amt += SupervisorDashboard._amt(r);
             if (r.invNum) byRoute[s].invs.add(r.invNum);
         });
-        const sorted = Object.entries(byRoute).sort((a,b) => b[1].net - a[1].net);
+        const sorted = Object.entries(byRoute).sort((a,b) => b[1].amt - a[1].amt);
         if (!sorted.length) return '<div style="font-size:11px;color:#9ca3af;padding:6px 0;">ไม่มีข้อมูล</div>';
-        const maxNet = sorted[0][1].net || 1;
+        const maxAmt = sorted[0][1].amt || 1;
         return sorted.map(([route, d]) => {
-            const barW = Math.round((d.net / maxNet) * 100);
-            const tgt  = SupervisorDashboard._targets[route] || 0;
-            const pct  = tgt > 0 ? (d.net / tgt * 100) : null;
+            const barW  = Math.round((d.amt / maxAmt) * 100);
+            const tgt   = SupervisorDashboard._targets[route] || 0;
+            const pct   = tgt > 0 ? (d.amt / tgt * 100) : null;
             const pctTxt = pct !== null ? (pct.toFixed(0) + '%') : '';
             return `
             <div style="margin-bottom:8px;">
                 <div style="display:flex;justify-content:space-between;margin-bottom:3px;">
                     <span style="font-size:11px;font-weight:800;color:#374151;">${route}</span>
-                    <span style="font-size:11px;font-weight:700;color:${color};">${SupervisorDashboard._fmt(d.net)} ${pctTxt ? '<span style="color:#9ca3af;font-weight:400;font-size:10px;">'+pctTxt+'</span>' : ''}</span>
+                    <span style="font-size:11px;font-weight:700;color:${color};">${SupervisorDashboard._fmt(d.amt)} ${pctTxt ? '<span style="color:#9ca3af;font-weight:400;font-size:10px;">'+pctTxt+'</span>' : ''}</span>
                 </div>
                 <div style="height:6px;background:#f3f4f6;border-radius:99px;overflow:hidden;">
                     <div style="height:6px;background:${color};border-radius:99px;width:${barW}%;opacity:0.7;"></div>
@@ -889,20 +986,22 @@ const SupervisorDashboard = {
         mainRows.forEach(r => {
             const s = String(r.sCode||'').toUpperCase();
             if (!s) return;
-            if (!byRoute[s]) byRoute[s] = { net: 0, outlets: new Set(), invs: new Set() };
-            byRoute[s].net += r.net || 0;
+            if (!byRoute[s]) byRoute[s] = { amt: 0, outlets: new Set(), invs: new Set() };
+            byRoute[s].amt += SupervisorDashboard._amt(r);
             if (r.custCode) byRoute[s].outlets.add(String(r.custCode));
             if (r.invNum)   byRoute[s].invs.add(r.invNum);
         });
         const sorted = Object.entries(byRoute).sort((a,b) => a[0].localeCompare(b[0],'th',{numeric:true}));
         const targets = SupervisorDashboard._targets;
-        const maxNet = sorted.reduce((m,[,d]) => Math.max(m, d.net), 0) || 1;
+        const maxAmt  = sorted.reduce((m,[,d]) => Math.max(m, d.amt), 0) || 1;
 
         shopEl.innerHTML = sorted.map(([route, d]) => {
             const tgt   = targets[route] || 0;
-            const pct   = tgt > 0 ? (d.net / tgt * 100) : null;
-            const barW  = Math.round((d.net / maxNet) * 100);
-            const color = pct === null ? '#6366f1' : pct >= 100 ? '#059669' : pct >= 80 ? '#d97706' : '#dc2626';
+            const pct   = tgt > 0 ? (d.amt / tgt * 100) : null;
+            const barW  = Math.round((d.amt / maxAmt) * 100);
+            const isL   = /L\d/.test(route);
+            const isC   = /C\d/.test(route);
+            const color = isL ? '#ea580c' : isC ? '#7c3aed' : pct === null ? '#6366f1' : pct >= 100 ? '#059669' : pct >= 80 ? '#d97706' : '#dc2626';
             const pctBadge = pct !== null
                 ? `<span style="font-size:9px;font-weight:800;color:${color};background:${color}18;padding:1px 5px;border-radius:6px;">${pct.toFixed(0)}%</span>`
                 : '';
@@ -910,7 +1009,7 @@ const SupervisorDashboard = {
             <div style="margin-bottom:10px;">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">
                     <span style="font-size:12px;font-weight:800;color:#374151;">${route} ${pctBadge}</span>
-                    <span style="font-size:11px;font-weight:800;color:#111827;">${SupervisorDashboard._fmt(d.net)}</span>
+                    <span style="font-size:11px;font-weight:800;color:#111827;">${SupervisorDashboard._fmt(d.amt)}</span>
                 </div>
                 <div style="height:5px;background:#f3f4f6;border-radius:99px;overflow:hidden;margin-bottom:3px;">
                     <div style="height:5px;background:${color};border-radius:99px;width:${barW}%;"></div>
@@ -922,10 +1021,5 @@ const SupervisorDashboard = {
             </div>`;
         }).join('') || '<div style="text-align:center;padding:12px;color:#9ca3af;font-size:12px;">ไม่มีข้อมูล</div>';
 
-        // ซ่อน basket/others สำหรับ supervisor
-        const basketEl = document.getElementById('db-basket-body');
-        const othersEl = document.getElementById('db-others-body');
-        if (basketEl) basketEl.closest?.('.db-card')?.style && (basketEl.closest('.db-card').style.display = 'none');
-        if (othersEl) othersEl.closest?.('.db-card')?.style && (othersEl.closest('.db-card').style.display = 'none');
     },
 };
