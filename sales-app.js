@@ -32,16 +32,14 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 
-// ใช้ MultiTab persistence ที่ถูกต้อง — ลด WebChannel reconnect
-db.enableMultiTabIndexedDbPersistence().catch(err => {
-    if (err.code === 'unimplemented') {
-        // fallback: single-tab persistence
-        db.enablePersistence().catch(() => {});
+// Enable persistence — รองรับ offline และหลาย tab
+db.enablePersistence({ synchronizeTabs: true }).catch(err => {
+    if (err.code === 'failed-precondition') {
+        console.warn('[DB] Multiple tabs: persistence limited');
+    } else if (err.code === 'unimplemented') {
+        console.warn('[DB] Browser does not support persistence');
     }
 });
-
-// Firestore settings — ลด long-polling reconnect noise
-db.settings({ experimentalForceLongPolling: false, merge: true });
 
 let docMain = db.collection('appData').doc('v1_main');
 const colSales = db.collection('v1_sales_chunks');

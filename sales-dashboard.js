@@ -440,7 +440,7 @@ const SalesDashboard = {
         // poll จนกว่า State.isLoaded = true (routes พร้อมแล้ว) แล้วค่อยโหลด
         const check = () => {
             if (typeof State !== 'undefined' && State.isLoaded &&
-                State.myRoute && State.allStores?.length > 0) {
+                (typeof State !== 'undefined') && State.myRoute && State.allStores?.length > 0) {
                 SalesDashboard._loadCampaigns();
             } else {
                 setTimeout(check, 500);
@@ -513,7 +513,7 @@ const SalesDashboard = {
         // ร้านในสายตัวเอง
         // Sales app ใช้ State.allStores (ไม่ใช่ State.db.routes)
         const myStores = (typeof State !== 'undefined' && State.allStores?.length > 0)
-            ? State.allStores.map(s => String(s.id))
+            ? (typeof State !== 'undefined' ? State.allStores.map(s => String(s.id)) : [])
             : [];
         const myStoreSet  = new Set(myStores);
         const totalStores = myStores.length;
@@ -657,7 +657,7 @@ const SupervisorDashboard = {
     init: () => {
         const session = Auth.getSession();
         const lbl = document.getElementById('db-route-label');
-        if (lbl) lbl.textContent = (State.viewMode === 'asm' ? 'ASM' : 'Supervisor') + ' · ศูนย์ ' + (State.centerId || '');
+        const _session = Auth.getSession(); if (lbl) lbl.textContent = (_session?.role === 'asm' ? 'ASM' : 'Supervisor') + ' · ศูนย์ ' + (_session?.centerId || '');
         SupervisorDashboard._loadMonthList();
     },
 
@@ -696,7 +696,7 @@ const SupervisorDashboard = {
             // ใช้ shared chunk cache จาก SalesDashboard
             const allRows = await SalesDashboard._loadChunks(ym);
             // กรองเฉพาะศูนย์นี้
-            const centerId = State.centerId || Auth.getSession()?.centerId || '';
+            const centerId = (typeof State !== 'undefined' ? State.centerId : null) || Auth.getSession()?.centerId || '';
             const rows = centerId
                 ? allRows.filter(r => String(r.sCode||'').startsWith(centerId))
                 : allRows;
