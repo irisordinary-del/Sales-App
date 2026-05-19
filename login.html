@@ -269,7 +269,8 @@
         })();
 
         // ─── Seed admin ครั้งแรก (ถ้ายังไม่มี users) ─────────────────────
-        Auth.seedAdmin().catch(e => console.warn('Seed admin:', e));
+        // หน่วงเวลา 2 วินาที ให้ Firebase/login form พร้อมก่อน
+        setTimeout(() => Auth.seedAdmin().catch(e => console.warn('Seed admin:', e)), 2000);
 
         // ─── Login handler ────────────────────────────────────────────────
         async function doLogin() {

@@ -165,7 +165,7 @@ service cloud.firestore {
         allow write: if request.resource.data.keys().hasAll(['index', 'rows'])
                      && request.resource.data.index is number
                      && request.resource.data.rows is list
-                     && request.resource.data.rows.size() <= 350;
+                     && request.resource.data.rows.size() <= 550;
       }
     }
 
@@ -198,7 +198,7 @@ service cloud.firestore {
         allow create: if request.resource.data.keys().hasAll(['actionKey','username','role'])
                       && request.resource.data.actionKey is string
                       && request.resource.data.username is string
-                      && request.resource.data.role in ['admin','supervisor','sales'];
+                      && request.resource.data.role in ['admin','supervisor','sales','route_supervisor','asm'];
         allow update, delete: if false; // log ลบ/แก้ไขไม่ได้
       }
     }

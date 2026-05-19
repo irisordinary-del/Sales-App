@@ -29,7 +29,10 @@ const firebaseConfig = {
     messagingSenderId: "486778971661",
     appId: "1:486778971661:web:2ef83fa1eeb09ec6665744"
 };
-firebase.initializeApp(firebaseConfig);
+// ป้องกัน duplicate-app error (กรณีหน้าอื่น init ไปแล้ว)
+if (!firebase.apps.length) {
+    firebase.initializeApp(firebaseConfig);
+}
 const db = firebase.firestore();
 
 // Enable persistence — รองรับ offline และหลาย tab
