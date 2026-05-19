@@ -29,10 +29,7 @@ const firebaseConfig = {
     messagingSenderId: "486778971661",
     appId: "1:486778971661:web:2ef83fa1eeb09ec6665744"
 };
-// ป้องกัน duplicate-app error (กรณีหน้าอื่น init ไปแล้ว)
-if (!firebase.apps.length) {
-    firebase.initializeApp(firebaseConfig);
-}
+firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 
 // Enable persistence — รองรับ offline และหลาย tab
@@ -294,6 +291,7 @@ const App = {
         let loaded = 0;
         State.allRoutes = {};
         State.allStores = [];
+        const routes = State.routeList; // fix: routes was not defined
         for (let i = 0; i < routes.length; i += BATCH) {
             const chunk = routes.slice(i, i + BATCH);
             await Promise.all(chunk.map(async (routeId) => {
