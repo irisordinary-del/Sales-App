@@ -230,7 +230,7 @@ const SalesDashboard = {
         const pct      = target > 0 ? (total / target * 100) : null;
 
         // ─ Credit breakdown (สำหรับ C-route) ─
-        const isCredit = /C\d/i.test(myRoute);
+        const isCredit = /C\d/i.test(SalesDashboard._myRoute);
         if (isCredit) {
             // ใช้ deliveryStatus แยก Confirm vs Pending
             const cConfirm  = invoicedRows.filter(r => String(r.deliveryStatus||'').toLowerCase() === 'confirm');
