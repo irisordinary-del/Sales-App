@@ -11,6 +11,7 @@ const Dashboard = {
     _rowCache: {},            // { 'YYYY_MM': rows[] } cache สำหรับ campaign
     _amountMode: 'gross',     // 'gross' | 'net'
     _drillRoute: null,        // null = ศูนย์ทั้งหมด
+    _drillShopType: null,     // null = ทุกประเภทร้าน
     _drillCategory: null,
     _drillBrand: null,
     _rows: [],                // flat filtered rows (current month)
@@ -180,7 +181,7 @@ const Dashboard = {
             <!-- Active Campaign Coverage (โหลดจาก SkuDist) -->
             <div id="db-campaign-section" class="hidden"></div>
 
-            <!-- Middle row: By-Route table + ShopType pie -->
+            <!-- Middle row: By-Route table + ShopType -->
             <div class="grid grid-cols-1 lg:grid-cols-5 gap-4">
                 <!-- Route table -->
                 <div class="lg:col-span-3 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden" id="db-route-panel">
@@ -209,13 +210,11 @@ const Dashboard = {
                     </div>
                 </div>
 
-
-            </div>
-
                 <!-- ShopType bars -->
                 <div class="lg:col-span-2 bg-white rounded-2xl shadow-sm border border-gray-100" id="db-shoptype-panel">
-                    <div class="px-4 py-3 border-b border-gray-100 bg-gray-50">
+                    <div class="px-4 py-3 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
                         <span class="text-sm font-black text-gray-700">🏪 ประเภทร้าน</span>
+                        <span class="text-xs text-gray-400" id="db-shoptype-hint">กดเพื่อกรอง</span>
                     </div>
                     <div class="p-4 space-y-2.5" id="db-shoptype-body">
                         <p class="text-center text-gray-400 text-xs py-4">ยังไม่มีข้อมูล</p>
@@ -508,6 +507,10 @@ const Dashboard = {
         } else if (Dashboard._drillRoute) {
             rows = rows.filter(r => r.sCode === Dashboard._drillRoute);
         }
+        // กรองตาม shopType (ถ้าเลือก)
+        if (Dashboard._drillShopType) {
+            rows = rows.filter(r => r.shopType === Dashboard._drillShopType);
+        }
         return rows;
     },
 
@@ -527,9 +530,10 @@ const Dashboard = {
     },
 
     _resetDrill: () => {
-        Dashboard._drillRoute = null;
+        Dashboard._drillRoute    = null;
+        Dashboard._drillShopType = null;
         Dashboard._drillCategory = null;
-        Dashboard._drillBrand = null;
+        Dashboard._drillBrand    = null;
         Dashboard._render();
     },
 
@@ -559,9 +563,10 @@ const Dashboard = {
         if (!bc || !rb) return;
 
         const parts = [];
-        if (Dashboard._drillRoute) parts.push(`🚚 ${Dashboard._drillRoute}`);
-        if (Dashboard._drillCategory) parts.push(`📦 ${Dashboard._drillCategory}`);
-        if (Dashboard._drillBrand) parts.push(`🏷️ ${Dashboard._drillBrand}`);
+        if (Dashboard._drillRoute)    parts.push(`🚚 ${Dashboard._drillRoute}`);
+        if (Dashboard._drillShopType) parts.push(`🏪 ${Dashboard._drillShopType}`);
+        if (Dashboard._drillCategory) parts.push(`🏷️ ${Dashboard._drillCategory}`);
+        if (Dashboard._drillBrand)    parts.push(`📦 ${Dashboard._drillBrand}`);
 
         if (parts.length > 0 && Dashboard._session.role !== 'sales') {
             bc.innerHTML = parts.join('<span class="mx-1 text-gray-600">›</span>');
@@ -701,20 +706,33 @@ const Dashboard = {
     },
 
     _drillToRoute: (r) => {
-        Dashboard._drillRoute = Dashboard._drillRoute === r ? null : r;
+        Dashboard._drillRoute    = Dashboard._drillRoute === r ? null : r;
+        Dashboard._drillShopType = null;
         Dashboard._drillCategory = null;
-        Dashboard._drillBrand = null;
+        Dashboard._drillBrand    = null;
         Dashboard._render();
     },
 
     _renderShopTypes: () => {
         const el = document.getElementById('db-shoptype-body');
         if (!el) return;
-        const rows = Dashboard._getFilteredRows();
-        if (!rows.length) { el.innerHTML = '<p class="text-center text-gray-400 text-xs py-4">ยังไม่มีข้อมูล</p>'; return; }
+        // ใช้ rows ก่อนกรอง shopType (เพื่อแสดง % ของทุกประเภท)
+        const baseRows = Dashboard._getFilteredRows();
+        // คำนวณโดยไม่กรอง shopType
+        const allRows = Dashboard._drillShopType
+            ? (() => {
+                const saved = Dashboard._drillShopType;
+                Dashboard._drillShopType = null;
+                const r = Dashboard._getFilteredRows();
+                Dashboard._drillShopType = saved;
+                return r;
+            })()
+            : baseRows;
+
+        if (!allRows.length) { el.innerHTML = '<p class="text-center text-gray-400 text-xs py-4">ยังไม่มีข้อมูล</p>'; return; }
 
         const byType = {};
-        rows.forEach(r => {
+        allRows.forEach(r => {
             const t = r.shopType || 'Other';
             byType[t] = (byType[t] || 0) + Dashboard._amt(r);
         });
@@ -722,21 +740,42 @@ const Dashboard = {
         const total  = sorted.reduce((s,[,v]) => s + v, 0);
         const max    = sorted[0]?.[1] || 1;
 
+        // อัปเดต hint
+        const hint = document.getElementById('db-shoptype-hint');
+        if (hint) {
+            if (Dashboard._drillShopType) {
+                hint.innerHTML = `<button onclick="Dashboard._drillToShopType('${Dashboard._drillShopType.replace(/'/g,"\\'")}');" class="text-xs text-blue-500 hover:text-blue-800 font-bold">✕ ยกเลิก</button>`;
+            } else {
+                hint.textContent = 'กดเพื่อกรอง';
+                hint.className = 'text-xs text-gray-400';
+            }
+        }
+
         el.innerHTML = sorted.map(([type, amt]) => {
-            const pct  = (amt / total * 100).toFixed(1);
-            const barW = Math.round((amt / max) * 100);
+            const pct     = (amt / total * 100).toFixed(1);
+            const barW    = Math.round((amt / max) * 100);
+            const isActive = Dashboard._drillShopType === type;
             return `
-            <div>
+            <div class="cursor-pointer group transition rounded-lg p-1.5 -mx-1.5 ${isActive ? 'bg-blue-50' : 'hover:bg-gray-50'}"
+                 onclick="Dashboard._drillToShopType('${type.replace(/'/g,"\\'")}')">
                 <div class="flex items-center justify-between mb-0.5">
-                    <span class="text-xs font-bold text-gray-700">${type}</span>
+                    <span class="text-xs font-bold ${isActive ? 'text-blue-700' : 'text-gray-700'} group-hover:text-blue-700 transition">${type}</span>
                     <span class="text-xs tabular-nums text-gray-500">${pct}%</span>
                 </div>
                 <div class="h-2 bg-gray-100 rounded-full overflow-hidden">
-                    <div class="h-2 rounded-full bg-blue-400" style="width:${barW}%"></div>
+                    <div class="h-2 rounded-full transition-all ${isActive ? 'bg-blue-500' : 'bg-blue-400'}" style="width:${barW}%"></div>
                 </div>
-                <div class="text-[10px] text-gray-400 mt-0.5 tabular-nums">${Dashboard._fmt(amt)}</div>
+                <div class="text-[10px] ${isActive ? 'text-blue-600 font-bold' : 'text-gray-400'} mt-0.5 tabular-nums">${Dashboard._fmt(amt)}</div>
             </div>`;
         }).join('');
+    },
+
+    _drillToShopType: (type) => {
+        // toggle — กดซ้ำเพื่อยกเลิก
+        Dashboard._drillShopType = Dashboard._drillShopType === type ? null : type;
+        Dashboard._drillCategory = null;
+        Dashboard._drillBrand    = null;
+        Dashboard._render();
     },
 
     _renderCategories: () => {
