@@ -245,6 +245,10 @@
                         class="bg-gray-700 border border-gray-600 text-white text-xs font-bold rounded-lg px-2 py-1.5 outline-none focus:ring-2 focus:ring-indigo-400 max-w-[130px]">
                         <option value="active">📅 Plan ที่ Sales ใช้อยู่</option>
                     </select>
+                    <button onclick="CalendarAdmin.open(App._planMode)"
+                        class="bg-indigo-600 hover:bg-indigo-500 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap" title="ตั้งค่าปฏิทิน">
+                        📅 ปฏิทิน
+                    </button>
                     <button onclick="PlanUI.openCreateDraft()"
                         class="bg-indigo-600 hover:bg-indigo-500 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap" title="วางแผนเดือนถัดไป">
                         + เพิ่มเดือน
@@ -266,10 +270,7 @@
                     <span class="text-xs text-amber-600">— แก้ไขได้เลย ไม่กระทบ Sales</span>
                 </div>
                 <div class="flex items-center gap-2">
-                    <button onclick="CalendarAdmin.open(App._planMode)"
-                        class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition shadow-sm">
-                        📅 ตั้งค่าปฏิทิน
-                    </button>
+
                     <button onclick="PlanUI.confirmDelete()"
                         class="bg-red-500 hover:bg-red-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition shadow-sm">
                         🗑️ ลบเดือนนี้
