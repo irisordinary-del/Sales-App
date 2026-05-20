@@ -44,7 +44,12 @@ db.enablePersistence({ synchronizeTabs: true }).catch(err => {
 let docMain = db.collection('appData').doc('v1_main');
 const colSales = db.collection('v1_sales_chunks');
 
-let State = { myRoute: "", allStores: [], routeStores: [], sales: {}, currentDay: "", isLoaded: false, mapNeedsFit: true, calendarConfig: null, activePlanYM: null, activePlanMode: 'active', viewMode: 'sales', centerId: null, allRoutes: {}, routeList: [], _filterMarket: '' };
+let State = { myRoute: "", allStores: [], routeStores: [], sales: {}, currentDay: "", isLoaded: false, mapNeedsFit: true, calendarConfig: null, activePlanYM: null, activePlanMode: 'active', viewMode: 'sales', centerId: null, allRoutes: {}, routeList: [], _filterMarket: '',
+    // multi-plan support
+    planList: [],          // ['2026_05','2026_06'] — ทุก plan ที่มี
+    planCache: {},         // { '2026_06': { stores: [], calendarConfig: {} } }
+    planCenterDocId: '',   // center doc id ปัจจุบัน
+};
 let map = null, mapMarkers = [], sortableList = null, markerClusterGroup = null;
 
 // ─── Tab keys ที่ระบบรู้จัก ───────────────────────────────
@@ -373,6 +378,87 @@ const App = {
         Auth.logout();
     },
 
+    // ─── โหลด planList ทั้งหมดจาก Firestore (active + drafts) ──────────
+    loadPlanList: async (centerDocId) => {
+        try {
+            State.planCenterDocId = centerDocId;
+            const metaSnap = await App._getWithTimeout(
+                db.collection('appData').doc(centerDocId), 5000
+            );
+            const meta = metaSnap.exists ? metaSnap.data() : {};
+            const draftList = meta.draftList || [];
+
+            // รวม active plan (ใช้ YM ปัจจุบันเป็น key) + drafts
+            const _now = new Date();
+            const _activeYM = `${_now.getFullYear()}_${String(_now.getMonth()+1).padStart(2,'0')}`;
+
+            // planList = drafts ทั้งหมด + active (ถ้า active ไม่ซ้ำกับ draft)
+            const allPlans = new Set([...draftList]);
+            // ถ้าไม่มี draft เดือนนี้ → เพิ่ม active
+            if (!draftList.includes(_activeYM)) allPlans.add('active:' + _activeYM);
+
+            State.planList = Array.from(allPlans).sort().reverse();
+            console.log('📅 planList:', State.planList);
+        } catch(e) {
+            console.warn('loadPlanList:', e);
+            State.planList = [];
+        }
+    },
+
+    // ─── โหลดข้อมูลของ plan เดือนนั้น (lazy, cached) ────────────────────
+    loadPlanData: async (ym) => {
+        if (State.planCache[ym]) return State.planCache[ym]; // ใช้ cache
+
+        const centerDocId = State.planCenterDocId;
+        const isActive = ym.startsWith('active:');
+        const realYM = isActive ? ym.replace('active:', '') : ym;
+
+        try {
+            // โหลด calendarConfig + stores ของสายตัวเอง
+            let cfgRef, routeRef;
+            if (isActive) {
+                cfgRef = db.collection('appData').doc(centerDocId);
+                routeRef = db.collection('appData').doc(centerDocId)
+                    .collection('routes').doc(State.myRoute);
+            } else {
+                cfgRef = db.collection('appData').doc(centerDocId)
+                    .collection('drafts').doc(realYM);
+                routeRef = db.collection('appData').doc(centerDocId)
+                    .collection('drafts').doc(realYM)
+                    .collection('routes').doc(State.myRoute);
+            }
+
+            const [cfgSnap, routeSnap] = await Promise.all([
+                App._getWithTimeout(cfgRef, 5000),
+                App._getWithTimeout(routeRef, 8000),
+            ]);
+
+            const calendarConfig = cfgSnap.exists ? (cfgSnap.data().calendarConfig || null) : null;
+            const stores = routeSnap.exists ? (routeSnap.data().stores || []) : [];
+
+            State.planCache[ym] = { stores, calendarConfig, ym: realYM };
+            return State.planCache[ym];
+        } catch(e) {
+            console.warn('loadPlanData:', ym, e);
+            State.planCache[ym] = { stores: [], calendarConfig: null, ym: realYM };
+            return State.planCache[ym];
+        }
+    },
+
+    // ─── Switch ไปใช้ plan เดือนนั้น ─────────────────────────────────────
+    switchToPlan: async (ym) => {
+        const data = await App.loadPlanData(ym);
+        State.allStores     = data.stores;
+        State.calendarConfig = data.calendarConfig;
+        State.activePlanYM  = data.ym;
+        State.activePlanMode = ym.startsWith('active:') ? 'active' : 'draft';
+        State._filterMarket = '';
+        if (State.isLoaded) {
+            Processor.run();
+            CalendarCtrl.render();
+        }
+    },
+
     // โหลด calendarConfig จาก Firestore
     loadCalendarConfig: async (centerDocId, ym, mode) => {
         try {
@@ -438,6 +524,9 @@ const App = {
         const _centerMatch = State.myRoute.match(/^(\d+)/);
         const _centerDocId = _centerMatch ? (_centerMatch[1] + '_main') : 'v1_main';
         docMain = db.collection('appData').doc(_centerDocId);
+
+        // ── โหลด planList ทั้งหมด ────────────────────────────────────────
+        await App.loadPlanList(_centerDocId);
 
         // ── Auto-switch: เช็ค draft เดือนนี้ + เดือนถัดไป ────────────────
         const _getYM = (offset = 0) => {
@@ -994,7 +1083,24 @@ const CalendarCtrl = {
             else if (isHoliday) { bgColor = '#fef2f2'; textColor = '#dc2626'; borderColor = '#fecaca'; }
             else if (isWeekend) { bgColor = '#f9fafb'; textColor = '#6b7280'; }
 
-            const hasRoute = dayLabel && State.allStores.some(s => s.days && s.days.includes(dayLabel));
+            // เช็คว่าเดือนนี้มี plan อยู่ไหม
+            const _cellYM = `${year}_${String(month+1).padStart(2,'0')}`;
+            const _hasPlan = State.planList.some(p => p === _cellYM || p === 'active:' + _cellYM);
+            // ถ้าเป็นเดือนที่โหลดอยู่ → เช็คจาก State.allStores
+            // ถ้าเป็นเดือนอื่นที่มี plan → แสดงจุดสีเทา (ยังไม่โหลด)
+            const _loadedYM = State.activePlanYM || '';
+            const [_ly, _lm] = _loadedYM.split('_').map(Number);
+            const _isLoadedMonth = (year === _ly && month === _lm - 1);
+            const _cachedPlan = State.planCache[_cellYM] || State.planCache['active:' + _cellYM];
+            let hasRoute = false;
+            let hasPlanNotLoaded = false;
+            if (_isLoadedMonth && dayLabel) {
+                hasRoute = State.allStores.some(s => s.days && s.days.includes(dayLabel));
+            } else if (_cachedPlan && dayLabel) {
+                hasRoute = _cachedPlan.stores.some(s => s.days && s.days.includes(dayLabel));
+            } else if (_hasPlan && dayLabel) {
+                hasPlanNotLoaded = true; // มี plan แต่ยังไม่โหลด → จุดสีเทา
+            }
             const clickHandler = dayLabel ? `CalendarCtrl.goToDay('${dayLabel}')` : '';
             const mktsInCell = dayLabel ? getDayMarketList(dayLabel, month, year) : [];
             const mktLabel = mktsInCell.length > 0 ? mktsInCell[0] : '';
@@ -1020,7 +1126,7 @@ const CalendarCtrl = {
                             color:${isToday ? '#fff' : '#5b21b6'};white-space:nowrap;line-height:1.3;">
                     ${dayLabel.replace('Day ','')}
                 </div>` : ''}
-                ${hasRoute ? `<div style="width:5px;height:5px;border-radius:50%;background:${isToday ? '#fff' : '#2563eb'};flex-shrink:0;"></div>` : ''}
+                ${hasRoute ? `<div style="width:5px;height:5px;border-radius:50%;background:${isToday ? '#fff' : '#2563eb'};flex-shrink:0;"></div>` : hasPlanNotLoaded ? `<div style="width:5px;height:5px;border-radius:50%;background:#d1d5db;flex-shrink:0;"></div>` : ''}
                 ${mktLabel ? `<div style="font-size:8px;color:${isToday ? 'rgba(255,255,255,0.85)' : '#2563eb'};font-weight:700;
                                           line-height:1.1;padding:0 2px;max-width:48px;
                                           overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
@@ -1040,9 +1146,22 @@ const CalendarCtrl = {
     },
 
     // navigate จริงๆ หลังเลือกตลาด
-    navigateToDay: (dayLabel, market) => {
+    navigateToDay: async (dayLabel, market) => {
         CalendarCtrl.closePopup();
         CalendarCtrl.closeDaySheet();
+
+        // ตรวจว่าเดือนปฏิทินที่กำลังดูอยู่ตรงกับ plan ที่โหลดไหม
+        const _calYM = `${CalendarCtrl._year}_${String(CalendarCtrl._month+1).padStart(2,'0')}`;
+        const _loadedYM = State.activePlanYM || '';
+        if (_calYM !== _loadedYM) {
+            // ต้อง switch plan ก่อน
+            const _planKey = State.planList.find(p => p === _calYM || p === 'active:' + _calYM);
+            if (_planKey) {
+                showSalesToast('⏳ กำลังโหลดข้อมูล...');
+                await App.switchToPlan(_planKey);
+            }
+        }
+
         setTimeout(() => {
             State.currentDay = dayLabel;
             State._filterMarket = market || '';
@@ -1051,7 +1170,8 @@ const CalendarCtrl = {
             State.mapNeedsFit = true;
             Processor.routeList();
             UI.switchTab('route');
-            const label = market || dayLabel;
+            const mkts = getDayMarketList(dayLabel, CalendarCtrl._month, CalendarCtrl._year);
+            const label = market || (mkts.length > 0 ? mkts[0] : dayLabel);
             showSalesToast('📅 ' + label);
         }, 320);
     },
