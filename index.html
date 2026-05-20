@@ -1405,19 +1405,23 @@
             _targetRef: null, // Firestore ref ที่จะ save
 
             open: async (planMode) => {
-                // planMode: 'active' | 'draft:YYYY_MM'
+                // planMode: 'active' | 'draft:YYYY_MM' | 'history:YYYY_MM'
                 const modal = document.getElementById('calendar-config-modal');
                 modal.classList.remove('hidden');
 
+                // ใช้ App._planMode ปัจจุบันเสมอ ถ้าไม่ได้ส่งมา
+                const _pm = planMode || App._planMode || 'active';
                 const lbl = document.getElementById('cal-modal-plan-label');
-                if (planMode === 'active') {
-                    lbl.textContent = 'Plan ปัจจุบัน';
+
+                if (_pm === 'active') {
+                    const _now = new Date();
+                    lbl.textContent = _now.toLocaleDateString('th-TH', { year:'numeric', month:'long' });
                     CalendarAdmin._targetRef = App.dbRef;
                 } else {
-                    const ym = planMode.replace('draft:', '');
+                    const ym = _pm.replace('draft:','').replace('history:','');
                     const [y, m] = ym.split('_');
                     const lbStr = new Date(+y, +m-1, 1).toLocaleDateString('th-TH', { year:'numeric', month:'long' });
-                    lbl.textContent = `Draft ${lbStr}`;
+                    lbl.textContent = lbStr;
                     CalendarAdmin._targetRef = App.draftsCol().doc(ym);
                 }
 
