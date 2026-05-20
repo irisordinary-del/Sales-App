@@ -312,24 +312,36 @@ const App = {
 
         LoadBar.setProgress(30, 'โหลดข้อมูลร้านทุกสาย...');
 
-        // โหลดแบบ batch ทีละ 5 สาย — ไม่ยิง 15 requests พร้อมกัน
-        const BATCH = 5;
-        let loaded = 0;
+        // โหลดทุกสายพร้อมกัน
         State.allRoutes = {};
         State.allStores = [];
-        for (let i = 0; i < routes.length; i += BATCH) {
-            const chunk = routes.slice(i, i + BATCH);
-            await Promise.all(chunk.map(async (routeId) => {
-                try {
-                    const rd = await routeColRef.doc(routeId).get();
-                    State.allRoutes[routeId] = rd.exists ? (rd.data().stores || []) : [];
-                } catch(e) { State.allRoutes[routeId] = []; }
-            }));
-            loaded += chunk.length;
-            LoadBar.setProgress(30 + Math.round(loaded / routes.length * 40), `โหลด ${loaded}/${routes.length} สาย...`);
-        }
+        let _supLoaded = 0;
+        await Promise.all(routes.map(async (routeId) => {
+            try {
+                const rd = await App._getWithTimeout(routeColRef.doc(routeId), 10000);
+                State.allRoutes[routeId] = rd.exists ? (rd.data().stores || []) : [];
+            } catch(e) { State.allRoutes[routeId] = []; }
+            _supLoaded++;
+            LoadBar.setProgress(30 + Math.round(_supLoaded / routes.length * 40), `โหลด ${_supLoaded}/${routes.length} สาย...`);
+        }));
         // รวมทุกร้านสำหรับ Tab2
         State.allStores = Object.values(State.allRoutes).flat();
+
+        // onSnapshot ทุกสาย — Admin อัปโหลดใหม่ → allStores อัปเดตอัตโนมัติ
+        App._supUnsubs = (App._supUnsubs || []);
+        App._supUnsubs.forEach(u => { try { u(); } catch(e) {} });
+        App._supUnsubs = routes.map(routeId =>
+            routeColRef.doc(routeId).onSnapshot(rd => {
+                if (!rd.exists) return;
+                State.allRoutes[routeId] = rd.data().stores || [];
+                State.allStores = Object.values(State.allRoutes).flat();
+                if (State.isLoaded) {
+                    Processor.run();
+                    const popup = document.getElementById('calendar-popup');
+                    if (popup && popup.style.display !== 'none') CalendarCtrl.render();
+                }
+            }, () => {})
+        );
 
         LoadBar.setProgress(75, 'โหลดยอดขาย...');
 
@@ -485,7 +497,14 @@ const App = {
         App._unsubRoute = routeColRef.doc(State.myRoute).onSnapshot(rd => {
             if (!rd.exists) return;
             State.allStores = rd.data().stores || [];
-            if (State.isLoaded) Processor.run();
+            if (State.isLoaded) {
+                Processor.run();
+                // re-render ปฏิทินถ้าเปิดอยู่ (Admin อัปโหลดใหม่ → ปฏิทินอัปเดตทันที)
+                const popup = document.getElementById('calendar-popup');
+                if (popup && popup.style.display !== 'none') {
+                    CalendarCtrl.render();
+                }
+            }
         });
 
         LoadBar.setProgress(30, 'กำลังโหลดข้อมูลยอดขาย...');
@@ -510,7 +529,19 @@ function trimMarketName(raw) {
 }
 
 // คืน array ชื่อตลาด unique ในวันนั้น
-function getDayMarketList(day) {
+// เฉพาะเดือนที่โหลดข้อมูลอยู่เท่านั้น ไม่แสดงข้ามเดือน
+function getDayMarketList(day, forMonth, forYear) {
+    // ถ้าส่ง forMonth/forYear มา ให้เช็คว่าตรงกับเดือนที่โหลดไหม
+    if (forMonth !== undefined && forYear !== undefined) {
+        const loadedYM = State.activePlanYM || (() => {
+            const d = new Date();
+            return `${d.getFullYear()}_${String(d.getMonth()+1).padStart(2,'0')}`;
+        })();
+        const [ly, lm] = loadedYM.split('_').map(Number);
+        if (forYear !== ly || forMonth !== lm - 1) {
+            return []; // เดือนอื่น → ไม่แสดงชื่อตลาด
+        }
+    }
     const names = new Set();
     State.allStores.forEach(s => {
         if (s.days && s.days.includes(day) && s.marketName && s.marketName.trim())
@@ -965,7 +996,7 @@ const CalendarCtrl = {
 
             const hasRoute = dayLabel && State.allStores.some(s => s.days && s.days.includes(dayLabel));
             const clickHandler = dayLabel ? `CalendarCtrl.goToDay('${dayLabel}')` : '';
-            const mktsInCell = dayLabel ? getDayMarketList(dayLabel) : [];
+            const mktsInCell = dayLabel ? getDayMarketList(dayLabel, month, year) : [];
             const mktLabel = mktsInCell.length > 0 ? mktsInCell[0] : '';
             const mktMore  = mktsInCell.length > 1 ? '+' + (mktsInCell.length-1) : '';
             // date mode: dayLabel = "Day 4" และ d = 4 → ตัวเลขเหมือนกัน ไม่ต้องแสดง badge ซ้ำ
@@ -1027,7 +1058,9 @@ const CalendarCtrl = {
 
     // Bottom Sheet แสดงตลาดในวันนั้น
     showDaySheet: (dayLabel) => {
-        const mkts = getDayMarketList(dayLabel);
+        const _sheetYear  = CalendarCtrl._year;
+        const _sheetMonth = CalendarCtrl._month;
+        const mkts = getDayMarketList(dayLabel, _sheetMonth, _sheetYear);
         const storeCount = State.allStores.filter(s => s.days && s.days.includes(dayLabel)).length;
         const now = new Date();
         const dayNum = parseInt(dayLabel.replace('Day ',''));
