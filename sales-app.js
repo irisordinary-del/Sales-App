@@ -51,7 +51,7 @@ let map = null, mapMarkers = [], sortableList = null, markerClusterGroup = null;
 const VALID_TABS = ['dashboard', 'stores', 'route'];
 const DEFAULT_TAB = 'dashboard';
 const FORCE_DEFAULT_TAB = true; // เริ่มที่ dashboard เสมอ
-const TAB_STORAGE_KEY = `sales_last_tab_${Auth.getSession()?.username || 'guest'}`;
+const TAB_STORAGE_KEY = 'sales_last_tab';
 
 const UI = {
     // ✅ จำ tab ล่าสุดใน localStorage
@@ -215,7 +215,6 @@ const UI = {
 
 const App = {
     checkAuth: () => {
-        Auth.renewSession?.(); // ต่ออายุ session ถ้าใกล้หมด
         const session = Auth.getSession();
         const supervisorRoles = ['admin', 'supervisor', 'route_supervisor', 'asm'];
         if (session && session.role === 'sales') {
@@ -238,15 +237,6 @@ const App = {
 
     // ─── isSupervisor helper ──────────────────────────────────────────────
     isSupervisor: () => ['route_supervisor','asm'].includes(State.viewMode),
-
-
-    // ─── Firestore get() with timeout — ป้องกัน hang นานเกิน ───────────
-    _getWithTimeout: (ref, ms = 8000) => {
-        return Promise.race([
-            ref.get(),
-            new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))
-        ]);
-    },
 
     // ─── Start สำหรับ route_supervisor / asm ─────────────────────────────
     startSupervisor: async () => {
@@ -277,7 +267,7 @@ const App = {
 
         // โหลด routeList จาก metadata
         try {
-            const metaSnap = await App._getWithTimeout(db.collection('appData').doc(_centerDocId));
+            const metaSnap = await db.collection('appData').doc(_centerDocId).get();
             State.routeList = metaSnap.exists ? (metaSnap.data().routeList || []) : [];
         } catch(e) { State.routeList = []; }
 
@@ -285,34 +275,33 @@ const App = {
         const _nowYM = (() => { const d = new Date(); return `${d.getFullYear()}_${String(d.getMonth()+1).padStart(2,'0')}`; })();
         let routeColRef;
         try {
-            const _draftDoc = await App._getWithTimeout(
-                db.collection('appData').doc(_centerDocId).collection('drafts').doc(_nowYM), 5000
-            );
+            const _draftDoc = await db.collection('appData').doc(_centerDocId).collection('drafts').doc(_nowYM).get();
             routeColRef = _draftDoc.exists
                 ? db.collection('appData').doc(_centerDocId).collection('drafts').doc(_nowYM).collection('routes')
                 : db.collection('appData').doc(_centerDocId).collection('routes');
             State.activePlanMode = _draftDoc.exists ? 'draft' : 'active';
         } catch(e) {
-            // timeout หรือ error → ใช้ active plan
             routeColRef = db.collection('appData').doc(_centerDocId).collection('routes');
-            State.activePlanMode = 'active';
         }
 
         LoadBar.setProgress(30, 'โหลดข้อมูลร้านทุกสาย...');
 
-        // โหลดทุกสายพร้อมกัน — ลด latency จาก sequential batching
-        const routes = State.routeList; // fix: declare routes ก่อนใช้
+        // โหลดแบบ batch ทีละ 5 สาย — ไม่ยิง 15 requests พร้อมกัน
+        const BATCH = 5;
+        let loaded = 0;
         State.allRoutes = {};
         State.allStores = [];
-        let _loaded = 0;
-        await Promise.all(routes.map(async (routeId) => {
-            try {
-                const rd = await App._getWithTimeout(routeColRef.doc(routeId), 10000);
-                State.allRoutes[routeId] = rd.exists ? (rd.data().stores || []) : [];
-            } catch(e) { State.allRoutes[routeId] = []; }
-            _loaded++;
-            LoadBar.setProgress(30 + Math.round(_loaded / routes.length * 40), `โหลด ${_loaded}/${routes.length} สาย...`);
-        }));
+        for (let i = 0; i < routes.length; i += BATCH) {
+            const chunk = routes.slice(i, i + BATCH);
+            await Promise.all(chunk.map(async (routeId) => {
+                try {
+                    const rd = await routeColRef.doc(routeId).get();
+                    State.allRoutes[routeId] = rd.exists ? (rd.data().stores || []) : [];
+                } catch(e) { State.allRoutes[routeId] = []; }
+            }));
+            loaded += chunk.length;
+            LoadBar.setProgress(30 + Math.round(loaded / routes.length * 40), `โหลด ${loaded}/${routes.length} สาย...`);
+        }
         // รวมทุกร้านสำหรับ Tab2
         State.allStores = Object.values(State.allRoutes).flat();
 
@@ -486,15 +475,27 @@ const App = {
     }
 };
 
-// รวบรวมชื่อตลาด (marketName) ของร้านทั้งหมดในวันที่กำหนด
-// คืน string เช่น "ตลาดสด · ตลาดนัด" หรือ "" ถ้าไม่มีข้อมูล
-function getDayMarkets(day) {
+// ตัด prefix รหัสสาย+วัน ออกจากชื่อตลาด
+// "402C01 D02 บ้านโป่ง 2" → "บ้านโป่ง 2"
+function trimMarketName(raw) {
+    if (!raw) return '';
+    // ตัด pattern "XXXXXXX Dnn " ออก
+    return raw.replace(/^[A-Z0-9]+\s+D\d+\s+/i, '').trim();
+}
+
+// รวบรวมชื่อตลาด unique ในวันนั้น (คืน array)
+function getDayMarketList(day) {
     const names = new Set();
     State.allStores.forEach(s => {
         if (s.days && s.days.includes(day) && s.marketName && s.marketName.trim())
-            names.add(s.marketName.trim());
+            names.add(trimMarketName(s.marketName));
     });
-    return Array.from(names).join(' · ');
+    return Array.from(names).filter(Boolean).sort();
+}
+
+// คืน string สำหรับแสดงใน header
+function getDayMarkets(day) {
+    return getDayMarketList(day).join(' · ');
 }
 
 const Processor = {
@@ -806,6 +807,14 @@ const CalendarCtrl = {
         const cfg = State.calendarConfig;
         if (!cfg) return null;
 
+        // โหมด date: Day column = วันที่จริง เช่น Day 2 = วันที่ 2
+        if (cfg.mode === 'date') {
+            // ตรวจว่ามีร้านวิ่งวันนี้ไหม
+            const label = `Day ${dateNum}`;
+            const hasStores = State.allStores.some(s => s.days && s.days.includes(label));
+            return hasStores ? label : null;
+        }
+
         if (cfg.mode === 'fixed') {
             // โหมด B: admin กำหนดเองว่าวันที่เท่าไหร่ = Day อะไร
             return cfg.mapping ? (cfg.mapping[String(dateNum)] || null) : null;
@@ -925,23 +934,30 @@ const CalendarCtrl = {
             else if (isHoliday) { bgColor = '#fef2f2'; textColor = '#dc2626'; borderColor = '#fecaca'; }
             else if (isWeekend) { bgColor = '#f9fafb'; textColor = '#6b7280'; }
 
-            const hasRoute = dayLabel && State.allStores.some(s => s.days && s.days.includes(dayLabel));
+            const mkts = dayLabel ? getDayMarketList(dayLabel) : [];
+            const mktText = mkts.length > 0 ? mkts[0] : '';
+            const mktMore = mkts.length > 1 ? `+${mkts.length-1}` : '';
             const clickHandler = dayLabel ? `CalendarCtrl.goToDay('${dayLabel}')` : '';
 
             html += `
             <div onclick="${clickHandler}"
                 style="border-radius:10px;border:1px solid ${borderColor};background:${bgColor};
                        padding:4px 2px;text-align:center;cursor:${dayLabel ? 'pointer' : 'default'};
-                       min-height:52px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;
-                       gap:2px;transition:opacity 0.1s;${dayLabel ? 'active:opacity:0.7;' : ''}">
-                <div style="font-size:12px;font-weight:${isToday ? '900' : '700'};color:${textColor};line-height:1.2;">${d}</div>
+                       min-height:58px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;
+                       gap:1px;transition:background 0.1s;-webkit-tap-highlight-color:rgba(0,0,0,0.08);">
+                <div style="font-size:12px;font-weight:${isToday ? '900' : '700'};color:${textColor};line-height:1.4;">${d}</div>
                 ${dayLabel ? `
                 <div style="font-size:9px;font-weight:800;padding:1px 5px;border-radius:5px;
                             background:${isToday ? 'rgba(255,255,255,0.25)' : '#ede9fe'};
-                            color:${isToday ? '#fff' : '#5b21b6'};white-space:nowrap;">
+                            color:${isToday ? '#fff' : '#5b21b6'};white-space:nowrap;line-height:1.3;">
                     ${dayLabel.replace('Day ','')}
                 </div>
-                ${hasRoute ? `<div style="width:5px;height:5px;border-radius:50%;background:${isToday ? '#fff' : '#2563eb'};margin-top:1px;"></div>` : ''}
+                ${mktText ? `
+                <div style="font-size:8px;color:${isToday ? 'rgba(255,255,255,0.9)' : '#2563eb'};
+                            font-weight:700;line-height:1.2;padding:0 3px;
+                            overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:50px;">
+                    ${mktText}${mktMore ? '<span style="color:#9ca3af"> ' + mktMore + '</span>' : ''}
+                </div>` : ''}
                 ` : (isHoliday ? `<div style="font-size:9px;color:#dc2626;">หยุด</div>` : '')}
             </div>`;
         }
@@ -949,16 +965,22 @@ const CalendarCtrl = {
         container.innerHTML = html;
     },
 
-    // กดวันในปฏิทิน → navigate ไปหน้าคิวงาน
+    // กดวันในปฏิทิน → ปิด popup + ไปหน้าคิวงาน + map refresh
     goToDay: (dayLabel) => {
-        // set currentDay แล้วไปหน้า route
         State.currentDay = dayLabel;
-        // re-render route list
+        // sync day-select dropdown
         const el = document.getElementById('day-select');
         if (el) el.value = dayLabel;
+        // ปิด calendar popup ก่อน navigate
+        CalendarCtrl.closePopup?.();
+        // render คิวงานและแผนที่
         Processor.routeList();
+        State.mapNeedsFit = true;
         UI.switchTab('route');
-        showSalesToast('📅 ' + dayLabel);
+        // แสดงชื่อตลาดใน toast
+        const mkts = getDayMarketList(dayLabel);
+        const label = mkts.length > 0 ? mkts.join(' · ') : dayLabel;
+        showSalesToast('📅 ' + label);
     },
 
     prevMonth: () => {

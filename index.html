@@ -5,7 +5,6 @@
 <head>
 
     <meta charset="UTF-8">
-    <link rel="icon" href="/icons/icon-192.png" type="image/png">
 
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 
@@ -1304,12 +1303,18 @@
                 <!-- โหมด -->
                 <div>
                     <label class="block text-xs font-bold text-gray-500 uppercase mb-2">โหมดปฏิทิน</label>
-                    <div class="grid grid-cols-2 gap-2">
+                    <div class="grid grid-cols-3 gap-2">
                         <button id="cal-mode-cycle" onclick="CalendarAdmin.setMode('cycle')"
                             class="border-2 border-indigo-500 bg-indigo-50 rounded-xl p-3 text-center cursor-pointer transition">
                             <div class="text-xl mb-1">🔄</div>
                             <div class="text-xs font-black text-indigo-800">Cycle D1-24</div>
                             <div class="text-[10px] text-indigo-600 mt-0.5">ต่อเนื่องนับวัน</div>
+                        </button>
+                        <button id="cal-mode-date" onclick="CalendarAdmin.setMode('date')"
+                            class="border-2 border-gray-200 bg-gray-50 rounded-xl p-3 text-center cursor-pointer transition">
+                            <div class="text-xl mb-1">📅</div>
+                            <div class="text-xs font-black text-gray-700">วันที่จริง</div>
+                            <div class="text-[10px] text-gray-500 mt-0.5">Day = วันที่ในเดือน</div>
                         </button>
                         <button id="cal-mode-fixed" onclick="CalendarAdmin.setMode('fixed')"
                             class="border-2 border-gray-200 bg-gray-50 rounded-xl p-3 text-center cursor-pointer transition">
@@ -1403,7 +1408,9 @@
                     CalendarAdmin._fixedRows = [];
                     if (cfg) {
                         CalendarAdmin.setMode(cfg.mode || 'cycle');
-                        if (cfg.mode === 'cycle') {
+                        if (cfg.mode === 'date') {
+                            // ไม่มี config พิเศษ — setMode พอ
+                        } else if (cfg.mode === 'cycle') {
                             document.getElementById('cal-start-date').value    = cfg.startDay    || 1;
                             document.getElementById('cal-start-day-num').value = cfg.startDayNum || 1;
                             document.getElementById('cal-cycle-days').value    = cfg.cycleDays   || 24;
@@ -1427,9 +1434,21 @@
             setMode: (mode) => {
                 CalendarAdmin._mode = mode;
                 const cycleBtn = document.getElementById('cal-mode-cycle');
+                const dateBtn  = document.getElementById('cal-mode-date');
                 const fixedBtn = document.getElementById('cal-mode-fixed');
                 const cycleSec = document.getElementById('cal-cycle-section');
                 const fixedSec = document.getElementById('cal-fixed-section');
+                const activeClass = 'border-2 border-indigo-500 bg-indigo-50 rounded-xl p-3 text-center cursor-pointer transition';
+                const inactiveClass = 'border-2 border-gray-200 bg-gray-50 rounded-xl p-3 text-center cursor-pointer transition';
+                if (dateBtn) dateBtn.className = inactiveClass;
+                if (mode === 'date') {
+                    if (cycleBtn) cycleBtn.className = inactiveClass;
+                    if (dateBtn)  dateBtn.className  = activeClass;
+                    if (fixedBtn) fixedBtn.className = inactiveClass;
+                    if (cycleSec) cycleSec.classList.add('hidden');
+                    if (fixedSec) fixedSec.classList.add('hidden');
+                    return;
+                }
                 if (mode === 'cycle') {
                     cycleBtn.className = 'border-2 border-indigo-500 bg-indigo-50 rounded-xl p-3 text-center cursor-pointer transition';
                     fixedBtn.className = 'border-2 border-gray-200 bg-gray-50 rounded-xl p-3 text-center cursor-pointer transition';
@@ -1501,7 +1520,9 @@
             save: async () => {
                 if (!CalendarAdmin._targetRef) return;
                 let cfg;
-                if (CalendarAdmin._mode === 'cycle') {
+                if (CalendarAdmin._mode === 'date') {
+                    cfg = { mode: 'date' };
+                } else if (CalendarAdmin._mode === 'cycle') {
                     cfg = {
                         mode:        'cycle',
                         startDay:    parseInt(document.getElementById('cal-start-date').value) || 1,
