@@ -291,7 +291,6 @@ const App = {
         let loaded = 0;
         State.allRoutes = {};
         State.allStores = [];
-        const routes = State.routeList; // fix: routes was not defined
         for (let i = 0; i < routes.length; i += BATCH) {
             const chunk = routes.slice(i, i + BATCH);
             await Promise.all(chunk.map(async (routeId) => {
@@ -646,7 +645,17 @@ const Processor = {
         });
         const _centerMatch = State.myRoute.match(/^(\d+)/);
         const _centerDocId = _centerMatch ? (_centerMatch[1] + '_main') : 'v1_main';
-        db.collection('appData').doc(_centerDocId).collection('routes').doc(State.myRoute).set({ stores: updated });
+        // ใช้ path ที่ถูกต้องตาม planMode ที่โหลดมา (draft หรือ active)
+        let _writeRef;
+        if (State.activePlanMode === 'draft' && State.activePlanYM) {
+            _writeRef = db.collection('appData').doc(_centerDocId)
+                .collection('drafts').doc(State.activePlanYM)
+                .collection('routes').doc(State.myRoute);
+        } else {
+            _writeRef = db.collection('appData').doc(_centerDocId)
+                .collection('routes').doc(State.myRoute);
+        }
+        _writeRef.set({ stores: updated });
     }
 };
 
@@ -1405,8 +1414,17 @@ const SupervisorUI = {
         State.allRoutes[routeId] = updated;
         const centerMatch  = routeId.match(/^(\d+)/);
         const centerDocId  = centerMatch ? (centerMatch[1] + '_main') : 'v1_main';
-        db.collection('appData').doc(centerDocId).collection('routes').doc(routeId)
-            .set({ stores: updated })
+        // ใช้ path ตาม planMode (draft หรือ active)
+        let _writeRef;
+        if (State.activePlanMode === 'draft' && State.activePlanYM) {
+            _writeRef = db.collection('appData').doc(centerDocId)
+                .collection('drafts').doc(State.activePlanYM)
+                .collection('routes').doc(routeId);
+        } else {
+            _writeRef = db.collection('appData').doc(centerDocId)
+                .collection('routes').doc(routeId);
+        }
+        _writeRef.set({ stores: updated })
             .then(() => showSalesToast('✅ บันทึกลำดับเรียบร้อย'))
             .catch(e => showSalesToast('❌ บันทึกไม่สำเร็จ: ' + e.message, true));
     },
