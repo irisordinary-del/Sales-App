@@ -959,22 +959,36 @@ const CalendarCtrl = {
 
             const hasRoute = dayLabel && State.allStores.some(s => s.days && s.days.includes(dayLabel));
             const clickHandler = dayLabel ? `CalendarCtrl.goToDay('${dayLabel}')` : '';
+            const mktsInCell = dayLabel ? getDayMarketList(dayLabel) : [];
+            const mktLabel = mktsInCell.length > 0 ? mktsInCell[0] : '';
+            const mktMore  = mktsInCell.length > 1 ? '+' + (mktsInCell.length-1) : '';
+            // date mode: dayLabel = "Day 4" และ d = 4 → ตัวเลขเหมือนกัน ไม่ต้องแสดง badge ซ้ำ
+            const cfg = State.calendarConfig;
+            const isDateMode = !cfg || cfg.mode === 'date';
+            const dayNum = dayLabel ? parseInt(dayLabel.replace('Day ','')) : null;
+            const isSameAsDate = isDateMode && dayNum === d;
 
             html += `
             <div onclick="${clickHandler}"
                 style="border-radius:10px;border:1px solid ${borderColor};background:${bgColor};
                        padding:4px 2px;text-align:center;cursor:${dayLabel ? 'pointer' : 'default'};
-                       min-height:52px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;
-                       gap:2px;transition:opacity 0.1s;${dayLabel ? 'active:opacity:0.7;' : ''}">
-                <div style="font-size:12px;font-weight:${isToday ? '900' : '700'};color:${textColor};line-height:1.2;">${d}</div>
+                       min-height:56px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;
+                       gap:2px;transition:background 0.1s;-webkit-tap-highlight-color:rgba(0,0,0,0.08);">
+                <div style="font-size:13px;font-weight:${isToday ? '900' : '700'};color:${textColor};line-height:1.3;">${d}</div>
                 ${dayLabel ? `
+                ${!isSameAsDate ? `
                 <div style="font-size:9px;font-weight:800;padding:1px 5px;border-radius:5px;
                             background:${isToday ? 'rgba(255,255,255,0.25)' : '#ede9fe'};
-                            color:${isToday ? '#fff' : '#5b21b6'};white-space:nowrap;">
+                            color:${isToday ? '#fff' : '#5b21b6'};white-space:nowrap;line-height:1.3;">
                     ${dayLabel.replace('Day ','')}
-                </div>
-                ${hasRoute ? `<div style="width:5px;height:5px;border-radius:50%;background:${isToday ? '#fff' : '#2563eb'};margin-top:1px;"></div>` : ''}
-                ` : (isHoliday ? `<div style="font-size:9px;color:#dc2626;">หยุด</div>` : '')}
+                </div>` : ''}
+                ${hasRoute ? `<div style="width:5px;height:5px;border-radius:50%;background:${isToday ? '#fff' : '#2563eb'};flex-shrink:0;"></div>` : ''}
+                ${mktLabel ? `<div style="font-size:8px;color:${isToday ? 'rgba(255,255,255,0.85)' : '#2563eb'};font-weight:700;
+                                          line-height:1.1;padding:0 2px;max-width:48px;
+                                          overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                    ${mktLabel}${mktMore ? '<span style=color:#9ca3af> ' + mktMore + '</span>' : ''}
+                </div>` : ''}
+                ` : (isHoliday ? `<div style="font-size:9px;color:#dc2626;font-weight:700;">หยุด</div>` : '')}
             </div>`;
         }
 
