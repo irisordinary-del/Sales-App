@@ -637,17 +637,6 @@ const App = {
     },
 
 
-    // ─── Helper: ตรวจว่าค่า day เป็น date-mode หรือ cycle-mode ────────────
-    // date mode: มีค่า > 24 หรือมีค่า 29/30/31, หรือไม่มี calendarConfig
-    // cycle mode: ค่า 1-24 sequential และมี calendarConfig.mode = 'cycle'
-    _isDateModeDay: (dayNum, calCfg) => {
-        if (!calCfg) return true; // ไม่มี config → treat เป็น date
-        if (calCfg.mode === 'date') return true;
-        if (calCfg.mode === 'cycle' || calCfg.mode === 'fixed') return false;
-        // auto-detect: ถ้า day > 24 หรือมีค่าเฉพาะที่บ่งบอก date pattern
-        return dayNum > 24;
-    },
-
     // ─── Helper: แปลง cycle-day (1-24) → calendar day โดยคำนวณจาก calendarConfig
     // input:  assignedDayNum = 1-24 (จากไฟล์ Excel)
     // output: 'Day N' ที่ถูกต้องตาม calendarConfig ของ draft/active นั้น
@@ -728,12 +717,8 @@ const App = {
                     const freq = (freqCol !== -1 && String(row[freqCol] || '').trim().toUpperCase().includes('2')) ? 2 : 1;
                     const rawDay = (dayCol !== -1 && row[dayCol]) ? String(row[dayCol]).trim() : '';
                     const dayNum = rawDay ? parseInt(rawDay.replace(/[^0-9]/g, '')) : NaN;
-                    // detect mode: date mode = calCfg.mode === 'date' หรือ auto-detect จากค่า
-                    // date mode → Day N หมายถึงวันที่ N ของเดือน → ใช้ตรงๆ ไม่ต้อง remap
-                    const isDateMode = calCfg?.mode === 'date' || App._isDateModeDay(dayNum, calCfg);
-                    const assignedDay = !isNaN(dayNum)
-                        ? (isDateMode ? `Day ${dayNum}` : App._mapCycleDayToCalDay(dayNum, calCfg))
-                        : '';
+                    // remap cycle-day → calendar-day ตาม calendarConfig (ข้ามวันหยุด)
+                    const assignedDay = !isNaN(dayNum) ? App._mapCycleDayToCalDay(dayNum, calCfg) : '';
                     const assignedSeq = (seqCol !== -1 && row[seqCol]) ? parseInt(String(row[seqCol]).replace(/[^0-9]/g, '')) : NaN;
                     const isValidDay = !!assignedDay;
 
@@ -792,8 +777,6 @@ const App = {
                 } catch(e) {
                     _processUpload(null);
                 }
-                UI.showSaveToast(`✅ โหลด ${finalArray.length} ร้าน พร้อมการจัดวันวิ่งสำเร็จ`);
-
             } catch (err) {
                 UI.showErrorToast('ขัดข้อง: ' + err.message);
             }
