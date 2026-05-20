@@ -51,7 +51,7 @@ let map = null, mapMarkers = [], sortableList = null, markerClusterGroup = null;
 const VALID_TABS = ['dashboard', 'stores', 'route'];
 const DEFAULT_TAB = 'dashboard';
 const FORCE_DEFAULT_TAB = true; // เริ่มที่ dashboard เสมอ
-const TAB_STORAGE_KEY = 'sales_last_tab';
+const TAB_STORAGE_KEY = `sales_last_tab_${Auth.getSession()?.username || 'guest'}`;
 
 const UI = {
     // ✅ จำ tab ล่าสุดใน localStorage
@@ -215,6 +215,7 @@ const UI = {
 
 const App = {
     checkAuth: () => {
+        Auth.renewSession?.();
         const session = Auth.getSession();
         const supervisorRoles = ['admin', 'supervisor', 'route_supervisor', 'asm'];
         if (session && session.role === 'sales') {
@@ -239,6 +240,14 @@ const App = {
     isSupervisor: () => ['route_supervisor','asm'].includes(State.viewMode),
 
     // ─── Start สำหรับ route_supervisor / asm ─────────────────────────────
+    // Firestore get() with timeout
+    _getWithTimeout: (ref, ms = 8000) => {
+        return Promise.race([
+            ref.get(),
+            new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))
+        ]);
+    },
+
     startSupervisor: async () => {
         document.getElementById('main-header').classList.remove('hidden');
         document.getElementById('main-content').classList.remove('hidden');
@@ -418,30 +427,20 @@ const App = {
         const _centerDocId = _centerMatch ? (_centerMatch[1] + '_main') : 'v1_main';
         docMain = db.collection('appData').doc(_centerDocId);
 
-        // ── Auto-switch: เช็ค draft เดือนนี้ และเดือนถัดไป ────────────────
-        const _getYM = (offsetMonths = 0) => {
-            const d = new Date();
-            d.setMonth(d.getMonth() + offsetMonths);
+        // ── Auto-switch: เช็ค draft เดือนนี้ + เดือนถัดไป ────────────────
+        const _getYM = (offset = 0) => {
+            const d = new Date(); d.setMonth(d.getMonth() + offset);
             return `${d.getFullYear()}_${String(d.getMonth()+1).padStart(2,'0')}`;
         };
-        const _nowYM  = _getYM(0);  // เดือนปัจจุบัน
-        const _nextYM = _getYM(1);  // เดือนถัดไป
-
-        // เช็ค draft เดือนนี้ก่อน → ถ้าไม่มี เช็คเดือนถัดไป → fallback active
+        const _nowYM  = _getYM(0);
+        const _nextYM = _getYM(1);
         let routeColRef;
         try {
-            // โหลดทั้ง 2 เดือนพร้อมกัน
             const [_draftNow, _draftNext] = await Promise.all([
-                App._getWithTimeout(db.collection('appData').doc(_centerDocId)
-                    .collection('drafts').doc(_nowYM), 5000),
-                App._getWithTimeout(db.collection('appData').doc(_centerDocId)
-                    .collection('drafts').doc(_nextYM), 5000),
+                db.collection('appData').doc(_centerDocId).collection('drafts').doc(_nowYM).get(),
+                db.collection('appData').doc(_centerDocId).collection('drafts').doc(_nextYM).get(),
             ]);
-
-            let _useYM = null;
-            if (_draftNow.exists)       _useYM = _nowYM;   // draft เดือนนี้ก่อน
-            else if (_draftNext.exists) _useYM = _nextYM;  // ถ้าไม่มี → ลองเดือนหน้า
-
+            const _useYM = _draftNow.exists ? _nowYM : (_draftNext.exists ? _nextYM : null);
             if (_useYM) {
                 routeColRef = db.collection('appData').doc(_centerDocId)
                     .collection('drafts').doc(_useYM).collection('routes');
@@ -450,7 +449,6 @@ const App = {
                 App.loadCalendarConfig(_centerDocId, _useYM, 'drafts');
                 LoadBar.setProgress(15, `📅 โหลด Plan ${_useYM}...`);
             } else {
-                // ไม่มี draft เลย → ใช้ active
                 routeColRef = db.collection('appData').doc(_centerDocId).collection('routes');
                 State.activePlanYM   = _nowYM;
                 State.activePlanMode = 'active';
@@ -505,13 +503,24 @@ const App = {
 
 // รวบรวมชื่อตลาด (marketName) ของร้านทั้งหมดในวันที่กำหนด
 // คืน string เช่น "ตลาดสด · ตลาดนัด" หรือ "" ถ้าไม่มีข้อมูล
-function getDayMarkets(day) {
+// ตัด prefix "402C01 D02 " ออกจากชื่อตลาด → "บ้านโป่ง 2"
+function trimMarketName(raw) {
+    if (!raw) return '';
+    return raw.replace(/^[A-Z0-9]+\s+D\d+\s+/i, '').trim();
+}
+
+// คืน array ชื่อตลาด unique ในวันนั้น
+function getDayMarketList(day) {
     const names = new Set();
     State.allStores.forEach(s => {
         if (s.days && s.days.includes(day) && s.marketName && s.marketName.trim())
-            names.add(s.marketName.trim());
+            names.add(trimMarketName(s.marketName));
     });
-    return Array.from(names).join(' · ');
+    return Array.from(names).filter(Boolean).sort();
+}
+
+function getDayMarkets(day) {
+    return getDayMarketList(day).join(' · ');
 }
 
 const Processor = {
@@ -821,7 +830,13 @@ const CalendarCtrl = {
     // คำนวณว่าวันที่ date ตรงกับ Day อะไร
     getDayLabel: (dateNum) => {
         const cfg = State.calendarConfig;
-        if (!cfg) return null;
+
+        // date mode: Day N = วันที่ N จริงๆ ของเดือน
+        if (!cfg || cfg.mode === 'date') {
+            const label = `Day ${dateNum}`;
+            const hasStores = State.allStores.some(s => s.days && s.days.includes(label));
+            return hasStores ? label : null;
+        }
 
         if (cfg.mode === 'fixed') {
             // โหมด B: admin กำหนดเองว่าวันที่เท่าไหร่ = Day อะไร
@@ -966,16 +981,20 @@ const CalendarCtrl = {
         container.innerHTML = html;
     },
 
-    // กดวันในปฏิทิน → navigate ไปหน้าคิวงาน
+    // กดวันในปฏิทิน → ปิด popup + ไปหน้าคิวงาน + แสดงชื่อตลาด
     goToDay: (dayLabel) => {
-        // set currentDay แล้วไปหน้า route
-        State.currentDay = dayLabel;
-        // re-render route list
-        const el = document.getElementById('day-select');
-        if (el) el.value = dayLabel;
-        Processor.routeList();
-        UI.switchTab('route');
-        showSalesToast('📅 ' + dayLabel);
+        CalendarCtrl.closePopup();
+        setTimeout(() => {
+            State.currentDay = dayLabel;
+            const el = document.getElementById('day-select');
+            if (el) el.value = dayLabel;
+            State.mapNeedsFit = true;
+            Processor.routeList();
+            UI.switchTab('route');
+            const mkts = getDayMarketList(dayLabel);
+            const label = mkts.length > 0 ? mkts.join(' · ') : dayLabel;
+            showSalesToast('📅 ' + label);
+        }, 320);
     },
 
     prevMonth: () => {
@@ -1014,18 +1033,7 @@ const CalendarCtrl = {
         setTimeout(() => { if (popup) popup.style.display = 'none'; }, 300);
     },
 
-    // override goToDay ให้ปิด popup ก่อน navigate
-    goToDay: (dayLabel) => {
-        CalendarCtrl.closePopup();
-        setTimeout(() => {
-            State.currentDay = dayLabel;
-            const el = document.getElementById('day-select');
-            if (el) el.value = dayLabel;
-            Processor.routeList();
-            UI.switchTab('route');
-            showSalesToast('📅 ' + dayLabel);
-        }, 320);
-    }
+
 };
 
 const MapCtrl = {
