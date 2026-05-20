@@ -1,4 +1,3 @@
-// sales-app.js — planCache per month fix — 2026-05-20
 // === sales-app.js ===
 
 // ✅ Inline toast
@@ -880,6 +879,35 @@ const CalendarCtrl = {
     },
 
     // คำนวณว่าวันที่ date ตรงกับ Day อะไร
+    // getDayLabelForCfg: ใช้ calendarConfig และ stores ของเดือนที่ระบุ
+    getDayLabelForCfg: (dateNum, cfg, stores, year, month) => {
+        if (!cfg || cfg.mode === 'date') {
+            const label = `Day ${dateNum}`;
+            return (stores || State.allStores).some(s => s.days && s.days.includes(label)) ? label : null;
+        }
+        if (cfg.mode === 'fixed') {
+            return cfg.mapping ? (cfg.mapping[String(dateNum)] || null) : null;
+        }
+        if (cfg.mode === 'cycle') {
+            const startDate  = parseInt(cfg.startDay || 1);
+            const holidays   = cfg.holidays || [];
+            if (dateNum < startDate) return null;
+            let dayCounter = parseInt(cfg.startDayNum || 1);
+            let workdays = 0;
+            for (let d2 = startDate; d2 <= dateNum; d2++) {
+                if (holidays.includes(d2)) continue;
+                workdays++;
+                if (d2 === dateNum) {
+                    const dayNum = dayCounter + workdays - 1;
+                    const cycleDays = cfg.cycleDays || 24;
+                    if (dayNum > cycleDays) return null;
+                    return 'Day ' + dayNum;
+                }
+            }
+        }
+        return null;
+    },
+
     getDayLabel: (dateNum) => {
         const cfg = State.calendarConfig;
         if (!cfg || cfg.mode === 'date') {
@@ -990,12 +1018,19 @@ const CalendarCtrl = {
             html += `<div></div>`;
         }
 
+        // โหลด calendarConfig และ stores ของเดือนที่กำลัง render
+        const _renderYM = `${year}_${String(month+1).padStart(2,'0')}`;
+        const _renderPlan = State.planCache[_renderYM] || State.planCache['active:' + _renderYM];
+        const _renderCfg = _renderPlan?.calendarConfig || cfg; // ใช้ cfg ของเดือนนี้ถ้ามี
+        const _renderStores = _renderPlan?.stores || State.allStores;
+
         for (let d = 1; d <= daysInMonth; d++) {
-            const dayLabel = cfg ? CalendarCtrl.getDayLabel(d) : null;
+            // ใช้ getDayLabelForCfg เพื่อให้ใช้ cfg ของเดือนที่ render
+            const dayLabel = CalendarCtrl.getDayLabelForCfg(d, _renderCfg, _renderStores, year, month);
             const isToday  = (d === now.getDate() && month === now.getMonth() && year === now.getFullYear());
             const dow      = new Date(year, month, d).getDay();
             const isWeekend = dow === 0 || dow === 6;
-            const isHoliday = cfg?.holidays?.includes(d);
+            const isHoliday = _renderCfg?.holidays?.includes(d);
 
             let bgColor = '#fff';
             let textColor = '#111827';
@@ -1007,13 +1042,23 @@ const CalendarCtrl = {
 
             const _cellYM = `${year}_${String(month+1).padStart(2,'0')}`;
             const _hasPlan = State.planList.some(p => p === _cellYM || p === 'active:' + _cellYM);
-            const _cachedPlan = State.planCache[_cellYM] || State.planCache['active:' + _cellYM];
             let hasRoute = false, hasPlanNotLoaded = false;
-            if (_cachedPlan && dayLabel) {
-                hasRoute = _cachedPlan.stores.some(s => s.days && s.days.includes(dayLabel));
-            } else if (_hasPlan && dayLabel) { hasPlanNotLoaded = true; }
+            if (dayLabel) {
+                if (_renderPlan) {
+                    hasRoute = _renderStores.some(s => s.days && s.days.includes(dayLabel));
+                } else if (_hasPlan) {
+                    hasPlanNotLoaded = true;
+                }
+            }
 
-            const mktsInCell = dayLabel ? getDayMarketList(dayLabel, month, year) : [];
+            const mktsInCell = dayLabel && _renderPlan ? (() => {
+                const names = new Set();
+                _renderStores.forEach(s => {
+                    if (s.days && s.days.includes(dayLabel) && s.marketName)
+                        names.add(trimMarketName(s.marketName));
+                });
+                return Array.from(names).filter(Boolean).sort();
+            })() : [];
             const mktLabel = mktsInCell[0] || '';
             const mktMore  = mktsInCell.length > 1 ? '+' + (mktsInCell.length-1) : '';
             const _cellCfg = State.calendarConfig;
