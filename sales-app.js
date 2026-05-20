@@ -1,3 +1,4 @@
+// sales-app.js — planCache per month fix — 2026-05-20
 // === sales-app.js ===
 
 // ✅ Inline toast
@@ -44,11 +45,9 @@ db.enablePersistence({ synchronizeTabs: true }).catch(err => {
 let docMain = db.collection('appData').doc('v1_main');
 const colSales = db.collection('v1_sales_chunks');
 
-let State = { myRoute: "", allStores: [], routeStores: [], sales: {}, currentDay: "", isLoaded: false, mapNeedsFit: true, calendarConfig: null, activePlanYM: null, activePlanMode: 'active', viewMode: 'sales', centerId: null, allRoutes: {}, routeList: [], _filterMarket: '',
-    // multi-plan support
-    planList: [],          // ['2026_05','2026_06'] — ทุก plan ที่มี
-    planCache: {},         // { '2026_06': { stores: [], calendarConfig: {} } }
-    planCenterDocId: '',   // center doc id ปัจจุบัน
+let State = { myRoute: "", allStores: [], routeStores: [], sales: {}, currentDay: "", isLoaded: false, mapNeedsFit: true, calendarConfig: null, activePlanYM: null, activePlanMode: 'active', viewMode: 'sales', centerId: null, allRoutes: {}, routeList: [],
+    _filterMarket: '',
+    planList: [], planCache: {}, planCenterDocId: '',
 };
 let map = null, mapMarkers = [], sortableList = null, markerClusterGroup = null;
 
@@ -245,12 +244,62 @@ const App = {
     isSupervisor: () => ['route_supervisor','asm'].includes(State.viewMode),
 
     // ─── Start สำหรับ route_supervisor / asm ─────────────────────────────
-    // Firestore get() with timeout
     _getWithTimeout: (ref, ms = 8000) => {
-        return Promise.race([
-            ref.get(),
-            new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))
-        ]);
+        return Promise.race([ref.get(), new Promise((_,rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
+    },
+
+    loadPlanList: async (centerDocId) => {
+        try {
+            State.planCenterDocId = centerDocId;
+            const snap = await App._getWithTimeout(db.collection('appData').doc(centerDocId), 5000);
+            const meta = snap.exists ? snap.data() : {};
+            const draftList = meta.draftList || [];
+            const _now = new Date();
+            const _activeYM = `${_now.getFullYear()}_${String(_now.getMonth()+1).padStart(2,'0')}`;
+            const allPlans = new Set([...draftList]);
+            if (!draftList.includes(_activeYM)) allPlans.add('active:' + _activeYM);
+            State.planList = Array.from(allPlans).sort().reverse();
+            console.log('📅 planList:', State.planList);
+        } catch(e) { console.warn('loadPlanList:', e); State.planList = []; }
+    },
+
+    loadPlanData: async (ym) => {
+        if (State.planCache[ym]) return State.planCache[ym];
+        const centerDocId = State.planCenterDocId;
+        const isActive = ym.startsWith('active:');
+        const realYM = isActive ? ym.replace('active:', '') : ym;
+        try {
+            const cfgRef   = isActive ? db.collection('appData').doc(centerDocId)
+                : db.collection('appData').doc(centerDocId).collection('drafts').doc(realYM);
+            const routeRef = isActive
+                ? db.collection('appData').doc(centerDocId).collection('routes').doc(State.myRoute)
+                : db.collection('appData').doc(centerDocId).collection('drafts').doc(realYM).collection('routes').doc(State.myRoute);
+            const [cfgSnap, routeSnap] = await Promise.all([
+                App._getWithTimeout(cfgRef, 15000),
+                App._getWithTimeout(routeRef, 15000),
+            ]);
+            const calendarConfig = cfgSnap.exists ? (cfgSnap.data().calendarConfig || null) : null;
+            const stores = routeSnap.exists ? (routeSnap.data().stores || []) : [];
+            State.planCache[ym] = { stores, calendarConfig, ym: realYM };
+            return State.planCache[ym];
+        } catch(e) {
+            console.warn('loadPlanData:', ym, e);
+            const _loadedYM = State.activePlanYM || '';
+            State.planCache[ym] = realYM === _loadedYM && State.allStores.length > 0
+                ? { stores: State.allStores, calendarConfig: State.calendarConfig, ym: realYM }
+                : { stores: [], calendarConfig: null, ym: realYM };
+            return State.planCache[ym];
+        }
+    },
+
+    switchToPlan: async (ym) => {
+        const data = await App.loadPlanData(ym);
+        State.allStores      = data.stores;
+        State.calendarConfig = data.calendarConfig;
+        State.activePlanYM   = data.ym;
+        State.activePlanMode = ym.startsWith('active:') ? 'active' : 'draft';
+        State._filterMarket  = '';
+        if (State.isLoaded) { Processor.run(); CalendarCtrl.render(); }
     },
 
     startSupervisor: async () => {
@@ -285,68 +334,44 @@ const App = {
             State.routeList = metaSnap.exists ? (metaSnap.data().routeList || []) : [];
         } catch(e) { State.routeList = []; }
 
-        // เช็ค draft เดือนนี้ + เดือนถัดไป
-        const _getYMSup = (offset = 0) => {
-            const d = new Date(); d.setMonth(d.getMonth() + offset);
-            return `${d.getFullYear()}_${String(d.getMonth()+1).padStart(2,'0')}`;
-        };
-        const _nowYMSup  = _getYMSup(0);
-        const _nextYMSup = _getYMSup(1);
+        const _getYMSup = (o=0) => { const d=new Date(); d.setMonth(d.getMonth()+o); return `${d.getFullYear()}_${String(d.getMonth()+1).padStart(2,'0')}`; };
+        const _nowYMSup = _getYMSup(0), _nextYMSup = _getYMSup(1);
         let routeColRef;
         try {
-            const [_draftNow, _draftNext] = await Promise.all([
-                App._getWithTimeout(db.collection('appData').doc(_centerDocId)
-                    .collection('drafts').doc(_nowYMSup), 5000),
-                App._getWithTimeout(db.collection('appData').doc(_centerDocId)
-                    .collection('drafts').doc(_nextYMSup), 5000),
+            const [_dn, _dx] = await Promise.all([
+                App._getWithTimeout(db.collection('appData').doc(_centerDocId).collection('drafts').doc(_nowYMSup), 5000),
+                App._getWithTimeout(db.collection('appData').doc(_centerDocId).collection('drafts').doc(_nextYMSup), 5000),
             ]);
-            const _useYM = _draftNow.exists ? _nowYMSup : (_draftNext.exists ? _nextYMSup : null);
+            const _useYM = _dn.exists ? _nowYMSup : (_dx.exists ? _nextYMSup : null);
             if (_useYM) {
-                routeColRef = db.collection('appData').doc(_centerDocId)
-                    .collection('drafts').doc(_useYM).collection('routes');
-                State.activePlanMode = 'draft';
-                State.activePlanYM   = _useYM;
+                routeColRef = db.collection('appData').doc(_centerDocId).collection('drafts').doc(_useYM).collection('routes');
+                State.activePlanMode = 'draft'; State.activePlanYM = _useYM;
             } else {
                 routeColRef = db.collection('appData').doc(_centerDocId).collection('routes');
                 State.activePlanMode = 'active';
             }
-        } catch(e) {
-            routeColRef = db.collection('appData').doc(_centerDocId).collection('routes');
-            State.activePlanMode = 'active';
-        }
+        } catch(e) { routeColRef = db.collection('appData').doc(_centerDocId).collection('routes'); State.activePlanMode = 'active'; }
 
         LoadBar.setProgress(30, 'โหลดข้อมูลร้านทุกสาย...');
 
-        // โหลดทุกสายพร้อมกัน
+        // โหลดแบบ batch ทีละ 5 สาย — ไม่ยิง 15 requests พร้อมกัน
+        const BATCH = 5;
+        let loaded = 0;
         State.allRoutes = {};
         State.allStores = [];
-        let _supLoaded = 0;
-        await Promise.all(routes.map(async (routeId) => {
-            try {
-                const rd = await App._getWithTimeout(routeColRef.doc(routeId), 10000);
-                State.allRoutes[routeId] = rd.exists ? (rd.data().stores || []) : [];
-            } catch(e) { State.allRoutes[routeId] = []; }
-            _supLoaded++;
-            LoadBar.setProgress(30 + Math.round(_supLoaded / routes.length * 40), `โหลด ${_supLoaded}/${routes.length} สาย...`);
-        }));
+        for (let i = 0; i < routes.length; i += BATCH) {
+            const chunk = routes.slice(i, i + BATCH);
+            await Promise.all(chunk.map(async (routeId) => {
+                try {
+                    const rd = await routeColRef.doc(routeId).get();
+                    State.allRoutes[routeId] = rd.exists ? (rd.data().stores || []) : [];
+                } catch(e) { State.allRoutes[routeId] = []; }
+            }));
+            loaded += chunk.length;
+            LoadBar.setProgress(30 + Math.round(loaded / routes.length * 40), `โหลด ${loaded}/${routes.length} สาย...`);
+        }
         // รวมทุกร้านสำหรับ Tab2
         State.allStores = Object.values(State.allRoutes).flat();
-
-        // onSnapshot ทุกสาย — Admin อัปโหลดใหม่ → allStores อัปเดตอัตโนมัติ
-        App._supUnsubs = (App._supUnsubs || []);
-        App._supUnsubs.forEach(u => { try { u(); } catch(e) {} });
-        App._supUnsubs = routes.map(routeId =>
-            routeColRef.doc(routeId).onSnapshot(rd => {
-                if (!rd.exists) return;
-                State.allRoutes[routeId] = rd.data().stores || [];
-                State.allStores = Object.values(State.allRoutes).flat();
-                if (State.isLoaded) {
-                    Processor.run();
-                    const popup = document.getElementById('calendar-popup');
-                    if (popup && popup.style.display !== 'none') CalendarCtrl.render();
-                }
-            }, () => {})
-        );
 
         LoadBar.setProgress(75, 'โหลดยอดขาย...');
 
@@ -376,93 +401,6 @@ const App = {
 
     logout: () => {
         Auth.logout();
-    },
-
-    // ─── โหลด planList ทั้งหมดจาก Firestore (active + drafts) ──────────
-    loadPlanList: async (centerDocId) => {
-        try {
-            State.planCenterDocId = centerDocId;
-            const metaSnap = await App._getWithTimeout(
-                db.collection('appData').doc(centerDocId), 5000
-            );
-            const meta = metaSnap.exists ? metaSnap.data() : {};
-            const draftList = meta.draftList || [];
-
-            // รวม active plan (ใช้ YM ปัจจุบันเป็น key) + drafts
-            const _now = new Date();
-            const _activeYM = `${_now.getFullYear()}_${String(_now.getMonth()+1).padStart(2,'0')}`;
-
-            // planList = drafts ทั้งหมด + active (ถ้า active ไม่ซ้ำกับ draft)
-            const allPlans = new Set([...draftList]);
-            // ถ้าไม่มี draft เดือนนี้ → เพิ่ม active
-            if (!draftList.includes(_activeYM)) allPlans.add('active:' + _activeYM);
-
-            State.planList = Array.from(allPlans).sort().reverse();
-            console.log('📅 planList:', State.planList);
-        } catch(e) {
-            console.warn('loadPlanList:', e);
-            State.planList = [];
-        }
-    },
-
-    // ─── โหลดข้อมูลของ plan เดือนนั้น (lazy, cached) ────────────────────
-    loadPlanData: async (ym) => {
-        if (State.planCache[ym]) return State.planCache[ym]; // ใช้ cache
-
-        const centerDocId = State.planCenterDocId;
-        const isActive = ym.startsWith('active:');
-        const realYM = isActive ? ym.replace('active:', '') : ym;
-
-        try {
-            // โหลด calendarConfig + stores ของสายตัวเอง
-            let cfgRef, routeRef;
-            if (isActive) {
-                cfgRef = db.collection('appData').doc(centerDocId);
-                routeRef = db.collection('appData').doc(centerDocId)
-                    .collection('routes').doc(State.myRoute);
-            } else {
-                cfgRef = db.collection('appData').doc(centerDocId)
-                    .collection('drafts').doc(realYM);
-                routeRef = db.collection('appData').doc(centerDocId)
-                    .collection('drafts').doc(realYM)
-                    .collection('routes').doc(State.myRoute);
-            }
-
-            const [cfgSnap, routeSnap] = await Promise.all([
-                App._getWithTimeout(cfgRef, 15000),
-                App._getWithTimeout(routeRef, 15000),
-            ]);
-
-            const calendarConfig = cfgSnap.exists ? (cfgSnap.data().calendarConfig || null) : null;
-            const stores = routeSnap.exists ? (routeSnap.data().stores || []) : [];
-
-            State.planCache[ym] = { stores, calendarConfig, ym: realYM };
-            return State.planCache[ym];
-        } catch(e) {
-            console.warn('loadPlanData:', ym, e);
-            // ถ้า timeout แต่เป็นเดือนที่โหลดอยู่ → ใช้ State.allStores แทน
-            const _loadedYM = State.activePlanYM || '';
-            if (realYM === _loadedYM && State.allStores.length > 0) {
-                State.planCache[ym] = { stores: State.allStores, calendarConfig: State.calendarConfig, ym: realYM };
-            } else {
-                State.planCache[ym] = { stores: [], calendarConfig: null, ym: realYM };
-            }
-            return State.planCache[ym];
-        }
-    },
-
-    // ─── Switch ไปใช้ plan เดือนนั้น ─────────────────────────────────────
-    switchToPlan: async (ym) => {
-        const data = await App.loadPlanData(ym);
-        State.allStores     = data.stores;
-        State.calendarConfig = data.calendarConfig;
-        State.activePlanYM  = data.ym;
-        State.activePlanMode = ym.startsWith('active:') ? 'active' : 'draft';
-        State._filterMarket = '';
-        if (State.isLoaded) {
-            Processor.run();
-            CalendarCtrl.render();
-        }
     },
 
     // โหลด calendarConfig จาก Firestore
@@ -531,40 +469,28 @@ const App = {
         const _centerDocId = _centerMatch ? (_centerMatch[1] + '_main') : 'v1_main';
         docMain = db.collection('appData').doc(_centerDocId);
 
-        // ── โหลด planList ทั้งหมด ────────────────────────────────────────
+        // โหลด planList ทั้งหมด
         await App.loadPlanList(_centerDocId);
-
-        // ── Auto-switch: เช็ค draft เดือนนี้ + เดือนถัดไป ────────────────
-        const _getYM = (offset = 0) => {
-            const d = new Date(); d.setMonth(d.getMonth() + offset);
-            return `${d.getFullYear()}_${String(d.getMonth()+1).padStart(2,'0')}`;
-        };
-        const _nowYM  = _getYM(0);
-        const _nextYM = _getYM(1);
+        const _getYM = (o=0) => { const d=new Date(); d.setMonth(d.getMonth()+o); return `${d.getFullYear()}_${String(d.getMonth()+1).padStart(2,'0')}`; };
+        const _nowYM = _getYM(0), _nextYM = _getYM(1);
         let routeColRef;
         try {
-            const [_draftNow, _draftNext] = await Promise.all([
+            const [_dn, _dx] = await Promise.all([
                 db.collection('appData').doc(_centerDocId).collection('drafts').doc(_nowYM).get(),
                 db.collection('appData').doc(_centerDocId).collection('drafts').doc(_nextYM).get(),
             ]);
-            const _useYM = _draftNow.exists ? _nowYM : (_draftNext.exists ? _nextYM : null);
+            const _useYM = _dn.exists ? _nowYM : (_dx.exists ? _nextYM : null);
             if (_useYM) {
-                routeColRef = db.collection('appData').doc(_centerDocId)
-                    .collection('drafts').doc(_useYM).collection('routes');
-                State.activePlanYM   = _useYM;
-                State.activePlanMode = 'draft';
+                routeColRef = db.collection('appData').doc(_centerDocId).collection('drafts').doc(_useYM).collection('routes');
+                State.activePlanYM = _useYM; State.activePlanMode = 'draft';
                 App.loadCalendarConfig(_centerDocId, _useYM, 'drafts');
                 LoadBar.setProgress(15, `📅 โหลด Plan ${_useYM}...`);
             } else {
                 routeColRef = db.collection('appData').doc(_centerDocId).collection('routes');
-                State.activePlanYM   = _nowYM;
-                State.activePlanMode = 'active';
+                State.activePlanYM = _nowYM; State.activePlanMode = 'active';
                 App.loadCalendarConfig(_centerDocId, _nowYM, 'active');
             }
-        } catch(e) {
-            routeColRef = db.collection('appData').doc(_centerDocId).collection('routes');
-            State.activePlanMode = 'active';
-        }
+        } catch(e) { routeColRef = db.collection('appData').doc(_centerDocId).collection('routes'); State.activePlanMode = 'active'; }
 
         LoadBar.setProgress(20, 'กำลังดึงข้อมูลร้านค้า...');
 
@@ -592,13 +518,15 @@ const App = {
         App._unsubRoute = routeColRef.doc(State.myRoute).onSnapshot(rd => {
             if (!rd.exists) return;
             State.allStores = rd.data().stores || [];
+            // อัปเดต planCache ด้วย
+            if (State.activePlanYM) {
+                const _ck = State.activePlanMode === 'active' ? 'active:' + State.activePlanYM : State.activePlanYM;
+                State.planCache[_ck] = { stores: State.allStores, calendarConfig: State.calendarConfig, ym: State.activePlanYM };
+            }
             if (State.isLoaded) {
                 Processor.run();
-                // re-render ปฏิทินถ้าเปิดอยู่ (Admin อัปโหลดใหม่ → ปฏิทินอัปเดตทันที)
                 const popup = document.getElementById('calendar-popup');
-                if (popup && popup.style.display !== 'none') {
-                    CalendarCtrl.render();
-                }
+                if (popup && popup.style.display !== 'none') CalendarCtrl.render();
             }
         });
 
@@ -617,25 +545,19 @@ const App = {
 
 // รวบรวมชื่อตลาด (marketName) ของร้านทั้งหมดในวันที่กำหนด
 // คืน string เช่น "ตลาดสด · ตลาดนัด" หรือ "" ถ้าไม่มีข้อมูล
-// ตัด prefix "402C01 D02 " ออกจากชื่อตลาด → "บ้านโป่ง 2"
 function trimMarketName(raw) {
     if (!raw) return '';
     return raw.replace(/^[A-Z0-9]+\s+D\d+\s+/i, '').trim();
 }
 
-// คืน array ชื่อตลาด unique ในวันนั้น
-// เฉพาะเดือนที่โหลดข้อมูลอยู่เท่านั้น ไม่แสดงข้ามเดือน
 function getDayMarketList(day, forMonth, forYear) {
-    // ถ้าส่ง forMonth/forYear มา ให้เช็คว่าตรงกับเดือนที่โหลดไหม
     if (forMonth !== undefined && forYear !== undefined) {
         const loadedYM = State.activePlanYM || (() => {
             const d = new Date();
             return `${d.getFullYear()}_${String(d.getMonth()+1).padStart(2,'0')}`;
         })();
         const [ly, lm] = loadedYM.split('_').map(Number);
-        if (forYear !== ly || forMonth !== lm - 1) {
-            return []; // เดือนอื่น → ไม่แสดงชื่อตลาด
-        }
+        if (forYear !== ly || forMonth !== lm - 1) return [];
     }
     const names = new Set();
     State.allStores.forEach(s => {
@@ -732,9 +654,7 @@ const Processor = {
     routeList: () => {
         let list = State.allStores.filter(s => {
             if (!s.days.includes(State.currentDay)) return false;
-            if (State._filterMarket) {
-                return trimMarketName(s.marketName) === State._filterMarket;
-            }
+            if (State._filterMarket) return trimMarketName(s.marketName) === State._filterMarket;
             return true;
         });
         list.sort((a, b) => (a.seqs?.[State.currentDay] || 999) - (b.seqs?.[State.currentDay] || 999));
@@ -962,14 +882,10 @@ const CalendarCtrl = {
     // คำนวณว่าวันที่ date ตรงกับ Day อะไร
     getDayLabel: (dateNum) => {
         const cfg = State.calendarConfig;
-
-        // date mode: Day N = วันที่ N จริงๆ ของเดือน
         if (!cfg || cfg.mode === 'date') {
             const label = `Day ${dateNum}`;
-            const hasStores = State.allStores.some(s => s.days && s.days.includes(label));
-            return hasStores ? label : null;
+            return State.allStores.some(s => s.days && s.days.includes(label)) ? label : null;
         }
-
         if (cfg.mode === 'fixed') {
             // โหมด B: admin กำหนดเองว่าวันที่เท่าไหร่ = Day อะไร
             return cfg.mapping ? (cfg.mapping[String(dateNum)] || null) : null;
@@ -1089,49 +1005,34 @@ const CalendarCtrl = {
             else if (isHoliday) { bgColor = '#fef2f2'; textColor = '#dc2626'; borderColor = '#fecaca'; }
             else if (isWeekend) { bgColor = '#f9fafb'; textColor = '#6b7280'; }
 
-            // เช็คจาก planCache ของเดือนนั้นโดยตรง
             const _cellYM = `${year}_${String(month+1).padStart(2,'0')}`;
             const _hasPlan = State.planList.some(p => p === _cellYM || p === 'active:' + _cellYM);
             const _cachedPlan = State.planCache[_cellYM] || State.planCache['active:' + _cellYM];
-            let hasRoute = false;
-            let hasPlanNotLoaded = false;
+            let hasRoute = false, hasPlanNotLoaded = false;
             if (_cachedPlan && dayLabel) {
-                // ใช้ข้อมูลจาก cache ของเดือนนั้นโดยตรง
                 hasRoute = _cachedPlan.stores.some(s => s.days && s.days.includes(dayLabel));
-            } else if (_hasPlan && dayLabel) {
-                hasPlanNotLoaded = true; // มี plan แต่ยังไม่โหลด → จุดสีเทา
-            }
-            const clickHandler = dayLabel ? `CalendarCtrl.goToDay('${dayLabel}')` : '';
+            } else if (_hasPlan && dayLabel) { hasPlanNotLoaded = true; }
+
             const mktsInCell = dayLabel ? getDayMarketList(dayLabel, month, year) : [];
-            const mktLabel = mktsInCell.length > 0 ? mktsInCell[0] : '';
+            const mktLabel = mktsInCell[0] || '';
             const mktMore  = mktsInCell.length > 1 ? '+' + (mktsInCell.length-1) : '';
-            // date mode: dayLabel = "Day 4" และ d = 4 → ตัวเลขเหมือนกัน ไม่ต้องแสดง badge ซ้ำ
             const _cellCfg = State.calendarConfig;
             const isDateMode = !_cellCfg || _cellCfg.mode === 'date';
             const dayNum = dayLabel ? parseInt(dayLabel.replace('Day ','')) : null;
             const isSameAsDate = isDateMode && dayNum === d;
+            const clickHandler = dayLabel ? `CalendarCtrl.goToDay('${dayLabel}')` : '';
 
             html += `
-            <div onclick="${clickHandler}"
-                ${isToday ? 'id="cal-today-cell"' : ''}
+            <div onclick="${clickHandler}" ${isToday ? 'id="cal-today-cell"' : ''}
                 style="border-radius:10px;border:1px solid ${borderColor};background:${bgColor};
                        padding:4px 2px;text-align:center;cursor:${dayLabel ? 'pointer' : 'default'};
                        min-height:56px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;
-                       gap:2px;transition:background 0.1s;-webkit-tap-highlight-color:rgba(0,0,0,0.08);">
+                       gap:1px;transition:background 0.1s;-webkit-tap-highlight-color:rgba(0,0,0,0.08);">
                 <div style="font-size:13px;font-weight:${isToday ? '900' : '700'};color:${textColor};line-height:1.3;">${d}</div>
                 ${dayLabel ? `
-                ${!isSameAsDate ? `
-                <div style="font-size:9px;font-weight:800;padding:1px 5px;border-radius:5px;
-                            background:${isToday ? 'rgba(255,255,255,0.25)' : '#ede9fe'};
-                            color:${isToday ? '#fff' : '#5b21b6'};white-space:nowrap;line-height:1.3;">
-                    ${dayLabel.replace('Day ','')}
-                </div>` : ''}
-                ${hasRoute ? `<div style="width:5px;height:5px;border-radius:50%;background:${isToday ? '#fff' : '#2563eb'};flex-shrink:0;"></div>` : hasPlanNotLoaded ? `<div style="width:5px;height:5px;border-radius:50%;background:#d1d5db;flex-shrink:0;"></div>` : ''}
-                ${mktLabel ? `<div style="font-size:8px;color:${isToday ? 'rgba(255,255,255,0.85)' : '#2563eb'};font-weight:700;
-                                          line-height:1.1;padding:0 2px;max-width:48px;
-                                          overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
-                    ${mktLabel}${mktMore ? '<span style=color:#9ca3af> ' + mktMore + '</span>' : ''}
-                </div>` : ''}
+                ${!isSameAsDate ? `<div style="font-size:9px;font-weight:800;padding:1px 5px;border-radius:5px;background:${isToday?'rgba(255,255,255,0.25)':'#ede9fe'};color:${isToday?'#fff':'#5b21b6'};white-space:nowrap;">${dayLabel.replace('Day ','')}</div>` : ''}
+                ${hasRoute ? `<div style="width:5px;height:5px;border-radius:50%;background:${isToday?'#fff':'#2563eb'};flex-shrink:0;"></div>` : hasPlanNotLoaded ? `<div style="width:5px;height:5px;border-radius:50%;background:#d1d5db;flex-shrink:0;"></div>` : ''}
+                ${mktLabel ? `<div style="font-size:8px;color:${isToday?'rgba(255,255,255,0.85)':'#2563eb'};font-weight:700;line-height:1.1;padding:0 2px;max-width:50px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${mktLabel}${mktMore?'<span style=color:#9ca3af> '+mktMore+'</span>':''}</div>` : ''}
                 ` : (isHoliday ? `<div style="font-size:9px;color:#dc2626;font-weight:700;">หยุด</div>` : '')}
             </div>`;
         }
@@ -1139,29 +1040,17 @@ const CalendarCtrl = {
         container.innerHTML = html;
     },
 
-    // กดวันในปฏิทิน → ปิด popup + ไปหน้าคิวงาน + แสดงชื่อตลาด
-    goToDay: (dayLabel) => {
-        // แสดง Bottom Sheet เลือกตลาด
-        CalendarCtrl.showDaySheet(dayLabel);
-    },
+    // กดวัน → Bottom Sheet เลือกตลาด
+    goToDay: (dayLabel) => { CalendarCtrl.showDaySheet(dayLabel); },
 
-    // navigate จริงๆ หลังเลือกตลาด
     navigateToDay: async (dayLabel, market) => {
         CalendarCtrl.closePopup();
         CalendarCtrl.closeDaySheet();
-
-        // ตรวจว่าเดือนปฏิทินที่กำลังดูอยู่ตรงกับ plan ที่โหลดไหม
         const _calYM = `${CalendarCtrl._year}_${String(CalendarCtrl._month+1).padStart(2,'0')}`;
-        const _loadedYM = State.activePlanYM || '';
-        if (_calYM !== _loadedYM) {
-            // ต้อง switch plan ก่อน
-            const _planKey = State.planList.find(p => p === _calYM || p === 'active:' + _calYM);
-            if (_planKey) {
-                showSalesToast('⏳ กำลังโหลดข้อมูล...');
-                await App.switchToPlan(_planKey);
-            }
+        if (_calYM !== (State.activePlanYM || '')) {
+            const _pk = State.planList.find(p => p === _calYM || p === 'active:' + _calYM);
+            if (_pk) { showSalesToast('⏳ กำลังโหลด...'); await App.switchToPlan(_pk); }
         }
-
         setTimeout(() => {
             State.currentDay = dayLabel;
             State._filterMarket = market || '';
@@ -1171,22 +1060,21 @@ const CalendarCtrl = {
             Processor.routeList();
             UI.switchTab('route');
             const mkts = getDayMarketList(dayLabel, CalendarCtrl._month, CalendarCtrl._year);
-            const label = market || (mkts.length > 0 ? mkts[0] : dayLabel);
-            showSalesToast('📅 ' + label);
+            showSalesToast('📅 ' + (market || (mkts[0] || dayLabel)));
         }, 320);
     },
 
-    // Bottom Sheet แสดงตลาดในวันนั้น
-    showDaySheet: (dayLabel) => {
-        const _sheetYear  = CalendarCtrl._year;
-        const _sheetMonth = CalendarCtrl._month;
-        const mkts = getDayMarketList(dayLabel, _sheetMonth, _sheetYear);
+    showDaySheet: async (dayLabel) => {
+        const _calYM = `${CalendarCtrl._year}_${String(CalendarCtrl._month+1).padStart(2,'0')}`;
+        if (_calYM !== (State.activePlanYM || '')) {
+            const _pk = State.planList.find(p => p === _calYM || p === 'active:' + _calYM);
+            if (_pk) await App.switchToPlan(_pk);
+        }
+        const _sy = CalendarCtrl._year, _sm = CalendarCtrl._month;
+        const mkts = getDayMarketList(dayLabel, _sm, _sy);
         const storeCount = State.allStores.filter(s => s.days && s.days.includes(dayLabel)).length;
-        const now = new Date();
         const dayNum = parseInt(dayLabel.replace('Day ',''));
-        const dateObj = new Date(CalendarCtrl._year, CalendarCtrl._month, dayNum);
-        const dateStr = dateObj.toLocaleDateString('th-TH', { weekday:'long', day:'numeric', month:'long' });
-
+        const dateStr = new Date(_sy, _sm, dayNum).toLocaleDateString('th-TH', {weekday:'long',day:'numeric',month:'long'});
         let sheet = document.getElementById('cal-day-sheet');
         if (!sheet) {
             sheet = document.createElement('div');
@@ -1195,66 +1083,24 @@ const CalendarCtrl = {
             sheet.innerHTML = '<div id="cal-day-sheet-bg" style="position:absolute;inset:0;background:rgba(0,0,0,0.5);" onclick="CalendarCtrl.closeDaySheet()"></div><div id="cal-day-sheet-body" style="position:relative;background:#fff;border-radius:20px 20px 0 0;width:100%;max-width:480px;max-height:70vh;overflow-y:auto;transform:translateY(100%);transition:transform 0.3s cubic-bezier(0.4,0,0.2,1);padding:0 0 32px;"></div>';
             document.body.appendChild(sheet);
         }
-
         const body = document.getElementById('cal-day-sheet-body');
-        body.innerHTML = `
-            <div style="display:flex;justify-content:center;padding:10px 0 6px;">
-                <div style="width:40px;height:4px;border-radius:2px;background:#e5e7eb;"></div>
-            </div>
-            <div style="padding:4px 20px 14px;">
-                <div style="font-size:11px;color:#6b7280;font-weight:600;">${dateStr}</div>
-                <div style="font-size:18px;font-weight:900;color:#111827;margin-top:2px;">
-                    ${storeCount} ร้านค้า
-                </div>
-            </div>
-            <div style="height:1px;background:#f3f4f6;margin:0 20px 12px;"></div>
-            <div style="padding:0 16px;">
-                <button onclick="CalendarCtrl.navigateToDay('${dayLabel}', '')"
-                    style="width:100%;padding:13px;border-radius:14px;border:none;
-                           background:#2563eb;color:#fff;font-size:15px;font-weight:800;
-                           cursor:pointer;margin-bottom:12px;display:flex;align-items:center;
-                           justify-content:center;gap:8px;">
-                    📋 ดูคิวงานทั้งหมด ${storeCount} ร้าน
-                </button>
-                ${mkts.length > 0 ? `
-                <div style="font-size:11px;font-weight:800;color:#6b7280;text-transform:uppercase;
-                            letter-spacing:0.5px;margin-bottom:8px;padding:0 4px;">เลือกตลาด</div>
-                <div style="display:flex;flex-direction:column;gap:8px;">
-                    ${mkts.map(mkt => {
-                        const cnt = State.allStores.filter(s =>
-                            s.days && s.days.includes(dayLabel) &&
-                            trimMarketName(s.marketName) === mkt
-                        ).length;
-                        return `<button onclick="CalendarCtrl.navigateToDay('${dayLabel}', '${mkt.replace(/'/g, "\'")}')"
-                            style="width:100%;padding:12px 16px;border-radius:14px;
-                                   border:1.5px solid #e5e7eb;background:#f9fafb;
-                                   display:flex;justify-content:space-between;align-items:center;
-                                   cursor:pointer;font-family:inherit;">
-                            <span style="font-size:14px;font-weight:700;color:#111827;">🏪 ${mkt}</span>
-                            <span style="font-size:12px;font-weight:800;color:#6b7280;
-                                         background:#e5e7eb;padding:3px 12px;border-radius:20px;">
-                                ${cnt} ร้าน
-                            </span>
-                        </button>`;
-                    }).join('')}
-                </div>` : `
-                <div style="text-align:center;color:#9ca3af;font-size:13px;padding:16px 0;">
-                    ไม่มีข้อมูลตลาด
-                </div>`}
-            </div>`;
-
-        requestAnimationFrame(() => {
-            body.style.transform = 'translateY(0)';
-        });
+        body.innerHTML = `<div style="display:flex;justify-content:center;padding:10px 0 6px;"><div style="width:40px;height:4px;border-radius:2px;background:#e5e7eb;"></div></div>
+        <div style="padding:4px 20px 14px;"><div style="font-size:11px;color:#6b7280;font-weight:600;">${dateStr}</div><div style="font-size:18px;font-weight:900;color:#111827;margin-top:2px;">${storeCount} ร้านค้า</div></div>
+        <div style="height:1px;background:#f3f4f6;margin:0 20px 12px;"></div>
+        <div style="padding:0 16px;">
+            <button onclick="CalendarCtrl.navigateToDay('${dayLabel}','')" style="width:100%;padding:13px;border-radius:14px;border:none;background:#2563eb;color:#fff;font-size:15px;font-weight:800;cursor:pointer;margin-bottom:12px;">📋 ดูคิวงานทั้งหมด ${storeCount} ร้าน</button>
+            ${mkts.length > 0 ? `<div style="font-size:11px;font-weight:800;color:#6b7280;margin-bottom:8px;padding:0 4px;">เลือกตลาด</div><div style="display:flex;flex-direction:column;gap:8px;">${mkts.map(mkt => {
+                const cnt = State.allStores.filter(s => s.days && s.days.includes(dayLabel) && trimMarketName(s.marketName) === mkt).length;
+                return `<button onclick="CalendarCtrl.navigateToDay('${dayLabel}','${mkt.replace(/'/g,"\'")}')" style="width:100%;padding:12px 16px;border-radius:14px;border:1.5px solid #e5e7eb;background:#f9fafb;display:flex;justify-content:space-between;align-items:center;cursor:pointer;font-family:inherit;"><span style="font-size:14px;font-weight:700;color:#111827;">🏪 ${mkt}</span><span style="font-size:12px;font-weight:800;color:#6b7280;background:#e5e7eb;padding:3px 12px;border-radius:20px;">${cnt} ร้าน</span></button>`;
+            }).join('')}</div>` : '<div style="text-align:center;color:#9ca3af;font-size:13px;padding:16px 0;">ไม่มีข้อมูลตลาด</div>'}
+        </div>`;
+        requestAnimationFrame(() => { body.style.transform = 'translateY(0)'; });
     },
 
     closeDaySheet: () => {
         const body = document.getElementById('cal-day-sheet-body');
         if (body) body.style.transform = 'translateY(100%)';
-        setTimeout(() => {
-            const sheet = document.getElementById('cal-day-sheet');
-            if (sheet) sheet.remove();
-        }, 320);
+        setTimeout(() => { const s = document.getElementById('cal-day-sheet'); if (s) s.remove(); }, 320);
     },
 
     prevMonth: () => {
@@ -1269,28 +1115,19 @@ const CalendarCtrl = {
         CalendarCtrl.render();
     },
 
-    openPopup: async () => {
+    openPopup: () => {
         const popup = document.getElementById('calendar-popup');
         const sheet = document.getElementById('calendar-popup-sheet');
         if (!popup || !sheet) return;
-        // sync เดือนปัจจุบันเสมอ
         const now = new Date();
         CalendarCtrl._year  = now.getFullYear();
         CalendarCtrl._month = now.getMonth();
-
-        // ใส่ข้อมูลปัจจุบันลง cache ก่อนเลย (ไม่ต้องรอ Firestore)
+        // ใส่ข้อมูลปัจจุบันลง cache ก่อนเลย
         const _curYM = State.activePlanYM || '';
         const _curKey = State.activePlanMode === 'active' ? ('active:' + _curYM) : _curYM;
         if (_curYM && State.allStores.length > 0 && !State.planCache[_curKey]) {
             State.planCache[_curKey] = { stores: State.allStores, calendarConfig: State.calendarConfig, ym: _curYM };
         }
-        // pre-load เดือนอื่นจาก Firestore (ไม่บล็อก — render ก่อนได้เลย)
-        if (State.planList && State.planList.length > 0) {
-            Promise.all(State.planList.map(ym => App.loadPlanData(ym).catch(() => {}))).then(() => {
-                CalendarCtrl.render(); // re-render หลังโหลดครบ
-            });
-        }
-
         CalendarCtrl.render();
         popup.style.display = 'block';
         requestAnimationFrame(() => {
@@ -1300,6 +1137,11 @@ const CalendarCtrl = {
                 if (todayEl) todayEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }, 350);
         });
+        // โหลดเดือนอื่น background
+        if (State.planList && State.planList.length > 0) {
+            Promise.all(State.planList.map(ym => App.loadPlanData(ym).catch(() => {})))
+                .then(() => CalendarCtrl.render());
+        }
     },
 
     closePopup: (e) => {
