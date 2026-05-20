@@ -238,15 +238,15 @@
                 <div class="flex items-center gap-1.5">
                     <div id="plan-mode-badge"
                         style="font-size:10px;font-weight:800;padding:3px 8px;border-radius:6px;background:#059669;color:#fff;white-space:nowrap;">
-                        ✅ Active
+                        📅 Plan ปัจจุบัน
                     </div>
                     <select id="plan-selector" onchange="PlanUI.onSelect(this.value)"
                         class="bg-gray-700 border border-gray-600 text-white text-xs font-bold rounded-lg px-2 py-1.5 outline-none focus:ring-2 focus:ring-indigo-400 max-w-[130px]">
-                        <option value="active">📅 Plan ปัจจุบัน (Active)</option>
+                        <option value="active">📅 Plan ที่ Sales ใช้อยู่</option>
                     </select>
                     <button onclick="PlanUI.openCreateDraft()"
-                        class="bg-indigo-600 hover:bg-indigo-500 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap" title="สร้าง Draft เดือนหน้า">
-                        + Draft
+                        class="bg-indigo-600 hover:bg-indigo-500 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap" title="วางแผนเดือนถัดไป">
+                        + เพิ่มเดือน
                     </button>
                 </div>
                 <button onclick="UI.showSummaryModal()" class="bg-gray-700 hover:bg-gray-600 border border-gray-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap">
@@ -261,18 +261,15 @@
                 class="bg-amber-50 border-b border-amber-200 px-4 py-2 flex items-center justify-between shrink-0">
                 <div class="flex items-center gap-2">
                     <span style="font-size:13px;">📝</span>
-                    <span id="draft-banner-label" class="text-xs font-bold text-amber-800">กำลังแก้ไข Draft</span>
-                    <span class="text-xs text-amber-600">— การเปลี่ยนแปลงนี้จะไม่กระทบ Sales จนกว่าจะ Activate</span>
+                    <span id="draft-banner-label" class="text-xs font-bold text-amber-800">วางแผน</span>
+                    <span class="text-xs text-amber-600">— แก้ไขได้เลย ไม่กระทบ Sales</span>
                 </div>
                 <div class="flex items-center gap-2">
                     <button onclick="CalendarAdmin.open(App._planMode)"
                         class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition shadow-sm">
                         📅 ตั้งค่าปฏิทิน
                     </button>
-                    <button onclick="PlanUI.confirmActivate()"
-                        class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-1.5 rounded-lg text-xs font-bold transition shadow-sm">
-                        ✅ Activate
-                    </button>
+
                 </div>
             </div>
 
@@ -858,7 +855,7 @@
     <div id="create-draft-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
         <div class="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden">
             <div class="p-5 border-b flex justify-between items-center">
-                <h2 class="text-base font-black text-gray-900">📝 สร้าง Draft เดือนใหม่</h2>
+                <h2 class="text-base font-black text-gray-900">📅 วางแผนเดือนใหม่</h2>
                 <button onclick="document.getElementById('create-draft-modal').classList.add('hidden')"
                     class="w-8 h-8 rounded-full border border-gray-200 text-gray-400 hover:bg-gray-100 font-bold">✕</button>
             </div>
@@ -870,14 +867,14 @@
                     </select>
                 </div>
                 <div class="bg-indigo-50 border border-indigo-100 rounded-xl p-3 text-xs text-indigo-700">
-                    💡 ระบบจะ Copy Plan ปัจจุบันมาเป็น Draft ให้อัตโนมัติ แก้ไขได้โดยไม่กระทบ Sales
+                    💡 ระบบจะ Copy ข้อมูลร้านค้าปัจจุบันมาให้ แก้ไขได้เลยโดยไม่กระทบสายที่ Sales ใช้อยู่
                 </div>
             </div>
             <div class="p-5 border-t flex gap-3">
                 <button onclick="document.getElementById('create-draft-modal').classList.add('hidden')"
                     class="flex-1 border border-gray-200 rounded-xl py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-50 transition">ยกเลิก</button>
                 <button onclick="PlanUI.doCreateDraft()"
-                    class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl py-2.5 text-sm font-bold transition shadow-sm">สร้าง Draft</button>
+                    class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl py-2.5 text-sm font-bold transition shadow-sm">📅 เริ่มวางแผน</button>
             </div>
         </div>
     </div>
@@ -1115,7 +1112,7 @@
                         draftList.forEach(ym => {
                             const [y, m] = ym.split('_');
                             const lbl = DateUtil ? DateUtil.ymToThaiShort(ym) : new Date(+y, +m-1, 1).toLocaleDateString('th-TH', { year: 'numeric', month: 'short' });
-                            opts += `<option value="draft:${ym}">📝 Draft · ${lbl}</option>`;
+                            opts += `<option value="draft:${ym}">📅 ${lbl}</option>`;
                         });
                         opts += `</optgroup>`;
                     }
@@ -1124,7 +1121,7 @@
                         historyList.forEach(ym => {
                             const [y, m] = ym.split('_');
                             const lbl = DateUtil ? DateUtil.ymToThaiShort(ym) : new Date(+y, +m-1, 1).toLocaleDateString('th-TH', { year: 'numeric', month: 'short' });
-                            opts += `<option value="history:${ym}">🔒 History · ${lbl}</option>`;
+                            opts += `<option value="history:${ym}">🔒 ${lbl} (Read-Only)</option>`;
                         });
                         opts += `</optgroup>`;
                     }
@@ -1183,6 +1180,9 @@
                     sel.innerHTML = PlanUI._nextMonths(4).map(({ym, lbl}) =>
                         `<option value="${ym}">${lbl}</option>`
                     ).join('');
+                    // default เลือกมิถุนายน 2026 ถ้ามีอยู่ใน options
+                    const juneOpt = [...sel.options].find(o => o.value === '2026_06');
+                    if (juneOpt) sel.value = '2026_06';
                 }
                 document.getElementById('create-draft-modal').classList.remove('hidden');
             },

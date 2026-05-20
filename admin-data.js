@@ -70,397 +70,8 @@ const StoreMgr = {
 };
 
 // ==========================================
-// 📂 Raw Data Manager
 // ==========================================
-const RawDataMgr = {
-    tempJson: [],
-
-    processExcel: (file) => {
-        UI.showLoader('กำลังอ่านไฟล์...', 'รอสักครู่');
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            try {
-                const data = new Uint8Array(e.target.result);
-                const workbook = XLSX.read(data, { type: 'array' });
-                const json = XLSX.utils.sheet_to_json(
-                    workbook.Sheets[workbook.SheetNames[0]], { defval: '' }
-                );
-                if (json.length < 1) throw new Error('ไฟล์ว่างเปล่า');
-
-                RawDataMgr.tempJson = json;
-                const headers = Object.keys(json[0]);
-                const savedCols = State.db.savedRawColumns || [];
-
-                const html = headers.map(h => {
-                    const isChecked = savedCols.length === 0 || savedCols.includes(h) ? 'checked' : '';
-                    return `
-                    <label class="flex items-center gap-2 p-2 border rounded-lg bg-gray-50 cursor-pointer hover:bg-indigo-50">
-                        <input type="checkbox" value="${h}" class="raw-col-cb w-4 h-4 text-indigo-600 rounded" ${isChecked}>
-                        <span class="text-xs font-bold text-gray-700 truncate">${h}</span>
-                    </label>`;
-                }).join('');
-
-                const cbEl = document.getElementById('column-checkboxes');
-                if (cbEl) cbEl.innerHTML = html;
-                UI.hideLoader();
-                const modal = document.getElementById('columnSelectModal');
-                if (modal) modal.classList.remove('hidden');
-            } catch (error) {
-                UI.hideLoader();
-                UI.showErrorToast('อ่านไฟล์ไม่ได้: ' + error.message);
-            }
-            const inp = document.getElementById('rawUpload');
-            if (inp) inp.value = '';
-        };
-        reader.readAsArrayBuffer(file);
-    },
-
-    applyImport: () => {
-        // กรองเฉพาะ column ที่จำเป็น — checkbox ใน modal เป็น UI แสดงข้อมูลเท่านั้น
-        const REQUIRED_COLS = ['CY', 'รหัส', 'ชื่อ', 'Sales', 'ประเภทร้าน1', 'Sold To City', 'Sold To State', 'Address 5', 'Latitude', 'Longitude', 'ชื่อสาย', 'Day'];
-        const selectedCols = (RawDataMgr.tempJson[0] ? Object.keys(RawDataMgr.tempJson[0]) : []).filter(c => REQUIRED_COLS.includes(c));
-        if (selectedCols.length === 0) return UI.showErrorToast('ไม่พบ column ที่จำเป็น กรุณาตรวจสอบ header ของไฟล์');
-
-        const modal = document.getElementById('columnSelectModal');
-        if (modal) modal.classList.add('hidden');
-        UI.showLoader('กำลังกรองข้อมูล...', 'สร้างฐานข้อมูลดิบ');
-
-        setTimeout(() => {
-            const rawData = RawDataMgr.tempJson.map(row => {
-                const cleanRow = {};
-                selectedCols.forEach(col => { cleanRow[col] = row[col]; });
-                return cleanRow;
-            });
-
-            State.db.savedRawColumns = selectedCols;
-            App.dbRef.update({ savedRawColumns: selectedCols })
-                .catch(err => console.warn('บันทึก savedRawColumns ไม่สำเร็จ:', err));
-
-            cloudDB.collection('v1_raw_chunks').get().then(snap => {
-                const delBatch = cloudDB.batch();
-                snap.forEach(doc => delBatch.delete(doc.ref));
-                return delBatch.commit();
-            }).then(() => {
-                const chunkSize = 500;
-                const promises = [];
-                for (let i = 0; i < rawData.length; i += chunkSize) {
-                    const chunk = { rows: rawData.slice(i, i + chunkSize) };
-                    promises.push(
-                        cloudDB.collection('v1_raw_chunks').doc('chunk_' + (i / chunkSize)).set(chunk)
-                    );
-                }
-                return Promise.all(promises);
-            }).then(() => {
-                State.rawData = rawData;
-                RawDataMgr.renderTable();
-                UI.hideLoader();
-                RawDataMgr.tempJson = [];
-                UI.showSaveToast('✅ อัปโหลดข้อมูลดิบสำเร็จ!');
-            }).catch(err => {
-                UI.hideLoader();
-                UI.showErrorToast('อัปโหลดไม่สำเร็จ: ' + err.message);
-            });
-        }, 100);
-    },
-
-    renderTable: () => {
-        const raw = State.rawData || [];
-        const totalEl = document.getElementById('raw-total-rows');
-        if (totalEl) totalEl.innerText = raw.length.toLocaleString();
-
-        if (raw.length === 0) {
-            const head = document.getElementById('raw-table-head');
-            const body = document.getElementById('raw-table-body');
-            if (head) head.innerHTML = '';
-            if (body) body.innerHTML = '<tr><td class="text-center p-8 text-gray-400">ไม่มีข้อมูลดิบ</td></tr>';
-            return;
-        }
-
-        const cols = Object.keys(raw[0]);
-        const th = '<tr>' + cols.map(c => `<th class="p-3 border-b bg-gray-100 sticky top-0">${c}</th>`).join('') + '</tr>';
-        const headEl = document.getElementById('raw-table-head');
-        if (headEl) headEl.innerHTML = th;
-
-        let html = raw.slice(0, 500).map(row =>
-            '<tr class="hover:bg-blue-50/50">' +
-            cols.map(c => `<td class="p-3 text-sm border-b border-gray-100">${row[c] !== undefined ? row[c] : ''}</td>`).join('') +
-            '</tr>'
-        ).join('');
-
-        if (raw.length > 500) {
-            html += `<tr><td colspan="${cols.length}" class="text-center p-4 text-xs text-gray-400">... ซ่อนข้อมูลแถวที่ 501 ถึง ${raw.length} ไว้เพื่อความรวดเร็ว ...</td></tr>`;
-        }
-        const bodyEl = document.getElementById('raw-table-body');
-        if (bodyEl) bodyEl.innerHTML = html;
-    },
-
-    clearAll: () => {
-        UI.showConfirm('ล้างข้อมูลดิบทั้งหมด? ข้อมูลที่ลบจะไม่สามารถกู้คืนได้', () => {
-        UI.showLoader('กำลังลบ...');
-        cloudDB.collection('v1_raw_chunks').get().then(snap => {
-            const delBatch = cloudDB.batch();
-            snap.forEach(doc => delBatch.delete(doc.ref));
-            return delBatch.commit();
-        }).then(() => {
-            State.rawData = [];
-            RawDataMgr.renderTable();
-            UI.hideLoader();
-            UI.showSaveToast('🗑️ ล้างข้อมูลดิบเรียบร้อย');
-        }).catch(err => {
-            UI.hideLoader();
-            UI.showErrorToast('ลบไม่สำเร็จ: ' + err.message);
-        });
-        });
-    }
-};
-
 // ==========================================
-// 🎯 KPI Manager
-// ==========================================
-const KPIMgr = {
-    renderSetup: () => {
-        const selectorEl = document.getElementById('kpi-selectors');
-        if (!selectorEl) return;
-
-        if (!State.rawData || State.rawData.length === 0) {
-            selectorEl.innerHTML = '<p class="col-span-3 text-red-500 font-bold text-sm">⚠️ ยังไม่มีข้อมูลดิบ กรุณาไปที่แท็บ "ข้อมูลการขาย" เพื่ออัปโหลดก่อนครับ</p>';
-            return;
-        }
-
-        const cols = Object.keys(State.rawData[0]);
-        const saved = State.db.kpiSettings || {};
-
-        const fields = [
-            { id: 'kpi-id', label: 'คอลัมน์ "รหัสร้าน" (อ้างอิง)', val: saved.idCol || cols.find(h => h.toLowerCase().includes('id') || h.includes('รหัส')) },
-            { id: 'kpi-name', label: 'คอลัมน์ "ชื่อร้าน" (ไว้โชว์)', val: saved.nameCol || cols.find(h => h.toLowerCase().includes('name') || (h.includes('ชื่อ') && !h.includes('ตลาด'))) },
-            { id: 'kpi-vpo', label: 'คอลัมน์ "ยอดขาย" (บวกเลข)', val: saved.vpoCol || cols.find(h => h.toLowerCase().includes('qty') || h.includes('จำนวน')) },
-            { id: 'kpi-bill', label: 'คอลัมน์ "เลขที่บิล" (นับจำนวน)', val: saved.billCol || cols.find(h => h.toLowerCase().includes('invoice') || h.includes('บิล')) },
-            { id: 'kpi-sku', label: 'คอลัมน์ "รหัสสินค้า" (นับจำนวน)', val: saved.skuCol || cols.find(h => h.toLowerCase().includes('sku') || h.includes('product')) }
-        ];
-
-        const html = fields.map(f => {
-            const opts = `<option value="">-- ไม่ใช้ --</option>` +
-                cols.map(c => `<option value="${c}" ${c === f.val ? 'selected' : ''}>${c}</option>`).join('');
-            return `
-                <div class="bg-gray-50 p-3 rounded-xl border border-gray-200">
-                    <label class="text-xs font-bold text-gray-700 block mb-1">${f.label}</label>
-                    <select id="${f.id}" class="w-full p-2 border rounded-lg text-sm bg-white">${opts}</select>
-                </div>`;
-        }).join('');
-
-        selectorEl.innerHTML = html;
-
-        const f1El = document.getElementById('kpi-focus-1');
-        const f2El = document.getElementById('kpi-focus-2');
-        if (f1El) f1El.value = saved.f1 || 'เจลลี่';
-        if (f2El) f2El.value = saved.f2 || 'กลมกล่อม';
-    },
-
-    calculatePreview: () => {
-        if (!State.rawData || State.rawData.length === 0) return UI.showErrorToast('ไม่มีข้อมูลดิบ');
-
-        const idColEl = document.getElementById('kpi-id');
-        if (!idColEl || !idColEl.value) return UI.showErrorToast('จำเป็นต้องระบุคอลัมน์ รหัสร้าน ครับ');
-
-        const conf = {
-            idCol: idColEl.value,
-            nameCol: document.getElementById('kpi-name') ? document.getElementById('kpi-name').value : '',
-            vpoCol: document.getElementById('kpi-vpo') ? document.getElementById('kpi-vpo').value : '',
-            billCol: document.getElementById('kpi-bill') ? document.getElementById('kpi-bill').value : '',
-            skuCol: document.getElementById('kpi-sku') ? document.getElementById('kpi-sku').value : '',
-            f1: document.getElementById('kpi-focus-1') ? document.getElementById('kpi-focus-1').value.trim() : '',
-            f2: document.getElementById('kpi-focus-2') ? document.getElementById('kpi-focus-2').value.trim() : ''
-        };
-
-        State.db.kpiSettings = conf;
-        App.dbRef.update({ kpiSettings: conf })
-            .catch(err => console.warn('บันทึก kpiSettings ไม่สำเร็จ:', err));
-
-        UI.showLoader('กำลังประมวลผล KPI...');
-        setTimeout(() => {
-            const temp = {};
-            State.rawData.forEach(row => {
-                const sId = String(row[conf.idCol] || '').trim();
-                if (!sId) return;
-                if (!temp[sId]) {
-                    temp[sId] = {
-                        id: sId,
-                        name: conf.nameCol ? (row[conf.nameCol] || 'ไม่ระบุ') : 'ไม่ระบุ',
-                        vpo: 0, bills: new Set(), skus: new Set(), h1: false, h2: false
-                    };
-                }
-                if (conf.vpoCol) {
-                    const qty = parseFloat(String(row[conf.vpoCol] || '').replace(/[^0-9.-]/g, ''));
-                    if (!isNaN(qty)) temp[sId].vpo += qty;
-                }
-                if (conf.billCol && row[conf.billCol]) temp[sId].bills.add(row[conf.billCol]);
-                if (conf.skuCol && row[conf.skuCol]) {
-                    const sku = String(row[conf.skuCol]);
-                    temp[sId].skus.add(sku);
-                    if (conf.f1 && sku.includes(conf.f1)) temp[sId].h1 = true;
-                    if (conf.f2 && sku.includes(conf.f2)) temp[sId].h2 = true;
-                }
-            });
-
-            const newSalesKPI = {};
-            Object.keys(temp).forEach(id => {
-                newSalesKPI[id] = {
-                    id, name: temp[id].name,
-                    vpo: Math.round(temp[id].vpo * 100) / 100,
-                    billCount: temp[id].bills.size,
-                    skuCount: temp[id].skus.size,
-                    hasJelly: temp[id].h1,
-                    hasKlom: temp[id].h2,
-                    active: temp[id].vpo > 0
-                };
-            });
-
-            State.previewSales = newSalesKPI;
-            KPIMgr.renderPreview(newSalesKPI, conf);
-            UI.hideLoader();
-        }, 100);
-    },
-
-    renderPreview: (kpiData, conf) => {
-        const keys = Object.keys(kpiData);
-        const countEl = document.getElementById('kpi-preview-count');
-        if (countEl) countEl.innerText = keys.length.toLocaleString();
-
-        const th = `<tr>
-            <th class="p-3 bg-gray-100 sticky top-0">รหัสร้าน</th>
-            <th class="p-3 bg-gray-100 sticky top-0">ชื่อร้าน</th>
-            <th class="p-3 bg-emerald-50 text-emerald-700 sticky top-0">VPO (รวม)</th>
-            <th class="p-3 bg-gray-100 sticky top-0">บิล</th>
-            <th class="p-3 bg-gray-100 sticky top-0">SKU</th>
-            <th class="p-3 bg-gray-100 sticky top-0">สินค้าโฟกัส</th>
-        </tr>`;
-
-        const headEl = document.getElementById('kpi-preview-head');
-        if (headEl) headEl.innerHTML = th;
-
-        let html = keys.slice(0, 300).map(id => {
-            const k = kpiData[id];
-            let fHtml = '';
-            if (k.hasJelly) fHtml += `<span class="bg-pink-100 text-pink-700 px-2 rounded text-[10px] font-bold mr-1">${conf.f1}</span>`;
-            if (k.hasKlom) fHtml += `<span class="bg-amber-100 text-amber-700 px-2 rounded text-[10px] font-bold">${conf.f2}</span>`;
-            return `<tr>
-                <td class="p-3 text-sm border-b">${k.id}</td>
-                <td class="p-3 text-sm border-b font-bold">${k.name}</td>
-                <td class="p-3 text-sm border-b font-black text-blue-600 bg-emerald-50/30">${k.vpo}</td>
-                <td class="p-3 text-sm border-b">${k.billCount}</td>
-                <td class="p-3 text-sm border-b">${k.skuCount}</td>
-                <td class="p-3 text-sm border-b">${fHtml}</td>
-            </tr>`;
-        }).join('');
-
-        if (keys.length > 300) {
-            html += `<tr><td colspan="6" class="text-center p-3 text-xs text-gray-400">... แสดงตัวอย่าง 300 ร้านแรก ...</td></tr>`;
-        }
-        const bodyEl = document.getElementById('kpi-preview-body');
-        if (bodyEl) bodyEl.innerHTML = html;
-    },
-
-    deployToSales: () => {
-        if (!State.previewSales) return UI.showErrorToast('กรุณากด "ทดสอบคำนวณ KPI" ให้เห็นตารางตัวอย่างก่อนส่งครับ');
-        UI.showLoader('กำลังอัปโหลดส่งให้ Sales...', 'กำลังแบ่งกล่องข้อมูล...');
-
-        cloudDB.collection('v1_sales_chunks').get().then(snap => {
-            const delBatch = cloudDB.batch();
-            snap.forEach(doc => delBatch.delete(doc.ref));
-            return delBatch.commit();
-        }).then(() => {
-            const keys = Object.keys(State.previewSales);
-            const chunkSize = 500;
-            const promises = [];
-            for (let i = 0; i < keys.length; i += chunkSize) {
-                const chunkData = {};
-                keys.slice(i, i + chunkSize).forEach(k => chunkData[k] = State.previewSales[k]);
-                promises.push(
-                    cloudDB.collection('v1_sales_chunks').doc('chunk_' + (i / chunkSize)).set(chunkData)
-                );
-            }
-            return Promise.all(promises);
-        }).then(() => {
-            State.sales = State.previewSales;
-            App.sync();
-            UI.hideLoader();
-            UI.showSaveToast('🚀 ส่งข้อมูลให้ Sales App สำเร็จ!');
-        }).catch(err => {
-            UI.hideLoader();
-            UI.showErrorToast('อัปโหลดไม่สำเร็จ: ' + err.message);
-        });
-    }
-};
-
-// ==========================================
-// 📊 Excel Export
-// ==========================================
-const ExcelIO = {
-    export: () => {
-                if (!State.stores.length) return UI.showErrorToast('ไม่มีข้อมูลให้โหลดครับ');
-
-                // Export 12 columns (A-L) matching uploaded file format exactly
-                const exportData = State.stores.map(s => {
-                                // Try to get original row data from rawData
-                                const rawRow = (State.rawData || []).find(r =>
-                                                    String(r['รหัส'] || r['B'] || '').trim() === String(s.id)
-                                                                                      ) || {};
-
-                                return {
-                                                    'CY': s.cy || '',
-                                                    'รหัส': s.id,
-                                                    'ชื่อ': s.name,
-                                                    'Sales': s.salesCode || '',
-                                                    'ประเภทร้านค้า1': s.shopType || '',
-                                                    'Sold To City': s.subDistrict || '',
-                                                    'Sold To State': s.district || '',
-                                                    'Address 5': s.province || '',
-                                                    'Latitude': s.lat,
-                                                    'Longitude': s.lng,  // แก้บัค: typo Longtitude → Longitude
-                                                    'ชื่อตลาด': s.marketName || '',
-                                                    'Day': s.days && s.days.length > 0 ? s.days[0] : (rawRow['Day'] || rawRow['L'] || ''),
-                                    'seq': (() => { const d0 = s.days && s.days.length > 0 ? s.days[0] : (rawRow['Day'] || rawRow['L'] || ''); return (s.seqs && d0 && s.seqs[d0] !== undefined) ? s.seqs[d0] : ''; })()
-                                };
-                });
-
-                // Sort by Day number
-                exportData.sort((a, b) => {
-                                const da = a['Day'] && a['Day'] !== '' ? parseInt(String(a['Day']).replace('Day ', '')) : 999;
-                                const db = b['Day'] && b['Day'] !== '' ? parseInt(String(b['Day']).replace('Day ', '')) : 999;
-                                return da - db;
-                });
-
-                // Create worksheet with 12 columns matching upload format
-                const ws = XLSX.utils.json_to_sheet(exportData, {
-                                header: ['CY', 'รหัส', 'ชื่อ', 'Sales', 'ประเภทร้านค้า1', 'Sold To City', 'Sold To State', 'Address 5', 'Latitude', 'Longitude', 'ชื่อตลาด', 'Day', 'seq']
-                });
-
-                // Set column widths
-                ws['!cols'] = [
-                    { wch: 14 }, // CY
-                    { wch: 12 }, // รหัส
-                    { wch: 40 }, // ชื่อ
-                    { wch: 10 }, // Sales
-                    { wch: 8  }, // ประเภทร้านค้า1
-                    { wch: 18 }, // Sold To City
-                    { wch: 18 }, // Sold To State
-                    { wch: 14 }, // Address 5
-                    { wch: 14 }, // Latitude
-                    { wch: 14 }, // Longtitude
-                    { wch: 30 }, // ชื่อตลาด
-                    { wch: 6  }, // Day
-                    { wch: 6  }  // seq
-                            ];
-
-                const wb = XLSX.utils.book_new();
-                XLSX.utils.book_append_sheet(wb, ws, 'RoutePlan');
-
-                const now = new Date();
-                const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
-                XLSX.writeFile(wb, `Route_${State.localActiveRoute}_${dateStr}.xlsx`);
-    }
-};
-
 // ==========================================
 // 🚀 App Controller
 // ==========================================
@@ -587,9 +198,8 @@ const App = {
             State.stores = State.db.routes[State.localActiveRoute] || [];
             App.log(`🏪 สายปัจจุบัน: ${State.localActiveRoute} (${State.stores.length} ร้าน)`);
 
-            App.log('📊 โหลด rawData + salesData...');
-            App.fetchRawData();
-            App.fetchSalesData(); // fetchSalesData เรียก App.sync() + UI.hideLoader() ปิดท้าย
+
+                    App.fetchSalesData(); // fetchSalesData เรียก App.sync() + UI.hideLoader() ปิดท้าย
             App.log('✅ Force reload เสร็จสิ้น');
         } catch (err) {
             App.log(`❌ Error: ${err.code || err.message}`);
@@ -662,9 +272,8 @@ const App = {
             State.stores = State.db.routes[State.localActiveRoute] || [];
             App.log(`🏪 สายปัจจุบัน: ${State.localActiveRoute} (${State.stores.length} ร้าน)`);
 
-            App.fetchRawData();
-            App.fetchSalesData();
-        }, (err) => {
+
+                }, (err) => {
             // onSnapshot error — มักเกิดจาก permission หรือ network
             // ถ้า persistence เปิดอยู่ Firestore จะ serve จาก cache อัตโนมัติ
             // ถ้าไม่มี cache เลย ให้แสดง retry
@@ -683,14 +292,6 @@ const App = {
 
         if (!App._fileListenersReady) {
             App._fileListenersReady = true;
-            const rawUpload = document.getElementById('rawUpload');
-            if (rawUpload) {
-                rawUpload.addEventListener('change', (e) => {
-                    const f = e.target.files[0];
-                    if (f) RawDataMgr.processExcel(f);
-                });
-            }
-
             const fileUpload = document.getElementById('fileUpload');
             if (fileUpload) {
                 fileUpload.addEventListener('change', App.handleMapUpload);
@@ -698,38 +299,7 @@ const App = {
         }
     },
 
-    fetchRawData: () => {
-        cloudDB.collection('v1_raw_chunks').get().then(snap => {
-            let raw = [];
-            snap.forEach(doc => { raw = raw.concat(doc.data().rows || []); });
-            State.rawData = raw;
-            App.log(`📊 rawData: ${raw.length} rows`);
-            RawDataMgr.renderTable();
-        }).catch(err => {
-            App.log(`⚠️ rawData: โหลดไม่สำเร็จ (${err.code || err.message})`);
-            console.warn('โหลด rawData ไม่สำเร็จ:', err);
-        });
-    },
 
-    fetchSalesData: () => {
-        App.log('📈 โหลด salesData...');
-        cloudDB.collection('v1_sales_chunks').get().then(snap => {
-            const merged = {};
-            snap.forEach(doc => { Object.assign(merged, doc.data()); });
-            State.sales = merged;
-            App.log(`✅ salesData: ${Object.keys(merged).length} ร้าน`);
-            App.sync();
-            clearTimeout(App._forceReloadTimer);
-            const btn = document.getElementById('force-reload-btn');
-            if (btn) btn.style.display = 'none';
-            UI.hideLoader();
-        }).catch(err => {
-            App.log(`⚠️ salesData: โหลดไม่สำเร็จ (${err.code || err.message})`);
-            console.warn('โหลด salesData ไม่สำเร็จ:', err);
-            App.sync();
-            UI.hideLoader();
-        });
-    },
 
     // ✅ saveDB: บันทึกทีละสายใน subcollection — รองรับ active/draft
     saveDB: () => {
@@ -1062,6 +632,29 @@ const App = {
         App.saveDB();
     },
 
+
+    // ─── Helper: แปลง cycle-day (1-24) → calendar day โดยคำนวณจาก calendarConfig
+    // input:  assignedDayNum = 1-24 (จากไฟล์ Excel)
+    // output: 'Day N' ที่ถูกต้องตาม calendarConfig ของ draft/active นั้น
+    _mapCycleDayToCalDay: (dayNum, calCfg) => {
+        if (!calCfg || calCfg.mode !== 'cycle' || !dayNum) return `Day ${dayNum}`;
+        const holidays = calCfg.holidays || [];
+        const cycleDays = calCfg.cycleDays || 24;
+        if (!holidays.length) return `Day ${dayNum}`; // ไม่มีวันหยุด → ตรงกัน
+
+        // สร้าง mapping: cycle-day (1,2,3...) → calendar-day (1,2,...,cycleDays) ข้ามวันหยุด
+        // cycle-day 1 = วันทำงานแรก, ข้ามวันหยุดทุกวัน
+        const mapping = {}; // cycleDay → calDay
+        let cycleDay = 1;
+        for (let calDay = 1; calDay <= cycleDays && cycleDay <= cycleDays; calDay++) {
+            if (holidays.includes(calDay)) continue; // ข้ามวันหยุด
+            mapping[cycleDay] = calDay;
+            cycleDay++;
+        }
+        const mapped = mapping[dayNum];
+        return mapped ? `Day ${mapped}` : `Day ${dayNum}`;
+    },
+
     handleMapUpload: function (e) {
         const file = e.target.files[0];
         if (!file) return;
@@ -1080,6 +673,10 @@ const App = {
                     workbook.Sheets[workbook.SheetNames[0]], { header: 1, defval: '' }
                 );
                 if (json.length < 2) return UI.showErrorToast('ไฟล์ว่างเปล่า');
+
+                // โหลด calendarConfig ของ plan ปัจจุบัน (สำหรับ remap days)
+                // ใช้แบบ async ผ่าน .get() แล้ว process ใน callback
+                const _processUpload = async (calCfg) => {
 
                 const headers = json[0];
                 let idCol = -1, nameCol = -1, latCol = -1, lngCol = -1, freqCol = -1, dayCol = -1, seqCol = -1, salesCodeCol = -1, shopTypeCol = -1, subDistrictCol = -1, districtCol = -1, provinceCol = -1, marketNameCol = -1, cyCol = -1;
@@ -1116,7 +713,8 @@ const App = {
                     const freq = (freqCol !== -1 && String(row[freqCol] || '').trim().toUpperCase().includes('2')) ? 2 : 1;
                     const rawDay = (dayCol !== -1 && row[dayCol]) ? String(row[dayCol]).trim() : '';
                     const dayNum = rawDay ? parseInt(rawDay.replace(/[^0-9]/g, '')) : NaN;
-                    const assignedDay = !isNaN(dayNum) ? 'Day ' + dayNum : '';
+                    // remap cycle-day → calendar-day ตาม calendarConfig (ข้ามวันหยุด)
+                    const assignedDay = !isNaN(dayNum) ? App._mapCycleDayToCalDay(dayNum, calCfg) : '';
                     const assignedSeq = (seqCol !== -1 && row[seqCol]) ? parseInt(String(row[seqCol]).replace(/[^0-9]/g, '')) : NaN;
                     const isValidDay = !!assignedDay;
 
@@ -1158,6 +756,23 @@ const App = {
                 App.sync();
                 App.saveDB();
                 MapCtrl.fitToStores();
+
+                }; // end _processUpload
+
+                // โหลด calendarConfig แบบ async แล้ว process
+                try {
+                    const planRef = App.currentRoutesCol
+                        ? (App._planMode.startsWith('draft:')
+                            ? App.draftsCol().doc(App._planMode.replace('draft:',''))
+                            : App.dbRef)
+                        : App.dbRef;
+                    planRef.get().then(snap => {
+                        const calCfg = snap.exists ? (snap.data().calendarConfig || null) : null;
+                        _processUpload(calCfg);
+                    }).catch(() => _processUpload(null));
+                } catch(e) {
+                    _processUpload(null);
+                }
                 UI.showSaveToast(`✅ โหลด ${finalArray.length} ร้าน พร้อมการจัดวันวิ่งสำเร็จ`);
 
             } catch (err) {
@@ -1371,13 +986,14 @@ const ExportCtrl = {
         const modal = document.getElementById('export-modal');
         if (!modal) { ExportCtrl.exportCurrent(); return; }
 
-        // populate plan options
+        // reset plan selector — เลือก draft ถ้า planMode ปัจจุบันเป็น draft
         const planSel = document.getElementById('export-plan-sel');
         if (planSel) {
             const m = App._planMode;
-            let opts = `<option value="current">📊 Plan ที่เปิดอยู่ตอนนี้ (${m === 'active' ? 'Active' : m})</option>`;
-            opts += `<option value="active">✅ Active (Sales ใช้อยู่)</option>`;
-            planSel.innerHTML = opts;
+            if (m.startsWith('draft:')) planSel.value = 'draft';
+            else if (m.startsWith('history:')) planSel.value = 'history';
+            else planSel.value = 'current';
+            ExportCtrl.onPlanSelChange(planSel.value);
         }
 
         // populate route options
@@ -1391,6 +1007,43 @@ const ExportCtrl = {
         modal.classList.remove('hidden');
     },
 
+    // เมื่อเปลี่ยน plan type → แสดง/ซ่อน month selector
+    onPlanSelChange: async (val) => {
+        const monthRow = document.getElementById('export-month-row');
+        const monthSel = document.getElementById('export-month-sel');
+        if (!monthRow || !monthSel) return;
+
+        if (val === 'draft' || val === 'history') {
+            monthRow.classList.remove('hidden');
+            monthSel.innerHTML = '<option value="">— กำลังโหลด... —</option>';
+
+            try {
+                // โหลด draftList / historyList จาก metadata
+                const metaSnap = await App.dbRef.get();
+                const meta = metaSnap.exists ? metaSnap.data() : {};
+                const list = val === 'draft'
+                    ? (meta.draftList   || []).sort().reverse()
+                    : (meta.historyList || []).sort().reverse();
+
+                if (!list.length) {
+                    monthSel.innerHTML = `<option value="">— ไม่มีข้อมูล ${val === 'draft' ? 'Draft' : 'History'} —</option>`;
+                } else {
+                    monthSel.innerHTML = list.map(ym => {
+                        const [y, m] = ym.split('_');
+                        const label = new Date(+y, +m-1, 1).toLocaleDateString('th-TH', { year:'numeric', month:'long' });
+                        // pre-select เดือนที่กำลังเปิดอยู่
+                        const cur = App._planMode.replace('draft:','').replace('history:','');
+                        return `<option value="${ym}" ${ym === cur ? 'selected' : ''}>${label}</option>`;
+                    }).join('');
+                }
+            } catch(e) {
+                monthSel.innerHTML = '<option value="">— โหลดไม่สำเร็จ —</option>';
+            }
+        } else {
+            monthRow.classList.add('hidden');
+        }
+    },
+
     closeModal: () => {
         const modal = document.getElementById('export-modal');
         if (modal) modal.classList.add('hidden');
@@ -1398,43 +1051,83 @@ const ExportCtrl = {
 
     doExport: async () => {
         const planSel  = document.getElementById('export-plan-sel');
+        const monthSel = document.getElementById('export-month-sel');
         const routeSel = document.getElementById('export-route-sel');
         const planVal  = planSel  ? planSel.value  : 'current';
+        const monthVal = monthSel ? monthSel.value : '';
         const routeVal = routeSel ? routeSel.value : State.localActiveRoute;
 
         ExportCtrl.closeModal();
 
-        // ถ้าเลือก active และ planMode ไม่ใช่ active → ต้องโหลดจาก Firestore
-        if (planVal === 'active' && App._planMode !== 'active') {
-            UI.showLoader('กำลังโหลด Active Plan...', 'ดึงข้อมูลจาก Firestore');
-            try {
+        // ─── helper: โหลด routes จาก Firestore ───────────────────────
+        const _loadFromFirestore = async (col, routeList, routeFilter) => {
+            const toLoad = routeFilter === 'ALL' ? routeList : [routeFilter];
+            const routeData = {};
+            await Promise.all(toLoad.map(async name => {
+                const d = await col.doc(name).get();
+                routeData[name] = d.exists ? (d.data().stores || []) : [];
+            }));
+            return routeData;
+        };
+
+        try {
+            // ─── Active ───────────────────────────────────────────────
+            if (planVal === 'active') {
+                UI.showLoader('กำลังโหลด Active Plan...', 'ดึงข้อมูลจาก Firestore');
                 const routeList = (await App.dbRef.get()).data()?.routeList || [];
-                const routesToExport = routeVal === 'ALL' ? routeList : [routeVal];
-                const routeData = {};
-                await Promise.all(routesToExport.map(async name => {
-                    const d = await App.routesCol().doc(name).get();
-                    routeData[name] = d.exists ? (d.data().stores || []) : [];
-                }));
+                const routeData = await _loadFromFirestore(App.routesCol(), routeList, routeVal);
                 UI.hideLoader();
                 ExportCtrl._writeExcel(routeData, 'Active');
-            } catch (err) {
-                UI.hideLoader();
-                UI.showErrorToast('❌ โหลดไม่สำเร็จ: ' + err.message);
+                return;
             }
-            return;
-        }
 
-        // ใช้ State ปัจจุบัน
-        const routeData = {};
-        if (routeVal === 'ALL') {
-            Object.assign(routeData, State.db.routes);
-        } else {
-            routeData[routeVal] = State.db.routes[routeVal] || [];
+            // ─── Draft เดือนที่เลือก ──────────────────────────────────
+            if (planVal === 'draft') {
+                if (!monthVal) return UI.showErrorToast('⚠️ กรุณาเลือกเดือน Draft');
+                // ถ้าเดือนที่เลือก = planMode ปัจจุบัน → ใช้ State แทน (เร็วกว่า)
+                if (App._planMode === 'draft:' + monthVal) {
+                    const routeData = {};
+                    if (routeVal === 'ALL') Object.assign(routeData, State.db.routes);
+                    else routeData[routeVal] = State.db.routes[routeVal] || [];
+                    ExportCtrl._writeExcel(routeData, `Draft_${monthVal}`);
+                    return;
+                }
+                UI.showLoader(`กำลังโหลด Draft ${monthVal}...`, 'ดึงข้อมูลจาก Firestore');
+                const draftDoc  = await App.draftsCol().doc(monthVal).get();
+                const routeList = draftDoc.exists ? (draftDoc.data().routeList || []) : [];
+                const col = App.draftsCol().doc(monthVal).collection('routes');
+                const routeData = await _loadFromFirestore(col, routeList, routeVal);
+                UI.hideLoader();
+                ExportCtrl._writeExcel(routeData, `Draft_${monthVal}`);
+                return;
+            }
+
+            // ─── History เดือนที่เลือก ────────────────────────────────
+            if (planVal === 'history') {
+                if (!monthVal) return UI.showErrorToast('⚠️ กรุณาเลือกเดือน History');
+                UI.showLoader(`กำลังโหลด History ${monthVal}...`, 'ดึงข้อมูลจาก Firestore');
+                const histDoc   = await App.dbRef.collection('history').doc(monthVal).get();
+                const routeList = histDoc.exists ? (histDoc.data().routeList || Object.keys(State.db.routes)) : [];
+                const col = App.dbRef.collection('history').doc(monthVal).collection('routes');
+                const routeData = await _loadFromFirestore(col, routeList, routeVal);
+                UI.hideLoader();
+                ExportCtrl._writeExcel(routeData, `History_${monthVal}`);
+                return;
+            }
+
+            // ─── Current (default) — ใช้ State ────────────────────────
+            const routeData = {};
+            if (routeVal === 'ALL') Object.assign(routeData, State.db.routes);
+            else routeData[routeVal] = State.db.routes[routeVal] || [];
+            const label = App._planMode === 'active' ? 'Active' :
+                App._planMode.startsWith('draft:')   ? 'Draft_'   + App._planMode.replace('draft:','') :
+                                                       'History_' + App._planMode.replace('history:','');
+            ExportCtrl._writeExcel(routeData, label);
+
+        } catch (err) {
+            UI.hideLoader();
+            UI.showErrorToast('❌ Export ไม่สำเร็จ: ' + err.message);
         }
-        const label = App._planMode === 'active' ? 'Active' :
-            App._planMode.startsWith('draft:') ? 'Draft_' + App._planMode.replace('draft:','') :
-            'History_' + App._planMode.replace('history:','');
-        ExportCtrl._writeExcel(routeData, label);
     },
 
     _writeExcel: (routeData, label) => {
