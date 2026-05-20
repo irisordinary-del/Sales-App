@@ -1089,20 +1089,14 @@ const CalendarCtrl = {
             else if (isHoliday) { bgColor = '#fef2f2'; textColor = '#dc2626'; borderColor = '#fecaca'; }
             else if (isWeekend) { bgColor = '#f9fafb'; textColor = '#6b7280'; }
 
-            // เช็คว่าเดือนนี้มี plan อยู่ไหม
+            // เช็คจาก planCache ของเดือนนั้นโดยตรง
             const _cellYM = `${year}_${String(month+1).padStart(2,'0')}`;
             const _hasPlan = State.planList.some(p => p === _cellYM || p === 'active:' + _cellYM);
-            // ถ้าเป็นเดือนที่โหลดอยู่ → เช็คจาก State.allStores
-            // ถ้าเป็นเดือนอื่นที่มี plan → แสดงจุดสีเทา (ยังไม่โหลด)
-            const _loadedYM = State.activePlanYM || '';
-            const [_ly, _lm] = _loadedYM.split('_').map(Number);
-            const _isLoadedMonth = (year === _ly && month === _lm - 1);
             const _cachedPlan = State.planCache[_cellYM] || State.planCache['active:' + _cellYM];
             let hasRoute = false;
             let hasPlanNotLoaded = false;
-            if (_isLoadedMonth && dayLabel) {
-                hasRoute = State.allStores.some(s => s.days && s.days.includes(dayLabel));
-            } else if (_cachedPlan && dayLabel) {
+            if (_cachedPlan && dayLabel) {
+                // ใช้ข้อมูลจาก cache ของเดือนนั้นโดยตรง
                 hasRoute = _cachedPlan.stores.some(s => s.days && s.days.includes(dayLabel));
             } else if (_hasPlan && dayLabel) {
                 hasPlanNotLoaded = true; // มี plan แต่ยังไม่โหลด → จุดสีเทา
