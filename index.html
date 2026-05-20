@@ -269,7 +269,10 @@
                         class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition shadow-sm">
                         📅 ตั้งค่าปฏิทิน
                     </button>
-
+                    <button onclick="PlanUI.confirmDelete()"
+                        class="bg-red-500 hover:bg-red-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition shadow-sm">
+                        🗑️ ลบเดือนนี้
+                    </button>
                 </div>
             </div>
 
@@ -1232,6 +1235,55 @@
                 await App.activateDraft(PlanUI._pendingActivateYm);
                 PlanUI._pendingActivateYm = null;
                 await PlanUI.refresh();
+            },
+
+            // ─── ลบเดือนที่วางแผนอยู่ ──────────────────────────────────
+            confirmDelete: () => {
+                const m = App._planMode;
+                if (!m.startsWith('draft:')) return;
+                const ym = m.replace('draft:', '');
+                const [y, mo] = ym.split('_');
+                const lbl = new Date(+y, +mo-1, 1).toLocaleDateString('th-TH', { year: 'numeric', month: 'long' });
+                UI.showConfirm(
+                    `🗑️ ลบแผน ${lbl} ?
+
+ข้อมูลจะหายถาวร และไม่สามารถกู้คืนได้`,
+                    () => PlanUI.doDelete()
+                );
+            },
+
+            doDelete: async () => {
+                const m = App._planMode;
+                if (!m.startsWith('draft:')) return;
+                const ym = m.replace('draft:', '');
+                const [y, mo] = ym.split('_');
+                const lbl = new Date(+y, +mo-1, 1).toLocaleDateString('th-TH', { year: 'numeric', month: 'long' });
+
+                UI.showLoader('กำลังลบ...', `ลบแผน ${lbl}`);
+                try {
+                    // ลบ routes ทั้งหมดใน draft นี้ก่อน
+                    const routesSnap = await App.draftsCol().doc(ym).collection('routes').get();
+                    const batch = cloudDB.batch();
+                    routesSnap.forEach(doc => batch.delete(doc.ref));
+                    // ลบ draft document
+                    batch.delete(App.draftsCol().doc(ym));
+                    await batch.commit();
+
+                    // อัปเดต draftList ใน metadata
+                    const metaSnap = await App.dbRef.get();
+                    const curList  = metaSnap.exists ? (metaSnap.data().draftList || []) : [];
+                    await App.dbRef.update({ draftList: curList.filter(d => d !== ym) });
+
+                    UI.hideLoader();
+                    UI.showSaveToast(`✅ ลบแผน ${lbl} เรียบร้อย`);
+
+                    // กลับไป Active plan
+                    await App.switchPlanMode('active');
+                    await PlanUI.refresh();
+                } catch(e) {
+                    UI.hideLoader();
+                    UI.showErrorToast('❌ ลบไม่สำเร็จ: ' + e.message);
+                }
             }
         };
     </script>
