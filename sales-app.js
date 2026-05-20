@@ -429,8 +429,8 @@ const App = {
             }
 
             const [cfgSnap, routeSnap] = await Promise.all([
-                App._getWithTimeout(cfgRef, 5000),
-                App._getWithTimeout(routeRef, 8000),
+                App._getWithTimeout(cfgRef, 15000),
+                App._getWithTimeout(routeRef, 15000),
             ]);
 
             const calendarConfig = cfgSnap.exists ? (cfgSnap.data().calendarConfig || null) : null;
@@ -440,7 +440,13 @@ const App = {
             return State.planCache[ym];
         } catch(e) {
             console.warn('loadPlanData:', ym, e);
-            State.planCache[ym] = { stores: [], calendarConfig: null, ym: realYM };
+            // ถ้า timeout แต่เป็นเดือนที่โหลดอยู่ → ใช้ State.allStores แทน
+            const _loadedYM = State.activePlanYM || '';
+            if (realYM === _loadedYM && State.allStores.length > 0) {
+                State.planCache[ym] = { stores: State.allStores, calendarConfig: State.calendarConfig, ym: realYM };
+            } else {
+                State.planCache[ym] = { stores: [], calendarConfig: null, ym: realYM };
+            }
             return State.planCache[ym];
         }
     },
@@ -1278,9 +1284,17 @@ const CalendarCtrl = {
         CalendarCtrl._year  = now.getFullYear();
         CalendarCtrl._month = now.getMonth();
 
-        // pre-load ทุก plan ใน planList เพื่อให้ปฏิทินแสดงจุดได้ถูกต้อง
+        // ใส่ข้อมูลปัจจุบันลง cache ก่อนเลย (ไม่ต้องรอ Firestore)
+        const _curYM = State.activePlanYM || '';
+        const _curKey = State.activePlanMode === 'active' ? ('active:' + _curYM) : _curYM;
+        if (_curYM && State.allStores.length > 0 && !State.planCache[_curKey]) {
+            State.planCache[_curKey] = { stores: State.allStores, calendarConfig: State.calendarConfig, ym: _curYM };
+        }
+        // pre-load เดือนอื่นจาก Firestore (ไม่บล็อก — render ก่อนได้เลย)
         if (State.planList && State.planList.length > 0) {
-            await Promise.all(State.planList.map(ym => App.loadPlanData(ym).catch(() => {})));
+            Promise.all(State.planList.map(ym => App.loadPlanData(ym).catch(() => {}))).then(() => {
+                CalendarCtrl.render(); // re-render หลังโหลดครบ
+            });
         }
 
         CalendarCtrl.render();
