@@ -272,6 +272,10 @@ const App = {
             State.stores = State.db.routes[State.localActiveRoute] || [];
             App.log(`🏪 สายปัจจุบัน: ${State.localActiveRoute} (${State.stores.length} ร้าน)`);
 
+            App.sync();
+            MapCtrl.fitToStores();
+            UI.hideLoader();
+            await PlanUI?.refresh?.();
 
                 }, (err) => {
             // onSnapshot error — มักเกิดจาก permission หรือ network
