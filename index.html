@@ -1324,12 +1324,18 @@
                 <!-- โหมด -->
                 <div>
                     <label class="block text-xs font-bold text-gray-500 uppercase mb-2">โหมดปฏิทิน</label>
-                    <div class="grid grid-cols-2 gap-2">
+                    <div class="grid grid-cols-3 gap-2">
                         <button id="cal-mode-cycle" onclick="CalendarAdmin.setMode('cycle')"
                             class="border-2 border-indigo-500 bg-indigo-50 rounded-xl p-3 text-center cursor-pointer transition">
                             <div class="text-xl mb-1">🔄</div>
                             <div class="text-xs font-black text-indigo-800">Cycle D1-24</div>
                             <div class="text-[10px] text-indigo-600 mt-0.5">ต่อเนื่องนับวัน</div>
+                        </button>
+                        <button id="cal-mode-date" onclick="CalendarAdmin.setMode('date')"
+                            class="border-2 border-gray-200 bg-gray-50 rounded-xl p-3 text-center cursor-pointer transition">
+                            <div class="text-xl mb-1">📅</div>
+                            <div class="text-xs font-black text-gray-700">วันที่จริง</div>
+                            <div class="text-[10px] text-gray-500 mt-0.5">Day = วันที่ในเดือน</div>
                         </button>
                         <button id="cal-mode-fixed" onclick="CalendarAdmin.setMode('fixed')"
                             class="border-2 border-gray-200 bg-gray-50 rounded-xl p-3 text-center cursor-pointer transition">
