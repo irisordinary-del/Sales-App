@@ -237,8 +237,9 @@
                 <!-- Plan Selector -->
                 <div class="flex items-center gap-1.5">
                     <div id="plan-mode-badge"
+                        id="plan-current-badge"
                         style="font-size:10px;font-weight:800;padding:3px 8px;border-radius:6px;background:#059669;color:#fff;white-space:nowrap;">
-                        📅 Plan ปัจจุบัน
+                        📅 Plan
                     </div>
                     <select id="plan-selector" onchange="PlanUI.onSelect(this.value)"
                         class="bg-gray-700 border border-gray-600 text-white text-xs font-bold rounded-lg px-2 py-1.5 outline-none focus:ring-2 focus:ring-indigo-400 max-w-[130px]">
@@ -1109,25 +1110,44 @@
                     const sel = document.getElementById('plan-selector');
                     if (!sel) return;
 
-                    let opts = `<option value="active">📅 Plan ปัจจุบัน</option>`;
-                    if (draftList.length) {
-                        opts += `<optgroup label="── Draft ──">`;
-                        draftList.forEach(ym => {
-                            const [y, m] = ym.split('_');
-                            const lbl = DateUtil ? DateUtil.ymToThaiShort(ym) : new Date(+y, +m-1, 1).toLocaleDateString('th-TH', { year: 'numeric', month: 'short' });
-                            opts += `<option value="draft:${ym}">📅 ${lbl}</option>`;
-                        });
-                        opts += `</optgroup>`;
+                    // ── แสดงเป็นชื่อเดือน ไม่มีคำว่า Draft/History ──────────
+                    // รวม active + drafts เรียงตามเดือน ใหม่ก่อน
+                    const allPlans = [];
+
+                    // เพิ่ม drafts (เรียงใหม่ก่อน)
+                    draftList.forEach(ym => {
+                        const lbl = DateUtil ? DateUtil.ymToThaiShort(ym)
+                            : new Date(+ym.split('_')[0], +ym.split('_')[1]-1, 1)
+                                .toLocaleDateString('th-TH', { year: 'numeric', month: 'long' });
+                        allPlans.push({ value: `draft:${ym}`, label: `📅 ${lbl}` });
+                    });
+
+                    // เพิ่ม active plan (เรียงตาม YM ด้วย)
+                    const _now = new Date();
+                    const _activeYM = `${_now.getFullYear()}_${String(_now.getMonth()+1).padStart(2,'0')}`;
+                    // ถ้า active ไม่ซ้ำกับ draft → เพิ่มเข้า list
+                    if (!draftList.includes(_activeYM)) {
+                        const _activeLbl = DateUtil ? DateUtil.ymToThaiShort(_activeYM)
+                            : new Date(+_activeYM.split('_')[0], +_activeYM.split('_')[1]-1, 1)
+                                .toLocaleDateString('th-TH', { year: 'numeric', month: 'long' });
+                        allPlans.push({ value: 'active', label: `📅 ${_activeLbl} (ปัจจุบัน)` });
                     }
+
+                    // เพิ่ม history (read-only) ท้ายสุด
                     if (historyList.length) {
-                        opts += `<optgroup label="── History ──">`;
                         historyList.forEach(ym => {
-                            const [y, m] = ym.split('_');
-                            const lbl = DateUtil ? DateUtil.ymToThaiShort(ym) : new Date(+y, +m-1, 1).toLocaleDateString('th-TH', { year: 'numeric', month: 'short' });
-                            opts += `<option value="history:${ym}">🔒 ${lbl} (Read-Only)</option>`;
+                            const lbl = DateUtil ? DateUtil.ymToThaiShort(ym)
+                                : new Date(+ym.split('_')[0], +ym.split('_')[1]-1, 1)
+                                    .toLocaleDateString('th-TH', { year: 'numeric', month: 'long' });
+                            allPlans.push({ value: `history:${ym}`, label: `🔒 ${lbl}` });
                         });
-                        opts += `</optgroup>`;
                     }
+
+                    let opts = allPlans.map(p =>
+                        `<option value="${p.value}">${p.label}</option>`
+                    ).join('');
+                    // fallback ถ้าไม่มีเลย
+                    if (!opts) opts = `<option value="active">📅 Plan ปัจจุบัน</option>`;
                     sel.innerHTML = opts;
                     sel.value = App._planMode.startsWith('draft:') || App._planMode.startsWith('history:')
                         ? App._planMode : 'active';
@@ -1303,18 +1323,12 @@
                 <!-- โหมด -->
                 <div>
                     <label class="block text-xs font-bold text-gray-500 uppercase mb-2">โหมดปฏิทิน</label>
-                    <div class="grid grid-cols-3 gap-2">
+                    <div class="grid grid-cols-2 gap-2">
                         <button id="cal-mode-cycle" onclick="CalendarAdmin.setMode('cycle')"
                             class="border-2 border-indigo-500 bg-indigo-50 rounded-xl p-3 text-center cursor-pointer transition">
                             <div class="text-xl mb-1">🔄</div>
                             <div class="text-xs font-black text-indigo-800">Cycle D1-24</div>
                             <div class="text-[10px] text-indigo-600 mt-0.5">ต่อเนื่องนับวัน</div>
-                        </button>
-                        <button id="cal-mode-date" onclick="CalendarAdmin.setMode('date')"
-                            class="border-2 border-gray-200 bg-gray-50 rounded-xl p-3 text-center cursor-pointer transition">
-                            <div class="text-xl mb-1">📅</div>
-                            <div class="text-xs font-black text-gray-700">วันที่จริง</div>
-                            <div class="text-[10px] text-gray-500 mt-0.5">Day = วันที่ในเดือน</div>
                         </button>
                         <button id="cal-mode-fixed" onclick="CalendarAdmin.setMode('fixed')"
                             class="border-2 border-gray-200 bg-gray-50 rounded-xl p-3 text-center cursor-pointer transition">
@@ -1408,9 +1422,7 @@
                     CalendarAdmin._fixedRows = [];
                     if (cfg) {
                         CalendarAdmin.setMode(cfg.mode || 'cycle');
-                        if (cfg.mode === 'date') {
-                            // ไม่มี config พิเศษ — setMode พอ
-                        } else if (cfg.mode === 'cycle') {
+                        if (cfg.mode === 'cycle') {
                             document.getElementById('cal-start-date').value    = cfg.startDay    || 1;
                             document.getElementById('cal-start-day-num').value = cfg.startDayNum || 1;
                             document.getElementById('cal-cycle-days').value    = cfg.cycleDays   || 24;
@@ -1434,21 +1446,9 @@
             setMode: (mode) => {
                 CalendarAdmin._mode = mode;
                 const cycleBtn = document.getElementById('cal-mode-cycle');
-                const dateBtn  = document.getElementById('cal-mode-date');
                 const fixedBtn = document.getElementById('cal-mode-fixed');
                 const cycleSec = document.getElementById('cal-cycle-section');
                 const fixedSec = document.getElementById('cal-fixed-section');
-                const activeClass = 'border-2 border-indigo-500 bg-indigo-50 rounded-xl p-3 text-center cursor-pointer transition';
-                const inactiveClass = 'border-2 border-gray-200 bg-gray-50 rounded-xl p-3 text-center cursor-pointer transition';
-                if (dateBtn) dateBtn.className = inactiveClass;
-                if (mode === 'date') {
-                    if (cycleBtn) cycleBtn.className = inactiveClass;
-                    if (dateBtn)  dateBtn.className  = activeClass;
-                    if (fixedBtn) fixedBtn.className = inactiveClass;
-                    if (cycleSec) cycleSec.classList.add('hidden');
-                    if (fixedSec) fixedSec.classList.add('hidden');
-                    return;
-                }
                 if (mode === 'cycle') {
                     cycleBtn.className = 'border-2 border-indigo-500 bg-indigo-50 rounded-xl p-3 text-center cursor-pointer transition';
                     fixedBtn.className = 'border-2 border-gray-200 bg-gray-50 rounded-xl p-3 text-center cursor-pointer transition';
@@ -1520,9 +1520,7 @@
             save: async () => {
                 if (!CalendarAdmin._targetRef) return;
                 let cfg;
-                if (CalendarAdmin._mode === 'date') {
-                    cfg = { mode: 'date' };
-                } else if (CalendarAdmin._mode === 'cycle') {
+                if (CalendarAdmin._mode === 'cycle') {
                     cfg = {
                         mode:        'cycle',
                         startDay:    parseInt(document.getElementById('cal-start-date').value) || 1,
