@@ -963,8 +963,8 @@ const CalendarCtrl = {
             const mktLabel = mktsInCell.length > 0 ? mktsInCell[0] : '';
             const mktMore  = mktsInCell.length > 1 ? '+' + (mktsInCell.length-1) : '';
             // date mode: dayLabel = "Day 4" และ d = 4 → ตัวเลขเหมือนกัน ไม่ต้องแสดง badge ซ้ำ
-            const cfg = State.calendarConfig;
-            const isDateMode = !cfg || cfg.mode === 'date';
+            const _cellCfg = State.calendarConfig;
+            const isDateMode = !_cellCfg || _cellCfg.mode === 'date';
             const dayNum = dayLabel ? parseInt(dayLabel.replace('Day ','')) : null;
             const isSameAsDate = isDateMode && dayNum === d;
 
