@@ -1269,7 +1269,7 @@ const CalendarCtrl = {
         CalendarCtrl.render();
     },
 
-    openPopup: () => {
+    openPopup: async () => {
         const popup = document.getElementById('calendar-popup');
         const sheet = document.getElementById('calendar-popup-sheet');
         if (!popup || !sheet) return;
@@ -1277,11 +1277,16 @@ const CalendarCtrl = {
         const now = new Date();
         CalendarCtrl._year  = now.getFullYear();
         CalendarCtrl._month = now.getMonth();
+
+        // pre-load ทุก plan ใน planList เพื่อให้ปฏิทินแสดงจุดได้ถูกต้อง
+        if (State.planList && State.planList.length > 0) {
+            await Promise.all(State.planList.map(ym => App.loadPlanData(ym).catch(() => {})));
+        }
+
         CalendarCtrl.render();
         popup.style.display = 'block';
         requestAnimationFrame(() => {
             sheet.style.transform = 'translateY(0)';
-            // scroll ไปวันปัจจุบันใน grid
             setTimeout(() => {
                 const todayEl = document.getElementById('cal-today-cell');
                 if (todayEl) todayEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
