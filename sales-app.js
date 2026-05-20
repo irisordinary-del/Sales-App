@@ -44,7 +44,7 @@ db.enablePersistence({ synchronizeTabs: true }).catch(err => {
 let docMain = db.collection('appData').doc('v1_main');
 const colSales = db.collection('v1_sales_chunks');
 
-let State = { myRoute: "", allStores: [], routeStores: [], sales: {}, currentDay: "", isLoaded: false, mapNeedsFit: true, calendarConfig: null, activePlanYM: null, activePlanMode: 'active', viewMode: 'sales', centerId: null, allRoutes: {}, routeList: [] };
+let State = { myRoute: "", allStores: [], routeStores: [], sales: {}, currentDay: "", isLoaded: false, mapNeedsFit: true, calendarConfig: null, activePlanYM: null, activePlanMode: 'active', viewMode: 'sales', centerId: null, allRoutes: {}, routeList: [], _filterMarket: '' };
 let map = null, mapMarkers = [], sortableList = null, markerClusterGroup = null;
 
 // ─── Tab keys ที่ระบบรู้จัก ───────────────────────────────
@@ -604,7 +604,13 @@ const Processor = {
     },
 
     routeList: () => {
-        let list = State.allStores.filter(s => s.days.includes(State.currentDay));
+        let list = State.allStores.filter(s => {
+            if (!s.days.includes(State.currentDay)) return false;
+            if (State._filterMarket) {
+                return trimMarketName(s.marketName) === State._filterMarket;
+            }
+            return true;
+        });
         list.sort((a, b) => (a.seqs?.[State.currentDay] || 999) - (b.seqs?.[State.currentDay] || 999));
 
         let html = list.map((s, i) => {
@@ -970,6 +976,7 @@ const CalendarCtrl = {
 
             html += `
             <div onclick="${clickHandler}"
+                ${isToday ? 'id="cal-today-cell"' : ''}
                 style="border-radius:10px;border:1px solid ${borderColor};background:${bgColor};
                        padding:4px 2px;text-align:center;cursor:${dayLabel ? 'pointer' : 'default'};
                        min-height:56px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;
@@ -997,17 +1004,103 @@ const CalendarCtrl = {
 
     // กดวันในปฏิทิน → ปิด popup + ไปหน้าคิวงาน + แสดงชื่อตลาด
     goToDay: (dayLabel) => {
+        // แสดง Bottom Sheet เลือกตลาด
+        CalendarCtrl.showDaySheet(dayLabel);
+    },
+
+    // navigate จริงๆ หลังเลือกตลาด
+    navigateToDay: (dayLabel, market) => {
         CalendarCtrl.closePopup();
+        CalendarCtrl.closeDaySheet();
         setTimeout(() => {
             State.currentDay = dayLabel;
+            State._filterMarket = market || '';
             const el = document.getElementById('day-select');
             if (el) el.value = dayLabel;
             State.mapNeedsFit = true;
             Processor.routeList();
             UI.switchTab('route');
-            const mkts = getDayMarketList(dayLabel);
-            const label = mkts.length > 0 ? mkts.join(' · ') : dayLabel;
+            const label = market || dayLabel;
             showSalesToast('📅 ' + label);
+        }, 320);
+    },
+
+    // Bottom Sheet แสดงตลาดในวันนั้น
+    showDaySheet: (dayLabel) => {
+        const mkts = getDayMarketList(dayLabel);
+        const storeCount = State.allStores.filter(s => s.days && s.days.includes(dayLabel)).length;
+        const now = new Date();
+        const dayNum = parseInt(dayLabel.replace('Day ',''));
+        const dateObj = new Date(CalendarCtrl._year, CalendarCtrl._month, dayNum);
+        const dateStr = dateObj.toLocaleDateString('th-TH', { weekday:'long', day:'numeric', month:'long' });
+
+        let sheet = document.getElementById('cal-day-sheet');
+        if (!sheet) {
+            sheet = document.createElement('div');
+            sheet.id = 'cal-day-sheet';
+            sheet.style.cssText = 'position:fixed;inset:0;z-index:99999;display:flex;align-items:flex-end;justify-content:center;';
+            sheet.innerHTML = '<div id="cal-day-sheet-bg" style="position:absolute;inset:0;background:rgba(0,0,0,0.5);" onclick="CalendarCtrl.closeDaySheet()"></div><div id="cal-day-sheet-body" style="position:relative;background:#fff;border-radius:20px 20px 0 0;width:100%;max-width:480px;max-height:70vh;overflow-y:auto;transform:translateY(100%);transition:transform 0.3s cubic-bezier(0.4,0,0.2,1);padding:0 0 32px;"></div>';
+            document.body.appendChild(sheet);
+        }
+
+        const body = document.getElementById('cal-day-sheet-body');
+        body.innerHTML = `
+            <div style="display:flex;justify-content:center;padding:10px 0 6px;">
+                <div style="width:40px;height:4px;border-radius:2px;background:#e5e7eb;"></div>
+            </div>
+            <div style="padding:4px 20px 14px;">
+                <div style="font-size:11px;color:#6b7280;font-weight:600;">${dateStr}</div>
+                <div style="font-size:18px;font-weight:900;color:#111827;margin-top:2px;">
+                    ${storeCount} ร้านค้า
+                </div>
+            </div>
+            <div style="height:1px;background:#f3f4f6;margin:0 20px 12px;"></div>
+            <div style="padding:0 16px;">
+                <button onclick="CalendarCtrl.navigateToDay('${dayLabel}', '')"
+                    style="width:100%;padding:13px;border-radius:14px;border:none;
+                           background:#2563eb;color:#fff;font-size:15px;font-weight:800;
+                           cursor:pointer;margin-bottom:12px;display:flex;align-items:center;
+                           justify-content:center;gap:8px;">
+                    📋 ดูคิวงานทั้งหมด ${storeCount} ร้าน
+                </button>
+                ${mkts.length > 0 ? `
+                <div style="font-size:11px;font-weight:800;color:#6b7280;text-transform:uppercase;
+                            letter-spacing:0.5px;margin-bottom:8px;padding:0 4px;">เลือกตลาด</div>
+                <div style="display:flex;flex-direction:column;gap:8px;">
+                    ${mkts.map(mkt => {
+                        const cnt = State.allStores.filter(s =>
+                            s.days && s.days.includes(dayLabel) &&
+                            trimMarketName(s.marketName) === mkt
+                        ).length;
+                        return `<button onclick="CalendarCtrl.navigateToDay('${dayLabel}', '${mkt.replace(/'/g, "\'")}')"
+                            style="width:100%;padding:12px 16px;border-radius:14px;
+                                   border:1.5px solid #e5e7eb;background:#f9fafb;
+                                   display:flex;justify-content:space-between;align-items:center;
+                                   cursor:pointer;font-family:inherit;">
+                            <span style="font-size:14px;font-weight:700;color:#111827;">🏪 ${mkt}</span>
+                            <span style="font-size:12px;font-weight:800;color:#6b7280;
+                                         background:#e5e7eb;padding:3px 12px;border-radius:20px;">
+                                ${cnt} ร้าน
+                            </span>
+                        </button>`;
+                    }).join('')}
+                </div>` : `
+                <div style="text-align:center;color:#9ca3af;font-size:13px;padding:16px 0;">
+                    ไม่มีข้อมูลตลาด
+                </div>`}
+            </div>`;
+
+        requestAnimationFrame(() => {
+            body.style.transform = 'translateY(0)';
+        });
+    },
+
+    closeDaySheet: () => {
+        const body = document.getElementById('cal-day-sheet-body');
+        if (body) body.style.transform = 'translateY(100%)';
+        setTimeout(() => {
+            const sheet = document.getElementById('cal-day-sheet');
+            if (sheet) sheet.remove();
         }, 320);
     },
 
@@ -1027,7 +1120,7 @@ const CalendarCtrl = {
         const popup = document.getElementById('calendar-popup');
         const sheet = document.getElementById('calendar-popup-sheet');
         if (!popup || !sheet) return;
-        // sync เดือนปัจจุบัน
+        // sync เดือนปัจจุบันเสมอ
         const now = new Date();
         CalendarCtrl._year  = now.getFullYear();
         CalendarCtrl._month = now.getMonth();
@@ -1035,6 +1128,11 @@ const CalendarCtrl = {
         popup.style.display = 'block';
         requestAnimationFrame(() => {
             sheet.style.transform = 'translateY(0)';
+            // scroll ไปวันปัจจุบันใน grid
+            setTimeout(() => {
+                const todayEl = document.getElementById('cal-today-cell');
+                if (todayEl) todayEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }, 350);
         });
     },
 
