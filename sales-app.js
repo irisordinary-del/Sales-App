@@ -239,6 +239,15 @@ const App = {
     // ─── isSupervisor helper ──────────────────────────────────────────────
     isSupervisor: () => ['route_supervisor','asm'].includes(State.viewMode),
 
+
+    // ─── Firestore get() with timeout — ป้องกัน hang นานเกิน ───────────
+    _getWithTimeout: (ref, ms = 8000) => {
+        return Promise.race([
+            ref.get(),
+            new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))
+        ]);
+    },
+
     // ─── Start สำหรับ route_supervisor / asm ─────────────────────────────
     startSupervisor: async () => {
         document.getElementById('main-header').classList.remove('hidden');
@@ -268,7 +277,7 @@ const App = {
 
         // โหลด routeList จาก metadata
         try {
-            const metaSnap = await db.collection('appData').doc(_centerDocId).get();
+            const metaSnap = await App._getWithTimeout(db.collection('appData').doc(_centerDocId));
             State.routeList = metaSnap.exists ? (metaSnap.data().routeList || []) : [];
         } catch(e) { State.routeList = []; }
 
@@ -276,13 +285,17 @@ const App = {
         const _nowYM = (() => { const d = new Date(); return `${d.getFullYear()}_${String(d.getMonth()+1).padStart(2,'0')}`; })();
         let routeColRef;
         try {
-            const _draftDoc = await db.collection('appData').doc(_centerDocId).collection('drafts').doc(_nowYM).get();
+            const _draftDoc = await App._getWithTimeout(
+                db.collection('appData').doc(_centerDocId).collection('drafts').doc(_nowYM), 5000
+            );
             routeColRef = _draftDoc.exists
                 ? db.collection('appData').doc(_centerDocId).collection('drafts').doc(_nowYM).collection('routes')
                 : db.collection('appData').doc(_centerDocId).collection('routes');
             State.activePlanMode = _draftDoc.exists ? 'draft' : 'active';
         } catch(e) {
+            // timeout หรือ error → ใช้ active plan
             routeColRef = db.collection('appData').doc(_centerDocId).collection('routes');
+            State.activePlanMode = 'active';
         }
 
         LoadBar.setProgress(30, 'โหลดข้อมูลร้านทุกสาย...');
@@ -294,7 +307,7 @@ const App = {
         let _loaded = 0;
         await Promise.all(routes.map(async (routeId) => {
             try {
-                const rd = await routeColRef.doc(routeId).get();
+                const rd = await App._getWithTimeout(routeColRef.doc(routeId), 10000);
                 State.allRoutes[routeId] = rd.exists ? (rd.data().stores || []) : [];
             } catch(e) { State.allRoutes[routeId] = []; }
             _loaded++;
