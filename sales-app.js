@@ -51,7 +51,7 @@ let map = null, mapMarkers = [], sortableList = null, markerClusterGroup = null;
 const VALID_TABS = ['dashboard', 'stores', 'route'];
 const DEFAULT_TAB = 'dashboard';
 const FORCE_DEFAULT_TAB = true; // เริ่มที่ dashboard เสมอ
-const TAB_STORAGE_KEY = 'sales_last_tab';
+const TAB_STORAGE_KEY = `sales_last_tab_${Auth.getSession()?.username || 'guest'}`;
 
 const UI = {
     // ✅ จำ tab ล่าสุดใน localStorage
@@ -215,7 +215,7 @@ const UI = {
 
 const App = {
     checkAuth: () => {
-        Auth.renewSession(); // ต่ออายุ session ถ้าใกล้หมด
+        Auth.renewSession?.(); // ต่ออายุ session ถ้าใกล้หมด
         const session = Auth.getSession();
         const supervisorRoles = ['admin', 'supervisor', 'route_supervisor', 'asm'];
         if (session && session.role === 'sales') {
@@ -287,22 +287,19 @@ const App = {
 
         LoadBar.setProgress(30, 'โหลดข้อมูลร้านทุกสาย...');
 
-        // โหลดแบบ batch ทีละ 5 สาย — ไม่ยิง 15 requests พร้อมกัน
-        const BATCH = 5;
-        let loaded = 0;
+        // โหลดทุกสายพร้อมกัน — ลด latency จาก sequential batching
+        const routes = State.routeList; // fix: declare routes ก่อนใช้
         State.allRoutes = {};
         State.allStores = [];
-        for (let i = 0; i < routes.length; i += BATCH) {
-            const chunk = routes.slice(i, i + BATCH);
-            await Promise.all(chunk.map(async (routeId) => {
-                try {
-                    const rd = await routeColRef.doc(routeId).get();
-                    State.allRoutes[routeId] = rd.exists ? (rd.data().stores || []) : [];
-                } catch(e) { State.allRoutes[routeId] = []; }
-            }));
-            loaded += chunk.length;
-            LoadBar.setProgress(30 + Math.round(loaded / routes.length * 40), `โหลด ${loaded}/${routes.length} สาย...`);
-        }
+        let _loaded = 0;
+        await Promise.all(routes.map(async (routeId) => {
+            try {
+                const rd = await routeColRef.doc(routeId).get();
+                State.allRoutes[routeId] = rd.exists ? (rd.data().stores || []) : [];
+            } catch(e) { State.allRoutes[routeId] = []; }
+            _loaded++;
+            LoadBar.setProgress(30 + Math.round(_loaded / routes.length * 40), `โหลด ${_loaded}/${routes.length} สาย...`);
+        }));
         // รวมทุกร้านสำหรับ Tab2
         State.allStores = Object.values(State.allRoutes).flat();
 
