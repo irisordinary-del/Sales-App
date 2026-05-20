@@ -1428,18 +1428,19 @@
                     CalendarAdmin._holidays = [];
                     CalendarAdmin._fixedRows = [];
                     if (cfg) {
-                        CalendarAdmin.setMode(cfg.mode || 'cycle');
+                        CalendarAdmin.setMode(cfg.mode || 'date');
                         if (cfg.mode === 'cycle') {
                             document.getElementById('cal-start-date').value    = cfg.startDay    || 1;
                             document.getElementById('cal-start-day-num').value = cfg.startDayNum || 1;
                             document.getElementById('cal-cycle-days').value    = cfg.cycleDays   || 24;
                             CalendarAdmin._holidays = cfg.holidays || [];
-                        } else {
+                        } else if (cfg.mode === 'fixed') {
                             const mapping = cfg.mapping || {};
                             CalendarAdmin._fixedRows = Object.entries(mapping).map(([d, day]) => ({ date: d, day }));
                         }
+                        // date mode ไม่ต้องโหลดอะไรเพิ่ม
                     } else {
-                        CalendarAdmin.setMode('cycle');
+                        CalendarAdmin.setMode('date'); // default = วันที่จริง
                     }
                 } catch(e) {
                     CalendarAdmin.setMode('cycle');
