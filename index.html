@@ -1452,20 +1452,30 @@
 
             setMode: (mode) => {
                 CalendarAdmin._mode = mode;
+                const activeClass   = 'border-2 border-indigo-500 bg-indigo-50 rounded-xl p-3 text-center cursor-pointer transition';
+                const inactiveClass = 'border-2 border-gray-200 bg-gray-50 rounded-xl p-3 text-center cursor-pointer transition';
                 const cycleBtn = document.getElementById('cal-mode-cycle');
+                const dateBtn  = document.getElementById('cal-mode-date');
                 const fixedBtn = document.getElementById('cal-mode-fixed');
                 const cycleSec = document.getElementById('cal-cycle-section');
                 const fixedSec = document.getElementById('cal-fixed-section');
+
+                // reset ทุกปุ่ม
+                if (cycleBtn) cycleBtn.className = inactiveClass;
+                if (dateBtn)  dateBtn.className  = inactiveClass;
+                if (fixedBtn) fixedBtn.className = inactiveClass;
+                if (cycleSec) cycleSec.classList.add('hidden');
+                if (fixedSec) fixedSec.classList.add('hidden');
+
                 if (mode === 'cycle') {
-                    cycleBtn.className = 'border-2 border-indigo-500 bg-indigo-50 rounded-xl p-3 text-center cursor-pointer transition';
-                    fixedBtn.className = 'border-2 border-gray-200 bg-gray-50 rounded-xl p-3 text-center cursor-pointer transition';
-                    cycleSec.classList.remove('hidden');
-                    fixedSec.classList.add('hidden');
+                    if (cycleBtn) cycleBtn.className = activeClass;
+                    if (cycleSec) cycleSec.classList.remove('hidden');
+                } else if (mode === 'date') {
+                    if (dateBtn) dateBtn.className = activeClass;
+                    // ไม่มี section พิเศษ — date mode ใช้วันที่จริงเลย ไม่ต้องตั้งค่าเพิ่ม
                 } else {
-                    cycleBtn.className = 'border-2 border-gray-200 bg-gray-50 rounded-xl p-3 text-center cursor-pointer transition';
-                    fixedBtn.className = 'border-2 border-indigo-500 bg-indigo-50 rounded-xl p-3 text-center cursor-pointer transition';
-                    cycleSec.classList.add('hidden');
-                    fixedSec.classList.remove('hidden');
+                    if (fixedBtn) fixedBtn.className = activeClass;
+                    if (fixedSec) fixedSec.classList.remove('hidden');
                 }
             },
 
