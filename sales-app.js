@@ -215,6 +215,7 @@ const UI = {
 
 const App = {
     checkAuth: () => {
+        Auth.renewSession(); // ต่ออายุ session ถ้าใกล้หมด
         const session = Auth.getSession();
         const supervisorRoles = ['admin', 'supervisor', 'route_supervisor', 'asm'];
         if (session && session.role === 'sales') {

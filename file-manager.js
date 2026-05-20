@@ -36,6 +36,7 @@ const FileManager = {
                                                                                          id: row.B,
                                                                                          code: row.B || '',
                                                                                          name: row.C || '',
+                                                                                         cy: row.A || '',           // BUG-09 fix: เก็บ CY field
                                                                                          salesCode: row.D || '',
                                                                                          shopType: row.E || '',
                                                                                          subDistrict: row.F || '',
@@ -44,13 +45,16 @@ const FileManager = {
                                                                                          lat: lat,
                                                                                          lng: lng,
                                                                                          marketName: row.K || '',
-                                                                                         dayOriginal: row.L || '', // Keep original day history
-                                                                                         days: [], // Will be filled after AI or manual assignment
+                                                                                         dayOriginal: row.L || '',
+                                                                                         days: [],
                                                                                          seqs: {},
                                                                                          freq: 1,
                                                                                          selected: false
                                                              });
                                 });
+
+                                // BUG-02 fix: save raw rows ไว้ให้ ExportCtrl._writeExcel lookup
+                                State.rawData = rows;
 
                                 if (stores.length === 0) {
                                                         UI.hideLoader();

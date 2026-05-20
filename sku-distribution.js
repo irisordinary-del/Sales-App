@@ -25,12 +25,12 @@ const SkuDist = {
         await SkuDist._loadCampaigns();
         SkuDist._renderCampaignList();
         SkuDist._loadProdOptions();
+        SkuDist._startCampaignListener(); // auto-refresh
     },
 
     // ─── โหลด Campaigns จาก Firestore ────────────────────────────────────
     _loadCampaigns: async () => {
         try {
-            // ไม่ใช้ orderBy เพื่อหลีกเลี่ยง composite index — sort ใน JS แทน
             const snap = await SkuDist._col()
                 .where('centerId', '==', SkuDist._centerDoc())
                 .get();
@@ -39,7 +39,7 @@ const SkuDist = {
                 .sort((a, b) => {
                     const ta = a.createdAt?.seconds || 0;
                     const tb = b.createdAt?.seconds || 0;
-                    return tb - ta; // ใหม่ก่อน
+                    return tb - ta;
                 });
         } catch (e) {
             console.warn('SkuDist._loadCampaigns:', e);
@@ -47,8 +47,25 @@ const SkuDist = {
         }
     },
 
+    // ─── onSnapshot: auto-refresh เมื่อ Campaign เปลี่ยนแปลง ────────────
+    _unsubCampaigns: null,
+    _startCampaignListener: () => {
+        if (SkuDist._unsubCampaigns) return;
+        SkuDist._unsubCampaigns = SkuDist._col()
+            .where('centerId', '==', SkuDist._centerDoc())
+            .onSnapshot(snap => {
+                SkuDist._campaigns = snap.docs
+                    .map(d => ({ id: d.id, ...d.data() }))
+                    .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+                const pg = document.getElementById('page-skudist');
+                if (pg && !pg.classList.contains('hidden')) {
+                    SkuDist._renderCampaignList();
+                }
+            }, e => console.warn('SkuDist onSnapshot:', e));
+    },
+
     // ─── โหลด prodCode/prodName options ─────────────────────────────────
-    // ลำดับ: 1) sellout (เดือนล่าสุด)  2) v1_raw_chunks (fallback)  3) v1_sales_chunks
+    // ลำดับ: 1) sellout (3 เดือนล่าสุด รวม SKU)  2) v1_raw_chunks (fallback)
     _loadProdOptions: async () => {
         if (SkuDist._allProdOptions.length > 0) return;
         const seen = new Map();
@@ -69,14 +86,15 @@ const SkuDist = {
                 .filter(id => /^\d{4}_\d{2}$/.test(id))
                 .sort().reverse();
 
-            if (months.length > 0) {
-                // ไม่ใช้ orderBy เพื่อหลีกเลี่ยง Firestore index requirement
-                const chunks = await cloudDB.collection('sellout').doc(months[0])
-                    .collection('chunks').get();
-                // sort ใน JS แทน
-                const chunkDocs = chunks.docs.sort((a,b) => (a.data().index||0) - (b.data().index||0));
-                chunkDocs.forEach(doc => extractFromRows(doc.data().rows || []));
-            }
+            // โหลด 3 เดือนล่าสุด → union SKU options ครบกว่าเดือนเดียว
+            const loadMonths = months.slice(0, 3);
+            await Promise.all(loadMonths.map(async ym => {
+                try {
+                    const chunks = await cloudDB.collection('sellout').doc(ym)
+                        .collection('chunks').get();
+                    chunks.docs.forEach(doc => extractFromRows(doc.data().rows || []));
+                } catch(e) { /* ข้ามถ้า chunk ใดโหลดไม่ได้ */ }
+            }));
         } catch (e) {
             console.warn('SkuDist._loadProdOptions (sellout):', e);
         }

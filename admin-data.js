@@ -763,14 +763,12 @@ const App = {
 
                 }; // end _processUpload
 
-                // โหลด calendarConfig แบบ async แล้ว process
+                // โหลด calendarConfig: draft → draftsCol doc, active → dbRef
                 try {
-                    const planRef = App.currentRoutesCol
-                        ? (App._planMode.startsWith('draft:')
-                            ? App.draftsCol().doc(App._planMode.replace('draft:',''))
-                            : App.dbRef)
+                    const _planRef = App._planMode.startsWith('draft:')
+                        ? App.draftsCol().doc(App._planMode.replace('draft:',''))
                         : App.dbRef;
-                    planRef.get().then(snap => {
+                    _planRef.get().then(snap => {
                         const calCfg = snap.exists ? (snap.data().calendarConfig || null) : null;
                         _processUpload(calCfg);
                     }).catch(() => _processUpload(null));
