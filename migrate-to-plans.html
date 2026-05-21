@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🔄 Migrate → plans/</title>
+<style>
+  body { font-family: 'Segoe UI', sans-serif; background: #0f172a; color: #e2e8f0; margin: 0; padding: 24px; }
+  h1   { font-size: 20px; font-weight: 900; color: #818cf8; margin-bottom: 4px; }
+  p    { font-size: 13px; color: #94a3b8; margin-bottom: 24px; }
+  .card { background: #1e293b; border-radius: 16px; padding: 20px; margin-bottom: 16px; }
+  label { font-size: 12px; font-weight: 700; color: #94a3b8; display: block; margin-bottom: 6px; }
+  input, select { width: 100%; box-sizing: border-box; padding: 10px 14px; border-radius: 10px;
+    border: 1px solid #334155; background: #0f172a; color: #e2e8f0; font-size: 14px; font-weight: 700;
+    outline: none; margin-bottom: 12px; }
+  button { padding: 12px 24px; border-radius: 12px; border: none; font-size: 14px; font-weight: 800;
+    cursor: pointer; transition: opacity 0.15s; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-primary { background: #6366f1; color: #fff; width: 100%; }
+  .btn-danger  { background: #dc2626; color: #fff; }
+  #log { background: #0f172a; border-radius: 12px; padding: 16px; height: 380px; overflow-y: auto;
+    font-family: monospace; font-size: 12px; line-height: 1.7; border: 1px solid #1e293b; }
+  .ok   { color: #34d399; }
+  .warn { color: #fbbf24; }
+  .err  { color: #f87171; }
+  .info { color: #60a5fa; }
+  .bold { color: #e2e8f0; font-weight: 700; }
+  .progress { height: 6px; background: #334155; border-radius: 99px; margin: 12px 0; overflow: hidden; }
+  .progress-bar { height: 6px; background: #6366f1; border-radius: 99px; transition: width 0.3s; width: 0%; }
+</style>
+</head>
+<body>
+
+<h1>🔄 Migration: routes/ + drafts/ → plans/{YYYY_MM}/</h1>
+<p>ใช้ครั้งเดียวเท่านั้น — หลัง migrate แล้วให้ deploy code ใหม่</p>
+
+<div class="card">
+  <label>Center ID (เช่น 402)</label>
+  <input id="center-id" type="text" placeholder="402" value="">
+  <label>เดือนปัจจุบัน (YYYY_MM) — active routes จะ migrate ไปที่นี่</label>
+  <input id="current-ym" type="text" placeholder="2026_05">
+  <div style="display:flex;gap:8px;">
+    <button class="btn-primary" id="btn-migrate" onclick="runMigration()">🚀 เริ่ม Migration</button>
+  </div>
+  <div class="progress"><div class="progress-bar" id="progress-bar"></div></div>
+</div>
+
+<div class="card">
+  <div id="log"><span class="info">รอเริ่ม migration...</span></div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore-compat.js"></script>
+<script src="app-config.js"></script>
+<script>
+// ── Firebase init ─────────────────────────────────────────────────────────
+const firebaseConfig = {
+    apiKey:            "AIzaSyDCYxJf0eHryjVJ8_INoWw_uTN14UMaEWE",
+    authDomain:        "route-plan-71e2e.firebaseapp.com",
+    projectId:         "route-plan-71e2e",
+    storageBucket:     "route-plan-71e2e.firebasestorage.app",
+    messagingSenderId: "486778971661",
+    appId:             "1:486778971661:web:2ef83fa1eeb09ec6665744",
+};
+if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+
+// ── Logger ────────────────────────────────────────────────────────────────
+const logEl = document.getElementById('log');
+const bar   = document.getElementById('progress-bar');
+let _total = 0, _done = 0;
+
+function log(msg, cls = '') {
+    const line = document.createElement('div');
+    line.className = cls;
+    line.textContent = msg;
+    logEl.appendChild(line);
+    logEl.scrollTop = logEl.scrollHeight;
+}
+function setProgress(pct) { bar.style.width = pct + '%'; }
+function centerDocId(cid) { return cid.trim() + '_main'; }
+
+// ── Migration ─────────────────────────────────────────────────────────────
+async function runMigration() {
+    const centerId = document.getElementById('center-id').value.trim();
+    const currentYM = document.getElementById('current-ym').value.trim();
+
+    if (!centerId || !currentYM || !/^\d{4}_\d{2}$/.test(currentYM)) {
+        log('❌ กรุณากรอก Center ID และเดือนให้ถูกต้อง (เช่น 2026_05)', 'err');
+        return;
+    }
+
+    const btn = document.getElementById('btn-migrate');
+    btn.disabled = true;
+    logEl.innerHTML = '';
+
+    const centerDoc = centerDocId(centerId);
+    const appRef    = db.collection('appData').doc(centerDoc);
+    const plansCol  = appRef.collection('plans');
+
+    try {
+        // ── Step 1: ดึง metadata ──────────────────────────────────────
+        log('📡 Step 1: ดึง metadata จาก centerDoc...', 'info');
+        const metaSnap = await appRef.get();
+        const meta     = metaSnap.exists ? metaSnap.data() : {};
+        const routeList  = meta.routeList  || [];
+        const draftList  = meta.draftList  || [];
+        const cycleDays  = meta.cycleDays  || 24;
+        const calCfg     = meta.calendarConfig || null;
+
+        log(`✅ routeList: ${routeList.length} สาย, draftList: ${draftList.length} เดือน`, 'ok');
+        setProgress(10);
+
+        // ── Step 2: Migrate active routes → plans/{currentYM} ────────
+        log(`\n📦 Step 2: Migrate active routes → plans/${currentYM}/...`, 'info');
+
+        const planMetaRef = plansCol.doc(currentYM);
+        const existingPlan = await planMetaRef.get();
+        if (existingPlan.exists) {
+            log(`  ⚠️ plans/${currentYM} มีอยู่แล้ว — ข้ามขั้นตอนนี้`, 'warn');
+        } else {
+            // บันทึก plan metadata
+            await planMetaRef.set({
+                routeList,
+                cycleDays,
+                calendarConfig: calCfg,
+                migratedFrom:   'active',
+                migratedAt:     firebase.firestore.FieldValue.serverTimestamp(),
+                updatedAt:      firebase.firestore.FieldValue.serverTimestamp(),
+            });
+            log(`  ✅ สร้าง plans/${currentYM} metadata`, 'ok');
+
+            // copy routes ทีละสาย
+            const activeRoutesCol = appRef.collection('routes');
+            const planRoutesCol   = planMetaRef.collection('routes');
+            _total = routeList.length;
+            _done  = 0;
+
+            await Promise.all(routeList.map(async (routeName) => {
+                try {
+                    const rd = await activeRoutesCol.doc(routeName).get();
+                    const stores = rd.exists ? (rd.data().stores || []) : [];
+                    await planRoutesCol.doc(routeName).set({ stores });
+                    _done++;
+                    setProgress(10 + Math.round(_done / Math.max(_total, 1) * 35));
+                    log(`    ✅ ${routeName}: ${stores.length} ร้าน`, 'ok');
+                } catch(e) {
+                    log(`    ❌ ${routeName}: ${e.message}`, 'err');
+                }
+            }));
+        }
+        setProgress(45);
+
+        // ── Step 3: Migrate drafts → plans/{YYYY_MM} ─────────────────
+        log(`\n📝 Step 3: Migrate drafts (${draftList.length} เดือน)...`, 'info');
+        _total = draftList.length;
+        _done  = 0;
+
+        for (const ym of draftList) {
+            try {
+                const draftRef  = appRef.collection('drafts').doc(ym);
+                const draftSnap = await draftRef.get();
+                if (!draftSnap.exists) {
+                    log(`  ⚠️ draft ${ym} ไม่มีใน Firestore — ข้าม`, 'warn');
+                    _done++; continue;
+                }
+                const draftData = draftSnap.data();
+
+                // เช็คว่า plans/{ym} มีแล้วหรือยัง
+                const planRef     = plansCol.doc(ym);
+                const planExist   = await planRef.get();
+                if (planExist.exists) {
+                    log(`  ⚠️ plans/${ym} มีอยู่แล้ว — ข้าม`, 'warn');
+                    _done++; setProgress(45 + Math.round(_done / Math.max(_total,1) * 40));
+                    continue;
+                }
+
+                // สร้าง plan metadata
+                await planRef.set({
+                    routeList:      draftData.routeList     || routeList,
+                    cycleDays:      draftData.cycleDays     || cycleDays,
+                    calendarConfig: draftData.calendarConfig || calCfg,
+                    migratedFrom:   'draft',
+                    migratedAt:     firebase.firestore.FieldValue.serverTimestamp(),
+                    updatedAt:      firebase.firestore.FieldValue.serverTimestamp(),
+                });
+
+                // copy routes
+                const draftRoutesCol = draftRef.collection('routes');
+                const planRoutesCol  = planRef.collection('routes');
+                const draftRoutes    = await draftRoutesCol.get();
+
+                await Promise.all(draftRoutes.docs.map(async d => {
+                    await planRoutesCol.doc(d.id).set(d.data());
+                }));
+
+                log(`  ✅ draft ${ym} → plans/${ym} (${draftRoutes.size} สาย)`, 'ok');
+            } catch(e) {
+                log(`  ❌ draft ${ym}: ${e.message}`, 'err');
+            }
+            _done++;
+            setProgress(45 + Math.round(_done / Math.max(_total,1) * 40));
+        }
+
+        // ── Step 4: อัปเดต centerDoc metadata ────────────────────────
+        log(`\n💾 Step 4: อัปเดต centerDoc metadata...`, 'info');
+        const allPlanYMs = [...new Set([currentYM, ...draftList])].sort();
+        await appRef.set({
+            planList:    allPlanYMs,
+            currentPlanYM: currentYM,
+            // เก็บ legacy fields ไว้ก่อน (ลบทีหลัง)
+        }, { merge: true });
+        log(`  ✅ planList: [${allPlanYMs.join(', ')}]`, 'ok');
+        setProgress(95);
+
+        // ── Done ──────────────────────────────────────────────────────
+        setProgress(100);
+        log('\n🎉 Migration เสร็จสมบูรณ์!', 'bold');
+        log(`   ✅ Active → plans/${currentYM}`, 'ok');
+        log(`   ✅ Drafts → plans/${draftList.join(', plans/')||'-'}`, 'ok');
+        log('\n📌 ขั้นตอนต่อไป:', 'info');
+        log('   1. Deploy code ใหม่ (admin-data.js, sales-app.js, index.html)', 'info');
+        log('   2. เทสระบบใหม่', 'info');
+        log('   3. ลบ routes/ และ drafts/ collection เดิมออกจาก Firestore Console (ทำทีหลังได้)', 'warn');
+
+    } catch(err) {
+        log(`\n❌ Migration ล้มเหลว: ${err.message}`, 'err');
+        console.error(err);
+    }
+
+    btn.disabled = false;
+}
+</script>
+</body>
+</html>
