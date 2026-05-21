@@ -596,7 +596,8 @@
         if (!resizer || !mapCont) return;
 
         const MIN_H = 120;          // px ต่ำสุดของแผนที่
-        const MAX_RATIO = 0.78;     // สูงสุด 78% หน้าจอ
+        // MAX_H คำนวณจากพื้นที่จริง: ลบ header + day-select + resizer + bottom-nav
+        const getMaxH = () => window.innerHeight - 190;
 
         let dragging = false;
         let startY   = 0;
@@ -617,7 +618,7 @@
         document.addEventListener('touchmove', (e) => {
             if (!dragging) return;
             const dy    = e.touches[0].clientY - startY;
-            const maxH  = Math.round(window.innerHeight * MAX_RATIO);
+            const maxH  = getMaxH();
             const newH  = Math.min(maxH, Math.max(MIN_H, startH + dy));
             mapCont.style.height = newH + 'px';
 
@@ -650,7 +651,7 @@
         document.addEventListener('mousemove', (e) => {
             if (!dragging) return;
             const dy   = e.clientY - startY;
-            const maxH = Math.round(window.innerHeight * MAX_RATIO);
+            const maxH = getMaxH();
             const newH = Math.min(maxH, Math.max(MIN_H, startH + dy));
             mapCont.style.height = newH + 'px';
             if (typeof map !== 'undefined' && map) map.invalidateSize();

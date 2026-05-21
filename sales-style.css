@@ -22,7 +22,10 @@ body { font-family: 'Prompt', sans-serif; background-color: #f3f4f6; margin: 0; 
     flex: none;
     height: 42vh;          /* ค่าเริ่มต้น ~42% หน้าจอ */
     min-height: 120px;
-    max-height: 75vh;
+    /*
+      max-height = 100dvh - header(48px) - day-select(52px) - resizer(18px) - bottom-nav(64px) - buffer(8px)
+    */
+    max-height: calc(100dvh - 190px);
     position: relative;
 }
 
