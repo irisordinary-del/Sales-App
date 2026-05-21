@@ -238,15 +238,19 @@
                 <div class="flex items-center gap-1.5">
                     <div id="plan-mode-badge"
                         style="font-size:10px;font-weight:800;padding:3px 8px;border-radius:6px;background:#059669;color:#fff;white-space:nowrap;">
-                        ✅ Active
+                        📅 Plan ปัจจุบัน
                     </div>
                     <select id="plan-selector" onchange="PlanUI.onSelect(this.value)"
                         class="bg-gray-700 border border-gray-600 text-white text-xs font-bold rounded-lg px-2 py-1.5 outline-none focus:ring-2 focus:ring-indigo-400 max-w-[130px]">
-                        <option value="active">📅 Plan ปัจจุบัน (Active)</option>
+                        <option value="active">📅 Plan ที่ Sales ใช้อยู่</option>
                     </select>
+                    <button onclick="CalendarAdmin.open(App._planMode)"
+                        class="bg-indigo-600 hover:bg-indigo-500 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap" title="ตั้งค่าปฏิทิน">
+                        📅 ปฏิทิน
+                    </button>
                     <button onclick="PlanUI.openCreateDraft()"
-                        class="bg-indigo-600 hover:bg-indigo-500 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap" title="สร้าง Draft เดือนหน้า">
-                        + Draft
+                        class="bg-indigo-600 hover:bg-indigo-500 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap" title="วางแผนเดือนถัดไป">
+                        + เพิ่มเดือน
                     </button>
                 </div>
                 <button onclick="UI.showSummaryModal()" class="bg-gray-700 hover:bg-gray-600 border border-gray-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap">
@@ -261,17 +265,14 @@
                 class="bg-amber-50 border-b border-amber-200 px-4 py-2 flex items-center justify-between shrink-0">
                 <div class="flex items-center gap-2">
                     <span style="font-size:13px;">📝</span>
-                    <span id="draft-banner-label" class="text-xs font-bold text-amber-800">กำลังแก้ไข Draft</span>
-                    <span class="text-xs text-amber-600">— การเปลี่ยนแปลงนี้จะไม่กระทบ Sales จนกว่าจะ Activate</span>
+                    <span id="draft-banner-label" class="text-xs font-bold text-amber-800">วางแผน</span>
+                    <span class="text-xs text-amber-600">— แก้ไขได้เลย ไม่กระทบ Sales</span>
                 </div>
                 <div class="flex items-center gap-2">
-                    <button onclick="CalendarAdmin.open(App._planMode)"
-                        class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition shadow-sm">
-                        📅 ตั้งค่าปฏิทิน
-                    </button>
-                    <button onclick="PlanUI.confirmActivate()"
-                        class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-1.5 rounded-lg text-xs font-bold transition shadow-sm">
-                        ✅ Activate
+
+                    <button onclick="PlanUI.confirmDelete()"
+                        class="bg-red-500 hover:bg-red-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition shadow-sm">
+                        🗑️ ลบเดือนนี้
                     </button>
                 </div>
             </div>
@@ -858,7 +859,7 @@
     <div id="create-draft-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
         <div class="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden">
             <div class="p-5 border-b flex justify-between items-center">
-                <h2 class="text-base font-black text-gray-900">📝 สร้าง Draft เดือนใหม่</h2>
+                <h2 class="text-base font-black text-gray-900">📅 วางแผนเดือนใหม่</h2>
                 <button onclick="document.getElementById('create-draft-modal').classList.add('hidden')"
                     class="w-8 h-8 rounded-full border border-gray-200 text-gray-400 hover:bg-gray-100 font-bold">✕</button>
             </div>
@@ -870,14 +871,14 @@
                     </select>
                 </div>
                 <div class="bg-indigo-50 border border-indigo-100 rounded-xl p-3 text-xs text-indigo-700">
-                    💡 ระบบจะ Copy Plan ปัจจุบันมาเป็น Draft ให้อัตโนมัติ แก้ไขได้โดยไม่กระทบ Sales
+                    💡 ระบบจะ Copy ข้อมูลร้านค้าปัจจุบันมาให้ แก้ไขได้เลยโดยไม่กระทบสายที่ Sales ใช้อยู่
                 </div>
             </div>
             <div class="p-5 border-t flex gap-3">
                 <button onclick="document.getElementById('create-draft-modal').classList.add('hidden')"
                     class="flex-1 border border-gray-200 rounded-xl py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-50 transition">ยกเลิก</button>
                 <button onclick="PlanUI.doCreateDraft()"
-                    class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl py-2.5 text-sm font-bold transition shadow-sm">สร้าง Draft</button>
+                    class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl py-2.5 text-sm font-bold transition shadow-sm">📅 เริ่มวางแผน</button>
             </div>
         </div>
     </div>
@@ -1115,7 +1116,7 @@
                         draftList.forEach(ym => {
                             const [y, m] = ym.split('_');
                             const lbl = DateUtil ? DateUtil.ymToThaiShort(ym) : new Date(+y, +m-1, 1).toLocaleDateString('th-TH', { year: 'numeric', month: 'short' });
-                            opts += `<option value="draft:${ym}">📝 Draft · ${lbl}</option>`;
+                            opts += `<option value="draft:${ym}">📅 ${lbl}</option>`;
                         });
                         opts += `</optgroup>`;
                     }
@@ -1124,7 +1125,7 @@
                         historyList.forEach(ym => {
                             const [y, m] = ym.split('_');
                             const lbl = DateUtil ? DateUtil.ymToThaiShort(ym) : new Date(+y, +m-1, 1).toLocaleDateString('th-TH', { year: 'numeric', month: 'short' });
-                            opts += `<option value="history:${ym}">🔒 History · ${lbl}</option>`;
+                            opts += `<option value="history:${ym}">🔒 ${lbl} (Read-Only)</option>`;
                         });
                         opts += `</optgroup>`;
                     }
@@ -1183,6 +1184,9 @@
                     sel.innerHTML = PlanUI._nextMonths(4).map(({ym, lbl}) =>
                         `<option value="${ym}">${lbl}</option>`
                     ).join('');
+                    // default เลือกมิถุนายน 2026 ถ้ามีอยู่ใน options
+                    const juneOpt = [...sel.options].find(o => o.value === '2026_06');
+                    if (juneOpt) sel.value = '2026_06';
                 }
                 document.getElementById('create-draft-modal').classList.remove('hidden');
             },
@@ -1232,6 +1236,55 @@
                 await App.activateDraft(PlanUI._pendingActivateYm);
                 PlanUI._pendingActivateYm = null;
                 await PlanUI.refresh();
+            },
+
+            // ─── ลบเดือนที่วางแผนอยู่ ──────────────────────────────────
+            confirmDelete: () => {
+                const m = App._planMode;
+                if (!m.startsWith('draft:')) return;
+                const ym = m.replace('draft:', '');
+                const [y, mo] = ym.split('_');
+                const lbl = new Date(+y, +mo-1, 1).toLocaleDateString('th-TH', { year: 'numeric', month: 'long' });
+                UI.showConfirm(
+                    `🗑️ ลบแผน ${lbl} ?
+
+ข้อมูลจะหายถาวร และไม่สามารถกู้คืนได้`,
+                    () => PlanUI.doDelete()
+                );
+            },
+
+            doDelete: async () => {
+                const m = App._planMode;
+                if (!m.startsWith('draft:')) return;
+                const ym = m.replace('draft:', '');
+                const [y, mo] = ym.split('_');
+                const lbl = new Date(+y, +mo-1, 1).toLocaleDateString('th-TH', { year: 'numeric', month: 'long' });
+
+                UI.showLoader('กำลังลบ...', `ลบแผน ${lbl}`);
+                try {
+                    // ลบ routes ทั้งหมดใน draft นี้ก่อน
+                    const routesSnap = await App.draftsCol().doc(ym).collection('routes').get();
+                    const batch = cloudDB.batch();
+                    routesSnap.forEach(doc => batch.delete(doc.ref));
+                    // ลบ draft document
+                    batch.delete(App.draftsCol().doc(ym));
+                    await batch.commit();
+
+                    // อัปเดต draftList ใน metadata
+                    const metaSnap = await App.dbRef.get();
+                    const curList  = metaSnap.exists ? (metaSnap.data().draftList || []) : [];
+                    await App.dbRef.update({ draftList: curList.filter(d => d !== ym) });
+
+                    UI.hideLoader();
+                    UI.showSaveToast(`✅ ลบแผน ${lbl} เรียบร้อย`);
+
+                    // กลับไป Active plan
+                    await App.switchPlanMode('active');
+                    await PlanUI.refresh();
+                } catch(e) {
+                    UI.hideLoader();
+                    UI.showErrorToast('❌ ลบไม่สำเร็จ: ' + e.message);
+                }
             }
         };
     </script>
@@ -1251,12 +1304,18 @@
                 <!-- โหมด -->
                 <div>
                     <label class="block text-xs font-bold text-gray-500 uppercase mb-2">โหมดปฏิทิน</label>
-                    <div class="grid grid-cols-2 gap-2">
+                    <div class="grid grid-cols-3 gap-2">
                         <button id="cal-mode-cycle" onclick="CalendarAdmin.setMode('cycle')"
-                            class="border-2 border-indigo-500 bg-indigo-50 rounded-xl p-3 text-center cursor-pointer transition">
+                            class="border-2 border-gray-200 bg-gray-50 rounded-xl p-3 text-center cursor-pointer transition">
                             <div class="text-xl mb-1">🔄</div>
                             <div class="text-xs font-black text-indigo-800">Cycle D1-24</div>
                             <div class="text-[10px] text-indigo-600 mt-0.5">ต่อเนื่องนับวัน</div>
+                        </button>
+                        <button id="cal-mode-date" onclick="CalendarAdmin.setMode('date')"
+                            class="border-2 border-indigo-500 bg-indigo-50 rounded-xl p-3 text-center cursor-pointer transition">
+                            <div class="text-xl mb-1">📅</div>
+                            <div class="text-xs font-black text-gray-700">วันที่จริง</div>
+                            <div class="text-[10px] text-gray-500 mt-0.5">Day = วันที่ในเดือน</div>
                         </button>
                         <button id="cal-mode-fixed" onclick="CalendarAdmin.setMode('fixed')"
                             class="border-2 border-gray-200 bg-gray-50 rounded-xl p-3 text-center cursor-pointer transition">
@@ -1319,77 +1378,101 @@
         // ==========================================
         // 📅 Calendar Admin Controller
         // ==========================================
+        // ─────────────────────────────────────────────────────────────────
+        // CalendarAdmin — ตั้งค่าปฏิทินสำหรับแต่ละ Plan
+        // modes: 'cycle' | 'date' | 'fixed'
+        // ─────────────────────────────────────────────────────────────────
         const CalendarAdmin = {
-            _mode: 'cycle',
-            _holidays: [],
+            _mode:      'date',   // default = วันที่จริง
+            _holidays:  [],
             _fixedRows: [],
-            _targetRef: null, // Firestore ref ที่จะ save
+            _targetRef: null,
 
+            // ── เปิด modal ──────────────────────────────────────────────────
             open: async (planMode) => {
-                // planMode: 'active' | 'draft:YYYY_MM'
                 const modal = document.getElementById('calendar-config-modal');
                 modal.classList.remove('hidden');
 
+                // กำหนด _targetRef และ label ตาม planMode ปัจจุบัน
+                const _pm = planMode || App._planMode || 'active';
                 const lbl = document.getElementById('cal-modal-plan-label');
-                if (planMode === 'active') {
-                    lbl.textContent = 'Plan ปัจจุบัน';
+
+                if (_pm === 'active') {
+                    const _d = new Date();
+                    lbl.textContent = _d.toLocaleDateString('th-TH', { year:'numeric', month:'long' });
                     CalendarAdmin._targetRef = App.dbRef;
                 } else {
-                    const ym = planMode.replace('draft:', '');
+                    const ym = _pm.replace('draft:','').replace('history:','');
                     const [y, m] = ym.split('_');
-                    const lbStr = new Date(+y, +m-1, 1).toLocaleDateString('th-TH', { year:'numeric', month:'long' });
-                    lbl.textContent = `Draft ${lbStr}`;
+                    lbl.textContent = new Date(+y, +m-1, 1)
+                        .toLocaleDateString('th-TH', { year:'numeric', month:'long' });
                     CalendarAdmin._targetRef = App.draftsCol().doc(ym);
                 }
 
-                // โหลด config ที่มีอยู่
+                // โหลด config จาก Firestore
+                CalendarAdmin._holidays  = [];
+                CalendarAdmin._fixedRows = [];
                 try {
                     const snap = await CalendarAdmin._targetRef.get();
-                    const cfg = snap.exists ? (snap.data().calendarConfig || null) : null;
-                    CalendarAdmin._holidays = [];
-                    CalendarAdmin._fixedRows = [];
-                    if (cfg) {
-                        CalendarAdmin.setMode(cfg.mode || 'cycle');
+                    const cfg  = snap.exists ? (snap.data().calendarConfig || null) : null;
+                    if (cfg && cfg.mode) {
+                        CalendarAdmin.setMode(cfg.mode);
                         if (cfg.mode === 'cycle') {
                             document.getElementById('cal-start-date').value    = cfg.startDay    || 1;
                             document.getElementById('cal-start-day-num').value = cfg.startDayNum || 1;
                             document.getElementById('cal-cycle-days').value    = cfg.cycleDays   || 24;
                             CalendarAdmin._holidays = cfg.holidays || [];
-                        } else {
+                        } else if (cfg.mode === 'fixed') {
                             const mapping = cfg.mapping || {};
-                            CalendarAdmin._fixedRows = Object.entries(mapping).map(([d, day]) => ({ date: d, day }));
+                            CalendarAdmin._fixedRows = Object.entries(mapping)
+                                .map(([d, day]) => ({ date: d, day }));
                         }
+                        // date mode ไม่ต้องโหลดอะไรเพิ่ม
                     } else {
-                        CalendarAdmin.setMode('cycle');
+                        CalendarAdmin.setMode('date'); // default
                     }
                 } catch(e) {
-                    CalendarAdmin.setMode('cycle');
+                    console.warn('CalendarAdmin.open:', e);
+                    CalendarAdmin.setMode('date');
                 }
                 CalendarAdmin._renderHolidayGrid();
                 CalendarAdmin._renderFixedRows();
             },
 
-            close: () => document.getElementById('calendar-config-modal').classList.add('hidden'),
+            // ── ปิด modal ───────────────────────────────────────────────────
+            close: () => {
+                document.getElementById('calendar-config-modal').classList.add('hidden');
+            },
 
+            // ── เลือก mode ──────────────────────────────────────────────────
             setMode: (mode) => {
                 CalendarAdmin._mode = mode;
+                const active   = 'border-2 border-indigo-500 bg-indigo-50 rounded-xl p-3 text-center cursor-pointer transition';
+                const inactive = 'border-2 border-gray-200 bg-gray-50 rounded-xl p-3 text-center cursor-pointer transition';
+
                 const cycleBtn = document.getElementById('cal-mode-cycle');
+                const dateBtn  = document.getElementById('cal-mode-date');
                 const fixedBtn = document.getElementById('cal-mode-fixed');
                 const cycleSec = document.getElementById('cal-cycle-section');
                 const fixedSec = document.getElementById('cal-fixed-section');
+
+                // reset
+                [cycleBtn, dateBtn, fixedBtn].forEach(b => { if (b) b.className = inactive; });
+                [cycleSec, fixedSec].forEach(s => { if (s) s.classList.add('hidden'); });
+
                 if (mode === 'cycle') {
-                    cycleBtn.className = 'border-2 border-indigo-500 bg-indigo-50 rounded-xl p-3 text-center cursor-pointer transition';
-                    fixedBtn.className = 'border-2 border-gray-200 bg-gray-50 rounded-xl p-3 text-center cursor-pointer transition';
-                    cycleSec.classList.remove('hidden');
-                    fixedSec.classList.add('hidden');
-                } else {
-                    cycleBtn.className = 'border-2 border-gray-200 bg-gray-50 rounded-xl p-3 text-center cursor-pointer transition';
-                    fixedBtn.className = 'border-2 border-indigo-500 bg-indigo-50 rounded-xl p-3 text-center cursor-pointer transition';
-                    cycleSec.classList.add('hidden');
-                    fixedSec.classList.remove('hidden');
+                    if (cycleBtn) cycleBtn.className = active;
+                    if (cycleSec) cycleSec.classList.remove('hidden');
+                } else if (mode === 'date') {
+                    if (dateBtn) dateBtn.className = active;
+                    // ไม่มี section พิเศษ
+                } else if (mode === 'fixed') {
+                    if (fixedBtn) fixedBtn.className = active;
+                    if (fixedSec) fixedSec.classList.remove('hidden');
                 }
             },
 
+            // ── วันหยุด (cycle mode) ────────────────────────────────────────
             _renderHolidayGrid: () => {
                 const grid = document.getElementById('cal-holiday-grid');
                 if (!grid) return;
@@ -1413,6 +1496,7 @@
                 CalendarAdmin._renderHolidayGrid();
             },
 
+            // ── fixed mode rows ─────────────────────────────────────────────
             addFixedRow: () => {
                 CalendarAdmin._fixedRows.push({ date: '', day: 'Day 1' });
                 CalendarAdmin._renderFixedRows();
@@ -1421,7 +1505,8 @@
             _renderFixedRows: () => {
                 const container = document.getElementById('cal-fixed-rows');
                 if (!container) return;
-                const dayOptions = Array.from({length: 24}, (_, i) => `<option>Day ${i+1}</option>`).join('');
+                const dayOptions = Array.from({length:24}, (_,i) =>
+                    `<option>Day ${i+1}</option>`).join('');
                 container.innerHTML = CalendarAdmin._fixedRows.map((row, i) => `
                     <div style="display:flex;align-items:center;gap:8px;">
                         <span style="font-size:12px;color:#6b7280;white-space:nowrap;">วันที่</span>
@@ -1435,9 +1520,7 @@
                         </select>
                         <button onclick="CalendarAdmin._fixedRows.splice(${i},1);CalendarAdmin._renderFixedRows()"
                             style="color:#dc2626;border:none;background:none;cursor:pointer;font-size:16px;padding:2px;">✕</button>
-                    </div>
-                `).join('');
-                // set select values
+                    </div>`).join('');
                 setTimeout(() => {
                     container.querySelectorAll('select').forEach((sel, i) => {
                         sel.value = CalendarAdmin._fixedRows[i]?.day || 'Day 1';
@@ -1445,30 +1528,39 @@
                 }, 0);
             },
 
+            // ── บันทึก ──────────────────────────────────────────────────────
             save: async () => {
-                if (!CalendarAdmin._targetRef) return;
+                if (!CalendarAdmin._targetRef) {
+                    UI.showErrorToast('❌ ไม่พบ Plan target');
+                    return;
+                }
                 let cfg;
                 if (CalendarAdmin._mode === 'cycle') {
                     cfg = {
                         mode:        'cycle',
-                        startDay:    parseInt(document.getElementById('cal-start-date').value) || 1,
+                        startDay:    parseInt(document.getElementById('cal-start-date').value)    || 1,
                         startDayNum: parseInt(document.getElementById('cal-start-day-num').value) || 1,
-                        cycleDays:   parseInt(document.getElementById('cal-cycle-days').value) || 24,
-                        holidays:    [...CalendarAdmin._holidays].sort((a,b)=>a-b)
+                        cycleDays:   parseInt(document.getElementById('cal-cycle-days').value)    || 24,
+                        holidays:    [...CalendarAdmin._holidays].sort((a,b) => a-b),
                     };
+                } else if (CalendarAdmin._mode === 'date') {
+                    cfg = { mode: 'date' };
                 } else {
                     const mapping = {};
-                    CalendarAdmin._fixedRows.forEach(r => { if (r.date && r.day) mapping[r.date] = r.day; });
+                    CalendarAdmin._fixedRows.forEach(r => {
+                        if (r.date && r.day) mapping[String(r.date)] = r.day;
+                    });
                     cfg = { mode: 'fixed', mapping };
                 }
                 try {
                     await CalendarAdmin._targetRef.set({ calendarConfig: cfg }, { merge: true });
                     CalendarAdmin.close();
                     UI.showSaveToast('✅ บันทึกตั้งค่าปฏิทินเรียบร้อย');
+                    console.log('✅ calendarConfig saved:', JSON.stringify(cfg));
                 } catch(e) {
                     UI.showErrorToast('❌ บันทึกไม่สำเร็จ: ' + e.message);
                 }
-            }
+            },
         };
     </script>
 

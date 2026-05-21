@@ -39,7 +39,7 @@ const Auth = {
         } catch { return null; }
     },
 
-    SESSION_TTL: 8 * 60 * 60 * 1000, // 8 ชั่วโมง
+    SESSION_TTL: 16 * 60 * 60 * 1000, // 16 ชั่วโมง (Sales เปิดทั้งวัน)
 
     setSession: (user) => {
         localStorage.setItem(Auth.STORAGE_KEY, JSON.stringify({
@@ -56,6 +56,21 @@ const Auth = {
 
     clearSession: () => {
         localStorage.removeItem(Auth.STORAGE_KEY);
+    },
+
+    // ─── Renew session: ต่ออายุ session เมื่อ user ยังใช้งานอยู่ ──────
+    // เรียกจาก sales-app.js / admin เมื่อมี user interaction
+    renewSession: () => {
+        try {
+            const raw = localStorage.getItem(Auth.STORAGE_KEY);
+            if (!raw) return;
+            const s = JSON.parse(raw);
+            // ต่ออายุเฉพาะถ้าเหลือน้อยกว่า 4 ชั่วโมง
+            if (s.expiresAt && (s.expiresAt - Date.now()) < 4 * 60 * 60 * 1000) {
+                s.expiresAt = Date.now() + Auth.SESSION_TTL;
+                localStorage.setItem(Auth.STORAGE_KEY, JSON.stringify(s));
+            }
+        } catch { /* ignore */ }
     },
 
     // ─── Guard — เรียกที่ต้นไฟล์ทุกหน้า ────────────────────────────────

@@ -11,7 +11,7 @@ const Dashboard = {
     _rowCache: {},            // { 'YYYY_MM': rows[] } cache สำหรับ campaign
     _amountMode: 'gross',     // 'gross' | 'net'
     _drillRoute: null,        // null = ศูนย์ทั้งหมด
-    _drillShopType: null,
+    _drillShopType: null,     // null = ทุกประเภทร้าน
     _drillCategory: null,
     _drillBrand: null,
     _rows: [],                // flat filtered rows (current month)
@@ -19,23 +19,52 @@ const Dashboard = {
     _targets: {},             // { routeCode: amount }
     _CHUNK_SIZE: 500,
 
+    // ─── SKU Whitelist — prodCode ที่นับใน SKU เฉลี่ย/ร้าน ────────────────
+    _skuWhitelist: null,   // null = ใช้ทุก SKU, Set = กรองเฉพาะที่เลือก
+
+    // โหลด whitelist จาก Firestore
+    _loadSkuWhitelist: async () => {
+        try {
+            const centerId = window.CENTER_DOC || 'v1_main';
+            const doc = await cloudDB.collection('appData').doc(centerId).get();
+            const list = doc.exists ? (doc.data().skuWhitelist || null) : null;
+            Dashboard._skuWhitelist = list ? new Set(list) : null;
+        } catch(e) {
+            Dashboard._skuWhitelist = null;
+        }
+    },
+
+    // save whitelist ลง Firestore
+    _saveSkuWhitelist: async (codes) => {
+        const centerId = window.CENTER_DOC || 'v1_main';
+        await cloudDB.collection('appData').doc(centerId).set(
+            { skuWhitelist: codes },
+            { merge: true }
+        );
+        Dashboard._skuWhitelist = codes.length ? new Set(codes) : null;
+    },
+
     // Categories ที่ต้องแยกออก ไม่รวมยอดหลัก
-    EXCLUDED_CATS: new Set(['อื่นๆ', 'กระเช้าของขวัญ']),
+    // ── ยกเว้น brand ที่ไม่นับในยอดหลัก ──────────────────────────────────
+    EXCLUDED_BRANDS: new Set(['อื่นๆ', 'กระเช้าของขวัญ']),
 
     // ยอดขาย / SKU เฉลี่ยต่อร้าน แยก V-route และ C-route
     // outlet = custCode ที่มียอดในเดือน
     _calcOutletMetrics: (rows, useMainOnly = true) => {
         const filtered = useMainOnly
-            ? rows.filter(r => !Dashboard.EXCLUDED_CATS.has(r.catDesc))
+            ? rows.filter(r => !Dashboard.EXCLUDED_BRANDS.has(r.brandDesc))
             : rows;
+        const wl = Dashboard._skuWhitelist; // null = ไม่กรอง
         const byOutlet = {}, byOutletV = {}, byOutletC = {};
         filtered.forEach(r => {
             const key = String(r.custCode || '').trim() || String(r.custName || '').trim();
             if (!key) return;
-            const sku  = String(r.prodCode || '').trim();
-            const amt  = Dashboard._amt(r);
+            const sku   = String(r.prodCode || '').trim();
+            const amt   = Dashboard._amt(r);
             const sCode = String(r.sCode || '').toUpperCase();
             const rType = /C\d/.test(sCode) ? 'C' : /V\d/.test(sCode) ? 'V' : null;
+            // กรอง SKU ตาม whitelist (ถ้ามี)
+            const skuValid = sku && (!wl || wl.has(sku));
             [
                 [byOutlet, true],
                 [byOutletV, rType === 'V'],
@@ -43,7 +72,7 @@ const Dashboard = {
             ].forEach(([map, use]) => {
                 if (!use) return;
                 if (!map[key]) map[key] = { skus: new Set(), vol: 0 };
-                if (sku) map[key].skus.add(sku);
+                if (skuValid) map[key].skus.add(sku);
                 map[key].vol += amt;
             });
         });
@@ -51,9 +80,11 @@ const Dashboard = {
             const list = Object.values(map);
             const n = list.length;
             if (!n) return { outletCount: 0, avgSku: 0, avgVol: 0 };
+            // สูตรใหม่: SKU ที่ขายได้ทั้งหมด ÷ ร้านที่มียอด (ตรงกับ report บ.)
+            const totalSkus = list.reduce((s, o) => s + o.skus.size, 0);
             return {
                 outletCount: n,
-                avgSku: list.reduce((s, o) => s + o.skus.size, 0) / n,
+                avgSku: totalSkus / n,
                 avgVol: list.reduce((s, o) => s + o.vol, 0) / n,
             };
         };
@@ -68,12 +99,12 @@ const Dashboard = {
         Dashboard._session = Auth.getSession();
         if (!Dashboard._session) return;
 
-        // ตั้งค่าเดือนปัจจุบัน (default = เดือนล่าสุดที่โหลด หรือเดือนนี้)
         const now = new Date();
         Dashboard._currentYM = `${now.getFullYear()}_${String(now.getMonth() + 1).padStart(2, '0')}`;
 
         Dashboard._renderShell();
-        // โหลด campaign section แบบ async ไม่บล็อก UI
+        // โหลด whitelist + campaign async
+        Dashboard._loadSkuWhitelist();
         setTimeout(() => Dashboard._renderCampaignSection(), 1500);
         Dashboard._loadMonthList();
     },
@@ -150,7 +181,7 @@ const Dashboard = {
             <!-- Active Campaign Coverage (โหลดจาก SkuDist) -->
             <div id="db-campaign-section" class="hidden"></div>
 
-            <!-- Middle row: By-Route table + ShopType pie -->
+            <!-- Middle row: By-Route table + ShopType -->
             <div class="grid grid-cols-1 lg:grid-cols-5 gap-4">
                 <!-- Route table -->
                 <div class="lg:col-span-3 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden" id="db-route-panel">
@@ -181,45 +212,26 @@ const Dashboard = {
 
                 <!-- ShopType bars -->
                 <div class="lg:col-span-2 bg-white rounded-2xl shadow-sm border border-gray-100" id="db-shoptype-panel">
-                    <div class="px-4 py-3 border-b border-gray-100 bg-gray-50">
+                    <div class="px-4 py-3 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
                         <span class="text-sm font-black text-gray-700">🏪 ประเภทร้าน</span>
+                        <span class="text-xs text-gray-400" id="db-shoptype-hint">กดเพื่อกรอง</span>
                     </div>
                     <div class="p-4 space-y-2.5" id="db-shoptype-body">
                         <p class="text-center text-gray-400 text-xs py-4">ยังไม่มีข้อมูล</p>
                     </div>
                 </div>
             </div>
-
-            <!-- Category breakdown (main) -->
             <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
                 <div class="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gray-50">
-                    <span class="text-sm font-black text-gray-700">📦 Category หลัก</span>
-                    <span class="text-xs text-gray-400">(ไม่รวม อื่นๆ / กระเช้า)</span>
+                    <span class="text-sm font-black text-gray-700">🏷️ Brand Breakdown</span>
+                    <span class="text-xs text-gray-400">แยกตาม Brand</span>
                 </div>
                 <div class="p-4" id="db-category-body">
                     <p class="text-center text-gray-400 text-xs py-4">ยังไม่มีข้อมูล</p>
                 </div>
             </div>
 
-            <!-- Excluded categories (อื่นๆ / กระเช้า) -->
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div class="bg-white rounded-2xl shadow-sm border border-orange-100 overflow-hidden">
-                    <div class="px-4 py-3 border-b border-orange-100 bg-orange-50">
-                        <span class="text-sm font-black text-orange-700">🎁 กระเช้าของขวัญ</span>
-                    </div>
-                    <div class="p-4" id="db-basket-body">
-                        <p class="text-center text-gray-400 text-xs py-4">ยังไม่มีข้อมูล</p>
-                    </div>
-                </div>
-                <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-                    <div class="px-4 py-3 border-b border-gray-100 bg-gray-50">
-                        <span class="text-sm font-black text-gray-700">🔖 อื่นๆ</span>
-                    </div>
-                    <div class="p-4" id="db-others-body">
-                        <p class="text-center text-gray-400 text-xs py-4">ยังไม่มีข้อมูล</p>
-                    </div>
-                </div>
-            </div>
+
 
             <!-- Brand drill-down (shows when drillCategory is set) -->
             <div id="db-brand-panel" class="hidden bg-white rounded-2xl shadow-sm border border-indigo-100 overflow-hidden">
@@ -288,7 +300,6 @@ const Dashboard = {
         if (!ym) return;
         Dashboard._currentYM = ym;
         Dashboard._drillRoute = Dashboard._session.role === 'sales' ? Dashboard._session.username : null;
-        Dashboard._drillShopType = null;
         Dashboard._drillCategory = null;
         Dashboard._drillBrand = null;
         await Dashboard._loadMonth(ym);
@@ -379,23 +390,35 @@ const Dashboard = {
 
     _normalizeRows: (raw) => {
         return raw
-            .filter(r => r['Invoice  Status'] === 'Invoiced' || r['Invoice  Status'] === 'Invoiced')
+            .filter(r => r['Invoice  Status'] === 'Invoiced' || r['Invoice  Status'] === 'Credit Note')
             .map(r => ({
-                sCode:    String(r['Salesman Code'] || '').trim().toUpperCase(),
-                sType:    String(r['Salesman Type'] || '').trim(),
-                custCode: String(r['Customer Code'] || '').trim(),
-                custName: String(r['Customer Name'] || '').trim(),
-                shopType: String(r['Shop Type Desc'] || '').trim(),
-                invDate:  r['Invoice Date'] ? String(r['Invoice Date']).slice(0, 10) : '',
-                invNum:   String(r['Invoice Number'] || '').trim(),
-                invStatus:String(r['Invoice  Status'] || '').trim(),
-                catDesc:  String(r['Category Description'] || '').trim(),
-                brandDesc:String(r['Brand Description'] || '').trim(),
-                prodCode: String(r['SO Product Code'] || '').trim(),
-                prodName: String(r['SO Product Name'] || '').trim(),
-                gross:    parseFloat(r['Invoice  Gross Amount']) || 0,
-                net:      parseFloat(r['Invoice Net Amount']) || 0,
-                qtyEA:    parseFloat(r['Delivery Total  QTY EA']) || 0,
+                // ─ Salesman ─
+                sCode:          String(r['Salesman Code'] || '').trim().toUpperCase(),
+                // ─ Customer ─
+                custCode:       String(r['Customer Code'] || '').trim(),
+                custName:       String(r['Customer Name'] || '').trim(),
+                shopType:       String(r['Shop Type Desc'] || '').trim(),
+                // ─ SO ─
+                soStatus:       String(r['SO Status'] || '').trim(),
+                soNet:          parseFloat(r['SO NET Amount']) || 0,
+                soNum:          String(r['SO Number'] || '').trim(),
+                // ─ Product ─
+                prodCode:       String(r['SO Product Code'] || '').trim(),
+                prodName:       String(r['SO Product Name'] || '').trim(),
+                brandDesc:      String(r['Brand Description'] || '').trim(),
+                carToEA:        parseFloat(r['CAR to EA']) || 0,
+                // ─ Invoice ─
+                invNum:         String(r['Invoice Number'] || '').trim(),
+                invStatus:      String(r['Invoice  Status'] || '').trim(),
+                gross:          parseFloat(r['Invoice  Gross Amount']) || 0,
+                net:            parseFloat(r['Invoice Net Amount']) || 0,
+                // ─ Delivery ─
+                deliveryStatus: String(r['Delivery Status'] || '').trim(),
+                qtyEA:          parseFloat(r['Delivery Total  QTY EA']) || 0,
+                // ─ KPI / Bonus ─
+                kpiDate:        r['KPI Date'] ? String(r['KPI Date']).slice(0, 10) : '',
+                brandBonus:     parseFloat(r['Brand Bonus']) || 0,
+                bbPoint:        parseFloat(r['BB Point']) || 0,
             }));
     },
 
@@ -484,7 +507,10 @@ const Dashboard = {
         } else if (Dashboard._drillRoute) {
             rows = rows.filter(r => r.sCode === Dashboard._drillRoute);
         }
-        if (Dashboard._drillShopType) rows = rows.filter(r => r.shopType === Dashboard._drillShopType);
+        // กรองตาม shopType (ถ้าเลือก)
+        if (Dashboard._drillShopType) {
+            rows = rows.filter(r => r.shopType === Dashboard._drillShopType);
+        }
         return rows;
     },
 
@@ -504,10 +530,10 @@ const Dashboard = {
     },
 
     _resetDrill: () => {
-        Dashboard._drillRoute = null;
+        Dashboard._drillRoute    = null;
         Dashboard._drillShopType = null;
         Dashboard._drillCategory = null;
-        Dashboard._drillBrand = null;
+        Dashboard._drillBrand    = null;
         Dashboard._render();
     },
 
@@ -537,10 +563,10 @@ const Dashboard = {
         if (!bc || !rb) return;
 
         const parts = [];
-        if (Dashboard._drillRoute) parts.push(`🚚 ${Dashboard._drillRoute}`);
+        if (Dashboard._drillRoute)    parts.push(`🚚 ${Dashboard._drillRoute}`);
         if (Dashboard._drillShopType) parts.push(`🏪 ${Dashboard._drillShopType}`);
-        if (Dashboard._drillCategory) parts.push(`📦 ${Dashboard._drillCategory}`);
-        if (Dashboard._drillBrand) parts.push(`🏷️ ${Dashboard._drillBrand}`);
+        if (Dashboard._drillCategory) parts.push(`🏷️ ${Dashboard._drillCategory}`);
+        if (Dashboard._drillBrand)    parts.push(`📦 ${Dashboard._drillBrand}`);
 
         if (parts.length > 0 && Dashboard._session.role !== 'sales') {
             bc.innerHTML = parts.join('<span class="mx-1 text-gray-600">›</span>');
@@ -554,8 +580,23 @@ const Dashboard = {
     _renderKPIs: () => {
         const el = document.getElementById('db-kpi-row');
         if (!el) return;
+
+        // KPI หัว = ยอดรวมทั้งหมด ไม่เปลี่ยนตาม filter
+        const savedRoute    = Dashboard._drillRoute;
+        const savedShopType = Dashboard._drillShopType;
+        const savedCat      = Dashboard._drillCategory;
+        const savedBrand    = Dashboard._drillBrand;
+        Dashboard._drillRoute    = null;
+        Dashboard._drillShopType = null;
+        Dashboard._drillCategory = null;
+        Dashboard._drillBrand    = null;
         const rows = Dashboard._getFilteredRows();
-        const mainRows = rows.filter(r => !Dashboard.EXCLUDED_CATS.has(r.catDesc));
+        Dashboard._drillRoute    = savedRoute;
+        Dashboard._drillShopType = savedShopType;
+        Dashboard._drillCategory = savedCat;
+        Dashboard._drillBrand    = savedBrand;
+
+        const mainRows = rows.filter(r => !Dashboard.EXCLUDED_BRANDS.has(r.brandDesc));
         const total = mainRows.reduce((s, r) => s + Dashboard._amt(r), 0);
         const totalAll = rows.reduce((s, r) => s + Dashboard._amt(r), 0);
 
@@ -584,7 +625,9 @@ const Dashboard = {
             { icon:'💰', label: `ยอด ${modeLabel} (หลัก)`, val: Dashboard._fmt(total), sub: '', color:'emerald' },
             { icon:'🎯', label: 'MTD vs Target', val: pct !== null ? Dashboard._pctBadge(pct) : '—', sub: targetAmt > 0 ? `Target: ${Dashboard._fmt(targetAmt)}` : 'ยังไม่ตั้ง Target', color:'amber', raw:true },
             { icon:'🏪', label: 'ร้านค้าทั้งหมด', val: outletM.outletCount.toLocaleString(), sub:'ร้านที่มียอด', color:'blue' },
-            { icon:'📦', label: 'SKU เฉลี่ย/ร้าน', val: Dashboard._fmtSku(outletM.avgSku), sub:'SKU รวมเฉลี่ยต่อร้าน', color:'cyan' },
+            { icon:'📦', label: 'SKU เฉลี่ย/ร้าน', val: Dashboard._fmtSku(outletM.avgSku),
+              sub: Dashboard._skuWhitelist ? `กรอง ${Dashboard._skuWhitelist.size} SKU · <span style="color:#6366f1;cursor:pointer;font-weight:800;" onclick="Dashboard.openSkuWhitelistModal()">⚙️ แก้ไข</span>` : `ทุก SKU · <span style="color:#6366f1;cursor:pointer;font-weight:800;" onclick="Dashboard.openSkuWhitelistModal()">⚙️ ตั้งค่า</span>`,
+              color:'cyan', rawSub: true },
             { icon:'🚐', label: 'ยอด/ร้าน สาย V', val: fmtFull(outletM.v.avgVol), sub: volVsub, color:'pink' },
             { icon:'🏪', label: 'ยอด/ร้าน สาย C', val: fmtFull(outletM.c.avgVol), sub: volCsub, color:'orange' },
             { icon:'📄', label: 'Invoice', val: invCount.toLocaleString(), sub:'ใบ', color:'violet' },
@@ -595,7 +638,7 @@ const Dashboard = {
                     <span class="text-xs font-bold text-gray-500 uppercase tracking-wide">${k.label}</span>
                 </div>
                 <div class="text-2xl font-black text-gray-800">${k.raw ? k.val : k.val}</div>
-                ${k.sub ? `<div class="text-xs text-gray-400 mt-0.5">${k.sub}</div>` : ''}
+                ${k.sub ? `<div class="text-xs text-gray-400 mt-0.5">${k.rawSub ? k.sub : k.sub}</div>` : ''}
             </div>
         `).join('');
     },
@@ -616,7 +659,7 @@ const Dashboard = {
         }
 
         const rowData = routes.map(r => {
-            const rows = Dashboard._rows.filter(rx => rx.sCode === r && !Dashboard.EXCLUDED_CATS.has(rx.catDesc));
+            const rows = Dashboard._rows.filter(rx => rx.sCode === r && !Dashboard.EXCLUDED_BRANDS.has(rx.brandDesc));
             const amt  = rows.reduce((s,rx) => s + Dashboard._amt(rx), 0);
             const tgt  = Dashboard._targets[r] || 0;
             const pct  = tgt > 0 ? (amt / tgt * 100) : null;
@@ -657,7 +700,7 @@ const Dashboard = {
         const totalAmt = rowData.reduce((s,d) => s + d.amt, 0);
         const totalTgt = rowData.reduce((s,d) => s + d.tgt, 0);
         const totalPct = totalTgt > 0 ? totalAmt/totalTgt*100 : null;
-        const filteredRows = Dashboard._getFilteredRows().filter(r => !Dashboard.EXCLUDED_CATS.has(r.catDesc));
+        const filteredRows = Dashboard._getFilteredRows().filter(r => !Dashboard.EXCLUDED_BRANDS.has(r.brandDesc));
         const totalOm = Dashboard._calcOutletMetrics(filteredRows);
         tbody.innerHTML += `
         <tr class="border-t-2 border-gray-200 bg-gray-50 font-black">
@@ -678,85 +721,139 @@ const Dashboard = {
     },
 
     _drillToRoute: (r) => {
-        Dashboard._drillRoute = Dashboard._drillRoute === r ? null : r;
+        Dashboard._drillRoute    = Dashboard._drillRoute === r ? null : r;
         Dashboard._drillShopType = null;
         Dashboard._drillCategory = null;
-        Dashboard._drillBrand = null;
+        Dashboard._drillBrand    = null;
         Dashboard._render();
     },
 
     _renderShopTypes: () => {
         const el = document.getElementById('db-shoptype-body');
         if (!el) return;
-        const rows = Dashboard._getFilteredRows();
-        if (!rows.length) { el.innerHTML = '<p class="text-center text-gray-400 text-xs py-4">ยังไม่มีข้อมูล</p>'; return; }
+        // ใช้ rows ก่อนกรอง shopType (เพื่อแสดง % ของทุกประเภท)
+        const baseRows = Dashboard._getFilteredRows();
+        // คำนวณโดยไม่กรอง shopType
+        const allRows = Dashboard._drillShopType
+            ? (() => {
+                const saved = Dashboard._drillShopType;
+                Dashboard._drillShopType = null;
+                const r = Dashboard._getFilteredRows();
+                Dashboard._drillShopType = saved;
+                return r;
+            })()
+            : baseRows;
+
+        if (!allRows.length) { el.innerHTML = '<p class="text-center text-gray-400 text-xs py-4">ยังไม่มีข้อมูล</p>'; return; }
 
         const byType = {};
-        rows.forEach(r => { byType[r.shopType] = (byType[r.shopType] || 0) + Dashboard._amt(r); });
+        allRows.forEach(r => {
+            const t = r.shopType || 'Other';
+            byType[t] = (byType[t] || 0) + Dashboard._amt(r);
+        });
         const sorted = Object.entries(byType).sort((a,b) => b[1]-a[1]);
-        const max = sorted[0]?.[1] || 1;
-        const total = sorted.reduce((s,[,v]) => s + v, 0);
+        const total  = sorted.reduce((s,[,v]) => s + v, 0);
+        const max    = sorted[0]?.[1] || 1;
+
+        // อัปเดต hint
+        const hint = document.getElementById('db-shoptype-hint');
+        if (hint) {
+            if (Dashboard._drillShopType) {
+                hint.innerHTML = `<button onclick="Dashboard._drillToShopType('${Dashboard._drillShopType.replace(/'/g,"\\'")}');" class="text-xs text-blue-500 hover:text-blue-800 font-bold">✕ ยกเลิก</button>`;
+            } else {
+                hint.textContent = 'กดเพื่อกรอง';
+                hint.className = 'text-xs text-gray-400';
+            }
+        }
 
         el.innerHTML = sorted.map(([type, amt]) => {
-            const pct = (amt / total * 100).toFixed(1);
-            const barW = Math.round((amt / max) * 100);
+            const pct     = (amt / total * 100).toFixed(1);
+            const barW    = Math.round((amt / max) * 100);
             const isActive = Dashboard._drillShopType === type;
             return `
-            <div class="cursor-pointer group ${isActive ? 'opacity-100' : 'opacity-90 hover:opacity-100'} transition"
+            <div class="cursor-pointer group transition rounded-lg p-1.5 -mx-1.5 ${isActive ? 'bg-blue-50' : 'hover:bg-gray-50'}"
                  onclick="Dashboard._drillToShopType('${type.replace(/'/g,"\\'")}')">
                 <div class="flex items-center justify-between mb-0.5">
-                    <span class="text-xs font-bold text-gray-700 group-hover:text-indigo-700 transition ${isActive ? 'text-indigo-700' : ''}">${type}</span>
+                    <span class="text-xs font-bold ${isActive ? 'text-blue-700' : 'text-gray-700'} group-hover:text-blue-700 transition">${type}</span>
                     <span class="text-xs tabular-nums text-gray-500">${pct}%</span>
                 </div>
                 <div class="h-2 bg-gray-100 rounded-full overflow-hidden">
-                    <div class="h-2 rounded-full transition-all ${isActive ? 'bg-indigo-500' : 'bg-blue-400'}" style="width:${barW}%"></div>
+                    <div class="h-2 rounded-full transition-all ${isActive ? 'bg-blue-500' : 'bg-blue-400'}" style="width:${barW}%"></div>
                 </div>
-                <div class="text-[10px] text-gray-400 mt-0.5 tabular-nums">${Dashboard._fmt(amt)}</div>
+                <div class="text-[10px] ${isActive ? 'text-blue-600 font-bold' : 'text-gray-400'} mt-0.5 tabular-nums">${Dashboard._fmt(amt)}</div>
             </div>`;
         }).join('');
     },
 
     _drillToShopType: (type) => {
+        // toggle — กดซ้ำเพื่อยกเลิก
         Dashboard._drillShopType = Dashboard._drillShopType === type ? null : type;
         Dashboard._drillCategory = null;
-        Dashboard._drillBrand = null;
+        Dashboard._drillBrand    = null;
         Dashboard._render();
     },
 
     _renderCategories: () => {
         const mainEl    = document.getElementById('db-category-body');
-        const basketEl  = document.getElementById('db-basket-body');
-        const othersEl  = document.getElementById('db-others-body');
         if (!mainEl) return;
 
         const rows = Dashboard._getFilteredRows();
         if (!rows.length) {
-            [mainEl, basketEl, othersEl].forEach(el => { if(el) el.innerHTML = '<p class="text-center text-gray-400 text-xs py-4">ยังไม่มีข้อมูล</p>'; });
+            if(mainEl) mainEl.innerHTML = '<p class="text-center text-gray-400 text-xs py-4">ยังไม่มีข้อมูล</p>';
             return;
         }
 
-        const mainRows   = rows.filter(r => !Dashboard.EXCLUDED_CATS.has(r.catDesc));
-        const basketRows = rows.filter(r => r.catDesc === 'กระเช้าของขวัญ');
-        const othersRows = rows.filter(r => r.catDesc === 'อื่นๆ');
+        // ใช้ brandDesc แทน catDesc สำหรับ breakdown หลัก
+        const mainRows   = rows.filter(r => !Dashboard.EXCLUDED_BRANDS.has(r.brandDesc));
 
-        const renderCatBars = (catRows, el) => {
-            if (!catRows.length) { el.innerHTML = '<p class="text-center text-gray-400 text-xs py-4">ไม่มียอด</p>'; return; }
-            const byCat = {};
-            catRows.forEach(r => { byCat[r.catDesc] = (byCat[r.catDesc] || 0) + Dashboard._amt(r); });
-            const sorted = Object.entries(byCat).sort((a,b) => b[1]-a[1]);
-            const total = sorted.reduce((s,[,v]) => s + v, 0);
-            const max   = sorted[0]?.[1] || 1;
+        // แยก Confirm vs Pending ใน Credit rows
+        const creditRows   = mainRows.filter(r => /C\d/.test(String(r.sCode||'')));
+        const confirmRows  = creditRows.filter(r => String(r.deliveryStatus||'').toLowerCase() === 'confirm');
+        const pendingRows  = creditRows.filter(r => String(r.deliveryStatus||'').toLowerCase() === 'pending');
+        const totalConfirm = confirmRows.reduce((s,r) => s + Dashboard._amt(r), 0);
+        const totalPending = pendingRows.reduce((s,r) => s + Dashboard._amt(r), 0);
+        const pendInvCount = new Set(pendingRows.map(r => r.invNum).filter(Boolean)).size;
+
+        // inject Credit Delivery Status section ถ้ามี credit rows
+        const creditStatusEl = document.getElementById('db-credit-delivery');
+        if (creditStatusEl && creditRows.length > 0) {
+            creditStatusEl.style.display = 'block';
+            creditStatusEl.innerHTML = `
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">
+                <div class="bg-emerald-50 border border-emerald-100 rounded-xl p-3">
+                    <div class="text-xs font-bold text-emerald-700 mb-1">✅ Confirm</div>
+                    <div class="text-lg font-black text-emerald-800">${Dashboard._fmt(totalConfirm)}</div>
+                    <div class="text-xs text-gray-400">${confirmRows.length} รายการ</div>
+                </div>
+                <div class="bg-amber-50 border border-amber-100 rounded-xl p-3 cursor-pointer hover:bg-amber-100 transition"
+                     onclick="Dashboard._showPendingInvoices()">
+                    <div class="text-xs font-bold text-amber-700 mb-1">⏳ รอ Confirm</div>
+                    <div class="text-lg font-black text-amber-800">${Dashboard._fmt(totalPending)}</div>
+                    <div class="text-xs text-gray-400">${pendInvCount} invoice · <span class="text-indigo-500 font-bold">ดูรายละเอียด →</span></div>
+                </div>
+            </div>`;
+        } else if (creditStatusEl) {
+            creditStatusEl.style.display = 'none';
+        }
+
+        const renderBrandBars = (brandRows, el) => {
+            if (!brandRows.length) { el.innerHTML = '<p class="text-center text-gray-400 text-xs py-4">ไม่มียอด</p>'; return; }
+            const byBrand = {};
+            brandRows.forEach(r => { byBrand[r.brandDesc] = (byBrand[r.brandDesc] || 0) + Dashboard._amt(r); });
+            const sorted = Object.entries(byBrand).sort((a,b) => b[1]-a[1]);
+            const total  = sorted.reduce((s,[,v]) => s + v, 0);
+            const max    = sorted[0]?.[1] || 1;
 
             el.innerHTML = `<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">` +
-                sorted.map(([cat, amt]) => {
-                    const pct = (amt / total * 100).toFixed(1);
+                sorted.map(([brand, amt]) => {
+                    const pct  = (amt / total * 100).toFixed(1);
                     const barW = Math.round((amt / max) * 100);
-                    const isActive = Dashboard._drillCategory === cat;
+                    const isActive = Dashboard._drillCategory === brand;
                     return `
                     <div class="cursor-pointer bg-gray-50 hover:bg-indigo-50 rounded-xl p-3 transition border border-transparent ${isActive ? 'border-indigo-300 bg-indigo-50' : ''}"
-                         onclick="Dashboard._drillToCategory('${cat.replace(/'/g,"\\'")}')">
+                         onclick="Dashboard._drillToCategory('${brand.replace(/'/g,"\\'")}')">
                         <div class="flex items-center justify-between mb-1">
-                            <span class="text-xs font-black text-gray-700">${cat}</span>
+                            <span class="text-xs font-black text-gray-700">${brand}</span>
                             <span class="text-xs text-gray-500">${pct}%</span>
                         </div>
                         <div class="h-2 bg-gray-200 rounded-full mb-1.5">
@@ -767,9 +864,64 @@ const Dashboard = {
                 }).join('') + `</div>`;
         };
 
-        renderCatBars(mainRows, mainEl);
-        renderCatBars(basketRows, basketEl);
-        renderCatBars(othersRows, othersEl);
+        renderBrandBars(mainRows, mainEl);
+
+    },
+
+    // ─── Pending Invoice Modal ──────────────────────────────────────────────
+    _showPendingInvoices: () => {
+        const rows = Dashboard._getFilteredRows()
+            .filter(r => /C\d/.test(String(r.sCode||'')) && String(r.deliveryStatus||'').toLowerCase() === 'pending');
+
+        // group by invNum
+        const byInv = {};
+        rows.forEach(r => {
+            const inv = r.invNum || r.soNum || '—';
+            if (!byInv[inv]) byInv[inv] = { sCode: r.sCode, custName: r.custName, net: 0, items: 0, kpiDate: r.kpiDate };
+            byInv[inv].net   += r.net || 0;
+            byInv[inv].items++;
+        });
+        const sorted = Object.entries(byInv).sort((a,b) => b[1].net - a[1].net);
+
+        let modal = document.getElementById('db-pending-modal');
+        if (!modal) {
+            modal = document.createElement('div');
+            modal.id = 'db-pending-modal';
+            modal.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);z-index:9999;align-items:center;justify-content:center;padding:16px;';
+            document.body.appendChild(modal);
+        }
+
+        const totalPending = sorted.reduce((s,[,d]) => s + d.net, 0);
+        modal.innerHTML = `
+        <div style="background:#fff;border-radius:24px;width:100%;max-width:560px;max-height:88dvh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 80px rgba(0,0,0,0.3);">
+            <div style="padding:18px 20px;border-bottom:1px solid #f1f5f9;display:flex;justify-content:space-between;align-items:center;flex-shrink:0;">
+                <div>
+                    <div style="font-size:15px;font-weight:900;color:#111827;">⏳ Invoice รอ Confirm</div>
+                    <div style="font-size:11px;color:#9ca3af;margin-top:2px;">${sorted.length} invoice · รวม ${Dashboard._fmt(totalPending)}</div>
+                </div>
+                <button onclick="document.getElementById('db-pending-modal').style.display='none'"
+                    style="width:30px;height:30px;border-radius:50%;border:1px solid #e5e7eb;background:#fff;color:#9ca3af;font-size:14px;cursor:pointer;font-weight:700;">✕</button>
+            </div>
+            <div style="flex:1;overflow-y:auto;padding:12px 20px;">
+                ${sorted.length === 0
+                    ? '<div style="text-align:center;padding:24px;color:#9ca3af;">ไม่มี invoice รอ Confirm</div>'
+                    : sorted.map(([inv, d]) => `
+                    <div style="background:#fefce8;border:1px solid #fde68a;border-radius:12px;padding:10px 14px;margin-bottom:8px;">
+                        <div style="display:flex;justify-content:space-between;align-items:center;">
+                            <div>
+                                <div style="font-size:12px;font-weight:900;color:#111827;font-family:monospace;">${inv}</div>
+                                <div style="font-size:11px;color:#6b7280;margin-top:2px;">${d.sCode} · ${d.custName || '—'}</div>
+                                ${d.kpiDate ? `<div style="font-size:10px;color:#9ca3af;">${d.kpiDate}</div>` : ''}
+                            </div>
+                            <div style="text-align:right;">
+                                <div style="font-size:14px;font-weight:900;color:#b45309;">${Dashboard._fmt(d.net)}</div>
+                                <div style="font-size:10px;color:#9ca3af;">${d.items} รายการ</div>
+                            </div>
+                        </div>
+                    </div>`).join('')}
+            </div>
+        </div>`;
+        modal.style.display = 'flex';
     },
 
     _drillToCategory: (cat) => {
@@ -786,22 +938,26 @@ const Dashboard = {
 
         if (!Dashboard._drillCategory) { panel.classList.add('hidden'); return; }
         panel.classList.remove('hidden');
-        if (title) title.textContent = `🏷️ Brand — ${Dashboard._drillCategory}`;
+        if (title) title.textContent = `🏷️ SKU — ${Dashboard._drillCategory}`;
 
-        const rows = Dashboard._getFilteredRows().filter(r => r.catDesc === Dashboard._drillCategory);
-        const byBrand = {};
-        rows.forEach(r => { byBrand[r.brandDesc] = (byBrand[r.brandDesc] || 0) + Dashboard._amt(r); });
-        const sorted = Object.entries(byBrand).sort((a,b) => b[1]-a[1]);
+        // drill จาก brandDesc → แสดง prodName ย่อย
+        const rows = Dashboard._getFilteredRows().filter(r => r.brandDesc === Dashboard._drillCategory);
+        const byProd = {};
+        rows.forEach(r => {
+            const key = r.prodName || r.prodCode || '—';
+            byProd[key] = (byProd[key] || 0) + Dashboard._amt(r);
+        });
+        const sorted = Object.entries(byProd).sort((a,b) => b[1]-a[1]);
         const max = sorted[0]?.[1] || 1;
 
-        body.innerHTML = `<div class="flex flex-wrap gap-2">` + sorted.map(([brand, amt]) => {
+        body.innerHTML = `<div class="flex flex-wrap gap-2">` + sorted.map(([prod, amt]) => {
             const barW = Math.round((amt / max) * 100);
-            const isActive = Dashboard._drillBrand === brand;
+            const isActive = Dashboard._drillBrand === prod;
             return `
             <div class="cursor-pointer flex-1 min-w-[160px] bg-gray-50 hover:bg-indigo-50 border border-transparent ${isActive ? 'border-indigo-300 bg-indigo-50' : ''} rounded-xl p-3 transition"
-                 onclick="Dashboard._drillToBrand('${brand.replace(/'/g,"\\'")}')">
+                 onclick="Dashboard._drillToBrand('${prod.replace(/'/g,"\\'")}')">
                 <div class="flex items-center justify-between mb-1">
-                    <span class="text-xs font-black text-gray-700 leading-tight">${brand}</span>
+                    <span class="text-xs font-black text-gray-700 leading-tight">${prod}</span>
                 </div>
                 <div class="h-1.5 bg-gray-200 rounded-full mb-1.5">
                     <div class="h-1.5 rounded-full bg-indigo-400" style="width:${barW}%"></div>
@@ -827,7 +983,7 @@ const Dashboard = {
         if (title) title.textContent = `📦 ${Dashboard._drillBrand}`;
 
         const rows = Dashboard._getFilteredRows()
-            .filter(r => r.catDesc === Dashboard._drillCategory && r.brandDesc === Dashboard._drillBrand);
+            .filter(r => r.brandDesc === Dashboard._drillCategory && r.prodName === Dashboard._drillBrand);
 
         const byProd = {};
         rows.forEach(r => {
@@ -1051,6 +1207,124 @@ const Dashboard = {
         }
     },
 
+
+    // ─── SKU Whitelist Modal ──────────────────────────────────────────────
+    openSkuWhitelistModal: async () => {
+        let modal = document.getElementById('sku-whitelist-modal');
+        if (!modal) {
+            modal = document.createElement('div');
+            modal.id = 'sku-whitelist-modal';
+            modal.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);z-index:9999;align-items:center;justify-content:center;padding:16px;';
+            modal.innerHTML = `
+            <div style="background:#fff;border-radius:24px;width:100%;max-width:560px;max-height:88dvh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 80px rgba(0,0,0,0.3);">
+                <div style="padding:18px 20px;border-bottom:1px solid #f1f5f9;display:flex;justify-content:space-between;align-items:center;flex-shrink:0;">
+                    <div>
+                        <div style="font-size:15px;font-weight:900;color:#111827;">📦 SKU สำหรับคำนวณเฉลี่ย/ร้าน</div>
+                        <div style="font-size:11px;color:#9ca3af;margin-top:2px;">ติ๊กเลือก SKU ที่ต้องการนับ — ไม่ติ๊กทั้งหมด = ใช้ทุก SKU</div>
+                    </div>
+                    <button onclick="Dashboard.closeSkuWhitelistModal()" style="width:30px;height:30px;border-radius:50%;border:1px solid #e5e7eb;background:#fff;color:#9ca3af;font-size:14px;cursor:pointer;font-weight:700;">✕</button>
+                </div>
+                <div style="padding:12px 20px;border-bottom:1px solid #f1f5f9;flex-shrink:0;display:flex;gap:8px;align-items:center;">
+                    <input id="sku-wl-search" type="text" placeholder="🔍 ค้นหา prodCode หรือชื่อสินค้า..."
+                        oninput="Dashboard._filterSkuList(this.value)"
+                        style="flex:1;background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;padding:8px 12px;font-size:12px;outline:none;font-family:inherit;">
+                    <button onclick="Dashboard._selectAllSku(true)" style="background:#f3f4f6;border:1px solid #e5e7eb;border-radius:8px;padding:6px 10px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;">ทั้งหมด</button>
+                    <button onclick="Dashboard._selectAllSku(false)" style="background:#f3f4f6;border:1px solid #e5e7eb;border-radius:8px;padding:6px 10px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;">ล้าง</button>
+                </div>
+                <div style="padding:8px 20px;background:#f8fafc;flex-shrink:0;border-bottom:1px solid #f1f5f9;">
+                    <span id="sku-wl-count" style="font-size:11px;font-weight:700;color:#6366f1;"></span>
+                </div>
+                <div id="sku-wl-list" style="flex:1;overflow-y:auto;padding:12px 20px;"></div>
+                <div style="padding:14px 20px;border-top:1px solid #f1f5f9;display:flex;gap:10px;flex-shrink:0;">
+                    <button onclick="Dashboard.closeSkuWhitelistModal()" style="flex:1;border:1px solid #e5e7eb;border-radius:12px;padding:11px;font-size:13px;font-weight:700;color:#6b7280;background:#fff;cursor:pointer;font-family:inherit;">ยกเลิก</button>
+                    <button onclick="Dashboard.saveSkuWhitelist()" style="flex:1;border:none;border-radius:12px;padding:11px;font-size:13px;font-weight:700;color:#fff;background:#6366f1;cursor:pointer;font-family:inherit;">💾 บันทึก</button>
+                </div>
+            </div>`;
+            document.body.appendChild(modal);
+        }
+        modal.style.display = 'flex';
+        const listEl = document.getElementById('sku-wl-list');
+        listEl.innerHTML = '<div style="text-align:center;padding:24px;color:#9ca3af;font-size:13px;">⏳ กำลังโหลด...</div>';
+        await Dashboard._ensureSkuOptions();
+        Dashboard._renderSkuList('');
+    },
+
+    _skuOptions: [],
+
+    _ensureSkuOptions: async () => {
+        if (Dashboard._skuOptions.length > 0) return;
+        try {
+            const snap = await cloudDB.collection('sellout').get();
+            const months = snap.docs.map(d => d.id).filter(id => /^\d{4}_\d{2}$/.test(id)).sort().reverse();
+            if (!months.length) return;
+            const chunks = await cloudDB.collection('sellout').doc(months[0]).collection('chunks').get();
+            const seen = new Map();
+            chunks.docs.sort((a,b) => (a.data().index||0)-(b.data().index||0))
+                .forEach(doc => (doc.data().rows||[]).forEach(r => {
+                    const code = String(r.prodCode||'').trim();
+                    const name = String(r.prodName||'').trim();
+                    if (code && !seen.has(code)) seen.set(code, name);
+                }));
+            Dashboard._skuOptions = [...seen.entries()]
+                .map(([code, name]) => ({ code, name }))
+                .sort((a,b) => a.code.localeCompare(b.code));
+        } catch(e) { console.warn('_ensureSkuOptions:', e); }
+    },
+
+    _renderSkuList: (q) => {
+        const listEl  = document.getElementById('sku-wl-list');
+        const countEl = document.getElementById('sku-wl-count');
+        if (!listEl) return;
+        const wl   = Dashboard._skuWhitelist;
+        const opts = Dashboard._skuOptions;
+        const filtered = q ? opts.filter(p => p.code.toLowerCase().includes(q) || p.name.toLowerCase().includes(q)) : opts;
+        if (countEl) countEl.textContent = wl
+            ? 'เลือกไว้ ' + wl.size + ' / ' + opts.length + ' SKU'
+            : 'ใช้ทุก SKU (' + opts.length + ' รายการ)';
+        listEl.innerHTML = filtered.map(p => {
+            const checked = !wl || wl.has(p.code);
+            return '<label style="display:flex;align-items:center;gap:10px;padding:8px 4px;border-bottom:1px solid #f9fafb;cursor:pointer;">' +
+                '<input type="checkbox" value="' + p.code + '" ' + (checked ? 'checked' : '') + ' onchange="Dashboard._onSkuCheck()" style="width:16px;height:16px;accent-color:#6366f1;flex-shrink:0;">' +
+                '<span style="font-family:monospace;font-size:11px;color:#6366f1;background:#ede9fe;padding:1px 6px;border-radius:5px;flex-shrink:0;">' + p.code + '</span>' +
+                '<span style="font-size:12px;color:#374151;font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + p.name + '">' + p.name + '</span>' +
+                '</label>';
+        }).join('') || '<div style="text-align:center;padding:20px;color:#9ca3af;font-size:12px;">ไม่พบสินค้า</div>';
+    },
+
+    _filterSkuList: (q) => Dashboard._renderSkuList(q.trim().toLowerCase()),
+
+    _selectAllSku: (checked) => {
+        document.querySelectorAll('#sku-wl-list input[type=checkbox]').forEach(cb => cb.checked = checked);
+        Dashboard._onSkuCheck();
+    },
+
+    _onSkuCheck: () => {
+        const countEl = document.getElementById('sku-wl-count');
+        const checked = document.querySelectorAll('#sku-wl-list input[type=checkbox]:checked').length;
+        const total   = Dashboard._skuOptions.length;
+        if (countEl) countEl.textContent = checked === total
+            ? 'ใช้ทุก SKU (' + total + ' รายการ)'
+            : 'เลือกไว้ ' + checked + ' / ' + total + ' SKU';
+    },
+
+    closeSkuWhitelistModal: () => {
+        const modal = document.getElementById('sku-whitelist-modal');
+        if (modal) modal.style.display = 'none';
+    },
+
+    saveSkuWhitelist: async () => {
+        const all     = Dashboard._skuOptions.map(p => p.code);
+        const checked = [...document.querySelectorAll('#sku-wl-list input[type=checkbox]:checked')].map(cb => cb.value);
+        const codes   = checked.length === all.length ? [] : checked;
+        try {
+            await Dashboard._saveSkuWhitelist(codes);
+            Dashboard.closeSkuWhitelistModal();
+            Dashboard._render();
+            UI.showSaveToast('✅ บันทึกแล้ว — ' + (codes.length ? codes.length + ' SKU' : 'ใช้ทุก SKU'));
+        } catch(e) {
+            UI.showErrorToast('❌ บันทึกไม่สำเร็จ: ' + e.message);
+        }
+    },
 
 };
 
