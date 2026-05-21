@@ -117,9 +117,9 @@
     <!-- Top Loading bar -->
     <div id="top-load-bar"><div id="top-load-fill"></div></div>
 
-    <div id="loader">
+    <div id="loader" style="display:flex">
         <div class="spinner"></div>
-        <p class="text-blue-600 font-bold text-lg">กำลังซิงค์ข้อมูลล่าสุด...</p>
+        <p class="text-blue-600 font-bold text-lg">กำลังโหลด...</p>
     </div>
 
     <!-- Header -->
@@ -597,42 +597,55 @@
     <script src="pwa-register.js"></script>
 
     <script>
-    // ── Resizer: ลากขึ้น-ลงเพื่อปรับขนาดแผนที่ ──────────────────────────
+    // ── Resizer: ลากปรับขนาดแผนที่ — mobile=บน/ล่าง, desktop=ซ้าย/ขวา ──
     (function initResizer() {
         const resizer  = document.getElementById('resizer');
         const mapCont  = document.getElementById('map-container');
-        const pill     = document.getElementById('resizer-pill');
+        const sidePanel = document.getElementById('route-side-panel');
         if (!resizer || !mapCont) return;
 
-        const MIN_H = 120;          // px ต่ำสุดของแผนที่
-        // MAX_H คำนวณจากพื้นที่จริง: ลบ header + day-select + resizer + bottom-nav
+        const isDesktop = () => window.innerWidth >= 1024;
+
+        // Mobile: ปรับ height ของ map (บน-ล่าง)
+        const MIN_H = 120;
         const getMaxH = () => window.innerHeight - 190;
 
+        // Desktop: ปรับ width ของ map (ซ้าย-ขวา)
+        const MIN_W = 200;
+        const getMaxW = () => window.innerWidth - 200;
+
         let dragging = false;
-        let startY   = 0;
-        let startH   = 0;
+        let startPos = 0;   // clientY (mobile) หรือ clientX (desktop)
+        let startSize = 0;  // height (mobile) หรือ width (desktop)
+
+        const getPos  = (e) => isDesktop() ? e.clientX : e.clientY;
+        const getSize = () => isDesktop() ? mapCont.offsetWidth : mapCont.offsetHeight;
+        const applySize = (newSize) => {
+            if (isDesktop()) {
+                const clamped = Math.min(getMaxW(), Math.max(MIN_W, newSize));
+                mapCont.style.width = clamped + 'px';
+                mapCont.style.flex  = 'none';
+            } else {
+                const clamped = Math.min(getMaxH(), Math.max(MIN_H, newSize));
+                mapCont.style.height = clamped + 'px';
+            }
+            if (typeof map !== 'undefined' && map) map.invalidateSize();
+        };
 
         // ── Touch ────────────────────────────────────────────────────────
         resizer.addEventListener('touchstart', (e) => {
-            if (window.innerWidth >= 1024) return; // desktop ใช้ flex ปกติ
-            // ✅ ถ้า Sortable กำลัง drag อยู่ → ไม่ activate Resizer
             if (window._sortableDragging) return;
-            dragging = true;
-            startY   = e.touches[0].clientY;
-            startH   = mapCont.offsetHeight;
+            dragging  = true;
+            startPos  = e.touches[0][isDesktop() ? 'clientX' : 'clientY'];
+            startSize = getSize();
             resizer.classList.add('dragging');
             e.preventDefault();
         }, { passive: false });
 
         document.addEventListener('touchmove', (e) => {
             if (!dragging) return;
-            const dy    = e.touches[0].clientY - startY;
-            const maxH  = getMaxH();
-            const newH  = Math.min(maxH, Math.max(MIN_H, startH + dy));
-            mapCont.style.height = newH + 'px';
-
-            // บอก Leaflet ให้ resize ตาม
-            if (typeof map !== 'undefined' && map) map.invalidateSize();
+            const delta = e.touches[0][isDesktop() ? 'clientX' : 'clientY'] - startPos;
+            applySize(startSize + delta);
             e.preventDefault();
         }, { passive: false });
 
@@ -640,30 +653,28 @@
             if (!dragging) return;
             dragging = false;
             resizer.classList.remove('dragging');
-            // snap: ถ้าสูงน้อยกว่า MIN_H+20 → collapse ไปที่ MIN_H
-            const h = mapCont.offsetHeight;
-            if (h < MIN_H + 20) mapCont.style.height = MIN_H + 'px';
+            if (!isDesktop()) {
+                const h = mapCont.offsetHeight;
+                if (h < MIN_H + 20) mapCont.style.height = MIN_H + 'px';
+            }
             if (typeof map !== 'undefined' && map) map.invalidateSize();
         });
 
-        // ── Mouse (desktop fallback) ──────────────────────────────────────
+        // ── Mouse ─────────────────────────────────────────────────────────
         resizer.addEventListener('mousedown', (e) => {
-            if (window.innerWidth >= 1024) return;
-            dragging = true;
-            startY   = e.clientY;
-            startH   = mapCont.offsetHeight;
+            dragging  = true;
+            startPos  = getPos(e);
+            startSize = getSize();
             resizer.classList.add('dragging');
             document.body.style.userSelect = 'none';
+            document.body.style.cursor = isDesktop() ? 'col-resize' : 'row-resize';
             e.preventDefault();
         });
 
         document.addEventListener('mousemove', (e) => {
             if (!dragging) return;
-            const dy   = e.clientY - startY;
-            const maxH = getMaxH();
-            const newH = Math.min(maxH, Math.max(MIN_H, startH + dy));
-            mapCont.style.height = newH + 'px';
-            if (typeof map !== 'undefined' && map) map.invalidateSize();
+            const delta = getPos(e) - startPos;
+            applySize(startSize + delta);
         });
 
         document.addEventListener('mouseup', () => {
@@ -671,6 +682,16 @@
             dragging = false;
             resizer.classList.remove('dragging');
             document.body.style.userSelect = '';
+            document.body.style.cursor = '';
+            if (typeof map !== 'undefined' && map) map.invalidateSize();
+        });
+
+        // reset width เมื่อ resize หน้าต่าง (เปลี่ยน breakpoint)
+        window.addEventListener('resize', () => {
+            if (!isDesktop()) {
+                mapCont.style.width = '';
+                mapCont.style.flex  = '';
+            }
             if (typeof map !== 'undefined' && map) map.invalidateSize();
         });
     })();
