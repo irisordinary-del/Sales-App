@@ -189,6 +189,13 @@ const UI = {
 
 // LoadBar defined in sales.html inline script
 
+// ✅ Guard: รอ Leaflet พร้อมก่อน init map (ป้องกัน defer โหลดไม่ทัน)
+function waitForLeaflet(cb, tries = 0) {
+    if (typeof L !== 'undefined' && typeof L.map === 'function') { cb(); return; }
+    if (tries > 50) { console.warn('[Map] Leaflet timeout'); return; } // timeout 5 วิ
+    setTimeout(() => waitForLeaflet(cb, tries + 1), 100);
+}
+
 const App = {
     checkAuth: () => {
         Auth.renewSession?.();
@@ -407,7 +414,7 @@ const App = {
                     UI.restoreTab();
                     State.isLoaded = true;
                     if (typeof CalendarCtrl !== 'undefined') CalendarCtrl.init();
-                    setTimeout(() => MapCtrl.initAndDraw(), 400);
+                    waitForLeaflet(() => MapCtrl.initAndDraw());
                 }
             }
         };
@@ -416,51 +423,84 @@ const App = {
         const _centerDocId = _centerMatch ? (_centerMatch[1] + '_main') : 'v1_main';
         docMain = db.collection('appData').doc(_centerDocId);
 
-        await App.loadPlanList(_centerDocId);
+        const _getYM = (o=0) => { const d=new Date(); d.setMonth(d.getMonth()+o); return `${d.getFullYear()}_${String(d.getMonth()+1).padStart(2,'0')}`; };
+        const _nowYM = _getYM(0), _nextYM = _getYM(1);
+        const _centerRef = db.collection('appData').doc(_centerDocId);
 
-        const _getYM  = (o=0) => { const d=new Date(); d.setMonth(d.getMonth()+o); return `${d.getFullYear()}_${String(d.getMonth()+1).padStart(2,'0')}`; };
-        const _nowYM  = _getYM(0), _nextYM = _getYM(1);
+        LoadBar.setProgress(15, 'กำลังเชื่อมต่อ...');
+
+        // ✅ PERF: ยิง 4 requests พร้อมกันใน 1 round trip แทนการรอทีละขั้น
+        // centerDoc + drafts(now) + drafts(next) + routeStores
         let routeColRef;
+        let _centerSnap, _dn, _dx, _routeSnap;
         try {
-            const [_dn, _dx] = await Promise.all([
-                db.collection('appData').doc(_centerDocId).collection('drafts').doc(_nowYM).get(),
-                db.collection('appData').doc(_centerDocId).collection('drafts').doc(_nextYM).get(),
+            [_centerSnap, _dn, _dx] = await Promise.all([
+                App._getWithTimeout(_centerRef, 6000),
+                App._getWithTimeout(_centerRef.collection('drafts').doc(_nowYM), 5000),
+                App._getWithTimeout(_centerRef.collection('drafts').doc(_nextYM), 5000),
             ]);
-            const _useYM = _dn.exists ? _nowYM : (_dx.exists ? _nextYM : null);
-            if (_useYM) {
-                routeColRef          = db.collection('appData').doc(_centerDocId).collection('drafts').doc(_useYM).collection('routes');
-                State.activePlanYM   = _useYM; State.activePlanMode = 'draft';
-                App.loadCalendarConfig(_centerDocId, _useYM, 'drafts');
-                LoadBar.setProgress(15, `📅 โหลด Plan ${_useYM}...`);
-            } else {
-                routeColRef          = db.collection('appData').doc(_centerDocId).collection('routes');
-                State.activePlanYM   = _nowYM; State.activePlanMode = 'active';
-                App.loadCalendarConfig(_centerDocId, _nowYM, 'active');
-            }
         } catch(e) {
-            routeColRef          = db.collection('appData').doc(_centerDocId).collection('routes');
-            State.activePlanMode = 'active';
+            _centerSnap = { exists: false, data: () => ({}) };
+            _dn = _dx = { exists: false };
         }
 
-        LoadBar.setProgress(20, 'กำลังดึงข้อมูลร้านค้า...');
+        // parse planList จาก centerDoc ที่ดึงมาแล้ว (ไม่ต้อง round trip ซ้ำ)
+        const _centerData = _centerSnap?.exists ? _centerSnap.data() : {};
+        State.planCenterDocId = _centerDocId;
+        const _draftList  = _centerData.draftList || [];
+        const _activeYM   = _nowYM;
+        const _allPlans   = new Set([..._draftList]);
+        if (!_draftList.includes(_activeYM)) _allPlans.add('active:' + _activeYM);
+        State.planList = Array.from(_allPlans).sort().reverse();
 
-        // ใช้ get() แทน onSnapshot ลด WebChannel load
+        // หา routeColRef จากผล draft check
+        const _useYM = _dn?.exists ? _nowYM : (_dx?.exists ? _nextYM : null);
+        if (_useYM) {
+            routeColRef        = _centerRef.collection('drafts').doc(_useYM).collection('routes');
+            State.activePlanYM = _useYM; State.activePlanMode = 'draft';
+            App.loadCalendarConfig(_centerDocId, _useYM, 'drafts');
+            LoadBar.setProgress(20, `📅 Plan ${_useYM}...`);
+        } else {
+            routeColRef        = _centerRef.collection('routes');
+            State.activePlanYM = _nowYM; State.activePlanMode = 'active';
+            App.loadCalendarConfig(_centerDocId, _nowYM, 'active');
+        }
+
+        // ✅ PERF: ดึง route stores พร้อมกับ sales data (parallel)
+        LoadBar.setProgress(25, 'กำลังดึงข้อมูลร้านค้า...');
+        const _routeRef = routeColRef.doc(State.myRoute);
+
+        // ดึง routeStores + sales พร้อมกัน
+        const [_routeResult, _salesResult] = await Promise.allSettled([
+            App._getWithTimeout(_routeRef, 10000),
+            colSales.get(),
+        ]);
+
+        // process stores
         try {
-            const doc  = await docMain.get();
-            if (!doc.exists) {
-                State.allStores = [];
+            const rd = _routeResult.status === 'fulfilled' ? _routeResult.value : null;
+            if (rd?.exists) {
+                State.allStores = rd.data().stores || [];
             } else {
-                const data = doc.data();
-                if (data.routes?.[State.myRoute]) {
-                    State.allStores = data.routes[State.myRoute] || [];
+                // fallback: ลองดึงจาก centerDoc (format เก่า)
+                if (_centerData.routes?.[State.myRoute]) {
+                    State.allStores = _centerData.routes[State.myRoute];
                 } else {
-                    LoadBar.setProgress(35, 'ดึงข้อมูลจาก subcollection...');
-                    const rd = await routeColRef.doc(State.myRoute).get();
-                    State.allStores = rd.exists ? (rd.data().stores || []) : [];
+                    State.allStores = [];
                 }
             }
         } catch(e) { State.allStores = []; }
         isMainLoaded = true; checkReady();
+
+        // process sales
+        try {
+            if (_salesResult.status === 'fulfilled') {
+                let merged = {};
+                _salesResult.value.forEach(doc => Object.assign(merged, doc.data()));
+                State.sales = merged;
+            }
+        } catch(e) { State.sales = {}; }
+        isSalesLoaded = true; checkReady();
 
         // onSnapshot เฉพาะ route ตัวเอง — real-time ลำดับจาก Admin
         App._unsubRoute = routeColRef.doc(State.myRoute).onSnapshot(rd => {
@@ -477,16 +517,7 @@ const App = {
             }
         });
 
-        LoadBar.setProgress(30, 'กำลังโหลดข้อมูลยอดขาย...');
-
-        // KPI ใช้ get() ไม่ต้อง real-time
-        try {
-            const snap = await colSales.get();
-            let merged = {};
-            snap.forEach(doc => Object.assign(merged, doc.data()));
-            State.sales = merged;
-        } catch(e) { State.sales = {}; }
-        isSalesLoaded = true; checkReady();
+        // sales โหลดแล้วใน Promise.allSettled ด้านบน
     },
 };
 

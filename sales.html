@@ -6,17 +6,26 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Sales App</title>
     
+    <!-- Firebase — must load sync (auth check runs immediately) -->
     <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore-compat.js"></script>
-    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- CSS — non-blocking -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css"/>
     <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css"/>
-    <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
-    <script src="https://unpkg.com/leaflet-rotate@0.2.8/dist/leaflet-rotate-src.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Font: เฉพาะ weight ที่ใช้จริง (400,700,800) -->
+    <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@400;700;800&display=swap" rel="stylesheet">
+
+    <!-- Tailwind: defer ได้ เพราะ class apply ตอน render -->
+    <script src="https://cdn.tailwindcss.com" defer></script>
+
+    <!-- Map + UI libs: defer — โหลดหลัง HTML parse เสร็จ -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
+    <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js" defer></script>
+    <!-- ใช้ minified แทน -src (ขนาดเล็กกว่า ~3x) -->
+    <script src="https://unpkg.com/leaflet-rotate@0.2.8/dist/leaflet-rotate.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js" defer></script>
     
     <!-- PWA -->
     <link rel="manifest" href="/manifest.json">
@@ -27,7 +36,7 @@
     <link rel="apple-touch-icon" href="/icons/icon-192.png">
 
     <link rel="stylesheet" href="sales-style.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
     <style>
         /* ── Dashboard tab ── */
         #tab-dashboard { background:#f8fafc; overflow-y:auto; padding-bottom:80px; }
