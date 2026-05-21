@@ -1019,6 +1019,90 @@
         });
     </script>
 
+    <div id="calendar-config-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden" style="max-height:90dvh;display:flex;flex-direction:column;">
+            <div class="p-5 border-b flex justify-between items-center bg-gray-50 flex-shrink-0">
+                <div>
+                    <h2 class="text-base font-black text-gray-900">📅 ตั้งค่าปฏิทิน</h2>
+                    <p id="cal-modal-plan-label" class="text-xs text-gray-500 mt-0.5"></p>
+                </div>
+                <button onclick="CalendarAdmin.close()" class="w-8 h-8 rounded-full border border-gray-200 text-gray-400 hover:bg-gray-100 font-bold">✕</button>
+            </div>
+
+            <div class="overflow-y-auto flex-1 p-5 space-y-4">
+                <!-- โหมด -->
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-2">โหมดปฏิทิน</label>
+                    <div class="grid grid-cols-3 gap-2">
+                        <button id="cal-mode-cycle" onclick="CalendarAdmin.setMode('cycle')"
+                            class="border-2 border-gray-200 bg-gray-50 rounded-xl p-3 text-center cursor-pointer transition">
+                            <div class="text-xl mb-1">🔄</div>
+                            <div class="text-xs font-black text-indigo-800">Cycle D1-24</div>
+                            <div class="text-[10px] text-indigo-600 mt-0.5">ต่อเนื่องนับวัน</div>
+                        </button>
+                        <button id="cal-mode-date" onclick="CalendarAdmin.setMode('date')"
+                            class="border-2 border-indigo-500 bg-indigo-50 rounded-xl p-3 text-center cursor-pointer transition">
+                            <div class="text-xl mb-1">📅</div>
+                            <div class="text-xs font-black text-gray-700">วันที่จริง</div>
+                            <div class="text-[10px] text-gray-500 mt-0.5">Day = วันที่ในเดือน</div>
+                        </button>
+                        <button id="cal-mode-fixed" onclick="CalendarAdmin.setMode('fixed')"
+                            class="border-2 border-gray-200 bg-gray-50 rounded-xl p-3 text-center cursor-pointer transition">
+                            <div class="text-xl mb-1">📌</div>
+                            <div class="text-xs font-black text-gray-700">กำหนดวันที่เอง</div>
+                            <div class="text-[10px] text-gray-500 mt-0.5">ระบุวันที่ = Day</div>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Cycle settings -->
+                <div id="cal-cycle-section" class="space-y-3">
+                    <div class="bg-indigo-50 border border-indigo-100 rounded-xl p-4 space-y-3">
+                        <div class="flex items-center justify-between">
+                            <label class="text-xs font-bold text-gray-700">Day 1 เริ่มวันที่:</label>
+                            <input type="number" id="cal-start-date" min="1" max="28" value="1"
+                                class="w-16 border border-gray-200 rounded-lg px-2 py-1.5 text-sm font-bold text-center outline-none focus:ring-2 focus:ring-indigo-300">
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <label class="text-xs font-bold text-gray-700">Day เริ่มต้น (ที่วันที่นั้น):</label>
+                            <input type="number" id="cal-start-day-num" min="1" max="24" value="1"
+                                class="w-16 border border-gray-200 rounded-lg px-2 py-1.5 text-sm font-bold text-center outline-none focus:ring-2 focus:ring-indigo-300">
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <label class="text-xs font-bold text-gray-700">จำนวนวัน Cycle:</label>
+                            <input type="number" id="cal-cycle-days" min="1" max="31" value="24"
+                                class="w-16 border border-gray-200 rounded-lg px-2 py-1.5 text-sm font-bold text-center outline-none focus:ring-2 focus:ring-indigo-300">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-gray-700 mb-2">วันหยุด (กดเลือกวันที่):</label>
+                        <div id="cal-holiday-grid" class="grid grid-cols-7 gap-1"></div>
+                        <p class="text-[10px] text-gray-400 mt-1">วันที่เลือกจะข้าม cycle</p>
+                    </div>
+                </div>
+
+                <!-- Fixed settings -->
+                <div id="cal-fixed-section" class="hidden space-y-3">
+                    <div class="bg-blue-50 border border-blue-100 rounded-xl p-3">
+                        <p class="text-xs text-blue-700 font-bold mb-2">กำหนดวันที่ของเดือน = Day ที่เท่าไหร่</p>
+                        <div id="cal-fixed-rows" class="space-y-2"></div>
+                        <button onclick="CalendarAdmin.addFixedRow()"
+                            class="mt-2 w-full border border-dashed border-blue-300 rounded-lg py-2 text-xs font-bold text-blue-600 hover:bg-blue-50 transition">
+                            + เพิ่มวัน
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="p-5 border-t flex gap-3 flex-shrink-0">
+                <button onclick="CalendarAdmin.close()"
+                    class="flex-1 border border-gray-200 rounded-xl py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-50 transition">ยกเลิก</button>
+                <button onclick="CalendarAdmin.save()"
+                    class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl py-2.5 text-sm font-bold transition shadow-sm">💾 บันทึก</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         // CalendarAdmin — ตั้งค่าปฏิทินสำหรับแต่ละ Plan
         // modes: 'cycle' | 'date' | 'fixed'
