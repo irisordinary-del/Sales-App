@@ -437,10 +437,20 @@ const SalesDashboard = {
 
     // ─── โหลด Active Campaigns ────────────────────────────────────────────
     _waitAndLoadCampaigns: () => {
-        // poll จนกว่า State.isLoaded = true (routes พร้อมแล้ว) แล้วค่อยโหลด
+        // ✅ FIX: เพิ่ม maxTries กันวนซ้ำไม่หยุด + เช็ค role ก่อน (route_sup/asm ไม่มี allStores จน selectRoute)
+        let tries = 0;
+        const MAX_TRIES = 20; // 10 วินาที
         const check = () => {
-            if (typeof State !== 'undefined' && State.isLoaded &&
-                (typeof State !== 'undefined') && State.myRoute && State.allStores?.length > 0) {
+            tries++;
+            if (tries > MAX_TRIES) {
+                console.warn('[SalesDashboard] _waitAndLoadCampaigns: timeout หลัง', MAX_TRIES, 'tries');
+                return;
+            }
+            const stateReady = typeof State !== 'undefined' && State.isLoaded && State.myRoute;
+            // route_supervisor/asm: allStores ว่างจน selectRoute → ใช้แค่ stateReady
+            const isSup = typeof App !== 'undefined' && App.isSupervisor();
+            const ok = isSup ? stateReady : (stateReady && State.allStores?.length > 0);
+            if (ok) {
                 SalesDashboard._loadCampaigns();
             } else {
                 setTimeout(check, 500);
@@ -625,17 +635,29 @@ const SalesDashboard = {
 };
 
 // ─── Hook เข้า App.start() ── เรียก init หลัง login สำเร็จ ─────────────
+// ✅ FIX: เช็ค viewMode และ isLoaded พร้อมกัน — isSupervisor() ใช้ State.viewMode
+// ซึ่ง set ใน App.checkAuth() → startSupervisor() ก่อน State.isLoaded = true
 document.addEventListener('DOMContentLoaded', () => {
+    let _initTries = 0;
+    const MAX_INIT = 40; // 20 วินาที
     const _tryInit = () => {
-        if (typeof State !== 'undefined' && State.isLoaded) {
-            if (typeof App !== 'undefined' && App.isSupervisor()) {
-                SupervisorDashboard.init();
-            } else {
-                SalesDashboard.init();
-            }
-        } else {
-            setTimeout(_tryInit, 500);
+        _initTries++;
+        if (_initTries > MAX_INIT) {
+            console.warn('[Dashboard] init timeout');
+            return;
         }
+        if (typeof State === 'undefined' || !State.isLoaded) {
+            return setTimeout(_tryInit, 500);
+        }
+        // ✅ เช็ค viewMode โดยตรง ไม่ใช้ App.isSupervisor() ซึ่งอาจ race กัน
+        const role = Auth.getSession()?.role || '';
+        const isSup = role === 'route_supervisor' || role === 'asm';
+        if (isSup) {
+            SupervisorDashboard.init();
+        } else if (role === 'sales') {
+            SalesDashboard.init();
+        }
+        // supervisor role → ไม่ init dashboard ใน sales-dashboard.js
     };
     setTimeout(_tryInit, 1000);
 });
@@ -655,16 +677,23 @@ const SupervisorDashboard = {
     EXCLUDED_BRANDS: new Set(['อื่นๆ', 'กระเช้าของขวัญ']),
 
     init: () => {
-        const session = Auth.getSession();
+        const _session = Auth.getSession();
         const lbl = document.getElementById('db-route-label');
-        const _session = Auth.getSession(); if (lbl) lbl.textContent = (_session?.role === 'asm' ? 'ASM' : 'Supervisor') + ' · ศูนย์ ' + (_session?.centerId || '');
+        if (lbl) lbl.textContent = (_session?.role === 'asm' ? 'ASM' : 'Supervisor') + ' · ศูนย์ ' + (_session?.centerId || '');
         SupervisorDashboard._loadMonthList();
     },
+
+    // ✅ เพิ่ม alias ให้ sales-app.js เรียกได้โดยตรงโดยไม่ต้องรอ DOMContentLoaded poll
+    initSupervisor: () => SupervisorDashboard.init(),
 
     _loadMonthList: async () => {
         try {
             const snap = await db.collection('sellout').get();
-            const months = snap.docs.map(d => d.id).sort().reverse();
+            // กรองเฉพาะ YYYY_MM ที่ถูกต้อง กันดึงเอกสาร meta อื่น
+            const months = snap.docs
+                .map(d => d.id)
+                .filter(id => /^\d{4}_\d{2}$/.test(id))
+                .sort().reverse();
             const sel = document.getElementById('db-month-sel');
             if (!sel) return;
             sel.innerHTML = '<option value="">-- เดือน --</option>' +
@@ -692,15 +721,21 @@ const SupervisorDashboard = {
     },
 
     _loadData: async (ym) => {
+        // ✅ FIX: ใช้ cache ของ Supervisor แยก key เพื่อไม่ปนกับ SalesDashboard
+        const centerId = (typeof State !== 'undefined' ? State.centerId : null) || Auth.getSession()?.centerId || '';
+        const cacheKey = ym + '_sup_' + centerId;
+        if (SupervisorDashboard._rowCache[cacheKey]) {
+            SupervisorDashboard._allRows = SupervisorDashboard._rowCache[cacheKey];
+            return;
+        }
         try {
-            // ใช้ shared chunk cache จาก SalesDashboard
+            // โหลด chunk ทั้งหมด (ใช้ shared cache เพื่อไม่ fetch ซ้ำ)
             const allRows = await SalesDashboard._loadChunks(ym);
-            // กรองเฉพาะศูนย์นี้
-            const centerId = (typeof State !== 'undefined' ? State.centerId : null) || Auth.getSession()?.centerId || '';
+            // กรองเฉพาะ sCode ที่ขึ้นต้นด้วย centerId
             const rows = centerId
                 ? allRows.filter(r => String(r.sCode||'').startsWith(centerId))
                 : allRows;
-            SupervisorDashboard._rowCache[ym] = rows;
+            SupervisorDashboard._rowCache[cacheKey] = rows;
             SupervisorDashboard._allRows = rows;
         } catch(e) {
             console.warn('SupervisorDashboard._loadData:', e);
