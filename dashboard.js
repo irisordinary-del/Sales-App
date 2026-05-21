@@ -3,6 +3,26 @@
 // v1.0 | Firebase Firestore | Role-Aware
 // ==========================================
 
+// ✅ DateUtil fallback — ถ้า app-config.js โหลดช้า
+if (typeof DateUtil === 'undefined') {
+    window.DateUtil = {
+        ymToThai: (ym) => {
+            if (!ym) return '';
+            const [y, m] = ym.split('_');
+            return new Date(+y, +m-1, 1).toLocaleDateString('th-TH', { year:'numeric', month:'long' });
+        },
+        ymToThaiShort: (ym) => {
+            if (!ym) return '';
+            const [y, m] = ym.split('_');
+            return new Date(+y, +m-1, 1).toLocaleDateString('th-TH', { year:'numeric', month:'short' });
+        },
+        currentYM: () => {
+            const d = new Date();
+            return `${d.getFullYear()}_${String(d.getMonth()+1).padStart(2,'0')}`;
+        },
+    };
+}
+
 const Dashboard = {
 
     // ─── State ───────────────────────────────────────────────────────────
