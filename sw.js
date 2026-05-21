@@ -7,7 +7,7 @@
 //   Tiles (maps)   → Stale-While-Revalidate
 // ==========================================
 
-const CACHE_VERSION = 'rp-v3';
+const CACHE_VERSION = 'rp-v4';
 const STATIC_CACHE  = `${CACHE_VERSION}-static`;
 const TILE_CACHE    = `${CACHE_VERSION}-tiles`;
 const CDN_CACHE     = `${CACHE_VERSION}-cdn`;
@@ -40,6 +40,7 @@ const STATIC_ASSETS = [
     '/center-select.js',
     '/sales-app.js',
     '/sales-dashboard.js',
+    '/pwa-register.js',
     '/audit-log.js',
     // Icons
     '/icons/icon-192.png',

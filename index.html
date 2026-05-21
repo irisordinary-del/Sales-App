@@ -1383,7 +1383,7 @@
         // modes: 'cycle' | 'date' | 'fixed'
         // ─────────────────────────────────────────────────────────────────
         const CalendarAdmin = {
-            _mode:      'date',   // default = วันที่จริง
+            _mode:      'cycle',  // default = Cycle D1-24 (เปลี่ยนจาก date เพราะส่วนใหญ่ใช้ cycle)
             _holidays:  [],
             _fixedRows: [],
             _targetRef: null,
@@ -1429,11 +1429,11 @@
                         }
                         // date mode ไม่ต้องโหลดอะไรเพิ่ม
                     } else {
-                        CalendarAdmin.setMode('date'); // default
+                        CalendarAdmin.setMode('cycle'); // ✅ default = cycle ไม่ใช่ date
                     }
                 } catch(e) {
                     console.warn('CalendarAdmin.open:', e);
-                    CalendarAdmin.setMode('date');
+                    CalendarAdmin.setMode('cycle'); // ✅ fallback = cycle
                 }
                 CalendarAdmin._renderHolidayGrid();
                 CalendarAdmin._renderFixedRows();
