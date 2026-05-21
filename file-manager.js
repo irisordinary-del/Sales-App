@@ -36,7 +36,6 @@ const FileManager = {
                                                                                          id: row.B,
                                                                                          code: row.B || '',
                                                                                          name: row.C || '',
-                                                                                         cy: row.A || '',           // BUG-09 fix: เก็บ CY field
                                                                                          salesCode: row.D || '',
                                                                                          shopType: row.E || '',
                                                                                          subDistrict: row.F || '',
@@ -45,16 +44,13 @@ const FileManager = {
                                                                                          lat: lat,
                                                                                          lng: lng,
                                                                                          marketName: row.K || '',
-                                                                                         dayOriginal: row.L || '',
-                                                                                         days: [],
+                                                                                         dayOriginal: row.L || '', // Keep original day history
+                                                                                         days: [], // Will be filled after AI or manual assignment
                                                                                          seqs: {},
                                                                                          freq: 1,
                                                                                          selected: false
                                                              });
                                 });
-
-                                // BUG-02 fix: save raw rows ไว้ให้ ExportCtrl._writeExcel lookup
-                                State.rawData = rows;
 
                                 if (stores.length === 0) {
                                                         UI.hideLoader();
@@ -452,9 +448,33 @@ const FileManager = {
                     const existing    = State.db.routes[routeKey] || [];
                     const existingIds = new Set(existing.map(s => s.id));
 
-                    // เพิ่มเฉพาะร้านที่ยังไม่มี ID ในระบบ
-                    const newStores  = incoming.filter(s => !existingIds.has(s.id));
-                    const merged     = [...existing, ...newStores];
+                    // Merge: อัปเดตวันวิ่ง+ตลาดของร้านเดิม + เพิ่มร้านใหม่
+                    let totalUpdated = 0;
+                    const incomingMap = {};
+                    incoming.forEach(s => { incomingMap[s.id] = s; });
+
+                    // อัปเดตร้านเดิมที่มี ID ตรงกัน (days, marketName, seqs)
+                    const updatedExisting = existing.map(s => {
+                        if (incomingMap[s.id]) {
+                            const inc = incomingMap[s.id];
+                            const changed = JSON.stringify(s.days) !== JSON.stringify(inc.days)
+                                         || s.marketName !== inc.marketName;
+                            if (changed) totalUpdated++;
+                            return {
+                                ...s,
+                                days:       inc.days || s.days,
+                                marketName: inc.marketName || s.marketName,
+                                lat:        inc.lat || s.lat,
+                                lng:        inc.lng || s.lng,
+                                cy:         inc.cy || s.cy || '',
+                            };
+                        }
+                        return s;
+                    });
+
+                    // เพิ่มร้านใหม่ที่ไม่มีใน existing
+                    const newStores = incoming.filter(s => !existingIds.has(s.id));
+                    const merged = [...updatedExisting, ...newStores];
                     State.db.routes[routeKey] = merged;
                     totalNew += newStores.length;
                     savedRoutes.push(routeKey);
@@ -497,7 +517,7 @@ const FileManager = {
                 App.sync();
                 MapCtrl.fitToStores();
                 UI.showSaveToast(
-                    `✅ Bulk Import เสร็จ! ${totalRoutes} สาย | เพิ่มร้านใหม่ ${totalNew} ร้าน`
+                    `✅ Bulk Import เสร็จ! ${totalRoutes} สาย | เพิ่มใหม่ ${totalNew} ร้าน`
                 );
 
             } catch (err) {
