@@ -420,7 +420,7 @@ const FileManager = {
                             ...s,
                             days:        inc.days       || s.days,
                             // ✅ FIX: merge seqs จากไฟล์ใหม่ด้วย — ไม่งั้น seq ว่างตลอด
-                            seqs:        (inc.seqs && Object.keys(inc.seqs).length > 0) ? inc.seqs : s.seqs,
+                            seqs:        (inc.seqs && Object.keys(inc.seqs).length > 0) ? inc.seqs : s.seqs, // seqs merge fix
                             marketName:  inc.marketName || s.marketName,
                             lat:         inc.lat        || s.lat,
                             lng:         inc.lng        || s.lng,
