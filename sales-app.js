@@ -237,9 +237,21 @@ const App = {
     loadPlanData: async (ym) => {
         if (State.planCache[ym]) return State.planCache[ym];
         const centerDocId = State.planCenterDocId;
-        // ✅ ระบบใหม่: ดึงจาก plans/{ym}/routes/{myRoute}
         try {
-            const planRef  = db.collection('appData').doc(centerDocId).collection('plans').doc(ym);
+            const planRef = db.collection('appData').doc(centerDocId).collection('plans').doc(ym);
+
+            if (App.isSupervisor()) {
+                // ✅ Supervisor/ASM: ดึงแค่ calendarConfig
+                // ไม่ seed stores ใน cache — ปฏิทินจะดึง State.allStores ณ เวลา render
+                // ซึ่ง State.allStores จะเปลี่ยนตามสายที่ selectRoute() เลือกไว้
+                const cfgSnap        = await App._getWithTimeout(planRef, 10000);
+                const calendarConfig = cfgSnap.exists ? (cfgSnap.data().calendarConfig || null) : null;
+                // stores = null → ปฏิทิน CalendarCtrl.render() จะใช้ State.allStores แทน
+                State.planCache[ym] = { stores: null, calendarConfig, ym };
+                return State.planCache[ym];
+            }
+
+            // Sales: ดึงจาก plans/{ym}/routes/{myRoute}
             const routeRef = planRef.collection('routes').doc(State.myRoute);
             const [cfgSnap, routeSnap] = await Promise.all([
                 App._getWithTimeout(planRef,   15000),
@@ -345,6 +357,49 @@ const App = {
         document.getElementById('loader').style.display = 'none';
         State.isLoaded = true;
         SupervisorUI.init();
+
+        // ✅ FIX: โหลด planList + calendarConfig สำหรับปฏิทิน
+        // startSupervisor ไม่ได้ set ของพวกนี้ ทำให้ CalendarCtrl ขึ้นแค่เดือนปัจจุบัน
+        (async () => {
+            try {
+                const _centerDocId2 = State.centerId ? (State.centerId + '_main') : 'v1_main';
+                const _metaSup = await App._getWithTimeout(
+                    db.collection('appData').doc(_centerDocId2), 5000
+                );
+                const _dataSup = _metaSup.exists ? _metaSup.data() : {};
+
+                // set planList ให้ CalendarCtrl รู้ว่ามีเดือนไหนบ้าง
+                State.planList      = (_dataSup.planList || []).sort().reverse();
+                State.currentPlanYM = _dataSup.currentPlanYM || State.activePlanYM || '';
+                State.planCenterDocId = _centerDocId2;
+
+                // โหลด calendarConfig จาก plan ที่ active อยู่
+                if (State.activePlanYM) {
+                    const _planSup = await db.collection('appData').doc(_centerDocId2)
+                        .collection('plans').doc(State.activePlanYM).get();
+                    State.calendarConfig = _planSup.exists
+                        ? (_planSup.data().calendarConfig || null)
+                        : null;
+
+                    // ✅ ไม่ seed stores ใน planCache
+                    // CalendarCtrl.render() จะดึง State.allStores ณ เวลา render
+                    // ซึ่งจะเปลี่ยนตามสายที่ selectRoute() เลือกอยู่
+                    State.planCache[State.activePlanYM] = {
+                        stores:         null,
+                        calendarConfig: State.calendarConfig,
+                        ym:             State.activePlanYM,
+                    };
+                }
+
+                // init CalendarCtrl (เหมือนที่ start() ทำ)
+                if (typeof CalendarCtrl !== 'undefined') CalendarCtrl.init();
+
+            } catch(e) {
+                console.warn('[Sup] calendar init:', e);
+                // fallback: init calendar โดยไม่มี config
+                if (typeof CalendarCtrl !== 'undefined') CalendarCtrl.init();
+            }
+        })();
 
         const searchEl = document.getElementById('search-input');
         if (searchEl) searchEl.oninput = (e) => {
@@ -1274,6 +1329,11 @@ const SupervisorUI = {
         State.myRoute     = routeId;
         State.currentDay  = '';
         State.mapNeedsFit = true;
+        // ✅ clear stores ใน planCache ทุกเดือน เพื่อให้ปฏิทินใช้ allStores ของสายใหม่
+        // (stores=null → CalendarCtrl.render() fallback ไปใช้ State.allStores ซึ่งอัปเดตแล้ว)
+        Object.keys(State.planCache).forEach(ym => {
+            if (State.planCache[ym]) State.planCache[ym].stores = null;
+        });
         SupervisorUI._showDayBar(true);
         SupervisorUI._injectBackBtn(routeId);
         Processor.setupRoute();
