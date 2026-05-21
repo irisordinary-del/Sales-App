@@ -536,25 +536,17 @@ const Processor = {
         }
 
         const html = list.map(s => {
-            const k      = State.sales[s.id];
-            const active = k?.vpo > 0;
             const h      = hist[s.id];
-            const badge  = active
-                ? `<span style="background:#d1fae5;color:#065f46;font-size:9px;font-weight:800;padding:2px 8px;border-radius:8px;">Active</span>`
-                : `<span style="background:#f3f4f6;color:#9ca3af;font-size:9px;font-weight:800;padding:2px 8px;border-radius:8px;">Inactive</span>`;
             const mktTag  = s.marketName
                 ? `<span style="font-size:10px;color:#3b82f6;font-weight:600;">${s.marketName}</span> ` : '';
             const histTag = h
                 ? `<div style="margin-top:3px;font-size:10px;color:#059669;font-weight:700;">💰 ${_fmtB(h.net)} · ${h.skuCount} SKU · ${h.invCount} บิล</div>` : '';
             return `<div onclick="UI.openModal('${s.id}')"
                 data-search="${s.id.toLowerCase()} ${s.name.toLowerCase()} ${(s.marketName||'').toLowerCase()}"
-                style="background:#fff;border-radius:14px;border:1px solid #e5e7eb;padding:11px 14px;display:flex;justify-content:space-between;align-items:flex-start;cursor:pointer;">
-                <div style="flex:1;min-width:0;margin-right:10px;">
-                    <div style="font-weight:800;font-size:13px;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${s.name}</div>
-                    <div style="font-size:10px;color:#9ca3af;font-family:monospace;margin-top:1px;">${mktTag}${s.id}</div>
-                    ${histTag}
-                </div>
-                <div style="flex-shrink:0;">${badge}</div>
+                style="background:#fff;border-radius:14px;border:1px solid #e5e7eb;padding:11px 14px;cursor:pointer;">
+                <div style="font-weight:800;font-size:13px;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${s.name}</div>
+                <div style="font-size:10px;color:#9ca3af;font-family:monospace;margin-top:1px;">${mktTag}${s.id}</div>
+                ${histTag}
             </div>`;
         }).join('');
         document.getElementById('all-store-list').innerHTML = html
@@ -615,10 +607,24 @@ const Processor = {
         sortableList = Sortable.create(c, {
             handle:              '.drag-handle',
             animation:           150,
-            forceFallback:       false,
-            touchStartThreshold: 3,
-            disabled:            true,
-            onEnd: () => { Processor._updateSeqBadgesOnly(); },
+            // ✅ iPad fix: forceFallback ป้องกัน native drag API ทำงานผิดบน iOS
+            forceFallback:       true,
+            fallbackTolerance:   5,
+            // delay กันกด popup โดยไม่ตั้งใจ
+            delay:               80,
+            delayOnTouchOnly:    true,
+            touchStartThreshold: 4,
+            // scroll อัตโนมัติตอนลากถึงขอบ list
+            scroll:              true,
+            scrollSensitivity:   60,
+            scrollSpeed:         12,
+            // ✅ แจ้ง Resizer ให้หยุดฟัง touch ระหว่าง drag
+            onStart: () => { window._sortableDragging = true; },
+            onEnd:   () => {
+                window._sortableDragging = false;
+                Processor._updateSeqBadgesOnly();
+            },
+            disabled: true,
         });
         window._sortableInstance = sortableList;
         setTimeout(() => {
