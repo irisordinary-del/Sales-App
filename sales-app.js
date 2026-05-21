@@ -235,7 +235,10 @@ const App = {
     },
 
     loadPlanData: async (ym) => {
-        if (State.planCache[ym]) return State.planCache[ym];
+        // ✅ ถ้า cache มีแล้วและ calendarConfig ไม่ใช่ null → ใช้ cache
+        // แต่ถ้า calendarConfig เป็น null → fetch ใหม่ (อาจยังไม่โหลด config จริง)
+        const cached = State.planCache[ym];
+        if (cached && cached.calendarConfig !== null) return cached;
         const centerDocId = State.planCenterDocId;
         try {
             const planRef = db.collection('appData').doc(centerDocId).collection('plans').doc(ym);
@@ -358,48 +361,38 @@ const App = {
         State.isLoaded = true;
         SupervisorUI.init();
 
-        // ✅ FIX: โหลด planList + calendarConfig สำหรับปฏิทิน
-        // startSupervisor ไม่ได้ set ของพวกนี้ ทำให้ CalendarCtrl ขึ้นแค่เดือนปัจจุบัน
-        (async () => {
-            try {
-                const _centerDocId2 = State.centerId ? (State.centerId + '_main') : 'v1_main';
-                const _metaSup = await App._getWithTimeout(
-                    db.collection('appData').doc(_centerDocId2), 5000
-                );
-                const _dataSup = _metaSup.exists ? _metaSup.data() : {};
+        // ── Calendar init: clone มาจาก App.start() ─────────────────────
+        // ดึง planList + calendarConfig ทุกเดือนพร้อมกัน แล้ว init CalendarCtrl
+        const _centerDocIdCal = State.centerId ? (State.centerId + '_main') : 'v1_main';
+        State.planCenterDocId = _centerDocIdCal;
+        const _centerRefCal   = db.collection('appData').doc(_centerDocIdCal);
 
-                // set planList ให้ CalendarCtrl รู้ว่ามีเดือนไหนบ้าง
-                State.planList      = (_dataSup.planList || []).sort().reverse();
-                State.currentPlanYM = _dataSup.currentPlanYM || State.activePlanYM || '';
-                State.planCenterDocId = _centerDocId2;
+        try {
+            const _calMeta = await App._getWithTimeout(_centerRefCal, 5000);
+            const _calData = _calMeta.exists ? _calMeta.data() : {};
+            State.planList      = (_calData.planList || []).sort().reverse();
+            State.currentPlanYM = _calData.currentPlanYM || State.activePlanYM || '';
 
-                // โหลด calendarConfig จาก plan ที่ active อยู่
-                if (State.activePlanYM) {
-                    const _planSup = await db.collection('appData').doc(_centerDocId2)
-                        .collection('plans').doc(State.activePlanYM).get();
-                    State.calendarConfig = _planSup.exists
-                        ? (_planSup.data().calendarConfig || null)
-                        : null;
-
-                    // ✅ ไม่ seed stores ใน planCache
-                    // CalendarCtrl.render() จะดึง State.allStores ณ เวลา render
-                    // ซึ่งจะเปลี่ยนตามสายที่ selectRoute() เลือกอยู่
-                    State.planCache[State.activePlanYM] = {
-                        stores:         null,
-                        calendarConfig: State.calendarConfig,
-                        ym:             State.activePlanYM,
-                    };
+            // โหลด calendarConfig ทุกเดือนพร้อมกัน (clone จาก openPopup ของ start())
+            await Promise.all(State.planList.map(async (ym) => {
+                try {
+                    const snap = await _centerRefCal.collection('plans').doc(ym).get();
+                    const cfg  = snap.exists ? (snap.data().calendarConfig || null) : null;
+                    // stores=null → render() จะใช้ State.allStores ณ เวลา render
+                    State.planCache[ym] = { stores: null, calendarConfig: cfg, ym };
+                } catch(e) {
+                    State.planCache[ym] = { stores: null, calendarConfig: null, ym };
                 }
+            }));
 
-                // init CalendarCtrl (เหมือนที่ start() ทำ)
-                if (typeof CalendarCtrl !== 'undefined') CalendarCtrl.init();
+            // set calendarConfig ของเดือน active
+            State.calendarConfig = State.planCache[State.activePlanYM]?.calendarConfig || null;
+        } catch(e) {
+            console.warn('[Sup] calendar init:', e);
+        }
 
-            } catch(e) {
-                console.warn('[Sup] calendar init:', e);
-                // fallback: init calendar โดยไม่มี config
-                if (typeof CalendarCtrl !== 'undefined') CalendarCtrl.init();
-            }
-        })();
+        // init CalendarCtrl (เหมือนกับที่ start() เรียก)
+        if (typeof CalendarCtrl !== 'undefined') CalendarCtrl.init();
 
         const searchEl = document.getElementById('search-input');
         if (searchEl) searchEl.oninput = (e) => {
@@ -1078,13 +1071,18 @@ const CalendarCtrl = {
         CalendarCtrl._loadAndRender();
     },
 
-    // ✅ โหลด plan ของเดือนที่กำลัง navigate ก่อน render — กัน config เดือนผิด
+    // ✅ โหลด calendarConfig ของเดือนนั้นก่อน render — กัน config เดือนผิด
     _loadAndRender: () => {
         const ym = `${CalendarCtrl._year}_${String(CalendarCtrl._month+1).padStart(2,'0')}`;
         CalendarCtrl.render(); // render ทันที (อาจยังไม่มี config)
-        if (!State.planCache[ym] && State.planList?.includes(ym)) {
+        // โหลดใหม่ถ้า: ยังไม่มีใน cache หรือ calendarConfig เป็น null
+        const cached = State.planCache[ym];
+        const needFetch = !cached || cached.calendarConfig === null;
+        if (needFetch && State.planList?.includes(ym)) {
+            // ลบ cache เก่าก่อน ให้ loadPlanData fetch ใหม่จริงๆ
+            if (cached?.calendarConfig === null) delete State.planCache[ym];
             App.loadPlanData(ym)
-                .then(() => CalendarCtrl.render()) // render ใหม่หลังได้ config จริง
+                .then(() => CalendarCtrl.render())
                 .catch(() => {});
         }
     },
@@ -1101,7 +1099,6 @@ const CalendarCtrl = {
         if (_curYM && State.allStores.length > 0 && !State.planCache[_curYM]) {
             State.planCache[_curYM] = { stores: State.allStores, calendarConfig: State.calendarConfig, ym: _curYM };
         }
-        CalendarCtrl.render();
         popup.style.display = 'block';
         requestAnimationFrame(() => {
             sheet.style.transform = 'translateY(0)';
@@ -1109,11 +1106,17 @@ const CalendarCtrl = {
                 document.getElementById('cal-today-cell')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }, 350);
         });
-        // โหลดเดือนอื่น background (non-blocking)
+        // ✅ โหลด calendarConfig ทุกเดือนก่อน แล้วค่อย render
+        // กัน config เดือนผิด (เดือนที่ยังไม่โหลดจะแสดงว่างแทนที่จะใช้ config เดือนอื่น)
         if (State.planList?.length > 0) {
+            // ลบ cache ที่ calendarConfig = null ออกก่อน ให้ fetch ใหม่
+            State.planList.forEach(ym => {
+                if (State.planCache[ym]?.calendarConfig === null) delete State.planCache[ym];
+            });
             Promise.all(State.planList.map(ym => App.loadPlanData(ym).catch(() => {})))
                 .then(() => CalendarCtrl.render());
         }
+        CalendarCtrl.render(); // render เบื้องต้นก่อน (อาจยังไม่มี config บางเดือน)
     },
 
     closePopup: (e) => {
