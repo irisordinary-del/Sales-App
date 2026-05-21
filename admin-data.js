@@ -1,5 +1,6 @@
 // ==========================================
 // 🏪 Store Manager
+// v2 — 2026-05-21 | fixes: BUG-08 toast, performance cleanup
 // ==========================================
 const StoreMgr = {
     toggleSelect: (id) => {
@@ -24,7 +25,7 @@ const StoreMgr = {
         if (d === 'remove') {
             s.days = [];
         } else if (s.freq === 2) {
-            const mK = State.db.cycleDays / 2;
+            const mK  = State.db.cycleDays / 2;
             const num = parseInt(d.replace('Day ', ''));
             const pair = num <= mK ? num + mK : num - mK;
             s.days = [d, `Day ${pair}`];
@@ -40,22 +41,22 @@ const StoreMgr = {
     assignSelected: () => {
         const ds = document.getElementById('assign-day');
         if (!ds) return;
-        const d = ds.value;
+        const d  = ds.value;
         const mK = State.db.cycleDays / 2;
         let changed = false;
 
         State.stores.forEach(s => {
             if (!s.selected) return;
             if (s.freq === 2) {
-                const num = parseInt(d.replace('Day ', ''));
+                const num  = parseInt(d.replace('Day ', ''));
                 const pair = num <= mK ? num + mK : num - mK;
                 s.days = [d, `Day ${pair}`];
             } else {
                 s.days = [d];
             }
             s.selected = false;
-            s.seqs = {};
-            changed = true;
+            s.seqs     = {};
+            changed    = true;
         });
 
         if (!changed) {
@@ -66,95 +67,76 @@ const StoreMgr = {
         }
     },
 
-    getDistSq: (a, b) => Math.pow(a.lat - b.lat, 2) + Math.pow(a.lng - b.lng, 2)
+    getDistSq: (a, b) => Math.pow(a.lat - b.lat, 2) + Math.pow(a.lng - b.lng, 2),
 };
 
-// ==========================================
-// ==========================================
-// ==========================================
 // ==========================================
 // 🚀 App Controller
 // ==========================================
 const App = {
-    get dbRef() {
-        return cloudDB.collection('appData').doc(window.CENTER_DOC || 'v1_main');
-    },
+    get dbRef()   { return cloudDB.collection('appData').doc(window.CENTER_DOC || 'v1_main'); },
     routesCol:  () => cloudDB.collection('appData').doc(window.CENTER_DOC || 'v1_main').collection('routes'),
 
-    // ─── Plan Mode helpers ───────────────────────────────────────────────
-    // planMode: 'active' | 'draft:{YYYY_MM}' | 'history:{YYYY_MM}'
+    // ─── Plan Mode helpers ──────────────────────────────────────────────
     _planMode: 'active',
 
     draftsCol:  () => cloudDB.collection('appData').doc(window.CENTER_DOC || 'v1_main').collection('drafts'),
     historyCol: () => cloudDB.collection('appData').doc(window.CENTER_DOC || 'v1_main').collection('history'),
 
-    // ส่งคืน collection ตาม planMode ปัจจุบัน
     currentRoutesCol: () => {
         const m = App._planMode;
-        if (m === 'active') return App.routesCol();
-        if (m.startsWith('draft:')) {
-            const ym = m.replace('draft:', '');
-            return App.draftsCol().doc(ym).collection('routes');
-        }
-        if (m.startsWith('history:')) {
-            const ym = m.replace('history:', '');
-            return App.historyCol().doc(ym).collection('routes');
-        }
+        if (m === 'active')          return App.routesCol();
+        if (m.startsWith('draft:'))  return App.draftsCol().doc(m.replace('draft:', '')).collection('routes');
+        if (m.startsWith('history:'))return App.historyCol().doc(m.replace('history:', '')).collection('routes');
         return App.routesCol();
     },
 
     isReadOnly: () => App._planMode.startsWith('history:'),
-    _snapshotUnsub: null,
+    _snapshotUnsub:    null,
     _fileListenersReady: false,
 
-    // Migrate: ข้อมูลเก่า (routes map ใน v1_main) → subcollection
+    // ─── Migrate: format เก่า → subcollection ──────────────────────────
     _migrate: async (oldRoutes) => {
         console.log('🔄 Migration: ย้ายข้อมูลไปยัง subcollection...');
-        const names = Object.keys(oldRoutes);
-        for (const name of names) {
+        for (const name of Object.keys(oldRoutes)) {
             await App.routesCol().doc(name).set({ stores: oldRoutes[name] || [] });
         }
         await App.dbRef.update({
-            routeList: names,
-            routes: firebase.firestore.FieldValue.delete()
+            routeList: Object.keys(oldRoutes),
+            routes:    firebase.firestore.FieldValue.delete(),
         });
         console.log('✅ Migration เสร็จสิ้น');
     },
 
-    // โหลดทุกสายจาก subcollection พร้อมกัน
+    // โหลดทุกสายพร้อมกัน (Promise.all)
     _loadAllRoutes: async (routeList) => {
         State.db.routes = {};
-        // ใช้ currentRoutesCol() เพื่อโหลดจาก path ที่ถูกต้องตาม mode
         const col = App.currentRoutesCol();
         await Promise.all(routeList.map(name =>
             col.doc(name).get()
                 .then(d => {
-                    const stores = d.exists ? (d.data().stores || []) : [];
-                    State.db.routes[name] = stores;
-                    App.log(`  ✅ ${name}: ${stores.length} ร้าน`);
+                    State.db.routes[name] = d.exists ? (d.data().stores || []) : [];
+                    App.log(`  ✅ ${name}: ${State.db.routes[name].length} ร้าน`);
                 })
-                .catch((e) => {
+                .catch(e => {
                     App.log(`  ⚠️ ${name}: ${e.code || e.message}`);
                     State.db.routes[name] = [];
                 })
         ));
     },
 
-    // ─── Process Logger (แสดงใน loader ขณะโหลด) ─────────────────────────
+    // ─── Process Logger ─────────────────────────────────────────────────
     _logLines: [],
     log: (msg) => {
-        const ts = new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        const ts   = new Date().toLocaleTimeString('th-TH', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
         const line = `[${ts}] ${msg}`;
         App._logLines.push(line);
         console.log('🔵', line);
         const el = document.getElementById('loader-log');
-        if (el) {
-            el.innerHTML = App._logLines.slice(-12).join('<br>');
-            el.scrollTop = el.scrollHeight;
-        }
+        if (el) { el.innerHTML = App._logLines.slice(-12).join('<br>'); el.scrollTop = el.scrollHeight; }
     },
 
-    // ─── Force Reload: ดึงข้อมูลใหม่จาก Firestore ทั้งหมด ──────────────
+    // ─── Force Reload ───────────────────────────────────────────────────
     forceReload: async () => {
         App._logLines = [];
         App.log('🔄 Force reload เริ่มต้น...');
@@ -165,9 +147,8 @@ const App = {
 
         try {
             App.log(`📡 ดึง metadata: ${window.CENTER_DOC}`);
-            // ดึงตรงๆ โดยไม่ผ่าน cache (source: server)
             const doc = await App.dbRef.get({ source: 'server' });
-            const d = doc.exists ? doc.data() : {};
+            const d   = doc.exists ? doc.data() : {};
             App.log(`✅ metadata OK — routeList: ${(d.routeList || []).length} สาย`);
 
             State.db.cycleDays = d.cycleDays || 24;
@@ -175,16 +156,15 @@ const App = {
 
             if (State.db.routeList.length === 0) {
                 App.log('⚠️ ไม่มี routeList — สร้างสายเริ่มต้น');
-                State.db.routeList = ['สายที่ 1'];
+                State.db.routeList      = ['สายที่ 1'];
                 State.db.routes['สายที่ 1'] = [];
             } else {
                 App.log(`📦 โหลด ${State.db.routeList.length} สาย...`);
-                await Promise.all(State.db.routeList.map(async (name) => {
+                await Promise.all(State.db.routeList.map(async name => {
                     try {
-                        const rd = await App.routesCol().doc(name).get({ source: 'server' });
-                        const stores = rd.exists ? (rd.data().stores || []) : [];
-                        State.db.routes[name] = stores;
-                        App.log(`  ✅ ${name}: ${stores.length} ร้าน`);
+                        const rd     = await App.routesCol().doc(name).get({ source: 'server' });
+                        State.db.routes[name] = rd.exists ? (rd.data().stores || []) : [];
+                        App.log(`  ✅ ${name}: ${State.db.routes[name].length} ร้าน`);
                     } catch (e) {
                         App.log(`  ⚠️ ${name}: โหลดไม่สำเร็จ (${e.code || e.message})`);
                         State.db.routes[name] = [];
@@ -198,9 +178,9 @@ const App = {
             State.stores = State.db.routes[State.localActiveRoute] || [];
             App.log(`🏪 สายปัจจุบัน: ${State.localActiveRoute} (${State.stores.length} ร้าน)`);
 
-
-                    App.fetchSalesData(); // fetchSalesData เรียก App.sync() + UI.hideLoader() ปิดท้าย
+            App.fetchSalesData();
             App.log('✅ Force reload เสร็จสิ้น');
+
         } catch (err) {
             App.log(`❌ Error: ${err.code || err.message}`);
             UI.hideLoader();
@@ -209,7 +189,6 @@ const App = {
         }
     },
 
-    // ─── Timer สำหรับแสดงปุ่ม force reload ถ้าโหลดนานเกิน 8 วิ ──────────
     _forceReloadTimer: null,
     _startForceReloadTimer: () => {
         clearTimeout(App._forceReloadTimer);
@@ -222,20 +201,17 @@ const App = {
 
     init: async () => {
         if (!MapCtrl.map) MapCtrl.init();
-
         if (App._snapshotUnsub) return;
 
         UI.showLoader('กำลังเชื่อมต่อ...', '');
         App.log(`🚀 เริ่มต้น — Center: ${window.CENTER_DOC || '(ไม่ระบุ)'}`);
         App._startForceReloadTimer();
 
-        // รอ Firestore persistence พร้อมก่อน — ป้องกัน cache miss ตอน network ช้า
-        // ใช้ Promise.race กับ timeout 3 วิ เพื่อไม่ให้ค้างบนมือถือ
         App.log('🔌 รอ Firestore persistence...');
         if (window.firestoreReady) {
             await Promise.race([
                 window.firestoreReady,
-                new Promise(resolve => setTimeout(resolve, 3000))
+                new Promise(resolve => setTimeout(resolve, 3000)),
             ]);
         }
         App.log('✅ Firestore persistence พร้อม');
@@ -249,22 +225,21 @@ const App = {
             State.db.cycleDays = d.cycleDays || 24;
             App.log(`📄 onSnapshot — doc.exists: ${doc.exists}`);
 
-            // ✅ ตรวจสอบ: มีข้อมูลเก่า (routes map) → migrate อัตโนมัติ
+            // ตรวจสอบ format เก่า → migrate
             if (d.routes && typeof d.routes === 'object' && Object.keys(d.routes).length > 0) {
                 App.log('🔄 พบข้อมูล format เก่า → migrate...');
                 State.db.routeList = Object.keys(d.routes).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
                 await App._migrate(d.routes);
-                return; // รอ onSnapshot trigger รอบถัดไปหลัง migration
+                return;
             }
 
-            // โครงสร้างใหม่: routeList ใน metadata
             const routeList = (d.routeList || []).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
             App.log(`📋 routeList: [${routeList.join(', ')}]`);
             State.db.routeList = routeList.length > 0 ? routeList : ['สายที่ 1'];
 
             App.log(`📦 โหลด ${State.db.routeList.length} สาย...`);
             await App._loadAllRoutes(State.db.routeList);
-            App.log(`✅ โหลดสายเสร็จ — รวม ${Object.keys(State.db.routes).reduce((s,k) => s + (State.db.routes[k]||[]).length, 0)} ร้าน`);
+            App.log(`✅ โหลดสายเสร็จ — รวม ${Object.values(State.db.routes).reduce((s,v) => s + v.length, 0)} ร้าน`);
 
             if (!State.localActiveRoute || !State.db.routes[State.localActiveRoute]) {
                 State.localActiveRoute = localStorage.getItem('last_viewed_route') || State.db.routeList[0];
@@ -277,10 +252,7 @@ const App = {
             UI.hideLoader();
             await PlanUI?.refresh?.();
 
-                }, (err) => {
-            // onSnapshot error — มักเกิดจาก permission หรือ network
-            // ถ้า persistence เปิดอยู่ Firestore จะ serve จาก cache อัตโนมัติ
-            // ถ้าไม่มี cache เลย ให้แสดง retry
+        }, (err) => {
             console.error('Firestore onSnapshot error:', err);
             App.log(`❌ onSnapshot error: ${err.code} — ${err.message}`);
             UI.hideLoader();
@@ -294,16 +266,13 @@ const App = {
             }
         });
 
+        // ✅ ลงทะเบียน #fileUpload listener ครั้งเดียวเท่านั้น (ป้องกัน BUG-06)
         if (!App._fileListenersReady) {
             App._fileListenersReady = true;
             const fileUpload = document.getElementById('fileUpload');
-            if (fileUpload) {
-                fileUpload.addEventListener('change', App.handleMapUpload);
-            }
+            if (fileUpload) fileUpload.addEventListener('change', App.handleMapUpload);
         }
     },
-
-
 
     // ✅ saveDB: บันทึกทีละสายใน subcollection — รองรับ active/draft
     saveDB: () => {
@@ -313,13 +282,15 @@ const App = {
         }
         State.db.routes[State.localActiveRoute] = State.stores;
         const routeList = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
-
-        const isDraft = App._planMode.startsWith('draft:');
-        const ym = isDraft ? App._planMode.replace('draft:', '') : null;
+        const isDraft   = App._planMode.startsWith('draft:');
+        const ym        = isDraft ? App._planMode.replace('draft:', '') : null;
 
         const routePromise = App.currentRoutesCol().doc(State.localActiveRoute).set({ stores: State.stores });
         const metaPromise  = isDraft
-            ? App.draftsCol().doc(ym).set({ routeList, cycleDays: State.db.cycleDays || 24, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true })
+            ? App.draftsCol().doc(ym).set(
+                { routeList, cycleDays: State.db.cycleDays || 24, updatedAt: firebase.firestore.FieldValue.serverTimestamp() },
+                { merge: true }
+              )
             : App.dbRef.update({ routeList, cycleDays: State.db.cycleDays || 24 });
 
         const modeLabel = isDraft ? `📝 Draft ${ym}` : '💾';
@@ -331,7 +302,6 @@ const App = {
             });
     },
 
-    // แก้บัค: reset tab กลับ tab1 ทุกครั้งที่ sync
     sync: () => {
         const rs = document.getElementById('routeSelector');
         if (rs) {
@@ -343,7 +313,7 @@ const App = {
         }
         MapCtrl.clearAll();
         UI.initDaySelector();
-        UI.switchTab('tab1'); // reset tab (แต่ switchTab จะ guard ไม่ให้ทับ tab ที่ user เลือกอยู่)
+        UI.switchTab('tab1');
         UI.render();
     },
 
@@ -351,14 +321,15 @@ const App = {
         if (State.localActiveRoute === name) return;
         State.localActiveRoute = name;
         if (App._planMode === 'active') localStorage.setItem('last_viewed_route', name);
-        // ถ้า route นี้ยังไม่ได้โหลด → ดึงจาก Firestore
         if (State.db.routes[name] === undefined) {
             UI.showLoader('กำลังโหลดสาย ' + name + '...');
-            App.currentRoutesCol().doc(name).get().then(d => {
-                State.db.routes[name] = d.exists ? (d.data().stores || []) : [];
-                State.stores = State.db.routes[name];
-                App.sync(); MapCtrl.fitToStores(); UI.hideLoader();
-            }).catch(() => { State.stores = []; App.sync(); UI.hideLoader(); });
+            App.currentRoutesCol().doc(name).get()
+                .then(d => {
+                    State.db.routes[name] = d.exists ? (d.data().stores || []) : [];
+                    State.stores = State.db.routes[name];
+                    App.sync(); MapCtrl.fitToStores(); UI.hideLoader();
+                })
+                .catch(() => { State.stores = []; App.sync(); UI.hideLoader(); });
         } else {
             State.stores = State.db.routes[name] || [];
             App.sync(); MapCtrl.fitToStores();
@@ -376,9 +347,9 @@ const App = {
             + '<button id="_add-route-cancel" style="padding:8px 18px;border-radius:8px;border:1px solid #d1d5db;background:#fff;color:#6b7280;cursor:pointer;font-size:13px;font-weight:600;">ยกเลิก</button>'
             + '<button id="_add-route-ok" style="padding:8px 18px;border-radius:8px;border:none;background:#4f46e5;color:#fff;cursor:pointer;font-size:13px;font-weight:700;">เพิ่ม</button>'
             + '</div>';
-        overlay.appendChild(box);  // แก้บัค: appendChild เพียงครั้งเดียว ไม่ซ้ำ
+        overlay.appendChild(box);
         document.body.appendChild(overlay);
-        const inp = box.querySelector('#_add-route-inp');
+        const inp   = box.querySelector('#_add-route-inp');
         inp.focus();
         const close = () => { if (document.body.contains(overlay)) document.body.removeChild(overlay); };
         const confirm = () => {
@@ -392,7 +363,7 @@ const App = {
             App.saveDB();
         };
         box.querySelector('#_add-route-cancel').onclick = close;
-        box.querySelector('#_add-route-ok').onclick = confirm;
+        box.querySelector('#_add-route-ok').onclick     = confirm;
         inp.addEventListener('keydown', e => { if (e.key === 'Enter') confirm(); if (e.key === 'Escape') close(); });
         overlay.onclick = e => { if (e.target === overlay) close(); };
     },
@@ -410,7 +381,7 @@ const App = {
             + '</div>';
         overlay.appendChild(box);
         document.body.appendChild(overlay);
-        const inp = box.querySelector('#_ren-route-inp');
+        const inp   = box.querySelector('#_ren-route-inp');
         inp.focus(); inp.select();
         const close = () => { if (document.body.contains(overlay)) document.body.removeChild(overlay); };
         const confirm = () => {
@@ -423,25 +394,23 @@ const App = {
             State.localActiveRoute = newName;
             App.sync();
             const routeList = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
-            // แก้บัค: ใช้ currentRoutesCol() ให้ตรงกับ planMode ปัจจุบัน
             Promise.all([
                 App.currentRoutesCol().doc(oldName).delete(),
                 App.currentRoutesCol().doc(newName).set({ stores: State.db.routes[newName] || [] }),
-                App.dbRef.update({ routeList })
+                App.dbRef.update({ routeList }),
             ])
             .then(() => UI.showSaveToast('💾 เปลี่ยนชื่อสายเรียบร้อย'))
             .catch(err => UI.showErrorToast('❌ เปลี่ยนชื่อไม่สำเร็จ: ' + err.message));
         };
         box.querySelector('#_ren-cancel').onclick = close;
-        box.querySelector('#_ren-ok').onclick = confirm;
+        box.querySelector('#_ren-ok').onclick     = confirm;
         inp.addEventListener('keydown', e => { if (e.key === 'Enter') confirm(); if (e.key === 'Escape') close(); });
         overlay.onclick = e => { if (e.target === overlay) close(); };
     },
 
     deleteRoute: () => {
-        if (Object.keys(State.db.routes).length <= 1) {
+        if (Object.keys(State.db.routes).length <= 1)
             return UI.showErrorToast('ห้ามลบสายสุดท้ายครับ');
-        }
         UI.showConfirm('ยืนยันลบสาย "' + State.localActiveRoute + '"?', () => {
             const deletedName = State.localActiveRoute;
             delete State.db.routes[deletedName];
@@ -450,10 +419,9 @@ const App = {
             State.localActiveRoute = sortedKeys[0];
             State.stores = State.db.routes[State.localActiveRoute] || [];
             App.sync(); MapCtrl.fitToStores();
-            // ✅ ลบ subcollection doc + อัปเดต routeList
             Promise.all([
                 App.routesCol().doc(deletedName).delete(),
-                App.dbRef.update({ routeList: sortedKeys })
+                App.dbRef.update({ routeList: sortedKeys }),
             ])
             .then(() => UI.showSaveToast('🗑️ ลบสายเรียบร้อย'))
             .catch(err => UI.showErrorToast('❌ ลบไม่สำเร็จ: ' + err.message));
@@ -461,52 +429,44 @@ const App = {
     },
 
     // ─── Plan Management ────────────────────────────────────────────────
-
-    // โหลด plan ตาม mode (active / draft:YYYY_MM / history:YYYY_MM)
     switchPlanMode: async (mode) => {
-        App._planMode = mode;
-        State.db.routes = {};
-
-        const isActive  = mode === 'active';
-        const isDraft   = mode.startsWith('draft:');
-        const isHistory = mode.startsWith('history:');
-        const ym = (isDraft || isHistory) ? mode.split(':')[1] : null;
+        App._planMode      = mode;
+        State.db.routes    = {};
+        const isActive     = mode === 'active';
+        const isDraft      = mode.startsWith('draft:');
+        const isHistory    = mode.startsWith('history:');
+        const ym           = (isDraft || isHistory) ? mode.split(':')[1] : null;
 
         UI.showLoader('กำลังโหลด Plan...', isActive ? 'โหลด Plan ปัจจุบัน' : `โหลด ${isDraft ? 'Draft' : 'History'} ${ym || ''}`);
 
         try {
             let routeList, cycleDays;
-
             if (isActive) {
-                const doc = await App.dbRef.get();
-                const d = doc.exists ? doc.data() : {};
-                routeList  = (d.routeList || []).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
-                cycleDays  = d.cycleDays || 24;
+                const d    = await App.dbRef.get();
+                const data = d.exists ? d.data() : {};
+                routeList  = (data.routeList || []).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
+                cycleDays  = data.cycleDays || 24;
             } else if (isDraft) {
-                const doc = await App.draftsCol().doc(ym).get();
-                const d = doc.exists ? doc.data() : {};
-                routeList  = (d.routeList || State.db.routeList || []).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
-                cycleDays  = d.cycleDays || State.db.cycleDays || 24;
+                const d    = await App.draftsCol().doc(ym).get();
+                const data = d.exists ? d.data() : {};
+                routeList  = (data.routeList || State.db.routeList || []).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
+                cycleDays  = data.cycleDays  || State.db.cycleDays || 24;
             } else {
-                const doc = await App.historyCol().doc(ym).get();
-                const d = doc.exists ? doc.data() : {};
-                routeList  = (d.routeList || []).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
-                cycleDays  = d.cycleDays || 24;
+                const d    = await App.historyCol().doc(ym).get();
+                const data = d.exists ? d.data() : {};
+                routeList  = (data.routeList || []).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
+                cycleDays  = data.cycleDays || 24;
             }
 
             State.db.routeList = routeList.length ? routeList : (State.db.routeList || []);
             State.db.cycleDays = cycleDays;
 
             await App._loadAllRoutes(State.db.routeList);
-
             State.localActiveRoute = State.db.routeList[0] || '';
             State.stores = State.db.routes[State.localActiveRoute] || [];
 
-            // อัปเดต UI badge
             PlanUI.updateBadge();
-            App.sync();
-            MapCtrl.fitToStores();
-            UI.hideLoader();
+            App.sync(); MapCtrl.fitToStores(); UI.hideLoader();
 
             const label = isActive ? 'Plan ปัจจุบัน' : (isDraft ? `Draft ${ym}` : `History ${ym}`);
             UI.showSaveToast(`✅ โหลด ${label} เสร็จ`);
@@ -517,38 +477,27 @@ const App = {
         }
     },
 
-    // สร้าง Draft จาก Active plan ปัจจุบัน
     createDraft: async (ym) => {
         if (!ym) return;
         UI.showLoader('กำลังสร้าง Draft...', `Copy plan → Draft ${ym}`);
         try {
-            // เช็คว่ามี draft นี้แล้วหรือยัง
             const existing = await App.draftsCol().doc(ym).get();
             if (existing.exists) {
                 UI.hideLoader();
-                UI.showErrorToast(`⚠️ Draft ${ym} มีอยู่แล้วครับ`);
-                return;
+                return UI.showErrorToast(`⚠️ Draft ${ym} มีอยู่แล้วครับ`);
             }
-
-            // Copy routeList + cycleDays
-            const meta = {
+            await App.draftsCol().doc(ym).set({
                 routeList:  State.db.routeList,
                 cycleDays:  State.db.cycleDays || 24,
                 createdAt:  firebase.firestore.FieldValue.serverTimestamp(),
-                sourceMode: 'active'
-            };
-            await App.draftsCol().doc(ym).set(meta);
-
-            // Copy ทุกสาย
+                sourceMode: 'active',
+            });
             const draftRoutesCol = App.draftsCol().doc(ym).collection('routes');
-            await Promise.all(State.db.routeList.map(async name => {
-                const stores = State.db.routes[name] || [];
-                await draftRoutesCol.doc(name).set({ stores });
-            }));
-
-            // อัปเดต draftList ใน metadata
-            const curDoc = await App.dbRef.get();
-            const curData = curDoc.exists ? curDoc.data() : {};
+            await Promise.all(State.db.routeList.map(name =>
+                draftRoutesCol.doc(name).set({ stores: State.db.routes[name] || [] })
+            ));
+            const curDoc   = await App.dbRef.get();
+            const curData  = curDoc.exists ? curDoc.data() : {};
             const draftList = [...new Set([...(curData.draftList || []), ym])].sort();
             await App.dbRef.update({ draftList });
 
@@ -562,64 +511,48 @@ const App = {
         }
     },
 
-    // Activate: copy active→history, draft→active
     activateDraft: async (ym) => {
         UI.showLoader('กำลัง Activate...', `Draft ${ym} → Active`);
         try {
             // 1. Snapshot active → history
-            const activeDoc = await App.dbRef.get();
+            const activeDoc  = await App.dbRef.get();
             const activeData = activeDoc.exists ? activeDoc.data() : {};
-            const histYm = PlanUI.currentYM(); // เดือนปัจจุบัน
-            const histMeta = {
-                routeList:   activeData.routeList  || [],
-                cycleDays:   activeData.cycleDays  || 24,
-                archivedAt:  firebase.firestore.FieldValue.serverTimestamp(),
-                label:       histYm
-            };
-            await App.historyCol().doc(histYm).set(histMeta);
-
-            // copy routes active → history
+            const histYm     = PlanUI.currentYM();
+            await App.historyCol().doc(histYm).set({
+                routeList:  activeData.routeList || [],
+                cycleDays:  activeData.cycleDays || 24,
+                archivedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                label:      histYm,
+            });
             const histRoutesCol = App.historyCol().doc(histYm).collection('routes');
             await Promise.all((activeData.routeList || []).map(async name => {
                 const rd = await App.routesCol().doc(name).get();
-                const stores = rd.exists ? (rd.data().stores || []) : [];
-                await histRoutesCol.doc(name).set({ stores });
+                await histRoutesCol.doc(name).set({ stores: rd.exists ? (rd.data().stores || []) : [] });
             }));
 
-            // 2. Load draft
-            const draftDoc = await App.draftsCol().doc(ym).get();
-            const draftData = draftDoc.exists ? draftDoc.data() : {};
+            // 2. Copy draft → active
+            const draftDoc    = await App.draftsCol().doc(ym).get();
+            const draftData   = draftDoc.exists ? draftDoc.data() : {};
             const newRouteList = (draftData.routeList || []).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
             const newCycleDays = draftData.cycleDays || 24;
-
-            // copy routes draft → active
-            const draftRoutesCol = App.draftsCol().doc(ym).collection('routes');
-            const draftRoutes = await draftRoutesCol.get();
+            const draftRoutes  = await App.draftsCol().doc(ym).collection('routes').get();
             const activeRoutesCol = App.routesCol();
-            await Promise.all(draftRoutes.docs.map(async d => {
-                await activeRoutesCol.doc(d.id).set(d.data());
-            }));
+            await Promise.all(draftRoutes.docs.map(d => activeRoutesCol.doc(d.id).set(d.data())));
 
-            // 3. อัปเดต metadata active
+            // 3. Update metadata
             const curDoc = await App.dbRef.get();
             const curData = curDoc.exists ? curDoc.data() : {};
-            const historyList = [...new Set([...(curData.historyList || []), histYm])].sort().reverse();
-            const draftList   = (curData.draftList || []).filter(d => d !== ym);
-
             await App.dbRef.update({
-                routeList:   newRouteList,
-                cycleDays:   newCycleDays,
-                historyList,
-                draftList,
+                routeList:     newRouteList,
+                cycleDays:     newCycleDays,
+                historyList:   [...new Set([...(curData.historyList || []), histYm])].sort().reverse(),
+                draftList:     (curData.draftList || []).filter(d => d !== ym),
                 lastActivated: ym,
-                updatedAt:   firebase.firestore.FieldValue.serverTimestamp()
+                updatedAt:     firebase.firestore.FieldValue.serverTimestamp(),
             });
 
             UI.hideLoader();
             UI.showSaveToast(`✅ Activate ${ym} เรียบร้อย! Sales จะเห็น Plan ใหม่ทันที`);
-
-            // Reload active mode
-            await App.switchPlanMode('active');
             if (typeof PlanUI !== 'undefined') PlanUI.refresh();
         } catch (err) {
             UI.hideLoader();
@@ -628,155 +561,133 @@ const App = {
         }
     },
 
-    clearStores: () => {
-        if (!confirm('ล้างข้อมูลร้านค้าทั้งหมดในสายนี้?')) return;
-        State.stores = [];
-        MapCtrl.clearAll();
-        App.sync();
-        App.saveDB();
-    },
-
-
-    // ─── Helper: แปลง cycle-day (1-24) → calendar day โดยคำนวณจาก calendarConfig
-    // input:  assignedDayNum = 1-24 (จากไฟล์ Excel)
-    // output: 'Day N' ที่ถูกต้องตาม calendarConfig ของ draft/active นั้น
-    _mapCycleDayToCalDay: (dayNum, calCfg) => {
-        if (!calCfg || calCfg.mode !== 'cycle' || !dayNum) return `Day ${dayNum}`;
-        const holidays = calCfg.holidays || [];
-        const cycleDays = calCfg.cycleDays || 24;
-        if (!holidays.length) return `Day ${dayNum}`; // ไม่มีวันหยุด → ตรงกัน
-
-        // สร้าง mapping: cycle-day (1,2,3...) → calendar-day (1,2,...,cycleDays) ข้ามวันหยุด
-        // cycle-day 1 = วันทำงานแรก, ข้ามวันหยุดทุกวัน
-        const mapping = {}; // cycleDay → calDay
-        let cycleDay = 1;
-        for (let calDay = 1; calDay <= cycleDays && cycleDay <= cycleDays; calDay++) {
-            if (holidays.includes(calDay)) continue; // ข้ามวันหยุด
-            mapping[cycleDay] = calDay;
-            cycleDay++;
+    // helper: map cycle day → calendar day (ข้ามวันหยุด)
+    _mapCycleDayToCalDay: (cycleDay, cfg) => {
+        if (!cfg || cfg.mode !== 'cycle') return cycleDay ? `Day ${cycleDay}` : '';
+        const startDate   = parseInt(cfg.startDay  || 1);
+        const startDayNum = parseInt(cfg.startDayNum || 1);
+        const holidays    = cfg.holidays || [];
+        const cycleDays   = cfg.cycleDays || 24;
+        const targetNum   = parseInt(cycleDay);
+        if (isNaN(targetNum) || targetNum < 1 || targetNum > cycleDays) return '';
+        let workDay = startDayNum;
+        for (let d = startDate; d <= 31; d++) {
+            if (holidays.includes(d)) continue;
+            if (workDay === targetNum) return `Day ${d}`;
+            workDay++;
         }
-        const mapped = mapping[dayNum];
-        return mapped ? `Day ${mapped}` : `Day ${dayNum}`;
+        return '';
     },
 
-    handleMapUpload: function (e) {
+    handleMapUpload: (e) => {
         const file = e.target.files[0];
         if (!file) return;
-
-        if (State.stores.length > 0 && !confirm(`ข้อมูลเดิมของ "${State.localActiveRoute}" จะถูกแทนที่\nยืนยันการอัปโหลด?`)) {
-            e.target.value = '';
-            return;
-        }
-
         const reader = new FileReader();
-        reader.onload = (e) => {
+        reader.onload = (ev) => {
             try {
-                const data = new Uint8Array(e.target.result);
-                const workbook = XLSX.read(data, { type: 'array' });
-                const json = XLSX.utils.sheet_to_json(
+                const data      = new Uint8Array(ev.target.result);
+                const workbook  = XLSX.read(data, { type: 'array' });
+                const json      = XLSX.utils.sheet_to_json(
                     workbook.Sheets[workbook.SheetNames[0]], { header: 1, defval: '' }
                 );
-                if (json.length < 2) return UI.showErrorToast('ไฟล์ว่างเปล่า');
-
-                // โหลด calendarConfig ของ plan ปัจจุบัน (สำหรับ remap days)
-                // ใช้แบบ async ผ่าน .get() แล้ว process ใน callback
-                const _processUpload = async (calCfg) => {
+                if (json.length < 2) return UI.showErrorToast('ไฟล์ว่างเปล่าหรือไม่มีข้อมูล');
 
                 const headers = json[0];
-                let idCol = -1, nameCol = -1, latCol = -1, lngCol = -1, freqCol = -1, dayCol = -1, seqCol = -1, salesCodeCol = -1, shopTypeCol = -1, subDistrictCol = -1, districtCol = -1, provinceCol = -1, marketNameCol = -1, cyCol = -1;
+                let idCol=-1, nameCol=-1, latCol=-1, lngCol=-1, freqCol=-1,
+                    dayCol=-1, seqCol=-1, salesCodeCol=-1, shopTypeCol=-1,
+                    subDistrictCol=-1, districtCol=-1, provinceCol=-1,
+                    marketNameCol=-1, cyCol=-1;
 
                 for (let i = 0; i < headers.length; i++) {
                     const h = String(headers[i]).toLowerCase();
-                    if (h.includes('รหัส') || h.includes('customer code') || h.includes('id')) idCol = i;
+                    if      (h.includes('รหัส') && !h.includes('เซลล์'))             idCol = i;
                     else if ((h.includes('ชื่อ') && !h.includes('ตลาด')) || h.includes('name')) nameCol = i;
-                    else if (h.includes('lat') || h.includes('ละติจูด')) latCol = i;
+                    else if (h.includes('lat') || h.includes('ละติจูด'))             latCol = i;
                     else if (h.includes('lng') || h.includes('lon') || h.includes('ลองจิจูด')) lngCol = i;
-                    else if (h.includes('freq') || h.includes('ความถี่') || h.includes('รอบ') || h.includes('f2')) freqCol = i;
-                    else if (h.includes('สายวิ่ง') || h.includes('day')) dayCol = i;
-                    else if (h.includes('คิว') || h.includes('seq')) seqCol = i;
-                    else if (h.includes('salescode') || h.includes('รหัสเซลล์')) salesCodeCol = i;
-                    else if (h.includes('sales')) salesCodeCol = i;
-                                        else if (h.includes('ประเภท') || h.includes('type') || h.includes('shoptype')) shopTypeCol = i;
-                                        else if (h.includes('sold to city') || h.includes('subdistrict') || h.includes('ตำบล')) subDistrictCol = i;
-                                        else if (h.includes('sold to state') || h.includes('district') || h.includes('อำเภอ')) districtCol = i;
-                                        else if (h.includes('address 5') || h.includes('province') || h.includes('จังหวัด')) provinceCol = i;
-                                        else if (h.includes('ตลาด') || h.includes('market')) marketNameCol = i;
-                                        else if (h === 'cy' || h.includes('cy')) cyCol = i;
+                    else if (h.includes('freq') || h.includes('ความถี่'))            freqCol = i;
+                    else if (h.includes('day') || h.includes('สายวิ่ง'))             dayCol = i;
+                    else if (h.includes('คิว') || h.includes('seq'))                 seqCol = i;
+                    else if (h.includes('salescode') || h.includes('รหัสเซลล์') || h === 'sales') salesCodeCol = i;
+                    else if (h.includes('ประเภท') || h.includes('type'))             shopTypeCol = i;
+                    else if (h.includes('sold to city') || h.includes('ตำบล'))       subDistrictCol = i;
+                    else if (h.includes('sold to state') || h.includes('อำเภอ'))     districtCol = i;
+                    else if (h.includes('address 5') || h.includes('จังหวัด'))       provinceCol = i;
+                    else if (h.includes('ตลาด') || h.includes('market'))             marketNameCol = i;
+                    else if (h === 'cy' || h.startsWith('cy'))                       cyCol = i;
                 }
 
-                const storeMap = {};
-                for (let i = 1; i < json.length; i++) {
-                    const row = json[i];
-                    if (!row || row.length === 0) continue;
-                    const idStr = row[idCol] ? String(row[idCol]).trim() : `S_${i}`;
-                    if (!idStr) continue;
-                    const lat = parseFloat(String(row[latCol] || '').replace(/[^0-9.-]/g, ''));
-                    const lng = parseFloat(String(row[lngCol] || '').replace(/[^0-9.-]/g, ''));
-                    if (isNaN(lat) || isNaN(lng)) continue;
+                if (latCol === -1 || lngCol === -1 || idCol === -1)
+                    return UI.showErrorToast('ไม่พบคอลัมน์ รหัส / Lat / Lng ในไฟล์ครับ');
 
-                    const freq = (freqCol !== -1 && String(row[freqCol] || '').trim().toUpperCase().includes('2')) ? 2 : 1;
-                    const rawDay = (dayCol !== -1 && row[dayCol]) ? String(row[dayCol]).trim() : '';
-                    const dayNum = rawDay ? parseInt(rawDay.replace(/[^0-9]/g, '')) : NaN;
-                    // remap cycle-day → calendar-day ตาม calendarConfig (ข้ามวันหยุด)
-                    const assignedDay = !isNaN(dayNum) ? App._mapCycleDayToCalDay(dayNum, calCfg) : '';
-                    const assignedSeq = (seqCol !== -1 && row[seqCol]) ? parseInt(String(row[seqCol]).replace(/[^0-9]/g, '')) : NaN;
-                    const isValidDay = !!assignedDay;
+                // โหลด calendarConfig แล้ว process
+                const _processUpload = (calCfg) => {
+                    const storeMap = {};
+                    for (let i = 1; i < json.length; i++) {
+                        const row = json[i];
+                        if (!row || row.length === 0) continue;
+                        const idStr = row[idCol] ? String(row[idCol]).trim() : `S_${i}`;
+                        if (!idStr) continue;
+                        const lat = parseFloat(String(row[latCol] || '').replace(/[^0-9.-]/g, ''));
+                        const lng = parseFloat(String(row[lngCol] || '').replace(/[^0-9.-]/g, ''));
+                        if (isNaN(lat) || isNaN(lng)) continue;
 
-                    if (storeMap[idStr]) {
-                        if (isValidDay && !storeMap[idStr].days.includes(assignedDay)) {
-                            storeMap[idStr].days.push(assignedDay);
-                            if (!isNaN(assignedSeq)) storeMap[idStr].seqs[assignedDay] = assignedSeq;
+                        const freq      = (freqCol !== -1 && String(row[freqCol]||'').trim().toUpperCase().includes('2')) ? 2 : 1;
+                        const rawDay    = (dayCol !== -1 && row[dayCol]) ? String(row[dayCol]).trim() : '';
+                        const dayNum    = rawDay ? parseInt(rawDay.replace(/[^0-9]/g, '')) : NaN;
+                        const assignedDay = !isNaN(dayNum) ? App._mapCycleDayToCalDay(dayNum, calCfg) : '';
+                        const assignedSeq = (seqCol !== -1 && row[seqCol]) ? parseInt(String(row[seqCol]).replace(/[^0-9]/g,'')) : NaN;
+                        const isValidDay  = !!assignedDay;
+
+                        if (storeMap[idStr]) {
+                            if (isValidDay && !storeMap[idStr].days.includes(assignedDay)) {
+                                storeMap[idStr].days.push(assignedDay);
+                                if (!isNaN(assignedSeq)) storeMap[idStr].seqs[assignedDay] = assignedSeq;
+                            }
+                            storeMap[idStr].freq = 2;
+                        } else {
+                            const newStore = {
+                                id: idStr, code: idStr,
+                                name:        row[nameCol] ? String(row[nameCol]).trim() : `Store_${idStr}`,
+                                lat, lng, freq, days: [], seqs: {}, selected: false,
+                                salesCode:   salesCodeCol !== -1   ? String(row[salesCodeCol]||'').trim()   : '',
+                                shopType:    shopTypeCol !== -1    ? String(row[shopTypeCol]||'').trim()    : '',
+                                subDistrict: subDistrictCol !== -1 ? String(row[subDistrictCol]||'').trim() : '',
+                                district:    districtCol !== -1    ? String(row[districtCol]||'').trim()    : '',
+                                province:    provinceCol !== -1    ? String(row[provinceCol]||'').trim()    : '',
+                                marketName:  marketNameCol !== -1  ? String(row[marketNameCol]||'').trim()  : '',
+                                cy:          cyCol !== -1          ? String(row[cyCol]||'').trim()          : '',
+                                dayOriginal: dayCol !== -1         ? String(row[dayCol]||'').trim()         : '',
+                            };
+                            if (isValidDay) {
+                                newStore.days.push(assignedDay);
+                                if (!isNaN(assignedSeq)) newStore.seqs[assignedDay] = assignedSeq;
+                            }
+                            storeMap[idStr] = newStore;
                         }
-                        storeMap[idStr].freq = 2;
-                    } else {
-                        const newStore = {
-                            id: idStr,
-                            name: row[nameCol] ? String(row[nameCol]).trim() : `Store_${idStr}`,
-                            lat, lng, freq, days: [], seqs: {}, selected: false,
-                            code: idStr,
-                            salesCode: salesCodeCol !== -1 ? (String(row[salesCodeCol] || '')).trim() : '',
-                            shopType: shopTypeCol !== -1 ? (String(row[shopTypeCol] || '')).trim() : '',
-                            subDistrict: subDistrictCol !== -1 ? (String(row[subDistrictCol] || '')).trim() : '',
-                            district: districtCol !== -1 ? (String(row[districtCol] || '')).trim() : '',
-                            province: provinceCol !== -1 ? (String(row[provinceCol] || '')).trim() : '',
-                            marketName: marketNameCol !== -1 ? (String(row[marketNameCol] || '')).trim() : '',
-                            cy: cyCol !== -1 ? (String(row[cyCol] || '')).trim() : '',
-                            dayOriginal: dayCol !== -1 ? (String(row[dayCol] || '')).trim() : ''
-                        };
-                        if (isValidDay) {
-                            newStore.days.push(assignedDay);
-                            if (!isNaN(assignedSeq)) newStore.seqs[assignedDay] = assignedSeq;
-                        }
-                        storeMap[idStr] = newStore;
                     }
-                }
 
-                const finalArray = Object.values(storeMap);
-                if (finalArray.length === 0) return UI.showErrorToast('ไม่พบพิกัด (Lat, Lng) ในไฟล์ครับ');
+                    const finalArray = Object.values(storeMap);
+                    if (finalArray.length === 0)
+                        return UI.showErrorToast('ไม่พบพิกัด (Lat, Lng) ในไฟล์ครับ');
 
-                // แก้บัค: clearAll markers เก่าก่อน load ใหม่
-                MapCtrl.clearAll();
-                State.stores = finalArray;
-                App.sync();
-                App.saveDB();
-                MapCtrl.fitToStores();
+                    MapCtrl.clearAll();
+                    State.stores = finalArray;
+                    App.sync();
+                    App.saveDB();
+                    MapCtrl.fitToStores();
+                };
 
-                }; // end _processUpload
-
-                // โหลด calendarConfig แบบ async แล้ว process
                 try {
-                    const planRef = App.currentRoutesCol
-                        ? (App._planMode.startsWith('draft:')
-                            ? App.draftsCol().doc(App._planMode.replace('draft:',''))
-                            : App.dbRef)
+                    const planRef = App._planMode.startsWith('draft:')
+                        ? App.draftsCol().doc(App._planMode.replace('draft:',''))
                         : App.dbRef;
-                    planRef.get().then(snap => {
-                        const calCfg = snap.exists ? (snap.data().calendarConfig || null) : null;
-                        _processUpload(calCfg);
-                    }).catch(() => _processUpload(null));
-                } catch(e) {
+                    planRef.get()
+                        .then(snap => _processUpload(snap.exists ? (snap.data().calendarConfig || null) : null))
+                        .catch(() => _processUpload(null));
+                } catch(err2) {
                     _processUpload(null);
                 }
+
             } catch (err) {
                 UI.showErrorToast('ขัดข้อง: ' + err.message);
             }
@@ -785,45 +696,55 @@ const App = {
         };
         reader.readAsArrayBuffer(file);
     },
-    
-    // เคลียร์การจัดสายทั้งหมด
+
+    fetchSalesData: async () => {
+        try {
+            const snap = await cloudDB.collection('v1_sales_chunks').get();
+            State.sales = {};
+            snap.forEach(doc => Object.assign(State.sales, doc.data()));
+        } catch(e) {
+            console.warn('fetchSalesData error:', e);
+            State.sales = {};
+        }
+        App.sync();
+        UI.hideLoader();
+    },
+
+    // ✅ FIX BUG-08: ลด duplicate toast call
     clearAllAssignments: () => {
         try {
-            if (!confirm('🗑️ ยืนยันการเคลียร์การจัดสายทั้งหมด?\n(ร้านทั้งหมดจะกลับไปอยู่ในสถานะ "รอจัดสาย")')) {
+            if (!confirm('🗑️ ยืนยันการเคลียร์การจัดสายทั้งหมด?\n(ร้านทั้งหมดจะกลับไปอยู่ในสถานะ "รอจัดสาย")'))
                 return;
-            }
-            
-            if (!State.stores || State.stores.length === 0) {
-                UI.showErrorToast('⚠️ ไม่มีข้อมูลร้านค้า');
-                return;
-            }
-            
-            State.stores.forEach(s => {
-                s.days = [];
-                s.seqs = {};
-                s.selected = false;
-            });
-            
-            if (MapCtrl && MapCtrl.clearRoad) MapCtrl.clearRoad(true);
-            if (MapCtrl && MapCtrl.clearAll) MapCtrl.clearAll();
-            if (UI && UI.render) UI.render();
-            if (App && App.saveDB) App.saveDB();
-            
+            if (!State.stores?.length)
+                return UI.showErrorToast('⚠️ ไม่มีข้อมูลร้านค้า');
+
+            State.stores.forEach(s => { s.days = []; s.seqs = {}; s.selected = false; });
+
+            MapCtrl?.clearRoad?.(true);
+            MapCtrl?.clearAll?.();
+            UI?.render?.();
+            App?.saveDB?.();
+
+            // ✅ เรียกครั้งเดียว ไม่มี duplicate
             UI.showSaveToast('✅ เคลียร์การจัดสายเสร็จ');
         } catch(err) {
             console.error('❌ Clear error:', err);
             UI.showErrorToast('❌ เกิดข้อผิดพลาด: ' + err.message);
         }
-    }
+    },
+
+    logout: () => {
+        if (typeof Auth !== 'undefined') Auth.logout();
+        else window.location.replace('login.html');
+    },
 };
 
 // ==========================================
-// 🔄 Store Transfer — ย้ายร้านระหว่างสาย
+// 🔄 Store Transfer
 // ==========================================
 const StoreTrans = {
     _selectedIds: new Set(),
 
-    // เปิด modal ย้ายร้าน
     open: () => {
         StoreTrans._selectedIds.clear();
         StoreTrans._renderRouteList();
@@ -836,51 +757,42 @@ const StoreTrans = {
         StoreTrans._selectedIds.clear();
     },
 
-    // render dropdown สาย source (= สายปัจจุบัน) และ target
     _renderRouteList: () => {
         const routes = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
-        const srcEl = document.getElementById('transfer-src-route');
-        const dstEl = document.getElementById('transfer-dst-route');
+        const srcEl  = document.getElementById('transfer-src-route');
+        const dstEl  = document.getElementById('transfer-dst-route');
         if (srcEl) {
             srcEl.innerHTML = routes.map(r =>
                 `<option value="${r}" ${r === State.localActiveRoute ? 'selected' : ''}>${r}</option>`
             ).join('');
         }
         if (dstEl) {
-            dstEl.innerHTML = routes.map(r =>
-                `<option value="${r}" ${r !== State.localActiveRoute ? '' : ''}>${r}</option>`
-            ).join('');
-            // default dst = อันแรกที่ไม่ใช่ src
+            dstEl.innerHTML = routes.map(r => `<option value="${r}">${r}</option>`).join('');
             const other = routes.find(r => r !== State.localActiveRoute);
-            if (other && dstEl) dstEl.value = other;
+            if (other) dstEl.value = other;
         }
         if (srcEl) srcEl.addEventListener('change', () => StoreTrans._renderStoreList());
     },
 
-    // render รายการร้านของ src route
     _renderStoreList: () => {
-        const srcEl = document.getElementById('transfer-src-route');
+        const srcEl   = document.getElementById('transfer-src-route');
         const srcRoute = srcEl ? srcEl.value : State.localActiveRoute;
-        const stores = State.db.routes[srcRoute] || [];
+        const stores   = State.db.routes[srcRoute] || [];
         StoreTrans._selectedIds.clear();
-
         const listEl = document.getElementById('transfer-store-list');
         if (!listEl) return;
-
         if (!stores.length) {
             listEl.innerHTML = '<p class="text-center text-xs text-gray-400 py-6">ไม่มีร้านค้าในสายนี้</p>';
             return;
         }
-
         listEl.innerHTML = stores.map(s => {
-            const dayTxt = s.days && s.days.length ? s.days.join(' & ') : 'รอจัดสาย';
-            const c = s.days && s.days.length && DAY_COLORS[s.days[0]] ? DAY_COLORS[s.days[0]].hex : '#9ca3af';
+            const dayTxt = s.days?.length ? s.days.join(' & ') : 'รอจัดสาย';
+            const c      = s.days?.length && DAY_COLORS[s.days[0]] ? DAY_COLORS[s.days[0]].hex : '#9ca3af';
             return `
             <label class="flex items-center gap-2.5 p-2.5 bg-white border border-gray-100 rounded-xl cursor-pointer hover:bg-indigo-50 hover:border-indigo-200 transition">
-                <input type="checkbox" value="${s.id}" onchange="StoreTrans._toggle(this)"
-                    class="w-4 h-4 text-indigo-600 rounded flex-shrink-0">
+                <input type="checkbox" value="${s.id}" onchange="StoreTrans._toggle(this)" class="w-4 h-4 text-indigo-600 rounded flex-shrink-0">
                 <div class="flex-1 min-w-0">
-                    <p class="text-sm font-bold text-gray-800 truncate">${s.name} ${s.freq===2?'<span style="background:#ef4444;color:#fff;padding:1px 5px;border-radius:8px;font-size:9px;font-weight:700;">F2</span>':''}</p>
+                    <p class="text-sm font-bold text-gray-800 truncate">${s.name}${s.freq===2?' <span style="background:#ef4444;color:#fff;padding:1px 5px;border-radius:8px;font-size:9px;font-weight:700;">F2</span>':''}</p>
                     <p class="text-[10px] text-gray-400 font-mono">${s.id}</p>
                 </div>
                 <span class="text-[10px] font-bold px-2 py-0.5 rounded-full text-white flex-shrink-0" style="background:${c};">${dayTxt}</span>
@@ -890,7 +802,7 @@ const StoreTrans = {
 
     _toggle: (cb) => {
         if (cb.checked) StoreTrans._selectedIds.add(cb.value);
-        else StoreTrans._selectedIds.delete(cb.value);
+        else            StoreTrans._selectedIds.delete(cb.value);
         const countEl = document.getElementById('transfer-count');
         if (countEl) countEl.textContent = StoreTrans._selectedIds.size;
     },
@@ -904,313 +816,39 @@ const StoreTrans = {
         if (countEl) countEl.textContent = StoreTrans._selectedIds.size;
     },
 
-    clearAll: () => {
-        document.querySelectorAll('#transfer-store-list input[type=checkbox]').forEach(cb => {
-            cb.checked = false;
-        });
-        StoreTrans._selectedIds.clear();
-        const countEl = document.getElementById('transfer-count');
-        if (countEl) countEl.textContent = 0;
-    },
-
-    // ยืนยันย้าย
     confirm: async () => {
         if (StoreTrans._selectedIds.size === 0)
-            return UI.showErrorToast('⚠️ กรุณาเลือกร้านที่ต้องการย้าย');
-
-        if (App.isReadOnly())
-            return UI.showErrorToast('⚠️ ไม่สามารถแก้ไข History ได้');
-
-        const srcEl = document.getElementById('transfer-src-route');
-        const dstEl = document.getElementById('transfer-dst-route');
+            return UI.showErrorToast('กรุณาเลือกร้านค้าก่อนครับ');
+        const srcEl  = document.getElementById('transfer-src-route');
+        const dstEl  = document.getElementById('transfer-dst-route');
         const srcRoute = srcEl ? srcEl.value : State.localActiveRoute;
         const dstRoute = dstEl ? dstEl.value : '';
+        if (!dstRoute || dstRoute === srcRoute)
+            return UI.showErrorToast('กรุณาเลือกสายปลายทางที่ต่างกันครับ');
 
-        if (!dstRoute || srcRoute === dstRoute)
-            return UI.showErrorToast('⚠️ กรุณาเลือกสายปลายทางที่ต่างจากต้นทาง');
+        const ids      = Array.from(StoreTrans._selectedIds);
+        const srcStores = State.db.routes[srcRoute] || [];
+        const dstStores = State.db.routes[dstRoute] || [];
+        const moving    = srcStores.filter(s => ids.includes(s.id));
 
-        const count = StoreTrans._selectedIds.size;
-        UI.showConfirm(
-            `ย้าย ${count} ร้าน\nจาก "${srcRoute}" → "${dstRoute}"\nยืนยันหรือไม่?`,
-            async () => {
-                UI.showLoader('กำลังย้ายร้าน...', `${count} ร้าน → ${dstRoute}`);
-                try {
-                    const srcStores = State.db.routes[srcRoute] || [];
-                    const dstStores = State.db.routes[dstRoute] || [];
-                    const toMove = srcStores.filter(s => StoreTrans._selectedIds.has(s.id));
-                    const remaining = srcStores.filter(s => !StoreTrans._selectedIds.has(s.id));
+        State.db.routes[srcRoute] = srcStores.filter(s => !ids.includes(s.id));
+        State.db.routes[dstRoute] = [...dstStores, ...moving];
 
-                    // รีเซ็ต days/seqs ของร้านที่ย้าย (เพราะ sequence ของสายเดิมไม่ match)
-                    toMove.forEach(s => { s.days = []; s.seqs = {}; s.selected = false; });
-
-                    State.db.routes[srcRoute] = remaining;
-                    State.db.routes[dstRoute] = [...dstStores, ...toMove];
-
-                    // อัปเดต State.stores ถ้า route ที่กำลังดูอยู่ถูกกระทบ
-                    if (State.localActiveRoute === srcRoute) State.stores = remaining;
-                    if (State.localActiveRoute === dstRoute) State.stores = State.db.routes[dstRoute];
-
-                    // บันทึกทั้ง src และ dst
-                    await Promise.all([
-                        App.currentRoutesCol().doc(srcRoute).set({ stores: remaining }),
-                        App.currentRoutesCol().doc(dstRoute).set({ stores: State.db.routes[dstRoute] })
-                    ]);
-
-                    StoreTrans.close();
-                    App.sync();
-                    MapCtrl.fitToStores();
-                    UI.hideLoader();
-                    UI.showSaveToast(`✅ ย้าย ${count} ร้าน → ${dstRoute} เรียบร้อย`);
-                } catch (err) {
-                    UI.hideLoader();
-                    UI.showErrorToast('❌ ย้ายไม่สำเร็จ: ' + err.message);
-                }
-            }
-        );
-    }
-};
-
-// ==========================================
-// 📤 Export Controller — รองรับทุก planMode
-// ==========================================
-const ExportCtrl = {
-
-    // แปลง YYYY_MM → ชื่อเดือนภาษาไทย พ.ศ.
-    formatYM: (ym) => {
-        if (!ym) return '';
-        const [y, m] = ym.split('_');
-        const d = new Date(+y, +m - 1, 1);
-        return d.toLocaleDateString('th-TH', { year: 'numeric', month: 'long' });
-    },
-
-    // เปิด modal เลือก plan/route ก่อน export
-    openModal: () => {
-        const modal = document.getElementById('export-modal');
-        if (!modal) { ExportCtrl.exportCurrent(); return; }
-
-        // reset plan selector — เลือก draft ถ้า planMode ปัจจุบันเป็น draft
-        const planSel = document.getElementById('export-plan-sel');
-        if (planSel) {
-            const m = App._planMode;
-            if (m.startsWith('draft:')) planSel.value = 'draft';
-            else if (m.startsWith('history:')) planSel.value = 'history';
-            else planSel.value = 'current';
-            ExportCtrl.onPlanSelChange(planSel.value);
-        }
-
-        // populate route options
-        const routeSel = document.getElementById('export-route-sel');
-        if (routeSel) {
-            const routes = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
-            routeSel.innerHTML = `<option value="ALL">📦 ทุกสาย</option>` +
-                routes.map(r => `<option value="${r}" ${r === State.localActiveRoute ? 'selected' : ''}>${r}</option>`).join('');
-        }
-
-        modal.classList.remove('hidden');
-    },
-
-    // เมื่อเปลี่ยน plan type → แสดง/ซ่อน month selector
-    onPlanSelChange: async (val) => {
-        const monthRow = document.getElementById('export-month-row');
-        const monthSel = document.getElementById('export-month-sel');
-        if (!monthRow || !monthSel) return;
-
-        if (val === 'draft' || val === 'history') {
-            monthRow.classList.remove('hidden');
-            monthSel.innerHTML = '<option value="">— กำลังโหลด... —</option>';
-
-            try {
-                // โหลด draftList / historyList จาก metadata
-                const metaSnap = await App.dbRef.get();
-                const meta = metaSnap.exists ? metaSnap.data() : {};
-                const list = val === 'draft'
-                    ? (meta.draftList   || []).sort().reverse()
-                    : (meta.historyList || []).sort().reverse();
-
-                if (!list.length) {
-                    monthSel.innerHTML = `<option value="">— ไม่มีข้อมูล ${val === 'draft' ? 'Draft' : 'History'} —</option>`;
-                } else {
-                    monthSel.innerHTML = list.map(ym => {
-                        const [y, m] = ym.split('_');
-                        const label = new Date(+y, +m-1, 1).toLocaleDateString('th-TH', { year:'numeric', month:'long' });
-                        // pre-select เดือนที่กำลังเปิดอยู่
-                        const cur = App._planMode.replace('draft:','').replace('history:','');
-                        return `<option value="${ym}" ${ym === cur ? 'selected' : ''}>${label}</option>`;
-                    }).join('');
-                }
-            } catch(e) {
-                monthSel.innerHTML = '<option value="">— โหลดไม่สำเร็จ —</option>';
-            }
-        } else {
-            monthRow.classList.add('hidden');
-        }
-    },
-
-    closeModal: () => {
-        const modal = document.getElementById('export-modal');
-        if (modal) modal.classList.add('hidden');
-    },
-
-    doExport: async () => {
-        const planSel  = document.getElementById('export-plan-sel');
-        const monthSel = document.getElementById('export-month-sel');
-        const routeSel = document.getElementById('export-route-sel');
-        const planVal  = planSel  ? planSel.value  : 'current';
-        const monthVal = monthSel ? monthSel.value : '';
-        const routeVal = routeSel ? routeSel.value : State.localActiveRoute;
-
-        ExportCtrl.closeModal();
-
-        // ─── helper: โหลด routes จาก Firestore ───────────────────────
-        const _loadFromFirestore = async (col, routeList, routeFilter) => {
-            const toLoad = routeFilter === 'ALL' ? routeList : [routeFilter];
-            const routeData = {};
-            await Promise.all(toLoad.map(async name => {
-                const d = await col.doc(name).get();
-                routeData[name] = d.exists ? (d.data().stores || []) : [];
-            }));
-            return routeData;
-        };
+        if (State.localActiveRoute === srcRoute) State.stores = State.db.routes[srcRoute];
+        else if (State.localActiveRoute === dstRoute) State.stores = State.db.routes[dstRoute];
 
         try {
-            // ─── Active ───────────────────────────────────────────────
-            if (planVal === 'active') {
-                UI.showLoader('กำลังโหลด Active Plan...', 'ดึงข้อมูลจาก Firestore');
-                const routeList = (await App.dbRef.get()).data()?.routeList || [];
-                const routeData = await _loadFromFirestore(App.routesCol(), routeList, routeVal);
-                UI.hideLoader();
-                ExportCtrl._writeExcel(routeData, 'Active');
-                return;
-            }
-
-            // ─── Draft เดือนที่เลือก ──────────────────────────────────
-            if (planVal === 'draft') {
-                if (!monthVal) return UI.showErrorToast('⚠️ กรุณาเลือกเดือน Draft');
-                // ถ้าเดือนที่เลือก = planMode ปัจจุบัน → ใช้ State แทน (เร็วกว่า)
-                if (App._planMode === 'draft:' + monthVal) {
-                    const routeData = {};
-                    if (routeVal === 'ALL') Object.assign(routeData, State.db.routes);
-                    else routeData[routeVal] = State.db.routes[routeVal] || [];
-                    ExportCtrl._writeExcel(routeData, `Draft_${monthVal}`);
-                    return;
-                }
-                UI.showLoader(`กำลังโหลด Draft ${monthVal}...`, 'ดึงข้อมูลจาก Firestore');
-                const draftDoc  = await App.draftsCol().doc(monthVal).get();
-                const routeList = draftDoc.exists ? (draftDoc.data().routeList || []) : [];
-                const col = App.draftsCol().doc(monthVal).collection('routes');
-                const routeData = await _loadFromFirestore(col, routeList, routeVal);
-                UI.hideLoader();
-                ExportCtrl._writeExcel(routeData, `Draft_${monthVal}`);
-                return;
-            }
-
-            // ─── History เดือนที่เลือก ────────────────────────────────
-            if (planVal === 'history') {
-                if (!monthVal) return UI.showErrorToast('⚠️ กรุณาเลือกเดือน History');
-                UI.showLoader(`กำลังโหลด History ${monthVal}...`, 'ดึงข้อมูลจาก Firestore');
-                const histDoc   = await App.dbRef.collection('history').doc(monthVal).get();
-                const routeList = histDoc.exists ? (histDoc.data().routeList || Object.keys(State.db.routes)) : [];
-                const col = App.dbRef.collection('history').doc(monthVal).collection('routes');
-                const routeData = await _loadFromFirestore(col, routeList, routeVal);
-                UI.hideLoader();
-                ExportCtrl._writeExcel(routeData, `History_${monthVal}`);
-                return;
-            }
-
-            // ─── Current (default) — ใช้ State ────────────────────────
-            const routeData = {};
-            if (routeVal === 'ALL') Object.assign(routeData, State.db.routes);
-            else routeData[routeVal] = State.db.routes[routeVal] || [];
-            const label = App._planMode === 'active' ? 'Active' :
-                App._planMode.startsWith('draft:')   ? 'Draft_'   + App._planMode.replace('draft:','') :
-                                                       'History_' + App._planMode.replace('history:','');
-            ExportCtrl._writeExcel(routeData, label);
-
+            await Promise.all([
+                App.currentRoutesCol().doc(srcRoute).set({ stores: State.db.routes[srcRoute] }),
+                App.currentRoutesCol().doc(dstRoute).set({ stores: State.db.routes[dstRoute] }),
+            ]);
+            StoreTrans.close();
+            App.sync();
+            UI.showSaveToast(`✅ ย้าย ${moving.length} ร้าน → ${dstRoute}`);
         } catch (err) {
-            UI.hideLoader();
-            UI.showErrorToast('❌ Export ไม่สำเร็จ: ' + err.message);
+            UI.showErrorToast('❌ ย้ายร้านไม่สำเร็จ: ' + err.message);
         }
     },
-
-    _writeExcel: (routeData, label) => {
-        const allStores = [];
-        Object.entries(routeData).forEach(([routeName, stores]) => {
-            (stores || []).forEach(s => {
-                allStores.push({
-                    'Route':           routeName,
-                    'CY':              s.cy || '',
-                    'รหัส':            s.id,
-                    'ชื่อ':            s.name,
-                    'Sales':           s.salesCode || '',
-                    'ประเภทร้านค้า1':  s.shopType || '',
-                    'Sold To City':    s.subDistrict || '',
-                    'Sold To State':   s.district || '',
-                    'Address 5':       s.province || '',
-                    'Latitude':        s.lat,
-                    'Longitude':       s.lng,
-                    'ชื่อตลาด':        s.marketName || '',
-                    'Day':             s.days && s.days.length > 0 ? s.days[0] : '',
-                    'seq':             (() => {
-                        const d0 = s.days && s.days.length > 0 ? s.days[0] : '';
-                        return (s.seqs && d0 && s.seqs[d0] !== undefined) ? s.seqs[d0] : '';
-                    })()
-                });
-            });
-        });
-
-        if (!allStores.length) return UI.showErrorToast('ไม่มีข้อมูลให้โหลดครับ');
-
-        allStores.sort((a, b) => {
-            if (a['Route'] !== b['Route']) return a['Route'].localeCompare(b['Route'], 'th', { numeric: true });
-            const da = a['Day'] ? parseInt(String(a['Day']).replace('Day ', '')) : 999;
-            const db2 = b['Day'] ? parseInt(String(b['Day']).replace('Day ', '')) : 999;
-            return da - db2;
-        });
-
-        const ws = XLSX.utils.json_to_sheet(allStores, {
-            header: ['Route','CY','รหัส','ชื่อ','Sales','ประเภทร้านค้า1','Sold To City','Sold To State','Address 5','Latitude','Longitude','ชื่อตลาด','Day','seq']
-        });
-        ws['!cols'] = [
-            {wch:10},{wch:14},{wch:12},{wch:40},{wch:10},{wch:10},
-            {wch:18},{wch:18},{wch:14},{wch:14},{wch:14},{wch:30},{wch:6},{wch:6}
-        ];
-
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, 'RoutePlan');
-        const now = new Date();
-        const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
-        XLSX.writeFile(wb, `RoutePlan_${label}_${dateStr}.xlsx`);
-        UI.showSaveToast(`✅ Export ${allStores.length} ร้าน เรียบร้อย`);
-    },
-
-    // backward compat สำหรับ ExcelIO.export() เดิม
-    exportCurrent: () => {
-        const routeData = { [State.localActiveRoute]: State.stores };
-        ExportCtrl._writeExcel(routeData, State.localActiveRoute);
-    }
 };
 
-// ==========================================
-// 🗓️ ฟังก์ชัน utility — แปลง YYYY_MM → ไทย
-// ==========================================
-const DateUtil = {
-    // แปลง YYYY_MM → "มิถุนายน 2569" (พ.ศ.)
-    ymToThai: (ym) => {
-        if (!ym) return '';
-        const [y, m] = ym.split('_');
-        const d = new Date(+y, +m - 1, 1);
-        return d.toLocaleDateString('th-TH', { year: 'numeric', month: 'long' });
-    },
-    // แปลง YYYY_MM → "มิ.ย. 2569"
-    ymToThaiShort: (ym) => {
-        if (!ym) return '';
-        const [y, m] = ym.split('_');
-        const d = new Date(+y, +m - 1, 1);
-        return d.toLocaleDateString('th-TH', { year: 'numeric', month: 'short' });
-    },
-    // YYYY_MM ของเดือนปัจจุบัน
-    currentYM: () => {
-        const d = new Date();
-        return `${d.getFullYear()}_${String(d.getMonth()+1).padStart(2,'0')}`;
-    }
-};
+console.log('✅ admin-data v2 loaded');
