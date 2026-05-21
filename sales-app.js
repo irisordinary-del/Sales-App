@@ -46,7 +46,7 @@ const colSales = db.collection('v1_sales_chunks');
 let State = {
     myRoute: "", allStores: [], routeStores: [], sales: {},
     currentDay: "", isLoaded: false, mapNeedsFit: true,
-    calendarConfig: null, activePlanYM: null, activePlanMode: 'active',
+    calendarConfig: null, activePlanYM: null, currentPlanYM: '',
     viewMode: 'sales', centerId: null, allRoutes: {}, routeList: [],
     _filterMarket: '',
     planList: [], planCache: {}, planCenterDocId: '',
@@ -189,6 +189,13 @@ const UI = {
 
 // LoadBar defined in sales.html inline script
 
+// ✅ Guard: รอ Leaflet พร้อมก่อน init map (ป้องกัน defer โหลดไม่ทัน)
+function waitForLeaflet(cb, tries = 0) {
+    if (typeof L !== 'undefined' && typeof L.map === 'function') { cb(); return; }
+    if (tries > 50) { console.warn('[Map] Leaflet timeout'); return; } // timeout 5 วิ
+    setTimeout(() => waitForLeaflet(cb, tries + 1), 100);
+}
+
 const App = {
     checkAuth: () => {
         Auth.renewSession?.();
@@ -220,43 +227,33 @@ const App = {
             State.planCenterDocId = centerDocId;
             const snap = await App._getWithTimeout(db.collection('appData').doc(centerDocId), 5000);
             const meta = snap.exists ? snap.data() : {};
-            const draftList = meta.draftList || [];
-            const _now     = new Date();
-            const _activeYM = `${_now.getFullYear()}_${String(_now.getMonth()+1).padStart(2,'0')}`;
-            const allPlans  = new Set([...draftList]);
-            if (!draftList.includes(_activeYM)) allPlans.add('active:' + _activeYM);
-            State.planList = Array.from(allPlans).sort().reverse();
-            console.log('📅 planList:', State.planList);
+            // ✅ ระบบใหม่: ใช้ planList และ currentPlanYM โดยตรง
+            State.planList       = (meta.planList || []).sort().reverse();
+            State.currentPlanYM  = meta.currentPlanYM || '';
+            console.log('📅 planList:', State.planList, 'current:', State.currentPlanYM);
         } catch(e) { console.warn('loadPlanList:', e); State.planList = []; }
     },
 
     loadPlanData: async (ym) => {
         if (State.planCache[ym]) return State.planCache[ym];
         const centerDocId = State.planCenterDocId;
-        const isActive    = ym.startsWith('active:');
-        const realYM      = isActive ? ym.replace('active:', '') : ym;
+        // ✅ ระบบใหม่: ดึงจาก plans/{ym}/routes/{myRoute}
         try {
-            const cfgRef   = isActive
-                ? db.collection('appData').doc(centerDocId)
-                : db.collection('appData').doc(centerDocId).collection('drafts').doc(realYM);
-            const routeRef = isActive
-                ? db.collection('appData').doc(centerDocId).collection('routes').doc(State.myRoute)
-                : db.collection('appData').doc(centerDocId).collection('drafts').doc(realYM).collection('routes').doc(State.myRoute);
-
+            const planRef  = db.collection('appData').doc(centerDocId).collection('plans').doc(ym);
+            const routeRef = planRef.collection('routes').doc(State.myRoute);
             const [cfgSnap, routeSnap] = await Promise.all([
-                App._getWithTimeout(cfgRef,   15000),
-                App._getWithTimeout(routeRef, 15000),
+                App._getWithTimeout(planRef,   15000),
+                App._getWithTimeout(routeRef,  15000),
             ]);
-            const calendarConfig = cfgSnap.exists   ? (cfgSnap.data().calendarConfig  || null) : null;
-            const stores         = routeSnap.exists ? (routeSnap.data().stores         || [])   : [];
-            State.planCache[ym]  = { stores, calendarConfig, ym: realYM };
+            const calendarConfig = cfgSnap.exists   ? (cfgSnap.data().calendarConfig || null) : null;
+            const stores         = routeSnap.exists ? (routeSnap.data().stores        || [])  : [];
+            State.planCache[ym]  = { stores, calendarConfig, ym };
             return State.planCache[ym];
         } catch(e) {
             console.warn('loadPlanData:', ym, e);
-            const _loadedYM = State.activePlanYM || '';
-            State.planCache[ym] = realYM === _loadedYM && State.allStores.length > 0
-                ? { stores: State.allStores, calendarConfig: State.calendarConfig, ym: realYM }
-                : { stores: [], calendarConfig: null, ym: realYM };
+            State.planCache[ym] = ym === State.activePlanYM && State.allStores.length > 0
+                ? { stores: State.allStores, calendarConfig: State.calendarConfig, ym }
+                : { stores: [], calendarConfig: null, ym };
             return State.planCache[ym];
         }
     },
@@ -266,7 +263,6 @@ const App = {
         State.allStores      = data.stores;
         State.calendarConfig = data.calendarConfig;
         State.activePlanYM   = data.ym;
-        State.activePlanMode = ym.startsWith('active:') ? 'active' : 'draft';
         State._filterMarket  = '';
         if (State.isLoaded) { Processor.run(); CalendarCtrl.render(); }
     },
@@ -300,23 +296,19 @@ const App = {
         } catch(e) { State.routeList = []; }
 
         // ─── detect routeColRef (draft หรือ active) ───────────────────
-        const _getYMSup = (o=0) => { const d=new Date(); d.setMonth(d.getMonth()+o); return `${d.getFullYear()}_${String(d.getMonth()+1).padStart(2,'0')}`; };
-        const _nowYMSup = _getYMSup(0), _nextYMSup = _getYMSup(1);
+        // ✅ ระบบใหม่: ดึง currentPlanYM จาก centerDoc แล้วใช้ plans/{ym}
         let routeColRef;
         try {
-            const [_dn, _dx] = await Promise.all([
-                App._getWithTimeout(db.collection('appData').doc(_centerDocId).collection('drafts').doc(_nowYMSup),  5000),
-                App._getWithTimeout(db.collection('appData').doc(_centerDocId).collection('drafts').doc(_nextYMSup), 5000),
-            ]);
-            const _useYM = _dn.exists ? _nowYMSup : (_dx.exists ? _nextYMSup : null);
-            if (_useYM) {
-                routeColRef          = db.collection('appData').doc(_centerDocId).collection('drafts').doc(_useYM).collection('routes');
-                State.activePlanMode = 'draft'; State.activePlanYM = _useYM;
-            } else {
-                routeColRef          = db.collection('appData').doc(_centerDocId).collection('routes');
-                State.activePlanMode = 'active';
-            }
-        } catch(e) { routeColRef = db.collection('appData').doc(_centerDocId).collection('routes'); State.activePlanMode = 'active'; }
+            const _metaSnap = await App._getWithTimeout(db.collection('appData').doc(_centerDocId), 5000);
+            const _meta     = _metaSnap.exists ? _metaSnap.data() : {};
+            const _nowYMSup = (() => { const d=new Date(); return `${d.getFullYear()}_${String(d.getMonth()+1).padStart(2,'0')}`; })();
+            const _useYM    = _meta.currentPlanYM || (_meta.planList?.[0]) || _nowYMSup;
+            routeColRef      = db.collection('appData').doc(_centerDocId).collection('plans').doc(_useYM).collection('routes');
+            State.activePlanYM = _useYM;
+        } catch(e) {
+            const _nowYMSup = (() => { const d=new Date(); return `${d.getFullYear()}_${String(d.getMonth()+1).padStart(2,'0')}`; })();
+            routeColRef = db.collection('appData').doc(_centerDocId).collection('plans').doc(_nowYMSup).collection('routes');
+        }
 
         LoadBar.setProgress(30, 'โหลดข้อมูลร้านทุกสาย...');
 
@@ -366,12 +358,10 @@ const App = {
 
     logout: () => { Auth.logout(); },
 
-    loadCalendarConfig: async (centerDocId, ym, mode) => {
+    loadCalendarConfig: async (centerDocId, ym) => {
+        // ✅ ระบบใหม่: calendarConfig อยู่ใน plans/{ym}
         try {
-            const cfgRef = mode === 'drafts'
-                ? db.collection('appData').doc(centerDocId).collection('drafts').doc(ym)
-                : db.collection('appData').doc(centerDocId);
-            const snap = await cfgRef.get();
+            const snap = await db.collection('appData').doc(centerDocId).collection('plans').doc(ym).get();
             State.calendarConfig = snap.exists ? (snap.data().calendarConfig || null) : null;
             if (typeof CalendarCtrl !== 'undefined') CalendarCtrl.render();
         } catch(e) {
@@ -407,7 +397,7 @@ const App = {
                     UI.restoreTab();
                     State.isLoaded = true;
                     if (typeof CalendarCtrl !== 'undefined') CalendarCtrl.init();
-                    setTimeout(() => MapCtrl.initAndDraw(), 400);
+                    waitForLeaflet(() => MapCtrl.initAndDraw());
                 }
             }
         };
@@ -416,59 +406,65 @@ const App = {
         const _centerDocId = _centerMatch ? (_centerMatch[1] + '_main') : 'v1_main';
         docMain = db.collection('appData').doc(_centerDocId);
 
-        await App.loadPlanList(_centerDocId);
+        const _centerRef = db.collection('appData').doc(_centerDocId);
+        LoadBar.setProgress(15, 'กำลังเชื่อมต่อ...');
 
-        const _getYM  = (o=0) => { const d=new Date(); d.setMonth(d.getMonth()+o); return `${d.getFullYear()}_${String(d.getMonth()+1).padStart(2,'0')}`; };
-        const _nowYM  = _getYM(0), _nextYM = _getYM(1);
-        let routeColRef;
+        // ✅ ระบบใหม่: ดึง centerDoc เพื่อหา currentPlanYM + planList
+        let _centerSnap;
+        try { _centerSnap = await App._getWithTimeout(_centerRef, 6000); }
+        catch(e) { _centerSnap = { exists: false, data: () => ({}) }; }
+
+        const _centerData    = _centerSnap?.exists ? _centerSnap.data() : {};
+        State.planCenterDocId = _centerDocId;
+        State.planList        = (_centerData.planList || []).sort().reverse();
+
+        const _nowYM = (() => { const d=new Date(); return `${d.getFullYear()}_${String(d.getMonth()+1).padStart(2,'0')}`; })();
+        const _useYM = _centerData.currentPlanYM || State.planList[0] || _nowYM;
+
+        LoadBar.setProgress(20, `📅 Plan ${_useYM}...`);
+        App.loadCalendarConfig(_centerDocId, _useYM);
+
+        // ดึง plan metadata + route stores + sales พร้อมกัน
+        const _planRef  = _centerRef.collection('plans').doc(_useYM);
+        const _routeRef = _planRef.collection('routes').doc(State.myRoute);
+
+        const [_planResult, _routeResult, _salesResult] = await Promise.allSettled([
+            App._getWithTimeout(_planRef,  8000),
+            App._getWithTimeout(_routeRef, 10000),
+            colSales.get(),
+        ]);
+
+        // process plan config
         try {
-            const [_dn, _dx] = await Promise.all([
-                db.collection('appData').doc(_centerDocId).collection('drafts').doc(_nowYM).get(),
-                db.collection('appData').doc(_centerDocId).collection('drafts').doc(_nextYM).get(),
-            ]);
-            const _useYM = _dn.exists ? _nowYM : (_dx.exists ? _nextYM : null);
-            if (_useYM) {
-                routeColRef          = db.collection('appData').doc(_centerDocId).collection('drafts').doc(_useYM).collection('routes');
-                State.activePlanYM   = _useYM; State.activePlanMode = 'draft';
-                App.loadCalendarConfig(_centerDocId, _useYM, 'drafts');
-                LoadBar.setProgress(15, `📅 โหลด Plan ${_useYM}...`);
-            } else {
-                routeColRef          = db.collection('appData').doc(_centerDocId).collection('routes');
-                State.activePlanYM   = _nowYM; State.activePlanMode = 'active';
-                App.loadCalendarConfig(_centerDocId, _nowYM, 'active');
-            }
-        } catch(e) {
-            routeColRef          = db.collection('appData').doc(_centerDocId).collection('routes');
-            State.activePlanMode = 'active';
-        }
+            const pd = _planResult.status === 'fulfilled' ? _planResult.value : null;
+            State.calendarConfig = pd?.exists ? (pd.data().calendarConfig || null) : null;
+            State.activePlanYM   = _useYM;
+        } catch(e) {}
 
-        LoadBar.setProgress(20, 'กำลังดึงข้อมูลร้านค้า...');
-
-        // ใช้ get() แทน onSnapshot ลด WebChannel load
+        // process stores
         try {
-            const doc  = await docMain.get();
-            if (!doc.exists) {
-                State.allStores = [];
-            } else {
-                const data = doc.data();
-                if (data.routes?.[State.myRoute]) {
-                    State.allStores = data.routes[State.myRoute] || [];
-                } else {
-                    LoadBar.setProgress(35, 'ดึงข้อมูลจาก subcollection...');
-                    const rd = await routeColRef.doc(State.myRoute).get();
-                    State.allStores = rd.exists ? (rd.data().stores || []) : [];
-                }
-            }
+            const rd = _routeResult.status === 'fulfilled' ? _routeResult.value : null;
+            State.allStores = rd?.exists ? (rd.data().stores || []) : [];
         } catch(e) { State.allStores = []; }
         isMainLoaded = true; checkReady();
 
-        // onSnapshot เฉพาะ route ตัวเอง — real-time ลำดับจาก Admin
-        App._unsubRoute = routeColRef.doc(State.myRoute).onSnapshot(rd => {
+        // process sales
+        try {
+            if (_salesResult.status === 'fulfilled') {
+                let merged = {};
+                _salesResult.value.forEach(doc => Object.assign(merged, doc.data()));
+                State.sales = merged;
+            }
+        } catch(e) { State.sales = {}; }
+        isSalesLoaded = true; checkReady();
+
+        // ✅ onSnapshot เฉพาะ route ตัวเอง จาก plans/{ym}/routes/{myRoute}
+        const _liveRouteRef = _centerRef.collection('plans').doc(_useYM).collection('routes').doc(State.myRoute);
+        App._unsubRoute = _liveRouteRef.onSnapshot(rd => {
             if (!rd.exists) return;
             State.allStores = rd.data().stores || [];
             if (State.activePlanYM) {
-                const _ck = State.activePlanMode === 'active' ? 'active:' + State.activePlanYM : State.activePlanYM;
-                State.planCache[_ck] = { stores: State.allStores, calendarConfig: State.calendarConfig, ym: State.activePlanYM };
+                State.planCache[State.activePlanYM] = { stores: State.allStores, calendarConfig: State.calendarConfig, ym: State.activePlanYM };
             }
             if (State.isLoaded) {
                 Processor.run();
@@ -477,16 +473,7 @@ const App = {
             }
         });
 
-        LoadBar.setProgress(30, 'กำลังโหลดข้อมูลยอดขาย...');
-
-        // KPI ใช้ get() ไม่ต้อง real-time
-        try {
-            const snap = await colSales.get();
-            let merged = {};
-            snap.forEach(doc => Object.assign(merged, doc.data()));
-            State.sales = merged;
-        } catch(e) { State.sales = {}; }
-        isSalesLoaded = true; checkReady();
+        // sales โหลดแล้วใน Promise.allSettled ด้านบน
     },
 };
 
@@ -667,15 +654,10 @@ const Processor = {
         const _centerDocId = _centerMatch ? (_centerMatch[1] + '_main') : 'v1_main';
 
         // ✅ เขียนไปยัง path ที่ถูกต้องตาม planMode (draft หรือ active)
-        let _writeRef;
-        if (State.activePlanMode === 'draft' && State.activePlanYM) {
-            _writeRef = db.collection('appData').doc(_centerDocId)
-                .collection('drafts').doc(State.activePlanYM)
-                .collection('routes').doc(State.myRoute);
-        } else {
-            _writeRef = db.collection('appData').doc(_centerDocId)
-                .collection('routes').doc(State.myRoute);
-        }
+        // ✅ ระบบใหม่: บันทึกไปที่ plans/{ym}/routes/{myRoute}
+        const _writeRef = db.collection('appData').doc(_centerDocId)
+            .collection('plans').doc(State.activePlanYM)
+            .collection('routes').doc(State.myRoute);
         _writeRef.set({ stores: updated })
             .catch(e => showSalesToast('❌ บันทึกลำดับไม่สำเร็จ: ' + e.message, true));
     },
@@ -900,7 +882,7 @@ const CalendarCtrl = {
         for (let i = 0; i < firstDow; i++) html += `<div></div>`;
 
         const _renderYM    = `${year}_${String(month+1).padStart(2,'0')}`;
-        const _renderPlan  = State.planCache[_renderYM] || State.planCache['active:' + _renderYM];
+        const _renderPlan  = State.planCache[_renderYM];
         const _renderCfg   = _renderPlan?.calendarConfig || cfg;
         const _renderStores = _renderPlan?.stores || State.allStores;
 
@@ -917,7 +899,7 @@ const CalendarCtrl = {
             else if (isWeekend)  { bgColor = '#f9fafb'; textColor = '#6b7280'; }
 
             const _cellYM       = _renderYM;
-            const _hasPlan      = State.planList.some(p => p === _cellYM || p === 'active:' + _cellYM);
+            const _hasPlan      = State.planList.some(p => p === _cellYM);
             let hasRoute = false, hasPlanNotLoaded = false;
             if (dayLabel) {
                 if (_renderPlan) {
@@ -940,7 +922,8 @@ const CalendarCtrl = {
             const _cellCfg    = State.calendarConfig;
             const isDateMode  = !_cellCfg || _cellCfg.mode === 'date';
             const dayNum      = dayLabel ? parseInt(dayLabel.replace('Day ','')) : null;
-            const isSameAsDate = isDateMode && dayNum === d;
+            // ✅ ซ่อน Day badge เมื่อตัวเลข Day ตรงกับวันที่ในทุก mode (ไม่ใช่แค่ date mode)
+            const isSameAsDate = dayNum === d;
             const clickHandler = dayLabel ? `CalendarCtrl.goToDay('${dayLabel}')` : '';
 
             html += `
@@ -967,7 +950,7 @@ const CalendarCtrl = {
         CalendarCtrl.closeDaySheet();
         const _calYM = `${CalendarCtrl._year}_${String(CalendarCtrl._month+1).padStart(2,'0')}`;
         if (_calYM !== (State.activePlanYM || '')) {
-            const _pk = State.planList.find(p => p === _calYM || p === 'active:' + _calYM);
+            const _pk = State.planList.find(p => p === _calYM);
             if (_pk) { showSalesToast('⏳ กำลังโหลด...'); await App.switchToPlan(_pk); }
         }
         setTimeout(() => {
@@ -986,7 +969,7 @@ const CalendarCtrl = {
     showDaySheet: async (dayLabel) => {
         const _calYM = `${CalendarCtrl._year}_${String(CalendarCtrl._month+1).padStart(2,'0')}`;
         if (_calYM !== (State.activePlanYM || '')) {
-            const _pk = State.planList.find(p => p === _calYM || p === 'active:' + _calYM);
+            const _pk = State.planList.find(p => p === _calYM);
             if (_pk) await App.switchToPlan(_pk);
         }
         const _sy = CalendarCtrl._year, _sm = CalendarCtrl._month;
@@ -1043,10 +1026,9 @@ const CalendarCtrl = {
         CalendarCtrl._year  = now.getFullYear();
         CalendarCtrl._month = now.getMonth();
         // seed cache ด้วยข้อมูลปัจจุบัน
-        const _curYM  = State.activePlanYM || '';
-        const _curKey = State.activePlanMode === 'active' ? ('active:' + _curYM) : _curYM;
-        if (_curYM && State.allStores.length > 0 && !State.planCache[_curKey]) {
-            State.planCache[_curKey] = { stores: State.allStores, calendarConfig: State.calendarConfig, ym: _curYM };
+        const _curYM = State.activePlanYM || '';
+        if (_curYM && State.allStores.length > 0 && !State.planCache[_curYM]) {
+            State.planCache[_curYM] = { stores: State.allStores, calendarConfig: State.calendarConfig, ym: _curYM };
         }
         CalendarCtrl.render();
         popup.style.display = 'block';
@@ -1352,14 +1334,10 @@ const SupervisorUI = {
         const centerDocId = centerMatch ? (centerMatch[1] + '_main') : 'v1_main';
 
         let _writeRef;
-        if (State.activePlanMode === 'draft' && State.activePlanYM) {
-            _writeRef = db.collection('appData').doc(centerDocId)
-                .collection('drafts').doc(State.activePlanYM)
-                .collection('routes').doc(routeId);
-        } else {
-            _writeRef = db.collection('appData').doc(centerDocId)
-                .collection('routes').doc(routeId);
-        }
+        // ✅ ระบบใหม่: บันทึกไปที่ plans/{ym}/routes/{routeId}
+        _writeRef = db.collection('appData').doc(centerDocId)
+            .collection('plans').doc(State.activePlanYM)
+            .collection('routes').doc(routeId);
         _writeRef.set({ stores: updated })
             .then(() => showSalesToast('✅ บันทึกลำดับเรียบร้อย'))
             .catch(e  => showSalesToast('❌ บันทึกไม่สำเร็จ: ' + e.message, true));

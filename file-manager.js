@@ -441,19 +441,16 @@ const FileManager = {
                         `💾 กำลังบันทึก... (${_si+1}/${savedRoutes.length} สาย)`,
                         `สาย ${_n} — ${(State.db.routes[_n]||[]).length} ร้าน`
                     );
-                    await App.currentRoutesCol().doc(_n).set({ stores: State.db.routes[_n] || [] });
+                    // ✅ ระบบใหม่: บันทึกไปที่ plans/{ym}/routes/{name}
+                    await App.planRoutesCol(App._currentPlanYM).doc(_n).set({ stores: State.db.routes[_n] || [] });
                 }
 
-                const isDraft = App._planMode?.startsWith('draft:');
-                if (isDraft) {
-                    const ym = App._planMode.replace('draft:', '');
-                    await App.draftsCol().doc(ym).set(
-                        { routeList, cycleDays: State.db.cycleDays || 24, updatedAt: firebase.firestore.FieldValue.serverTimestamp() },
-                        { merge: true }
-                    );
-                } else {
-                    await App.dbRef.update({ routeList, cycleDays: State.db.cycleDays || 24 });
-                }
+                // อัปเดต plan metadata
+                const ym = App._currentPlanYM;
+                await App.planRef(ym).set(
+                    { routeList, cycleDays: State.db.cycleDays || 24, updatedAt: firebase.firestore.FieldValue.serverTimestamp() },
+                    { merge: true }
+                );
 
                 if (!State.localActiveRoute || !State.db.routes[State.localActiveRoute]) {
                     State.localActiveRoute = routeList[0];

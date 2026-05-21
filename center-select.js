@@ -1,3 +1,20 @@
+// ✅ Toast helper — แทน alert()
+function _csToast(msg, isError = false) {
+    let t = document.getElementById('_cs-toast');
+    if (!t) {
+        t = document.createElement('div');
+        t.id = '_cs-toast';
+        t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);padding:10px 20px;border-radius:10px;font-size:13px;font-weight:700;color:#fff;z-index:99999;transition:transform 0.3s,opacity 0.3s;opacity:0;font-family:Prompt,sans-serif;max-width:90vw;text-align:center;';
+        document.body.appendChild(t);
+    }
+    t.style.background = isError ? '#dc2626' : '#111827';
+    t.textContent = msg;
+    t.style.transform = 'translateX(-50%) translateY(0)';
+    t.style.opacity = '1';
+    clearTimeout(t._tid);
+    t._tid = setTimeout(() => { t.style.transform = 'translateX(-50%) translateY(80px)'; t.style.opacity = '0'; }, 3000);
+}
+
 // ==========================================
 // 🏢 Center Selector Logic
 // ==========================================
@@ -64,7 +81,7 @@ const App = {
         if (!id || !id.trim()) return;
         const centerId = id.trim();
         if (App.centers[centerId]) {
-            alert('มีศูนย์นี้แล้วครับ');
+            _csToast('⚠️ มีศูนย์นี้แล้วครับ', true);
             return;
         }
         const name = prompt('ชื่อศูนย์ (เช่น ศูนย์ 406):', 'ศูนย์ ' + centerId);
@@ -89,10 +106,10 @@ const App = {
             }, { merge: true })
         ])
         .then(() => {
-            alert('✅ สร้างศูนย์ ' + centerId + ' เรียบร้อยแล้วครับ');
+            _csToast('✅ สร้างศูนย์ ' + centerId + ' เรียบร้อยแล้วครับ');
             App.select(centerId); // ไปที่ศูนย์ใหม่เลย
         })
-        .catch(err => alert('❌ สร้างไม่สำเร็จ: ' + err.message));
+        .catch(err => _csToast('❌ สร้างไม่สำเร็จ: ' + err.message, true));
     },
 
     renderError: () => {

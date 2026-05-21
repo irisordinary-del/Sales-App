@@ -224,7 +224,7 @@ service cloud.firestore {
 
   function validCenterDoc(data) {
     return data.keys().hasAny(['routeList', 'cycleDays', 'routes', 'kpiSettings', 'savedRawColumns', 'createdAt',
-                                'draftList', 'historyList', 'lastActivated', 'updatedAt'])
+                                'draftList', 'historyList', 'lastActivated', 'updatedAt', 'calendarConfig', 'skuWhitelist'])
            && (!data.keys().hasAll(['routeList']) || data.routeList is list)
            && (!data.keys().hasAll(['cycleDays']) || data.cycleDays is number)
            && (!data.keys().hasAll(['draftList']) || data.draftList is list)

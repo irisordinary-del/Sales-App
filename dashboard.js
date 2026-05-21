@@ -3,6 +3,26 @@
 // v1.0 | Firebase Firestore | Role-Aware
 // ==========================================
 
+// ✅ DateUtil fallback — ถ้า app-config.js โหลดช้า
+if (typeof DateUtil === 'undefined') {
+    window.DateUtil = {
+        ymToThai: (ym) => {
+            if (!ym) return '';
+            const [y, m] = ym.split('_');
+            return new Date(+y, +m-1, 1).toLocaleDateString('th-TH', { year:'numeric', month:'long' });
+        },
+        ymToThaiShort: (ym) => {
+            if (!ym) return '';
+            const [y, m] = ym.split('_');
+            return new Date(+y, +m-1, 1).toLocaleDateString('th-TH', { year:'numeric', month:'short' });
+        },
+        currentYM: () => {
+            const d = new Date();
+            return `${d.getFullYear()}_${String(d.getMonth()+1).padStart(2,'0')}`;
+        },
+    };
+}
+
 const Dashboard = {
 
     // ─── State ───────────────────────────────────────────────────────────
@@ -335,12 +355,34 @@ const Dashboard = {
         // Detect year_month from filename or ask
         let ym = Dashboard._detectYM(file.name);
         if (!ym) {
-            const input = prompt('ตรวจจับเดือนไม่ได้ กรุณาระบุ (เช่น 2026_04):');
-            if (!input || !/^\d{4}_\d{2}$/.test(input.trim())) return alert('รูปแบบไม่ถูกต้อง ใช้ YYYY_MM');
-            ym = input.trim();
+            // ใช้ UI input แทน prompt/alert
+            const input = await new Promise(resolve => {
+                const overlay = document.createElement('div');
+                overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9999;display:flex;align-items:center;justify-content:center;';
+                const box = document.createElement('div');
+                box.style.cssText = 'background:#fff;border-radius:16px;padding:24px;max-width:320px;width:90%;font-family:Prompt,sans-serif;';
+                box.innerHTML = '<p style="font-size:13px;font-weight:700;color:#111827;margin-bottom:12px;">ระบุเดือน (เช่น 2026_04)</p>' +
+                    '<input id="_ym-inp" type="text" placeholder="YYYY_MM" style="width:100%;box-sizing:border-box;padding:9px 12px;border:1px solid #d1d5db;border-radius:10px;font-size:14px;font-family:inherit;outline:none;margin-bottom:14px;">' +
+                    '<div style="display:flex;gap:8px;justify-content:flex-end;">' +
+                    '<button id="_ym-cancel" style="padding:7px 16px;border-radius:8px;border:1px solid #d1d5db;background:#fff;color:#6b7280;cursor:pointer;font-size:13px;font-weight:600;">ยกเลิก</button>' +
+                    '<button id="_ym-ok" style="padding:7px 16px;border-radius:8px;border:none;background:#4f46e5;color:#fff;cursor:pointer;font-size:13px;font-weight:700;">ตกลง</button></div>';
+                overlay.appendChild(box);
+                document.body.appendChild(overlay);
+                const inp = box.querySelector('#_ym-inp');
+                inp.focus();
+                const close = (val) => { document.body.removeChild(overlay); resolve(val); };
+                box.querySelector('#_ym-cancel').onclick = () => close(null);
+                box.querySelector('#_ym-ok').onclick = () => close(inp.value.trim());
+                inp.addEventListener('keydown', e => { if (e.key === 'Enter') close(inp.value.trim()); if (e.key === 'Escape') close(null); });
+            });
+            if (!input || !/^\d{4}_\d{2}$/.test(input)) {
+                if (input) Dashboard._toast('⚠️ รูปแบบไม่ถูกต้อง ใช้ YYYY_MM', true);
+                return;
+            }
+            ym = input;
         }
 
-        const confirm = window.confirm(`อัปโหลดข้อมูล Sellout เดือน ${ym} ?\n(ไฟล์เก่าจะถูกแทนที่)`);
+        const confirm = await new Promise(r => { if (window.confirm(`อัปโหลดข้อมูล Sellout เดือน ${ym} ?\n(ไฟล์เก่าจะถูกแทนที่)`)) r(true); else r(false); });
         if (!confirm) return;
 
         Dashboard._showUploadBar('กำลังอ่านไฟล์...', 5);
@@ -354,7 +396,7 @@ const Dashboard = {
             Dashboard._showUploadBar('กำลังแปลงข้อมูล...', 20);
 
             const rows = Dashboard._normalizeRows(raw);
-            if (rows.length === 0) return alert('ไม่พบข้อมูลในไฟล์');
+            if (rows.length === 0) { Dashboard._toast('⚠️ ไม่พบข้อมูลในไฟล์', true); return; }
 
             Dashboard._showUploadBar(`บันทึก ${rows.length} แถว...`, 40);
 
@@ -370,7 +412,7 @@ const Dashboard = {
 
         } catch (e) {
             Dashboard._hideUploadBar();
-            alert('❌ อัปโหลดไม่สำเร็จ: ' + e.message);
+            Dashboard._toast('❌ อัปโหลดไม่สำเร็จ: ' + e.message, true);
             console.error(e);
         }
     },
@@ -486,7 +528,7 @@ const Dashboard = {
             Dashboard._targets = targets;
             Dashboard._closeTargetModal();
             Dashboard._render();
-        } catch (e) { alert('บันทึกไม่สำเร็จ: ' + e.message); }
+        } catch (e) { Dashboard._toast('❌ บันทึกไม่สำเร็จ: ' + e.message, true); }
     },
 
     // ─── Drill & Filter ───────────────────────────────────────────────────
@@ -1045,6 +1087,28 @@ const Dashboard = {
     _hideUploadBar: () => {
         const bar = document.getElementById('db-upload-bar');
         if (bar) bar.classList.add('hidden');
+    },
+
+    // ✅ Toast แทน alert() — ไม่ block UI
+    _toast: (msg, isError = false) => {
+        if (typeof UI !== 'undefined' && UI.showSaveToast) {
+            isError ? UI.showErrorToast(msg) : UI.showSaveToast(msg);
+            return;
+        }
+        // fallback: สร้าง toast เองถ้า UI ไม่พร้อม
+        let t = document.getElementById('_db-toast');
+        if (!t) {
+            t = document.createElement('div');
+            t.id = '_db-toast';
+            t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);padding:10px 20px;border-radius:10px;font-size:13px;font-weight:700;color:#fff;z-index:99999;transition:transform 0.3s,opacity 0.3s;opacity:0;font-family:Prompt,sans-serif;';
+            document.body.appendChild(t);
+        }
+        t.style.background = isError ? '#dc2626' : '#111827';
+        t.textContent = msg;
+        t.style.transform = 'translateX(-50%) translateY(0)';
+        t.style.opacity = '1';
+        clearTimeout(t._tid);
+        t._tid = setTimeout(() => { t.style.transform = 'translateX(-50%) translateY(80px)'; t.style.opacity = '0'; }, 3000);
     },
 
     // ─── Active Campaign Coverage on Dashboard ──────────────────────────
