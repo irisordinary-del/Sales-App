@@ -615,10 +615,24 @@ const Processor = {
         sortableList = Sortable.create(c, {
             handle:              '.drag-handle',
             animation:           150,
-            forceFallback:       false,
-            touchStartThreshold: 3,
-            disabled:            true,
-            onEnd: () => { Processor._updateSeqBadgesOnly(); },
+            // ✅ iPad fix: forceFallback ป้องกัน native drag API ทำงานผิดบน iOS
+            forceFallback:       true,
+            fallbackTolerance:   5,
+            // delay กันกด popup โดยไม่ตั้งใจ
+            delay:               80,
+            delayOnTouchOnly:    true,
+            touchStartThreshold: 4,
+            // scroll อัตโนมัติตอนลากถึงขอบ list
+            scroll:              true,
+            scrollSensitivity:   60,
+            scrollSpeed:         12,
+            // ✅ แจ้ง Resizer ให้หยุดฟัง touch ระหว่าง drag
+            onStart: () => { window._sortableDragging = true; },
+            onEnd:   () => {
+                window._sortableDragging = false;
+                Processor._updateSeqBadgesOnly();
+            },
+            disabled: true,
         });
         window._sortableInstance = sortableList;
         setTimeout(() => {

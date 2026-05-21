@@ -605,6 +605,8 @@
         // ── Touch ────────────────────────────────────────────────────────
         resizer.addEventListener('touchstart', (e) => {
             if (window.innerWidth >= 1024) return; // desktop ใช้ flex ปกติ
+            // ✅ ถ้า Sortable กำลัง drag อยู่ → ไม่ activate Resizer
+            if (window._sortableDragging) return;
             dragging = true;
             startY   = e.touches[0].clientY;
             startH   = mapCont.offsetHeight;
