@@ -17,14 +17,47 @@ body { font-family: 'Prompt', sans-serif; background-color: #f3f4f6; margin: 0; 
 .nav-item { color: #94a3b8; transition: all 0.2s; }
 .nav-item.active { color: #2563eb; }
 
-/* สัดส่วนแผนที่เริ่มต้น */
-#map-container { flex: 0 0 40%; }
-
-@media (min-width: 1024px) {
-    #map-container { flex: 0 0 60%; }
+/* สัดส่วนแผนที่เริ่มต้น — ใช้ height แบบ pixel เพื่อรองรับ drag resize */
+#map-container {
+    flex: none;
+    height: 42vh;          /* ค่าเริ่มต้น ~42% หน้าจอ */
+    min-height: 120px;
+    max-height: 75vh;
+    position: relative;
 }
 
-#resizer:active { background-color: #f3f4f6; }
+@media (min-width: 1024px) {
+    /* Desktop: กลับเป็น flex column→row ตามเดิม */
+    #map-container { flex: 0 0 60%; height: auto !important; max-height: none; }
+}
+
+/* Resizer handle — ชัดขึ้นตอนกด */
+#resizer {
+    flex: 0 0 18px !important;
+    cursor: row-resize;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    background: #fff;
+    border-top: 1px solid #e5e7eb;
+    border-bottom: 1px solid #e5e7eb;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.12s;
+}
+#resizer:active,
+#resizer.dragging { background: #eff6ff; }
+
+/* pill indicator ใน resizer */
+#resizer-pill {
+    width: 40px; height: 5px;
+    border-radius: 99px;
+    background: #d1d5db;
+    pointer-events: none;
+    transition: background 0.12s;
+}
+#resizer.dragging #resizer-pill { background: #2563eb; }
 
 /* ── Bottom Nav กันชัวร์ ── */
 #bottom-nav {
