@@ -328,8 +328,9 @@ const FileManager = {
                     else if (h.includes('lng') || h.includes('lon') || h.includes('ลองจิจูด'))       lngCol = i;
                     else if (h.includes('freq') || h.includes('ความถี่') || h.includes('f2'))        freqCol = i;
                     else if (h.includes('สายวิ่ง') || h.includes('day'))                             dayCol = i;
-                    else if (h.includes('คิว') || h.includes('seq'))                                 seqCol = i;
-                    else if (h.includes('salescode') || h.includes('รหัสเซลล์'))                    salesCodeCol = i;
+                    else if (h.includes('คิว') || h.includes('seq') || h.includes('ลำดับ') || h.includes('order')) seqCol = i;
+                    else if (h === 'route' || h === 'สายวิ่ง')                                           salesCodeCol = i;
+                    else if ((h.includes('salescode') || h.includes('รหัสเซลล์') || h === 'sales') && salesCodeCol === -1) salesCodeCol = i;
                     else if (h.includes('sales'))                                                     salesCodeCol = i;
                     else if (h.includes('ประเภท') || h.includes('type') || h.includes('shoptype'))  shopTypeCol = i;
                     else if (h.includes('sold to city') || h.includes('subdistrict') || h.includes('ตำบล'))     subDistrictCol = i;
