@@ -971,7 +971,8 @@ const CalendarCtrl = {
             const _cellCfg    = State.calendarConfig;
             const isDateMode  = !_cellCfg || _cellCfg.mode === 'date';
             const dayNum      = dayLabel ? parseInt(dayLabel.replace('Day ','')) : null;
-            const isSameAsDate = isDateMode && dayNum === d;
+            // ✅ ซ่อน Day badge เมื่อตัวเลข Day ตรงกับวันที่ในทุก mode (ไม่ใช่แค่ date mode)
+            const isSameAsDate = dayNum === d;
             const clickHandler = dayLabel ? `CalendarCtrl.goToDay('${dayLabel}')` : '';
 
             html += `
