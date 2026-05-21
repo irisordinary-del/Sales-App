@@ -938,7 +938,12 @@ const CalendarCtrl = {
 
         const _renderYM    = `${year}_${String(month+1).padStart(2,'0')}`;
         const _renderPlan  = State.planCache[_renderYM];
-        const _renderCfg   = _renderPlan?.calendarConfig || cfg;
+        // ✅ FIX: ถ้า _renderPlan มีใน cache → ใช้ calendarConfig ของเดือนนั้นเท่านั้น
+        // ไม่ fallback ไป State.calendarConfig (เดือนอื่น) ซึ่งทำให้ pattern วันหยุดผิด
+        // ถ้า _renderPlan ยังไม่มีใน cache เลย (ยังไม่โหลด) → ใช้ cfg เป็น fallback
+        const _renderCfg   = _renderPlan !== undefined
+            ? _renderPlan?.calendarConfig   // อาจเป็น null ถ้าเดือนนั้นไม่มี config → ไม่แสดง Day
+            : cfg;                          // ยังไม่โหลดเลย → ใช้ active month config
         const _renderStores = _renderPlan?.stores || State.allStores;
 
         for (let d = 1; d <= daysInMonth; d++) {
@@ -1064,13 +1069,24 @@ const CalendarCtrl = {
     prevMonth: () => {
         CalendarCtrl._month--;
         if (CalendarCtrl._month < 0) { CalendarCtrl._month = 11; CalendarCtrl._year--; }
-        CalendarCtrl.render();
+        CalendarCtrl._loadAndRender();
     },
 
     nextMonth: () => {
         CalendarCtrl._month++;
         if (CalendarCtrl._month > 11) { CalendarCtrl._month = 0; CalendarCtrl._year++; }
-        CalendarCtrl.render();
+        CalendarCtrl._loadAndRender();
+    },
+
+    // ✅ โหลด plan ของเดือนที่กำลัง navigate ก่อน render — กัน config เดือนผิด
+    _loadAndRender: () => {
+        const ym = `${CalendarCtrl._year}_${String(CalendarCtrl._month+1).padStart(2,'0')}`;
+        CalendarCtrl.render(); // render ทันที (อาจยังไม่มี config)
+        if (!State.planCache[ym] && State.planList?.includes(ym)) {
+            App.loadPlanData(ym)
+                .then(() => CalendarCtrl.render()) // render ใหม่หลังได้ config จริง
+                .catch(() => {});
+        }
     },
 
     openPopup: () => {

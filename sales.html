@@ -608,7 +608,16 @@
 
         // Mobile: ปรับ height ของ map (บน-ล่าง)
         const MIN_H = 120;
-        const getMaxH = () => window.innerHeight - 190;
+        // getMaxH: วัดจาก bottom-nav จริง ไม่ hardcode — กันลากหลุดขอบล่าง
+        const getMaxH = () => {
+            const nav = document.getElementById('bottom-nav');
+            const navH = nav ? nav.offsetHeight : 64;
+            const header = document.getElementById('main-header');
+            const headerH = header ? header.offsetHeight : 48;
+            const dayBar = document.querySelector('#tab-route > div[style*="border-bottom"]');
+            const dayBarH = dayBar ? dayBar.offsetHeight : 52;
+            return window.innerHeight - headerH - dayBarH - navH - 18 - 8; // 18=resizer, 8=buffer
+        };
 
         // Desktop: ปรับ width ของ map (ซ้าย-ขวา)
         const MIN_W = 200;
