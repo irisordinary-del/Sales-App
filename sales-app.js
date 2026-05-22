@@ -235,50 +235,35 @@ const App = {
     },
 
     loadPlanData: async (ym) => {
-        const centerDocId = State.planCenterDocId;
-
-        // ── Supervisor/ASM: โหลด calendarConfig + stores ทุกสายของเดือนนั้น ──
-        if (App.isSupervisor()) {
-            const cached = State.planCache[ym];
-            if (cached && cached.stores !== null) return cached;
-            try {
-                const planRef        = db.collection('appData').doc(centerDocId).collection('plans').doc(ym);
-                const cfgSnap        = await App._getWithTimeout(planRef, 10000);
-                const calendarConfig = cfgSnap.exists ? (cfgSnap.data().calendarConfig || null) : null;
-                const routeList      = cfgSnap.exists ? (cfgSnap.data().routeList || []) : [];
-                // โหลด stores ทุกสายพร้อมกัน เพื่อให้ปฏิทินแสดงชื่อตลาดถูกเดือน
-                let stores = [];
-                if (routeList.length > 0) {
-                    const BATCH = 5;
-                    for (let i = 0; i < routeList.length; i += BATCH) {
-                        const chunk = routeList.slice(i, i + BATCH);
-                        const docs  = await Promise.all(
-                            chunk.map(r => planRef.collection('routes').doc(r).get().catch(() => null))
-                        );
-                        docs.forEach(d => { if (d?.exists) stores = stores.concat(d.data().stores || []); });
-                    }
-                }
-                State.planCache[ym] = { stores, calendarConfig, ym };
-            } catch(e) {
-                console.warn('loadPlanData [sup]:', ym, e);
-                State.planCache[ym] = { stores: [], calendarConfig: null, ym };
-            }
-            return State.planCache[ym];
-        }
-
-        // ── Sales: เหมือนเดิม ──────────────────────────────────────────────
         if (State.planCache[ym]) return State.planCache[ym];
-        const _unused = centerDocId; // ระบบใหม่: ดึงจาก plans/{ym}/routes/{myRoute}
+        const centerDocId = State.planCenterDocId;
+        const planRef     = db.collection('appData').doc(centerDocId).collection('plans').doc(ym);
+
         try {
-            const planRef  = db.collection('appData').doc(centerDocId).collection('plans').doc(ym);
-            const routeRef = planRef.collection('routes').doc(State.myRoute);
-            const [cfgSnap, routeSnap] = await Promise.all([
-                App._getWithTimeout(planRef,   15000),
-                App._getWithTimeout(routeRef,  15000),
-            ]);
-            const calendarConfig = cfgSnap.exists   ? (cfgSnap.data().calendarConfig || null) : null;
-            const stores         = routeSnap.exists ? (routeSnap.data().stores        || [])  : [];
-            State.planCache[ym]  = { stores, calendarConfig, ym };
+            const cfgSnap        = await App._getWithTimeout(planRef, 15000);
+            const calendarConfig = cfgSnap.exists ? (cfgSnap.data().calendarConfig || null) : null;
+            const routeList      = cfgSnap.exists ? (cfgSnap.data().routeList || []) : [];
+
+            let stores;
+            if (App.isSupervisor()) {
+                // Supervisor: โหลดทุกสายของเดือนนั้น แล้ว flat รวมกัน
+                // clone มาจาก startSupervisor — เหมือนกันทุกอย่าง
+                stores = [];
+                const BATCH = 5;
+                for (let i = 0; i < routeList.length; i += BATCH) {
+                    const chunk = routeList.slice(i, i + BATCH);
+                    const docs  = await Promise.all(
+                        chunk.map(r => planRef.collection('routes').doc(r).get().catch(() => null))
+                    );
+                    docs.forEach(d => { if (d?.exists) stores = stores.concat(d.data().stores || []); });
+                }
+            } else {
+                // Sales: โหลดแค่สายของตัวเอง — เหมือนเดิม
+                const routeSnap = await App._getWithTimeout(planRef.collection('routes').doc(State.myRoute), 15000);
+                stores = routeSnap.exists ? (routeSnap.data().stores || []) : [];
+            }
+
+            State.planCache[ym] = { stores, calendarConfig, ym };
             return State.planCache[ym];
         } catch(e) {
             console.warn('loadPlanData:', ym, e);
