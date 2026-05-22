@@ -972,10 +972,10 @@ const CalendarCtrl = {
             })() : [];
             const mktLabel = mktsInCell[0] || '';
             const mktMore  = mktsInCell.length > 1 ? '+' + (mktsInCell.length - 1) : '';
-            const _cellCfg    = State.calendarConfig;
+            // ✅ ใช้ _renderCfg (config ของเดือนที่กำลัง render) ไม่ใช่ State.calendarConfig (เดือน active)
+            const _cellCfg    = _renderCfg;
             const isDateMode  = !_cellCfg || _cellCfg.mode === 'date';
             const dayNum      = dayLabel ? parseInt(dayLabel.replace('Day ','')) : null;
-            // ✅ ซ่อน Day badge เมื่อตัวเลข Day ตรงกับวันที่ในทุก mode (ไม่ใช่แค่ date mode)
             const isSameAsDate = dayNum === d;
             const clickHandler = dayLabel ? `CalendarCtrl.goToDay('${dayLabel}')` : '';
 
