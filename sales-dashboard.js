@@ -62,9 +62,13 @@ const SalesDashboard = {
         if (!session || session.role !== 'sales') return;
         SalesDashboard._username = session.username.toUpperCase();
 
-        // แสดงชื่อสายใน header
+        // ✅ UX-FIX-1: แสดงชื่อจริง + รหัสสาย แทน username อย่างเดียว
         const lbl = document.getElementById('db-route-label');
-        if (lbl) lbl.textContent = SalesDashboard._username;
+        if (lbl) {
+            const _name = session.displayName || session.username;
+            const _code = session.username.toUpperCase();
+            lbl.textContent = _name !== _code ? `${_name} · ${_code}` : _code;
+        }
 
         // ดึง route จาก session หรือ State
         const myRoute = Auth.getSession()?.username?.toUpperCase() || '';
@@ -773,7 +777,11 @@ const SupervisorDashboard = {
     init: () => {
         const _session = Auth.getSession();
         const lbl = document.getElementById('db-route-label');
-        if (lbl) lbl.textContent = (_session?.role === 'asm' ? 'ASM' : 'Supervisor') + ' · ศูนย์ ' + (_session?.centerId || '');
+        if (lbl) {
+            const _roleLabel = _session?.role === 'asm' ? 'ASM' : 'Supervisor';
+            const _name = _session?.displayName || _session?.username || '';
+            lbl.textContent = `${_roleLabel} · ${_name} · ศูนย์ ${_session?.centerId || ''}`;
+        }
         SupervisorDashboard._loadMonthList();
     },
 

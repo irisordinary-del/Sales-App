@@ -35,9 +35,16 @@ firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 
 // Enable persistence — รองรับ offline และหลาย tab
+// ✅ FIX: InPrivate / browser ที่ block storage จะ throw error แต่ app ยังทำงานปกติ (online mode)
 db.enablePersistence({ synchronizeTabs: true }).catch(err => {
-    if (err.code === 'failed-precondition') console.warn('[DB] Multiple tabs: persistence limited');
-    else if (err.code === 'unimplemented')  console.warn('[DB] Browser does not support persistence');
+    if (err.code === 'failed-precondition') {
+        console.warn('[DB] Multiple tabs open: offline persistence disabled');
+    } else if (err.code === 'unimplemented') {
+        console.warn('[DB] Browser does not support offline persistence');
+    } else {
+        // InPrivate / storage blocked → ทำงาน online ปกติ ไม่ต้องแจ้ง user
+        console.warn('[DB] Persistence unavailable (private/restricted mode), running online only');
+    }
 });
 
 let docMain  = db.collection('appData').doc('v1_main');
