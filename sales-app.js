@@ -1128,7 +1128,9 @@ const CalendarCtrl = {
             }).join('')}</div>` : '<div style="text-align:center;color:#9ca3af;font-size:13px;padding:16px 0;">ไม่มีข้อมูลตลาด</div>'}
         </div>`;
         requestAnimationFrame(() => { body.style.transform = 'translateY(0)'; });
-        closeDaySheet: () => {
+    },
+
+    closeDaySheet: () => {
         const body = document.getElementById('cal-day-sheet-body');
         if (body) body.style.transform = 'translateY(100%)';
         setTimeout(() => { document.getElementById('cal-day-sheet')?.remove(); }, 320);
