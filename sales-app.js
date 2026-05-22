@@ -804,6 +804,10 @@ const CalendarCtrl = {
     },
 
     getDayLabelForCfg: (dateNum, cfg, stores, year, month) => {
+        // ✅ ถ้า mode='date' แต่มี mapping → treat เป็น fixed (ข้อมูลเก่าใน Firestore)
+        if (cfg?.mapping && Object.keys(cfg.mapping).length > 0) {
+            return cfg.mapping[String(dateNum)] || null;
+        }
         if (!cfg || cfg.mode === 'date') {
             const label = `Day ${dateNum}`;
             return (stores || State.allStores).some(s => s.days?.includes(label)) ? label : null;
