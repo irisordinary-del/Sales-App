@@ -1089,8 +1089,22 @@ const CalendarCtrl = {
             if (_pk) await App.switchToPlan(_pk);
         }
         const _sy = CalendarCtrl._year, _sm = CalendarCtrl._month;
-        const mkts       = getDayMarketList(dayLabel, _sm, _sy);
-        const storeCount = State.allStores.filter(s => s.days?.includes(dayLabel)).length;
+
+        // ✅ FIX-SUP: Supervisor ที่เลือกสายแล้ว → ใช้เฉพาะร้านในสายนั้น
+        // ไม่ใช้ State.allStores ซึ่งรวมทุกสาย
+        const _activeStores = (App.isSupervisor() && SupervisorUI._selectedRoute)
+            ? (State.allRoutes[SupervisorUI._selectedRoute] || State.allStores)
+            : State.allStores;
+
+        const mkts       = (() => {
+            const names = new Set();
+            _activeStores.forEach(s => {
+                if (s.days?.includes(dayLabel) && s.marketName)
+                    names.add(trimMarketName(s.marketName));
+            });
+            return Array.from(names).filter(Boolean).sort();
+        })();
+        const storeCount = _activeStores.filter(s => s.days?.includes(dayLabel)).length;
         const dayNum     = parseInt(dayLabel.replace('Day ',''));
         const dateStr    = new Date(_sy, _sm, dayNum).toLocaleDateString('th-TH', {weekday:'long',day:'numeric',month:'long'});
 
@@ -1109,14 +1123,12 @@ const CalendarCtrl = {
         <div style="padding:0 16px;">
             <button onclick="CalendarCtrl.navigateToDay('${dayLabel}','')" style="width:100%;padding:13px;border-radius:14px;border:none;background:#2563eb;color:#fff;font-size:15px;font-weight:800;cursor:pointer;margin-bottom:12px;">📋 ดูคิวงานทั้งหมด ${storeCount} ร้าน</button>
             ${mkts.length > 0 ? `<div style="font-size:11px;font-weight:800;color:#6b7280;margin-bottom:8px;padding:0 4px;">เลือกตลาด</div><div style="display:flex;flex-direction:column;gap:8px;">${mkts.map(mkt => {
-                const cnt = State.allStores.filter(s => s.days?.includes(dayLabel) && trimMarketName(s.marketName) === mkt).length;
-                return `<button onclick="CalendarCtrl.navigateToDay('${dayLabel}','${mkt.replace(/'/g,"\'")}')" style="width:100%;padding:12px 16px;border-radius:14px;border:1.5px solid #e5e7eb;background:#f9fafb;display:flex;justify-content:space-between;align-items:center;cursor:pointer;font-family:inherit;"><span style="font-size:14px;font-weight:700;color:#111827;">🏪 ${mkt}</span><span style="font-size:12px;font-weight:800;color:#6b7280;background:#e5e7eb;padding:3px 12px;border-radius:20px;">${cnt} ร้าน</span></button>`;
+                const cnt = _activeStores.filter(s => s.days?.includes(dayLabel) && trimMarketName(s.marketName) === mkt).length;
+                return `<button onclick="CalendarCtrl.navigateToDay('${dayLabel}','${mkt.replace(/'/g,"\\'")}')\" style="width:100%;padding:12px 16px;border-radius:14px;border:1.5px solid #e5e7eb;background:#f9fafb;display:flex;justify-content:space-between;align-items:center;cursor:pointer;font-family:inherit;"><span style="font-size:14px;font-weight:700;color:#111827;">🏪 ${mkt}</span><span style="font-size:12px;font-weight:800;color:#6b7280;background:#e5e7eb;padding:3px 12px;border-radius:20px;">${cnt} ร้าน</span></button>`;
             }).join('')}</div>` : '<div style="text-align:center;color:#9ca3af;font-size:13px;padding:16px 0;">ไม่มีข้อมูลตลาด</div>'}
         </div>`;
         requestAnimationFrame(() => { body.style.transform = 'translateY(0)'; });
-    },
-
-    closeDaySheet: () => {
+        closeDaySheet: () => {
         const body = document.getElementById('cal-day-sheet-body');
         if (body) body.style.transform = 'translateY(100%)';
         setTimeout(() => { document.getElementById('cal-day-sheet')?.remove(); }, 320);

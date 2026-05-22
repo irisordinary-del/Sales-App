@@ -75,6 +75,7 @@ const SalesDashboard = {
         SalesDashboard._myRoute = myRoute;
 
         SalesDashboard._ready = true;
+        SalesDashboard._initOfflineListener();
         SalesDashboard._ensureKpiCards();
         SalesDashboard._loadMonthList();
         // รอ State.isLoaded (routes พร้อม) ก่อนโหลด campaigns
@@ -136,9 +137,18 @@ const SalesDashboard = {
             if (months.length > 0) {
                 sel.value = months[0];
                 await SalesDashboard.onMonthChange(months[0]);
-                // preload เดือนก่อนหน้าเบื้องหลัง (ไม่บล็อก render)
+                // preload เดือนก่อนหน้าทั้ง chunk + row cache เบื้องหลัง
+                // ใช้ _loadData (ไม่ใช่แค่ _loadChunks) เพื่อให้ rowCache พร้อมเมื่อผู้ใช้กดเลือก
                 if (months[1]) {
-                    setTimeout(() => SalesDashboard._loadChunks(months[1]).catch(()=>{}), 3000);
+                    setTimeout(() => {
+                        SalesDashboard._loadData(months[1]).catch(() => {});
+                        SalesDashboard._loadTarget(months[1]).catch(() => {});
+                    }, 3000);
+                }
+                if (months[2]) {
+                    setTimeout(() => {
+                        SalesDashboard._loadData(months[2]).catch(() => {});
+                    }, 6000);
                 }
             }
         } catch (e) {
@@ -197,10 +207,8 @@ const SalesDashboard = {
             const metaDoc = await db.collection('sellout').doc(ym).get();
             if (!metaDoc.exists) { SalesDashboard._chunkCache[ym] = []; return []; }
 
-            // ✅ FIX-PERF-1: แสดง banner เมื่อข้อมูลมาจาก offline cache
-            if (metaDoc.metadata && metaDoc.metadata.fromCache) {
-                SalesDashboard._showOfflineBanner(metaDoc);
-            }
+            // ✅ FIX-OFFLINE: ตรวจสอบ online/offline จริงแทน fromCache
+            // fromCache=true เกิดได้ตอน online ปกติด้วย จึงไม่ใช้เป็น offline indicator
 
             // ✅ FIX-PERF-2: ดึง chunk refs ก่อน แล้ว fetch ทุก chunk พร้อมกัน (parallel)
             // เดิม: .get() แบบ serial (1 chunk ต่อ 1 round-trip)
@@ -240,20 +248,21 @@ const SalesDashboard = {
         }
     },
 
-    // ✅ NEW: แสดง banner เมื่อข้อมูลมาจาก offline cache
-    _showOfflineBanner: (doc) => {
+    // ✅ NEW: แสดง banner เมื่อ offline จริง (ตรวจ navigator.onLine)
+    _showOfflineBanner: () => {
         if (document.getElementById('_offline-banner')) return;
-        const updatedAt = doc.data()?.updatedAt?.toDate?.();
-        const timeStr = updatedAt
-            ? updatedAt.toLocaleString('th-TH', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' })
-            : 'ไม่ทราบเวลา';
         const banner = document.createElement('div');
         banner.id = '_offline-banner';
         banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#f59e0b;color:#78350f;font-size:12px;font-weight:700;text-align:center;padding:6px 16px;font-family:Prompt,sans-serif;';
-        banner.textContent = `📡 แสดงข้อมูล offline ณ ${timeStr} — บางข้อมูลอาจไม่ใช่ล่าสุด`;
+        banner.textContent = '📡 ไม่มีอินเทอร์เน็ต — ข้อมูลอาจไม่ใช่ล่าสุด';
         document.body.prepend(banner);
-        // ซ่อนอัตโนมัติเมื่อกลับมา online
         window.addEventListener('online', () => banner.remove(), { once: true });
+    },
+
+    // เริ่ม listen online/offline event ครั้งเดียวตอน init
+    _initOfflineListener: () => {
+        window.addEventListener('offline', () => SalesDashboard._showOfflineBanner());
+        window.addEventListener('online',  () => document.getElementById('_offline-banner')?.remove());
     },
 
     // ✅ NEW: แจ้งเตือนเมื่อมี chunk โหลดไม่สำเร็จ
