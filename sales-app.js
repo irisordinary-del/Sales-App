@@ -83,15 +83,33 @@ const UI = {
         UI._editMode = true;
         document.getElementById('edit-order-btn').style.display    = 'none';
         document.getElementById('confirm-order-btn').style.display = 'block';
-        document.querySelectorAll('.drag-handle').forEach(h => { h.style.opacity = '1'; h.style.pointerEvents = 'auto'; });
+        // ✅ UX-FIX-6: visual indicator ว่ากำลัง edit อยู่
+        const panel = document.getElementById('route-side-panel');
+        if (panel) panel.classList.add('edit-mode');
+        document.querySelectorAll('.drag-handle').forEach(h => {
+            h.style.opacity       = '1';
+            h.style.pointerEvents = 'auto';
+            h.style.color         = '#2563eb';
+            h.style.fontSize      = '20px';
+        });
+        document.querySelectorAll('.store-item').forEach(el => el.classList.add('edit-mode-on'));
         if (window._sortableInstance) window._sortableInstance.option('disabled', false);
-        showSalesToast('ลากเพื่อสลับลำดับ แล้วกด ✓ ยืนยัน');
+        showSalesToast('✏️ ลากแถบ ≡ เพื่อสลับลำดับ แล้วกด ✓ ยืนยัน');
     },
     confirmEditOrder: () => {
         UI._editMode = false;
         document.getElementById('edit-order-btn').style.display    = 'block';
         document.getElementById('confirm-order-btn').style.display = 'none';
-        document.querySelectorAll('.drag-handle').forEach(h => { h.style.opacity = '0'; h.style.pointerEvents = 'none'; });
+        // ✅ UX-FIX-6: ปิด visual indicator
+        const panel = document.getElementById('route-side-panel');
+        if (panel) panel.classList.remove('edit-mode');
+        document.querySelectorAll('.drag-handle').forEach(h => {
+            h.style.opacity       = '0';
+            h.style.pointerEvents = 'none';
+            h.style.color         = '';
+            h.style.fontSize      = '';
+        });
+        document.querySelectorAll('.store-item').forEach(el => el.classList.remove('edit-mode-on'));
         if (window._sortableInstance) window._sortableInstance.option('disabled', true);
         Processor._updateSeqBadges();
         Processor.handleDrag();
@@ -130,10 +148,15 @@ const UI = {
         }
 
         // Supervisor: tab ร้านค้า → ถ้ายังไม่เลือกสาย redirect ไป tab route (grid)
+        // ✅ UX-FIX-5: เพิ่ม guard ป้องกัน redirect วนซ้ำ
         if (id === 'stores' && App.isSupervisor() && !SupervisorUI._selectedRoute) {
-            setTimeout(() => UI.switchTab('route'), 0);
+            if (!UI._redirectingToRoute) {
+                UI._redirectingToRoute = true;
+                setTimeout(() => { UI._redirectingToRoute = false; UI.switchTab('route'); }, 0);
+            }
             return;
         }
+        UI._redirectingToRoute = false;
     },
 
     restoreTab: () => {
@@ -142,8 +165,9 @@ const UI = {
         const savedTab = localStorage.getItem(_getTabKey());
 
         if (lastDate !== today) {
+            // ✅ UX-FIX-2: เช้าวันใหม่ → ไปที่คิวงานก่อนเลย (สำคัญกว่า dashboard)
             localStorage.setItem('sales_tab_date', today);
-            UI.switchTab(DEFAULT_TAB);
+            UI.switchTab('route');
         } else {
             UI.switchTab(VALID_TABS.includes(savedTab) ? savedTab : DEFAULT_TAB);
         }
@@ -282,8 +306,9 @@ const App = {
 
         const session   = Auth.getSession();
         const roleLabel = State.viewMode === 'asm' ? '🏢 ASM' : '👁 Sup';
+        const _dispName = session?.displayName || session?.username || '';
         document.getElementById('user-route-label').innerText =
-            roleLabel + ' · ' + (session?.displayName || session?.username || '');
+            roleLabel + ' · ' + _dispName;
 
         // ซ่อน day bar + edit btn จนกว่าจะเลือกสาย
         const _dayRow = document.getElementById('day-select')?.closest('div[style*="border-bottom"]');
@@ -440,7 +465,10 @@ const App = {
         document.getElementById('main-content').classList.remove('hidden');
         const _bnav = document.getElementById('bottom-nav');
         if (_bnav) _bnav.style.display = 'grid';
-        document.getElementById('user-route-label').innerText  = State.myRoute;
+        // ✅ UX-FIX-1: แสดงชื่อจริงแทน username รหัส
+        const _sess = Auth.getSession();
+        const _displayName = _sess?.displayName || _sess?.username || State.myRoute;
+        document.getElementById('user-route-label').innerText = _displayName;
         document.getElementById('loader').style.display = 'flex';
         LoadBar.show();
 
@@ -707,6 +735,12 @@ const Processor = {
     handleDrag: () => {
         if (App.isSupervisor()) { SupervisorUI.handleDrag(); return; }
 
+        // ✅ UX-FIX-4: ป้องกันเขียนไปที่ path ผิดถ้า plan ยังโหลดไม่เสร็จ
+        if (!State.activePlanYM) {
+            showSalesToast('⚠️ ระบบยังโหลดไม่เสร็จ กรุณารอสักครู่', true);
+            return;
+        }
+
         const items   = document.querySelectorAll('#route-store-list > .store-item');
         const updated = [...State.allStores];
         items.forEach((item, index) => {
@@ -933,9 +967,17 @@ const CalendarCtrl = {
 
         const modeEl = document.getElementById('calendar-mode-badge');
         if (modeEl) {
+            // ✅ UX-FIX-3: Sales ไม่ต้องเห็น warning ที่ทำอะไรไม่ได้
+            const _isSalesRole = Auth.getSession()?.role === 'sales';
             if (!cfg) {
-                modeEl.textContent = '⚠️ ยังไม่ได้ตั้งค่าปฏิทิน';
-                modeEl.style.background = '#fef3c7'; modeEl.style.color = '#92400e';
+                if (_isSalesRole) {
+                    // Sales เห็นข้อความที่ไม่ทำให้งง และไม่ให้ความรู้สึกว่ามี error
+                    modeEl.textContent = '📅 ปฏิทินวิ่งงาน';
+                    modeEl.style.background = '#f0f9ff'; modeEl.style.color = '#0369a1';
+                } else {
+                    modeEl.textContent = '⚠️ ยังไม่ได้ตั้งค่าปฏิทิน';
+                    modeEl.style.background = '#fef3c7'; modeEl.style.color = '#92400e';
+                }
             } else if (cfg.mode === 'cycle') {
                 modeEl.textContent = '🔄 Cycle D1-' + (cfg.cycleDays || 24);
                 modeEl.style.background = '#ede9fe'; modeEl.style.color = '#5b21b6';
@@ -1016,19 +1058,21 @@ const CalendarCtrl = {
         const _calYM = `${CalendarCtrl._year}_${String(CalendarCtrl._month+1).padStart(2,'0')}`;
         if (_calYM !== (State.activePlanYM || '')) {
             const _pk = State.planList.find(p => p === _calYM);
-            if (_pk) { showSalesToast('⏳ กำลังโหลด...'); await App.switchToPlan(_pk); }
+            if (_pk) {
+                // ✅ UX-FIX-8: await ให้เสร็จก่อน render — ป้องกัน race condition แสดงร้านผิดเดือน
+                showSalesToast('⏳ กำลังโหลดข้อมูลเดือนนี้...');
+                await App.switchToPlan(_pk);
+            }
         }
-        setTimeout(() => {
-            State.currentDay       = dayLabel;
-            State._filterMarket    = market || '';
-            const el = document.getElementById('day-select');
-            if (el) el.value = dayLabel;
-            State.mapNeedsFit = true;
-            Processor.routeList();
-            UI.switchTab('route');
-            const mkts = getDayMarketList(dayLabel, CalendarCtrl._month, CalendarCtrl._year);
-            showSalesToast('📅 ' + (market || (mkts[0] || dayLabel)));
-        }, 320);
+        State.currentDay       = dayLabel;
+        State._filterMarket    = market || '';
+        const el = document.getElementById('day-select');
+        if (el) el.value = dayLabel;
+        State.mapNeedsFit = true;
+        Processor.routeList();
+        UI.switchTab('route');
+        const mkts = getDayMarketList(dayLabel, CalendarCtrl._month, CalendarCtrl._year);
+        showSalesToast('📅 ' + (market || (mkts[0] || dayLabel)));
     },
 
     showDaySheet: async (dayLabel) => {
@@ -1303,7 +1347,7 @@ const SupervisorUI = {
         const header = selected ? `
             <div style="display:flex;align-items:center;gap:8px;padding:8px 14px;background:#f8fafc;border-radius:12px;margin-bottom:10px;cursor:pointer;"
                 onclick="SupervisorUI.clearRoute()">
-                <span style="color:#9ca3af;font-size:12px;font-weight:700;">← ดูทุกสาย</span>
+                <span style="color:#9ca3af;font-size:12px;font-weight:700;">← กลับ · เลือกสายใหม่</span>
                 <span style="background:${/C\d/.test(selected)?'#ede9fe':'#dbeafe'};color:${/C\d/.test(selected)?'#7c3aed':'#2563eb'};font-size:11px;font-weight:900;padding:2px 10px;border-radius:8px;">${selected}</span>
                 <span style="font-size:11px;color:#6b7280;font-weight:700;">${stores.length} ร้าน</span>
             </div>` : '';
@@ -1370,10 +1414,13 @@ const SupervisorUI = {
         const backBtn = SupervisorUI._selectedRoute ? `
         <div onclick="SupervisorUI.clearRoute()"
             style="display:flex;align-items:center;gap:8px;padding:9px 14px;background:#f1f5f9;border-radius:12px;cursor:pointer;margin-bottom:12px;font-weight:700;font-size:12px;color:#374151;">
-            ← ยกเลิกเลือกสาย
+            ← กลับ · เลือกสายใหม่
         </div>` : '';
 
         container.innerHTML = backBtn
+            + `<div style="font-size:11px;color:#9ca3af;font-weight:600;text-align:center;padding:6px 0 12px;">
+                แตะสายวิ่งเพื่อดูรายละเอียดและแผนที่
+               </div>`
             + renderGroup('💳 Credit (C)', '#7c3aed', '#ede9fe', cRoutes)
             + renderGroup('🚐 Van (V)',    '#2563eb', '#dbeafe', vRoutes)
             + renderGroup('📦 อื่นๆ',      '#374151', '#f3f4f6', otherRoutes);
@@ -1403,7 +1450,7 @@ const SupervisorUI = {
         const isC        = /C\d/.test(routeId);
         const badgeColor = isC ? '#7c3aed' : '#2563eb';
         const badgeBg    = isC ? '#ede9fe' : '#dbeafe';
-        btn.innerHTML = `<span style="font-size:14px;">←</span><span style="color:#9ca3af;">เลือกสายใหม่</span><span style="background:${badgeBg};color:${badgeColor};font-size:10px;font-weight:900;padding:2px 10px;border-radius:8px;">${routeId}</span>`;
+        btn.innerHTML = `<span style="font-size:14px;">←</span><span style="color:#9ca3af;">กลับ · เลือกสายใหม่</span><span style="background:${badgeBg};color:${badgeColor};font-size:10px;font-weight:900;padding:2px 10px;border-radius:8px;">${routeId}</span>`;
         splitContainer.parentElement.insertBefore(btn, splitContainer);
     },
 
@@ -1434,6 +1481,12 @@ const SupervisorUI = {
     handleDrag: () => {
         const routeId = SupervisorUI._selectedRoute;
         if (!routeId) return;
+
+        // ✅ UX-FIX-4: ป้องกัน path plans/undefined/routes/...
+        if (!State.activePlanYM) {
+            showSalesToast('⚠️ ระบบยังโหลดไม่เสร็จ กรุณารอสักครู่', true);
+            return;
+        }
         const items   = document.querySelectorAll('#route-store-list > .store-item');
         const updated = [...State.allStores];
         items.forEach((item, index) => {

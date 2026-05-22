@@ -103,10 +103,25 @@
             display:block; font-size:11px; font-weight:700; color:#6b7280;
             text-transform:uppercase; letter-spacing:0.6px; margin-bottom:6px;
         }
-        .modal-input {
-            width:100%; background:#f9fafb; border:1px solid #e5e7eb;
-            border-radius:12px; padding:12px 14px; font-size:14px;
-            outline:none; font-family:inherit; box-sizing:border-box;
+        /* ── Edit mode indicator ── */
+        #route-side-panel.edit-mode {
+            outline: 2px solid #2563eb;
+            outline-offset: -2px;
+            border-radius: 0;
+        }
+        #route-side-panel.edit-mode #route-title::after {
+            content: ' · โหมดแก้ไขลำดับ';
+            color: #2563eb;
+            font-size: 10px;
+            font-weight: 800;
+        }
+        .store-item.edit-mode-on {
+            border-color: #bfdbfe !important;
+            background: #eff6ff !important;
+        }
+        .drag-handle.edit-mode-on {
+            color: #2563eb !important;
+            font-size: 20px !important;
         }
     </style>
 </head>
@@ -541,8 +556,10 @@
     <script>
         const Drawer = {
             open: () => {
-                // sync route name
-                const name = (typeof State !== 'undefined') ? (State.myRoute || '—') : '—';
+                // ✅ UX-FIX-1: แสดงชื่อจริงใน drawer แทน route code
+                const session = (typeof Auth !== 'undefined') ? Auth.getSession() : null;
+                const name = session?.displayName || session?.username
+                    || ((typeof State !== 'undefined') ? State.myRoute : '') || '—';
                 const el = document.getElementById('drawer-route-name');
                 if (el) el.textContent = name;
 
