@@ -235,20 +235,21 @@ const App = {
     },
 
     loadPlanData: async (ym) => {
-        // Supervisor: ดึงแค่ calendarConfig (ไม่ดึง route เดียว)
-        // Sales: ดึง stores ของ myRoute ด้วย
-        const cached = State.planCache[ym];
-        if (cached && cached.calendarConfig !== null) return cached;
         const centerDocId = State.planCenterDocId;
-        try {
-            const planRef = db.collection('appData').doc(centerDocId).collection('plans').doc(ym);
-            if (App.isSupervisor()) {
-                const cfgSnap        = await App._getWithTimeout(planRef, 10000);
+        if (App.isSupervisor()) {
+            const cached = State.planCache[ym];
+            if (cached && cached.calendarConfig !== null) return cached;
+            try {
+                const cfgSnap        = await App._getWithTimeout(db.collection('appData').doc(centerDocId).collection('plans').doc(ym), 10000);
                 const calendarConfig = cfgSnap.exists ? (cfgSnap.data().calendarConfig || null) : null;
                 State.planCache[ym]  = { stores: null, calendarConfig, ym };
-                return State.planCache[ym];
-            }
-            // Sales path — เหมือนเดิม
+            } catch(e) { State.planCache[ym] = { stores: null, calendarConfig: null, ym }; }
+            return State.planCache[ym];
+        }
+        if (State.planCache[ym]) return State.planCache[ym];
+        // ✅ ระบบใหม่: ดึงจาก plans/{ym}/routes/{myRoute}
+        try {
+            const planRef  = db.collection('appData').doc(centerDocId).collection('plans').doc(ym);
             const routeRef = planRef.collection('routes').doc(State.myRoute);
             const [cfgSnap, routeSnap] = await Promise.all([
                 App._getWithTimeout(planRef,   15000),
@@ -355,22 +356,16 @@ const App = {
         State.isLoaded = true;
         SupervisorUI.init();
 
-        // ── Calendar init: clone จาก openPopup ของ Sales ──────────────────
-        // โหลด planList + calendarConfig ทุกเดือนพร้อมกัน แล้ว init CalendarCtrl
+        // ── Supervisor calendar init ──────────────────────────────────
         (async () => {
             try {
-                const _cDocId = State.centerId ? (State.centerId + '_main') : 'v1_main';
+                const _cDocId = centerIdRaw ? (centerIdRaw + '_main') : 'v1_main';
                 State.planCenterDocId = _cDocId;
-                const _cRef   = db.collection('appData').doc(_cDocId);
-                const _cMeta  = await App._getWithTimeout(_cRef, 5000);
-                const _cData  = _cMeta.exists ? _cMeta.data() : {};
+                const _cMeta = await App._getWithTimeout(db.collection('appData').doc(_cDocId), 5000);
+                const _cData = _cMeta.exists ? _cMeta.data() : {};
                 State.planList      = (_cData.planList || []).sort().reverse();
                 State.currentPlanYM = _cData.currentPlanYM || State.activePlanYM || '';
-                // โหลด calendarConfig ทุกเดือนพร้อมกัน (เหมือน openPopup)
-                await Promise.all(State.planList.map(ym =>
-                    App.loadPlanData(ym).catch(() => {})
-                ));
-                // set calendarConfig ของเดือน active
+                await Promise.all(State.planList.map(ym => App.loadPlanData(ym).catch(() => {})));
                 State.calendarConfig = State.planCache[State.activePlanYM]?.calendarConfig || null;
             } catch(e) { console.warn('[Sup] calendar init:', e); }
             CalendarCtrl.init();
@@ -804,7 +799,6 @@ const CalendarCtrl = {
     },
 
     getDayLabelForCfg: (dateNum, cfg, stores, year, month) => {
-        // ✅ ถ้า mode='date' แต่มี mapping → treat เป็น fixed (ข้อมูลเก่าใน Firestore)
         if (cfg?.mapping && Object.keys(cfg.mapping).length > 0) {
             return cfg.mapping[String(dateNum)] || null;
         }
@@ -917,7 +911,7 @@ const CalendarCtrl = {
 
         const _renderYM    = `${year}_${String(month+1).padStart(2,'0')}`;
         const _renderPlan  = State.planCache[_renderYM];
-        const _renderCfg   = _renderPlan?.calendarConfig || cfg;
+        const _renderCfg   = _renderPlan !== undefined ? _renderPlan?.calendarConfig : cfg;
         const _renderStores = _renderPlan?.stores || State.allStores;
 
         for (let d = 1; d <= daysInMonth; d++) {
@@ -954,7 +948,7 @@ const CalendarCtrl = {
             const mktLabel = mktsInCell[0] || '';
             const mktMore  = mktsInCell.length > 1 ? '+' + (mktsInCell.length - 1) : '';
             const dayNum      = dayLabel ? parseInt(dayLabel.replace('Day ','')) : null;
-            const isSameAsDate = true; // ซ่อน Day badge เสมอ — ไม่แสดงเลข Day ในปฏิทิน
+            const isSameAsDate = true; // ไม่แสดงเลข Day badge
             const clickHandler = dayLabel ? `CalendarCtrl.goToDay('${dayLabel}')` : '';
 
             html += `
@@ -1041,24 +1035,12 @@ const CalendarCtrl = {
         CalendarCtrl._month--;
         if (CalendarCtrl._month < 0) { CalendarCtrl._month = 11; CalendarCtrl._year--; }
         CalendarCtrl.render();
-        // ถ้า config ของเดือนนี้ยังไม่มี → โหลด background แล้ว re-render
-        const ym = `${CalendarCtrl._year}_${String(CalendarCtrl._month+1).padStart(2,'0')}`;
-        if (!State.planCache[ym] || State.planCache[ym].calendarConfig === null) {
-            delete State.planCache[ym];
-            App.loadPlanData(ym).then(() => CalendarCtrl.render()).catch(() => {});
-        }
     },
 
     nextMonth: () => {
         CalendarCtrl._month++;
         if (CalendarCtrl._month > 11) { CalendarCtrl._month = 0; CalendarCtrl._year++; }
         CalendarCtrl.render();
-        // ถ้า config ของเดือนนี้ยังไม่มี → โหลด background แล้ว re-render
-        const ym = `${CalendarCtrl._year}_${String(CalendarCtrl._month+1).padStart(2,'0')}`;
-        if (!State.planCache[ym] || State.planCache[ym].calendarConfig === null) {
-            delete State.planCache[ym];
-            App.loadPlanData(ym).then(() => CalendarCtrl.render()).catch(() => {});
-        }
     },
 
     openPopup: () => {
@@ -1082,11 +1064,12 @@ const CalendarCtrl = {
             }, 350);
         });
         // โหลดเดือนอื่น background (non-blocking)
-        // เคลียร์ cache ที่ calendarConfig=null ก่อน ให้ loadPlanData fetch ใหม่จริงๆ
         if (State.planList?.length > 0) {
-            State.planList.forEach(ym => {
-                if (State.planCache[ym]?.calendarConfig === null) delete State.planCache[ym];
-            });
+            if (App.isSupervisor()) {
+                State.planList.forEach(ym => {
+                    if (State.planCache[ym]?.calendarConfig === null) delete State.planCache[ym];
+                });
+            }
             Promise.all(State.planList.map(ym => App.loadPlanData(ym).catch(() => {})))
                 .then(() => CalendarCtrl.render());
         }
