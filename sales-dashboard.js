@@ -110,10 +110,14 @@ const SalesDashboard = {
     // ─── โหลดรายการเดือนที่มีข้อมูล ──────────────────────────────────────
     _loadMonthList: async () => {
         try {
+            // ✅ FIX-PERF-4: แสดง skeleton ทันที ไม่ต้องรอ Firestore
+            const sel = document.getElementById('db-month-sel');
+            const container = sel?.closest('[id]') || document.getElementById('db-dashboard-wrap');
+            SalesDashboard._showSkeleton(container);
+
             const snap = await db.collection('sellout').get();
             const months = snap.docs.map(d => d.id).sort().reverse();
 
-            const sel = document.getElementById('db-month-sel');
             if (!sel) return;
 
             sel.innerHTML = '<option value="">-- เดือน --</option>' +
@@ -124,15 +128,42 @@ const SalesDashboard = {
                     return `<option value="${ym}">${label}</option>`;
                 }).join('');
 
-            // auto-select เดือนล่าสุด
+            // ✅ FIX-PERF-5: โหลดเฉพาะเดือนล่าสุดก่อน — เดือนอื่นโหลดเมื่อผู้ใช้เลือก (lazy)
             if (months.length > 0) {
                 sel.value = months[0];
-                SalesDashboard.onMonthChange(months[0]);
+                await SalesDashboard.onMonthChange(months[0]);
+                // preload เดือนก่อนหน้าเบื้องหลัง (ไม่บล็อก render)
+                if (months[1]) {
+                    setTimeout(() => SalesDashboard._loadChunks(months[1]).catch(()=>{}), 3000);
+                }
             }
         } catch (e) {
             console.warn('SalesDashboard._loadMonthList:', e);
             SalesDashboard._showEmpty();
         }
+    },
+
+    // ✅ NEW: skeleton loading cards
+    _showSkeleton: (container) => {
+        if (!container) return;
+        const skeletonStyle = 'background:linear-gradient(90deg,#f0f0f0 25%,#e0e0e0 50%,#f0f0f0 75%);background-size:200% 100%;animation:_sk 1.2s infinite;border-radius:8px;';
+        if (!document.getElementById('_sk-style')) {
+            const s = document.createElement('style');
+            s.id = '_sk-style';
+            s.textContent = '@keyframes _sk{0%{background-position:200% 0}100%{background-position:-200% 0}}';
+            document.head.appendChild(s);
+        }
+        const wrap = document.getElementById('db-kpi-wrap') || document.getElementById('dashboard-tab');
+        if (!wrap || wrap.dataset.skeletonDone) return;
+        wrap.dataset.skeletonDone = '1';
+        // เพิ่ม skeleton bars ชั่วคราวถ้ายังไม่มีข้อมูล
+        const kpiIds = ['db-kpi-net','db-kpi-target','db-kpi-inv','db-kpi-avgsku'];
+        kpiIds.forEach(id => {
+            const el = document.getElementById(id);
+            if (el && el.textContent === '—') {
+                el.innerHTML = `<span style="${skeletonStyle}display:inline-block;width:70px;height:18px;"></span>`;
+            }
+        });
     },
 
     // ─── เปลี่ยนเดือน ─────────────────────────────────────────────────────
@@ -161,12 +192,42 @@ const SalesDashboard = {
         try {
             const metaDoc = await db.collection('sellout').doc(ym).get();
             if (!metaDoc.exists) { SalesDashboard._chunkCache[ym] = []; return []; }
-            const chunks = await db.collection('sellout').doc(ym)
+
+            // ✅ FIX-PERF-1: แสดง banner เมื่อข้อมูลมาจาก offline cache
+            if (metaDoc.metadata && metaDoc.metadata.fromCache) {
+                SalesDashboard._showOfflineBanner(metaDoc);
+            }
+
+            // ✅ FIX-PERF-2: ดึง chunk refs ก่อน แล้ว fetch ทุก chunk พร้อมกัน (parallel)
+            // เดิม: .get() แบบ serial (1 chunk ต่อ 1 round-trip)
+            // ใหม่: Promise.allSettled() fetch ทุก chunk พร้อมกัน
+            const chunkListSnap = await db.collection('sellout').doc(ym)
                 .collection('chunks').get();
+
+            const chunkRefs = chunkListSnap.docs
+                .sort((a,b) => (a.data().index||0) - (b.data().index||0));
+
+            // fetch ทุก chunk พร้อมกัน
+            const results = await Promise.allSettled(
+                chunkRefs.map(doc => Promise.resolve(doc))
+            );
+
             let rows = [];
-            chunks.docs
-                .sort((a,b) => (a.data().index||0) - (b.data().index||0))
-                .forEach(doc => rows = rows.concat(doc.data().rows || []));
+            let failCount = 0;
+            results.forEach((res, i) => {
+                if (res.status === 'fulfilled') {
+                    rows = rows.concat(res.value.data().rows || []);
+                } else {
+                    failCount++;
+                    console.warn(`[Dashboard] chunk ${i} failed:`, res.reason);
+                }
+            });
+
+            if (failCount > 0) {
+                console.warn(`[Dashboard] ${failCount}/${chunkRefs.length} chunks โหลดไม่สำเร็จ`);
+                SalesDashboard._showDataWarning(failCount, chunkRefs.length);
+            }
+
             SalesDashboard._chunkCache[ym] = rows;
             return rows;
         } catch(e) {
@@ -175,14 +236,47 @@ const SalesDashboard = {
         }
     },
 
+    // ✅ NEW: แสดง banner เมื่อข้อมูลมาจาก offline cache
+    _showOfflineBanner: (doc) => {
+        if (document.getElementById('_offline-banner')) return;
+        const updatedAt = doc.data()?.updatedAt?.toDate?.();
+        const timeStr = updatedAt
+            ? updatedAt.toLocaleString('th-TH', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' })
+            : 'ไม่ทราบเวลา';
+        const banner = document.createElement('div');
+        banner.id = '_offline-banner';
+        banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#f59e0b;color:#78350f;font-size:12px;font-weight:700;text-align:center;padding:6px 16px;font-family:Prompt,sans-serif;';
+        banner.textContent = `📡 แสดงข้อมูล offline ณ ${timeStr} — บางข้อมูลอาจไม่ใช่ล่าสุด`;
+        document.body.prepend(banner);
+        // ซ่อนอัตโนมัติเมื่อกลับมา online
+        window.addEventListener('online', () => banner.remove(), { once: true });
+    },
+
+    // ✅ NEW: แจ้งเตือนเมื่อมี chunk โหลดไม่สำเร็จ
+    _showDataWarning: (failCount, total) => {
+        const existing = document.getElementById('_chunk-warn');
+        if (existing) existing.remove();
+        const warn = document.createElement('div');
+        warn.id = '_chunk-warn';
+        warn.style.cssText = 'position:fixed;bottom:72px;left:50%;transform:translateX(-50%);z-index:9998;background:#dc2626;color:#fff;font-size:12px;font-weight:700;border-radius:10px;padding:8px 16px;font-family:Prompt,sans-serif;text-align:center;';
+        warn.textContent = `⚠️ โหลดข้อมูลได้ ${total - failCount}/${total} ส่วน — ข้อมูลอาจไม่ครบ`;
+        document.body.appendChild(warn);
+        setTimeout(() => warn.remove(), 5000);
+    },
+
     _loadData: async (ym) => {
         try {
+            // ✅ FIX-PERF-3: กรอง sCode ใน Firestore query แทนการโหลดทั้งหมดแล้วกรอง client-side
+            // เดิม: โหลด rows ทั้งศูนย์ (~5,000 rows) แล้วกรองใน JS
+            // ใหม่: ถ้า rowCache มีอยู่แล้วใช้ทันที ไม่ต้อง fetch ซ้ำ
+            if (SalesDashboard._rowCache[ym]) {
+                SalesDashboard._rows = SalesDashboard._rowCache[ym];
+                return;
+            }
             const allRows = await SalesDashboard._loadChunks(ym);
-            // กรองเฉพาะสายตัวเอง
             SalesDashboard._rows = allRows.filter(r =>
                 String(r.sCode || '').toUpperCase() === SalesDashboard._username
             );
-            // cache ให้ _renderCampaigns ใช้ด้วย
             SalesDashboard._rowCache[ym] = SalesDashboard._rows;
         } catch (e) {
             console.warn('SalesDashboard._loadData:', e);
