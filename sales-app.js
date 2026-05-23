@@ -1468,14 +1468,13 @@ const SupervisorUI = {
         State.myRoute     = routeId;
         State.currentDay  = '';
         State.mapNeedsFit = true;
-        SupervisorUI.renderStoreList();
+        Processor.setupRoute();
         SupervisorUI._showDayBar(true);
         SupervisorUI._injectBackBtn(routeId);
-        Processor.setupRoute();
-        // ✅ UX-FIX: switch ไป route tab พร้อม render map
-        // renderRouteGrid() ทำก่อนเพื่ออัปเดต highlight การ์ดที่เลือก
-        SupervisorUI.renderRouteGrid();
+        // ✅ switch ไป route tab ก่อน แล้วค่อย render list (ป้องกัน grid ทับ)
         UI.switchTab('route');
+        // render store list (คิวงาน) แทน route grid
+        Processor.routeList();
     },
 
     _injectBackBtn: (routeId) => {
