@@ -108,50 +108,6 @@
         .sortable-chosen { box-shadow: 0 8px 24px rgba(37,99,235,0.18) !important; }
         .sortable-drag   { opacity: 0.95; transform: scale(1.02); }
 
-        /* ── Resizer ลื่นขึ้น ── */
-        /* mobile resizer — desktop ถูก override โดย sales-style.css media query */
-        #resizer {
-            flex: 0 0 10px !important;
-            touch-action: none;
-            user-select: none;
-            -webkit-user-select: none;
-            background: #f1f5f9;
-            border-top: 1px solid #e2e8f0;
-            border-bottom: 1px solid #e2e8f0;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: background 0.1s;
-            cursor: row-resize;
-        }
-        @media (min-width: 1024px) {
-            #resizer {
-                flex: 0 0 10px !important;
-                cursor: col-resize;
-                border-top: none;
-                border-bottom: none;
-                border-left: 1px solid #e2e8f0;
-                border-right: 1px solid #e2e8f0;
-            }
-            #resizer-pill {
-                width: 3px;
-                height: 32px;
-            }
-        }
-        #resizer:active, #resizer.dragging {
-            background: #dbeafe;
-            border-color: #93c5fd;
-        }
-        #resizer-pill {
-            width: 32px; height: 3px;
-            border-radius: 99px;
-            background: #cbd5e1;
-            pointer-events: none;
-            transition: background 0.1s;
-        }
-        #resizer.dragging #resizer-pill {
-            background: #2563eb;
-        }
             outline: 2px solid #2563eb;
             outline-offset: -2px;
             border-radius: 0;

@@ -35,42 +35,42 @@ body { font-family: 'Prompt', sans-serif; background-color: #f3f4f6; margin: 0; 
 
     /* Desktop: resizer เปลี่ยนเป็นแนวตั้ง ซ้าย-ขวา */
     #resizer {
-        flex: 0 0 12px !important;
+        flex: 0 0 10px !important;
         cursor: col-resize;
         border-top: none;
         border-bottom: none;
-        border-left: 1px solid #e5e7eb;
-        border-right: 1px solid #e5e7eb;
+        border-left: 1px solid #e2e8f0;
+        border-right: 1px solid #e2e8f0;
     }
     #resizer-pill {
-        width: 5px;
-        height: 40px;
+        width: 3px;   /* แนวตั้ง: บาง-สูง */
+        height: 32px;
     }
 }
 
-/* Resizer handle — ชัดขึ้นตอนกด */
+/* Resizer handle — mobile: แนวนอน */
 #resizer {
-    flex: 0 0 18px !important;
+    flex: 0 0 10px !important;
     cursor: row-resize;
     touch-action: none;
     user-select: none;
     -webkit-user-select: none;
-    background: #fff;
-    border-top: 1px solid #e5e7eb;
-    border-bottom: 1px solid #e5e7eb;
+    background: #f1f5f9;
+    border-top: 1px solid #e2e8f0;
+    border-bottom: 1px solid #e2e8f0;
     display: flex;
     align-items: center;
     justify-content: center;
     transition: background 0.12s;
 }
 #resizer:active,
-#resizer.dragging { background: #eff6ff; }
+#resizer.dragging { background: #dbeafe; border-color: #93c5fd; }
 
-/* pill indicator ใน resizer */
+/* pill indicator — mobile: แนวนอน */
 #resizer-pill {
-    width: 40px; height: 5px;
+    width: 32px; height: 3px;
     border-radius: 99px;
-    background: #d1d5db;
+    background: #cbd5e1;
     pointer-events: none;
     transition: background 0.12s;
 }
