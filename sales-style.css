@@ -29,26 +29,7 @@ body { font-family: 'Prompt', sans-serif; background-color: #f3f4f6; margin: 0; 
     position: relative;
 }
 
-@media (min-width: 1024px) {
-    /* Desktop: กลับเป็น flex column→row ตามเดิม */
-    #map-container { flex: 0 0 60%; height: auto !important; max-height: none; }
-
-    /* Desktop: resizer เปลี่ยนเป็นแนวตั้ง ซ้าย-ขวา */
-    #resizer {
-        flex: 0 0 10px !important;
-        cursor: col-resize;
-        border-top: none;
-        border-bottom: none;
-        border-left: 1px solid #e2e8f0;
-        border-right: 1px solid #e2e8f0;
-    }
-    #resizer-pill {
-        width: 3px;   /* แนวตั้ง: บาง-สูง */
-        height: 32px;
-    }
-}
-
-/* Resizer handle — mobile: แนวนอน */
+/* Resizer handle — mobile: แนวนอน (ต้องอยู่ก่อน media query) */
 #resizer {
     flex: 0 0 10px !important;
     cursor: row-resize;
@@ -75,6 +56,25 @@ body { font-family: 'Prompt', sans-serif; background-color: #f3f4f6; margin: 0; 
     transition: background 0.12s;
 }
 #resizer.dragging #resizer-pill { background: #2563eb; }
+
+@media (min-width: 1024px) {
+    /* Desktop: กลับเป็น flex column→row ตามเดิม */
+    #map-container { flex: 0 0 60%; height: auto !important; max-height: none; }
+
+    /* Desktop: resizer แนวตั้ง ซ้าย-ขวา */
+    #resizer {
+        flex: 0 0 10px !important;
+        cursor: col-resize;
+        border-top: none;
+        border-bottom: none;
+        border-left: 1px solid #e2e8f0;
+        border-right: 1px solid #e2e8f0;
+    }
+    #resizer-pill {
+        width: 3px;
+        height: 32px;
+    }
+}
 
 /* ── Bottom Nav กันชัวร์ ── */
 #bottom-nav {
