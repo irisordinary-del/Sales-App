@@ -109,34 +109,48 @@
         .sortable-drag   { opacity: 0.95; transform: scale(1.02); }
 
         /* ── Resizer ลื่นขึ้น ── */
+        /* mobile resizer — desktop ถูก override โดย sales-style.css media query */
         #resizer {
-            flex: 0 0 22px !important;
+            flex: 0 0 10px !important;
             touch-action: none;
             user-select: none;
             -webkit-user-select: none;
-            background: #f8fafc;
-            border-top: 1.5px solid #e5e7eb;
-            border-bottom: 1.5px solid #e5e7eb;
+            background: #f1f5f9;
+            border-top: 1px solid #e2e8f0;
+            border-bottom: 1px solid #e2e8f0;
             display: flex;
             align-items: center;
             justify-content: center;
             transition: background 0.1s;
             cursor: row-resize;
         }
+        @media (min-width: 1024px) {
+            #resizer {
+                flex: 0 0 10px !important;
+                cursor: col-resize;
+                border-top: none;
+                border-bottom: none;
+                border-left: 1px solid #e2e8f0;
+                border-right: 1px solid #e2e8f0;
+            }
+            #resizer-pill {
+                width: 3px;
+                height: 32px;
+            }
+        }
         #resizer:active, #resizer.dragging {
-            background: #eff6ff;
-            border-color: #bfdbfe;
+            background: #dbeafe;
+            border-color: #93c5fd;
         }
         #resizer-pill {
-            width: 48px; height: 5px;
+            width: 32px; height: 3px;
             border-radius: 99px;
             background: #cbd5e1;
             pointer-events: none;
-            transition: background 0.1s, width 0.1s;
+            transition: background 0.1s;
         }
         #resizer.dragging #resizer-pill {
             background: #2563eb;
-            width: 56px;
         }
             outline: 2px solid #2563eb;
             outline-offset: -2px;
@@ -325,7 +339,7 @@
                         <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" /></svg>
                     </button>
                 </div>
-                <div id="resizer" style="flex:0 0 18px;touch-action:none;">
+                <div id="resizer" style="flex:0 0 10px;touch-action:none;">
                     <div id="resizer-pill"></div>
                 </div>
                 <div id="route-side-panel" class="flex-1 flex flex-col overflow-hidden bg-gray-50 relative z-10">
@@ -672,7 +686,7 @@
             // เอา top ของ split-container เป็น origin
             const container = document.getElementById('split-container');
             const containerTop = container ? container.getBoundingClientRect().top : 0;
-            return navTop - containerTop - 18 - 4; // 18=resizer height, 4=buffer
+            return navTop - containerTop - 10 - 4; // 10=resizer height, 4=buffer
         };
 
         // Desktop: ปรับ width ของ map (ซ้าย-ขวา)
