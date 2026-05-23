@@ -160,17 +160,8 @@ const UI = {
     },
 
     restoreTab: () => {
-        const today    = new Date().toDateString();
-        const lastDate = localStorage.getItem('sales_tab_date');
-        const savedTab = localStorage.getItem(_getTabKey());
-
-        if (lastDate !== today) {
-            // ✅ UX-FIX-2: เช้าวันใหม่ → ไปที่คิวงานก่อนเลย (สำคัญกว่า dashboard)
-            localStorage.setItem('sales_tab_date', today);
-            UI.switchTab('route');
-        } else {
-            UI.switchTab(VALID_TABS.includes(savedTab) ? savedTab : DEFAULT_TAB);
-        }
+        // ✅ ข้อ 4: ไม่จำ tab เดิม — เริ่มต้นใหม่ทุกครั้ง route tab เสมอ
+        UI.switchTab('route');
     },
 
     searchStores: (val) => {
@@ -662,10 +653,28 @@ const Processor = {
         const el   = document.getElementById('day-select');
         el.innerHTML = sorted.map(d => `<option value="${d}">Day ${d.replace('Day ','')}</option>`).join('');
 
-        if (!State.currentDay) { State.currentDay = sorted[0]; State.mapNeedsFit = true; }
+        // ✅ ข้อ 6: ถ้ายังไม่มี currentDay → หาวันที่ตรงกับวันนี้ก่อน
+        if (!State.currentDay) {
+            // CalendarCtrl คำนวณวันปัจจุบันอยู่แล้ว — ดึง dayLabel จากนั้น
+            const todayLabel = (typeof CalendarCtrl !== 'undefined')
+                ? CalendarCtrl.getTodayDayLabel?.()
+                : null;
+            // ถ้าหา dayLabel ได้และอยู่ใน sorted → ใช้ มิฉะนั้น Day แรกที่มี
+            State.currentDay = (todayLabel && sorted.includes(todayLabel))
+                ? todayLabel
+                : sorted[0];
+            State.mapNeedsFit = true;
+        }
         el.value = State.currentDay;
-
-        const _stM  = getDayMarkets(State.currentDay);
+        // ✅ ข้อ 5: อัปเดต label display แทน dropdown
+        const _labelEl = document.getElementById('day-label-display');
+        if (_labelEl && State.currentDay) {
+            const _dayNum = State.currentDay.replace('Day ','');
+            const _mktNow = getDayMarkets(State.currentDay);
+            _labelEl.textContent = _mktNow
+                ? `Day ${_dayNum} · ${_mktNow.split(' · ')[0]}`
+                : `Day ${_dayNum}`;
+        }
         const _stEl = document.getElementById('stores-title');
         if (_stEl) _stEl.textContent = _stM
             ? 'Day ' + State.currentDay.replace('Day ','') + ' · ' + _stM
@@ -709,22 +718,24 @@ const Processor = {
         sortableList = Sortable.create(c, {
             handle:              '.drag-handle',
             animation:           150,
-            // ✅ iPad fix: forceFallback ป้องกัน native drag API ทำงานผิดบน iOS
-            forceFallback:       true,
-            fallbackTolerance:   5,
-            // delay กันกด popup โดยไม่ตั้งใจ
+            forceFallback:       false,  // ✅ ข้อ 2: ปิด forceFallback — ใช้ native drag แทน ป้องกันวางผิดตำแหน่ง
+            fallbackTolerance:   3,
             delay:               80,
             delayOnTouchOnly:    true,
             touchStartThreshold: 4,
-            // scroll อัตโนมัติตอนลากถึงขอบ list
             scroll:              true,
-            scrollSensitivity:   60,
-            scrollSpeed:         12,
-            // ✅ แจ้ง Resizer ให้หยุดฟัง touch ระหว่าง drag
+            scrollSensitivity:   80,
+            scrollSpeed:         15,
+            ghostClass:          'sortable-ghost',  // ✅ ข้อ 2: แสดง placeholder ตำแหน่งที่จะวาง
+            chosenClass:         'sortable-chosen',
+            dragClass:           'sortable-drag',
             onStart: () => { window._sortableDragging = true; },
-            onEnd:   () => {
+            onMove: () => true,  // ✅ ข้อ 2: allow drop ทุกตำแหน่ง
+            onEnd: () => {
                 window._sortableDragging = false;
+                // ✅ ข้อ 3: อัปเดตตัวเลขทันทีหลัง drop ทั้งใน list และ map
                 Processor._updateSeqBadgesOnly();
+                MapCtrl.drawMap();
             },
             disabled: true,
         });
@@ -892,6 +903,16 @@ const CalendarCtrl = {
         CalendarCtrl._year  = now.getFullYear();
         CalendarCtrl._month = now.getMonth();
         CalendarCtrl.render();
+    },
+
+    // ✅ ข้อ 6: คืน dayLabel ของวันนี้ตาม calendarConfig
+    getTodayDayLabel: () => {
+        const now   = new Date();
+        const cfg   = State.calendarConfig;
+        const day   = now.getDate();
+        const y     = now.getFullYear();
+        const m     = now.getMonth();
+        return CalendarCtrl.getDayLabelForCfg(day, cfg, State.allStores, y, m) || null;
     },
 
     getDayLabelForCfg: (dateNum, cfg, stores, year, month) => {
@@ -1555,6 +1576,12 @@ document.getElementById('day-select').addEventListener('change', (e) => {
     if (_sEl) _sEl.textContent = _m
         ? 'สายวิ่งวันที่ ' + State.currentDay.replace('Day ','') + ' · ' + _m
         : 'รายชื่อร้านค้าทั้งหมด';
+    // ✅ ข้อ 5: sync label display
+    const _lbl = document.getElementById('day-label-display');
+    if (_lbl && State.currentDay) {
+        const _dn = State.currentDay.replace('Day ','');
+        _lbl.textContent = _m ? `Day ${_dn} · ${_m.split(' · ')[0]}` : `Day ${_dn}`;
+    }
     State.mapNeedsFit = true;
     Processor.routeList();
 });
