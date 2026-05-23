@@ -133,23 +133,24 @@ const SalesDashboard = {
                     return `<option value="${ym}">${label}</option>`;
                 }).join('');
 
-            // ✅ FIX-PERF-5: โหลดเฉพาะเดือนล่าสุดก่อน — เดือนอื่นโหลดเมื่อผู้ใช้เลือก (lazy)
+            // ✅ FIX-PERF-5: โหลดเดือนล่าสุดก่อน แล้ว preload ทุกเดือนที่เหลือเบื้องหลัง
             if (months.length > 0) {
+                // ✅ FIX: รอ browser render <option> เสร็จก่อน set value
+                // sel.value = months[0] ทันทีหลัง innerHTML อาจไม่ติดใน browser บางตัว
+                await new Promise(r => requestAnimationFrame(r));
                 sel.value = months[0];
+                // ตรวจสอบว่า set สำเร็จ ถ้าไม่ติดให้ force select option แรก
+                if (sel.value !== months[0]) {
+                    sel.selectedIndex = 1; // index 0 = "-- เดือน --", index 1 = เดือนล่าสุด
+                }
                 await SalesDashboard.onMonthChange(months[0]);
-                // preload เดือนก่อนหน้าทั้ง chunk + row cache เบื้องหลัง
-                // ใช้ _loadData (ไม่ใช่แค่ _loadChunks) เพื่อให้ rowCache พร้อมเมื่อผู้ใช้กดเลือก
-                if (months[1]) {
+                // preload ทุกเดือนที่เหลือ — staggered ทุก 2 วิ ไม่บล็อก render
+                months.slice(1).forEach((ym, i) => {
                     setTimeout(() => {
-                        SalesDashboard._loadData(months[1]).catch(() => {});
-                        SalesDashboard._loadTarget(months[1]).catch(() => {});
-                    }, 3000);
-                }
-                if (months[2]) {
-                    setTimeout(() => {
-                        SalesDashboard._loadData(months[2]).catch(() => {});
-                    }, 6000);
-                }
+                        SalesDashboard._loadData(ym).catch(() => {});
+                        SalesDashboard._loadTarget(ym).catch(() => {});
+                    }, (i + 1) * 2000);
+                });
             }
         } catch (e) {
             console.warn('SalesDashboard._loadMonthList:', e);
