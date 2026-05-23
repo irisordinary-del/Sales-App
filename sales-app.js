@@ -1472,9 +1472,10 @@ const SupervisorUI = {
         SupervisorUI._showDayBar(true);
         SupervisorUI._injectBackBtn(routeId);
         Processor.setupRoute();
-        // ✅ UX-FIX: ไม่ force switchTab('route') — ให้ผู้ใช้กด tab ที่ต้องการเอง
-        // render grid ใหม่เพื่ออัปเดต highlight สายที่เลือก
+        // ✅ UX-FIX: switch ไป route tab พร้อม render map
+        // renderRouteGrid() ทำก่อนเพื่ออัปเดต highlight การ์ดที่เลือก
         SupervisorUI.renderRouteGrid();
+        UI.switchTab('route');
     },
 
     _injectBackBtn: (routeId) => {
