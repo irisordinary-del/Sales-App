@@ -77,9 +77,11 @@ const SalesDashboard = {
         SalesDashboard._ready = true;
         SalesDashboard._initOfflineListener();
         SalesDashboard._ensureKpiCards();
-        SalesDashboard._loadMonthList();
-        // รอ State.isLoaded (routes พร้อม) ก่อนโหลด campaigns
-        SalesDashboard._waitAndLoadCampaigns();
+        // ✅ โหลดพร้อมกัน ไม่รอกัน
+        Promise.all([
+            SalesDashboard._loadMonthList(),
+            SalesDashboard._waitAndLoadCampaigns(),
+        ]).catch(() => {});
     },
 
     _ensureKpiCards: () => {
@@ -205,17 +207,11 @@ const SalesDashboard = {
     _loadChunks: async (ym) => {
         if (SalesDashboard._chunkCache[ym]) return SalesDashboard._chunkCache[ym];
         try {
-            const metaDoc = await db.collection('sellout').doc(ym).get();
-            if (!metaDoc.exists) { SalesDashboard._chunkCache[ym] = []; return []; }
-
-            // ✅ FIX-OFFLINE: ตรวจสอบ online/offline จริงแทน fromCache
-            // fromCache=true เกิดได้ตอน online ปกติด้วย จึงไม่ใช้เป็น offline indicator
-
-            // ✅ FIX-PERF-2: ดึง chunk refs ก่อน แล้ว fetch ทุก chunk พร้อมกัน (parallel)
-            // เดิม: .get() แบบ serial (1 chunk ต่อ 1 round-trip)
-            // ใหม่: Promise.allSettled() fetch ทุก chunk พร้อมกัน
+            // ✅ FIX-PERF: ดึง chunks โดยตรงเลย ไม่ต้องดึง metaDoc ก่อน (ลด 1 round-trip)
             const chunkListSnap = await db.collection('sellout').doc(ym)
                 .collection('chunks').get();
+
+            if (chunkListSnap.empty) { SalesDashboard._chunkCache[ym] = []; return []; }
 
             const chunkRefs = chunkListSnap.docs
                 .sort((a,b) => (a.data().index||0) - (b.data().index||0));
