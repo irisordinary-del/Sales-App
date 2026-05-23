@@ -604,9 +604,9 @@ const Processor = {
         const hist = (typeof StoreHistory !== 'undefined') ? StoreHistory._storeMap : {};
         const mode = UI._sortMode || 'seq';
 
-        // ✅ UX-FIX: Supervisor/ASM ไม่เลือกสาย → แสดงร้านทุกสายในศูนย์
-        // เลือกสายแล้ว → แสดงเฉพาะสายนั้น
-        const isSupAllRoutes = App.isSupervisor() && !SupervisorUI._selectedRoute;
+        // ✅ Supervisor/ASM: ร้านค้า tab แสดงทุกสายในศูนย์เสมอ
+        // ไม่เกี่ยวกับสายที่เลือกใน tab คิวงาน (แยกอิสระ)
+        const isSupAllRoutes = App.isSupervisor();
         let list = isSupAllRoutes
             ? Object.values(State.allRoutes || {}).flat()
             : [...State.allStores];
@@ -1471,10 +1471,9 @@ const SupervisorUI = {
         Processor.setupRoute();
         SupervisorUI._showDayBar(true);
         SupervisorUI._injectBackBtn(routeId);
-        // ✅ switch ไป route tab ก่อน แล้วค่อย render list (ป้องกัน grid ทับ)
+        // ✅ แค่ switch ไป tab คิวงาน + render แผนที่
+        // ร้านค้า tab แยกอิสระ ไม่เกี่ยวกันเลย
         UI.switchTab('route');
-        // render store list (คิวงาน) แทน route grid
-        Processor.routeList();
     },
 
     _injectBackBtn: (routeId) => {
