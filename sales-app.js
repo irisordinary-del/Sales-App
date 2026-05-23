@@ -35,9 +35,16 @@ firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 
 // Enable persistence — รองรับ offline และหลาย tab
+// ✅ FIX: InPrivate / browser ที่ block storage จะ throw error แต่ app ยังทำงานปกติ (online mode)
 db.enablePersistence({ synchronizeTabs: true }).catch(err => {
-    if (err.code === 'failed-precondition') console.warn('[DB] Multiple tabs: persistence limited');
-    else if (err.code === 'unimplemented')  console.warn('[DB] Browser does not support persistence');
+    if (err.code === 'failed-precondition') {
+        console.warn('[DB] Multiple tabs open: offline persistence disabled');
+    } else if (err.code === 'unimplemented') {
+        console.warn('[DB] Browser does not support offline persistence');
+    } else {
+        // InPrivate / storage blocked → ทำงาน online ปกติ ไม่ต้องแจ้ง user
+        console.warn('[DB] Persistence unavailable (private/restricted mode), running online only');
+    }
 });
 
 let docMain  = db.collection('appData').doc('v1_main');
@@ -83,15 +90,33 @@ const UI = {
         UI._editMode = true;
         document.getElementById('edit-order-btn').style.display    = 'none';
         document.getElementById('confirm-order-btn').style.display = 'block';
-        document.querySelectorAll('.drag-handle').forEach(h => { h.style.opacity = '1'; h.style.pointerEvents = 'auto'; });
+        // ✅ UX-FIX-6: visual indicator ว่ากำลัง edit อยู่
+        const panel = document.getElementById('route-side-panel');
+        if (panel) panel.classList.add('edit-mode');
+        document.querySelectorAll('.drag-handle').forEach(h => {
+            h.style.opacity       = '1';
+            h.style.pointerEvents = 'auto';
+            h.style.color         = '#2563eb';
+            h.style.fontSize      = '20px';
+        });
+        document.querySelectorAll('.store-item').forEach(el => el.classList.add('edit-mode-on'));
         if (window._sortableInstance) window._sortableInstance.option('disabled', false);
-        showSalesToast('ลากเพื่อสลับลำดับ แล้วกด ✓ ยืนยัน');
+        showSalesToast('✏️ ลากแถบ ≡ เพื่อสลับลำดับ แล้วกด ✓ ยืนยัน');
     },
     confirmEditOrder: () => {
         UI._editMode = false;
         document.getElementById('edit-order-btn').style.display    = 'block';
         document.getElementById('confirm-order-btn').style.display = 'none';
-        document.querySelectorAll('.drag-handle').forEach(h => { h.style.opacity = '0'; h.style.pointerEvents = 'none'; });
+        // ✅ UX-FIX-6: ปิด visual indicator
+        const panel = document.getElementById('route-side-panel');
+        if (panel) panel.classList.remove('edit-mode');
+        document.querySelectorAll('.drag-handle').forEach(h => {
+            h.style.opacity       = '0';
+            h.style.pointerEvents = 'none';
+            h.style.color         = '';
+            h.style.fontSize      = '';
+        });
+        document.querySelectorAll('.store-item').forEach(el => el.classList.remove('edit-mode-on'));
         if (window._sortableInstance) window._sortableInstance.option('disabled', true);
         Processor._updateSeqBadges();
         Processor.handleDrag();
@@ -128,19 +153,15 @@ const UI = {
                 }
             }, 200);
         }
+
+        // ✅ UX-FIX: Supervisor/ASM เข้า tab ร้านค้าได้เลย — แสดงร้านทั้งหมดทุกสาย
+        // ไม่ต้องเลือกสายก่อน (แยกออกจาก tab คิวงานที่ดูรายสาย)
+        UI._redirectingToRoute = false;
     },
 
     restoreTab: () => {
-        const today    = new Date().toDateString();
-        const lastDate = localStorage.getItem('sales_tab_date');
-        const savedTab = localStorage.getItem(_getTabKey());
-
-        if (lastDate !== today) {
-            localStorage.setItem('sales_tab_date', today);
-            UI.switchTab(DEFAULT_TAB);
-        } else {
-            UI.switchTab(VALID_TABS.includes(savedTab) ? savedTab : DEFAULT_TAB);
-        }
+        // ✅ ข้อ 4: ไม่จำ tab เดิม — เริ่มต้นใหม่ทุกครั้ง route tab เสมอ
+        UI.switchTab('route');
     },
 
     searchStores: (val) => {
@@ -268,73 +289,94 @@ const App = {
     },
 
     startSupervisor: async () => {
+        // ── clone จาก start() ── ไม่แตะ Sales เลย ──────────────────────
         document.getElementById('main-header').classList.remove('hidden');
         document.getElementById('main-content').classList.remove('hidden');
         const _bnav = document.getElementById('bottom-nav');
         if (_bnav) _bnav.style.display = 'grid';
 
-        const session    = Auth.getSession();
-        const roleLabel  = State.viewMode === 'asm' ? '🏢 ASM' : '👁 Sup';
-        document.getElementById('user-route-label').innerText = roleLabel + ' · ' + (session?.displayName || session?.username || '');
+        const session   = Auth.getSession();
+        const roleLabel = State.viewMode === 'asm' ? '🏢 ASM' : '👁 Sup';
+        const _dispName = session?.displayName || session?.username || '';
+        document.getElementById('user-route-label').innerText =
+            roleLabel + ' · ' + _dispName;
 
-        const dayRow = document.getElementById('day-select')?.closest('div');
-        if (dayRow) dayRow.style.display = 'none';
-        const editBtn = document.getElementById('edit-order-btn');
-        if (editBtn) editBtn.style.display = 'none';
+        // ซ่อน day bar + edit btn จนกว่าจะเลือกสาย
+        const _dayRow = document.getElementById('day-select')?.closest('div[style*="border-bottom"]');
+        if (_dayRow) _dayRow.style.display = 'none';
+        const _editBtn = document.getElementById('edit-order-btn');
+        if (_editBtn) _editBtn.style.display = 'none';
 
         document.getElementById('loader').style.display = 'flex';
         LoadBar.show();
-        LoadBar.setProgress(15, 'กำลังโหลดข้อมูลทุกสาย...');
+        LoadBar.setProgress(10, 'กำลังเชื่อมต่อ...');
 
+        // ── Step 1: ดึง centerDoc (เหมือน start()) ────────────────────
         const centerIdRaw  = session?.centerId || '';
         const _centerDocId = centerIdRaw ? (centerIdRaw + '_main') : 'v1_main';
-        State.centerId     = centerIdRaw;
+        State.centerId        = centerIdRaw;
+        State.planCenterDocId = _centerDocId;
+        const _centerRef      = db.collection('appData').doc(_centerDocId);
 
-        try {
-            const metaSnap = await db.collection('appData').doc(_centerDocId).get();
-            State.routeList = metaSnap.exists ? (metaSnap.data().routeList || []) : [];
-        } catch(e) { State.routeList = []; }
+        let _centerSnap;
+        try { _centerSnap = await App._getWithTimeout(_centerRef, 6000); }
+        catch(e) { _centerSnap = { exists: false, data: () => ({}) }; }
 
-        // ─── detect routeColRef (draft หรือ active) ───────────────────
-        // ✅ ระบบใหม่: ดึง currentPlanYM จาก centerDoc แล้วใช้ plans/{ym}
-        let routeColRef;
-        try {
-            const _metaSnap = await App._getWithTimeout(db.collection('appData').doc(_centerDocId), 5000);
-            const _meta     = _metaSnap.exists ? _metaSnap.data() : {};
-            const _nowYMSup = (() => { const d=new Date(); return `${d.getFullYear()}_${String(d.getMonth()+1).padStart(2,'0')}`; })();
-            const _useYM    = _meta.currentPlanYM || (_meta.planList?.[0]) || _nowYMSup;
-            routeColRef      = db.collection('appData').doc(_centerDocId).collection('plans').doc(_useYM).collection('routes');
-            State.activePlanYM = _useYM;
-        } catch(e) {
-            const _nowYMSup = (() => { const d=new Date(); return `${d.getFullYear()}_${String(d.getMonth()+1).padStart(2,'0')}`; })();
-            routeColRef = db.collection('appData').doc(_centerDocId).collection('plans').doc(_nowYMSup).collection('routes');
-        }
+        const _centerData = _centerSnap?.exists ? _centerSnap.data() : {};
+        State.planList       = (_centerData.planList || []).sort().reverse();
 
-        LoadBar.setProgress(30, 'โหลดข้อมูลร้านทุกสาย...');
+        const _nowYM = (() => { const d=new Date(); return `${d.getFullYear()}_${String(d.getMonth()+1).padStart(2,'0')}`; })();
+        const _useYM = _centerData.currentPlanYM || State.planList[0] || _nowYM;
+        State.activePlanYM   = _useYM;
+        State.currentPlanYM  = _useYM;
 
-        // โหลดแบบ batch ทีละ 5 สาย — ลด concurrent requests
-        const routes = State.routeList;
-        const BATCH  = 5;
-        let loaded   = 0;
+        LoadBar.setProgress(20, `📅 Plan ${_useYM}...`);
+
+        // ── Step 2: ดึง plan metadata (เหมือน start()) ────────────────
+        const _planRef = _centerRef.collection('plans').doc(_useYM);
+        let _planSnap;
+        try { _planSnap = await App._getWithTimeout(_planRef, 8000); }
+        catch(e) { _planSnap = null; }
+
+        const _planData      = _planSnap?.exists ? _planSnap.data() : {};
+        State.calendarConfig = _planData.calendarConfig || null;
+        // routeList มาจาก plans/{ym} ไม่ใช่ root
+        State.routeList      = (_planData.routeList || [])
+            .sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
+
+        LoadBar.setProgress(30, `โหลด ${State.routeList.length} สาย...`);
+
+        // ── Step 3: โหลด stores ทุกสาย batch 5 (เหมือนเดิม) ─────────
+        const _routesCol = _planRef.collection('routes');
+        const BATCH = 5;
+        let loaded = 0;
         State.allRoutes = {};
         State.allStores = [];
 
-        for (let i = 0; i < routes.length; i += BATCH) {
-            const chunk = routes.slice(i, i + BATCH);
+        for (let i = 0; i < State.routeList.length; i += BATCH) {
+            const chunk = State.routeList.slice(i, i + BATCH);
             await Promise.all(chunk.map(async (routeId) => {
                 try {
-                    const rd = await routeColRef.doc(routeId).get();
+                    const rd = await App._getWithTimeout(_routesCol.doc(routeId), 8000);
                     State.allRoutes[routeId] = rd.exists ? (rd.data().stores || []) : [];
                 } catch(e) { State.allRoutes[routeId] = []; }
             }));
             loaded += chunk.length;
-            LoadBar.setProgress(30 + Math.round(loaded / Math.max(routes.length,1) * 40), `โหลด ${loaded}/${routes.length} สาย...`);
+            LoadBar.setProgress(30 + Math.round(loaded / Math.max(State.routeList.length,1) * 45),
+                `โหลด ${loaded}/${State.routeList.length} สาย...`);
         }
-
         State.allStores = Object.values(State.allRoutes).flat();
-        LoadBar.setProgress(75, 'โหลดยอดขาย...');
 
-        // โหลด sellout แบบ non-blocking
+        // seed planCache เดือน active — ปฏิทินใช้ได้ทันที
+        State.planCache[_useYM] = {
+            stores:         State.allStores,
+            calendarConfig: State.calendarConfig,
+            ym:             _useYM,
+        };
+
+        LoadBar.setProgress(80, 'โหลดยอดขาย...');
+
+        // ── Step 4: sales non-blocking (เหมือน start()) ───────────────
         colSales.get().then(snap => {
             let merged = {};
             snap.forEach(doc => Object.assign(merged, doc.data()));
@@ -346,6 +388,18 @@ const App = {
         State.isLoaded = true;
         SupervisorUI.init();
 
+        // ── Step 5: calendar init — โหลด config เดือนอื่น background ──
+        // เหมือน openPopup ของ Sales
+        if (State.planList.length > 0) {
+            Promise.all(State.planList
+                .filter(ym => ym !== _useYM)
+                .map(ym => App.loadPlanDataForSup(ym).catch(() => {}))
+            ).then(() => {
+                if (typeof CalendarCtrl !== 'undefined') CalendarCtrl.render();
+            });
+        }
+        if (typeof CalendarCtrl !== 'undefined') CalendarCtrl.init();
+
         const searchEl = document.getElementById('search-input');
         if (searchEl) searchEl.oninput = (e) => {
             const q = e.target.value.toLowerCase().trim();
@@ -354,6 +408,33 @@ const App = {
             });
         };
         UI.switchTab('dashboard');
+    },
+
+    // ── loadPlanDataForSup: ดึง calendarConfig + stores ต่อเดือน ──────
+    // เรียกเฉพาะ Supervisor — Sales ใช้ loadPlanData ปกติ
+    loadPlanDataForSup: async (ym) => {
+        if (State.planCache[ym]) return State.planCache[ym];
+        const centerDocId = State.planCenterDocId;
+        try {
+            const planRef        = db.collection('appData').doc(centerDocId).collection('plans').doc(ym);
+            const cfgSnap        = await App._getWithTimeout(planRef, 10000);
+            const calendarConfig = cfgSnap.exists ? (cfgSnap.data().calendarConfig || null) : null;
+            const routeList      = cfgSnap.exists ? (cfgSnap.data().routeList || []) : [];
+            // โหลด stores ทุกสาย batch 5
+            let stores = [];
+            const BATCH = 5;
+            for (let i = 0; i < routeList.length; i += BATCH) {
+                const chunk = routeList.slice(i, i + BATCH);
+                const docs  = await Promise.all(
+                    chunk.map(r => planRef.collection('routes').doc(r).get().catch(() => null))
+                );
+                docs.forEach(d => { if (d?.exists) stores = stores.concat(d.data().stores || []); });
+            }
+            State.planCache[ym] = { stores, calendarConfig, ym };
+        } catch(e) {
+            State.planCache[ym] = { stores: [], calendarConfig: null, ym };
+        }
+        return State.planCache[ym];
     },
 
     logout: () => { Auth.logout(); },
@@ -375,7 +456,10 @@ const App = {
         document.getElementById('main-content').classList.remove('hidden');
         const _bnav = document.getElementById('bottom-nav');
         if (_bnav) _bnav.style.display = 'grid';
-        document.getElementById('user-route-label').innerText  = State.myRoute;
+        // ✅ UX-FIX-1: แสดงชื่อจริงแทน username รหัส
+        const _sess = Auth.getSession();
+        const _displayName = _sess?.displayName || _sess?.username || State.myRoute;
+        document.getElementById('user-route-label').innerText = _displayName;
         document.getElementById('loader').style.display = 'flex';
         LoadBar.show();
 
@@ -510,7 +594,19 @@ const Processor = {
     stores: () => {
         const hist = (typeof StoreHistory !== 'undefined') ? StoreHistory._storeMap : {};
         const mode = UI._sortMode || 'seq';
-        let list   = [...State.allStores];
+
+        // ✅ Supervisor/ASM: ร้านค้า tab แสดงทุกสายในศูนย์เสมอ
+        // ไม่เกี่ยวกับสายที่เลือกใน tab คิวงาน (แยกอิสระ)
+        const isSupAllRoutes = App.isSupervisor();
+        let list = isSupAllRoutes
+            ? Object.values(State.allRoutes || {}).flat()
+            : [...State.allStores];
+
+        // กรองซ้ำ (ร้านที่อยู่หลายสาย)
+        if (isSupAllRoutes) {
+            const seen = new Set();
+            list = list.filter(s => seen.has(s.id) ? false : seen.add(s.id));
+        }
 
         if (mode === 'seq') {
             list.sort((a, b) => (a.seqs?.[State.currentDay] || 9999) - (b.seqs?.[State.currentDay] || 9999));
@@ -523,21 +619,31 @@ const Processor = {
         }
 
         const html = list.map(s => {
-            const h      = hist[s.id];
+            const h       = hist[s.id];
             const mktTag  = s.marketName
                 ? `<span style="font-size:10px;color:#3b82f6;font-weight:600;">${s.marketName}</span> ` : '';
             const histTag = h
                 ? `<div style="margin-top:3px;font-size:10px;color:#059669;font-weight:700;">💰 ${_fmtB(h.net)} · ${h.skuCount} SKU · ${h.invCount} บิล</div>` : '';
+            // Supervisor ดูรวม → แสดง route badge
+            const routeTag = isSupAllRoutes && s.salesCode
+                ? `<span style="font-size:10px;background:#dbeafe;color:#1e40af;font-weight:700;padding:1px 7px;border-radius:6px;margin-left:4px;">${s.salesCode}</span>` : '';
             return `<div onclick="UI.openModal('${s.id}')"
-                data-search="${s.id.toLowerCase()} ${s.name.toLowerCase()} ${(s.marketName||'').toLowerCase()}"
+                data-search="${s.id.toLowerCase()} ${s.name.toLowerCase()} ${(s.marketName||'').toLowerCase()} ${(s.salesCode||'').toLowerCase()}"
                 style="background:#fff;border-radius:14px;border:1px solid #e5e7eb;padding:11px 14px;cursor:pointer;">
-                <div style="font-weight:800;font-size:13px;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${s.name}</div>
+                <div style="display:flex;align-items:center;justify-content:space-between;">
+                    <div style="font-weight:800;font-size:13px;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${s.name}</div>
+                    ${routeTag}
+                </div>
                 <div style="font-size:10px;color:#9ca3af;font-family:monospace;margin-top:1px;">${mktTag}${s.id}</div>
                 ${histTag}
             </div>`;
         }).join('');
+
+        const emptyMsg = isSupAllRoutes
+            ? 'ไม่พบข้อมูลร้านในศูนย์นี้'
+            : 'ไม่พบข้อมูลร้านในสายนี้';
         document.getElementById('all-store-list').innerHTML = html
-            || '<p style="text-align:center;color:#9ca3af;margin-top:24px;font-size:13px;">ไม่พบข้อมูลร้านในสายนี้</p>';
+            || `<p style="text-align:center;color:#9ca3af;margin-top:24px;font-size:13px;">${emptyMsg}</p>`;
     },
 
     setupRoute: () => {
@@ -547,10 +653,28 @@ const Processor = {
         const el   = document.getElementById('day-select');
         el.innerHTML = sorted.map(d => `<option value="${d}">Day ${d.replace('Day ','')}</option>`).join('');
 
-        if (!State.currentDay) { State.currentDay = sorted[0]; State.mapNeedsFit = true; }
+        // ✅ ข้อ 6: ถ้ายังไม่มี currentDay → หาวันที่ตรงกับวันนี้ก่อน
+        if (!State.currentDay) {
+            // CalendarCtrl คำนวณวันปัจจุบันอยู่แล้ว — ดึง dayLabel จากนั้น
+            const todayLabel = (typeof CalendarCtrl !== 'undefined')
+                ? CalendarCtrl.getTodayDayLabel?.()
+                : null;
+            // ถ้าหา dayLabel ได้และอยู่ใน sorted → ใช้ มิฉะนั้น Day แรกที่มี
+            State.currentDay = (todayLabel && sorted.includes(todayLabel))
+                ? todayLabel
+                : sorted[0];
+            State.mapNeedsFit = true;
+        }
         el.value = State.currentDay;
-
-        const _stM  = getDayMarkets(State.currentDay);
+        // ✅ ข้อ 5: อัปเดต label display แทน dropdown
+        const _labelEl = document.getElementById('day-label-display');
+        if (_labelEl && State.currentDay) {
+            const _dayNum = State.currentDay.replace('Day ','');
+            const _mktNow = getDayMarkets(State.currentDay);
+            _labelEl.textContent = _mktNow
+                ? `Day ${_dayNum} · ${_mktNow.split(' · ')[0]}`
+                : `Day ${_dayNum}`;
+        }
         const _stEl = document.getElementById('stores-title');
         if (_stEl) _stEl.textContent = _stM
             ? 'Day ' + State.currentDay.replace('Day ','') + ' · ' + _stM
@@ -594,22 +718,24 @@ const Processor = {
         sortableList = Sortable.create(c, {
             handle:              '.drag-handle',
             animation:           150,
-            // ✅ iPad fix: forceFallback ป้องกัน native drag API ทำงานผิดบน iOS
-            forceFallback:       true,
-            fallbackTolerance:   5,
-            // delay กันกด popup โดยไม่ตั้งใจ
+            forceFallback:       false,  // ✅ ข้อ 2: ปิด forceFallback — ใช้ native drag แทน ป้องกันวางผิดตำแหน่ง
+            fallbackTolerance:   3,
             delay:               80,
             delayOnTouchOnly:    true,
             touchStartThreshold: 4,
-            // scroll อัตโนมัติตอนลากถึงขอบ list
             scroll:              true,
-            scrollSensitivity:   60,
-            scrollSpeed:         12,
-            // ✅ แจ้ง Resizer ให้หยุดฟัง touch ระหว่าง drag
+            scrollSensitivity:   80,
+            scrollSpeed:         15,
+            ghostClass:          'sortable-ghost',  // ✅ ข้อ 2: แสดง placeholder ตำแหน่งที่จะวาง
+            chosenClass:         'sortable-chosen',
+            dragClass:           'sortable-drag',
             onStart: () => { window._sortableDragging = true; },
-            onEnd:   () => {
+            onMove: () => true,  // ✅ ข้อ 2: allow drop ทุกตำแหน่ง
+            onEnd: () => {
                 window._sortableDragging = false;
+                // ✅ ข้อ 3: อัปเดตตัวเลขทันทีหลัง drop ทั้งใน list และ map
                 Processor._updateSeqBadgesOnly();
+                MapCtrl.drawMap();
             },
             disabled: true,
         });
@@ -641,6 +767,12 @@ const Processor = {
 
     handleDrag: () => {
         if (App.isSupervisor()) { SupervisorUI.handleDrag(); return; }
+
+        // ✅ UX-FIX-4: ป้องกันเขียนไปที่ path ผิดถ้า plan ยังโหลดไม่เสร็จ
+        if (!State.activePlanYM) {
+            showSalesToast('⚠️ ระบบยังโหลดไม่เสร็จ กรุณารอสักครู่', true);
+            return;
+        }
 
         const items   = document.querySelectorAll('#route-store-list > .store-item');
         const updated = [...State.allStores];
@@ -773,7 +905,20 @@ const CalendarCtrl = {
         CalendarCtrl.render();
     },
 
+    // ✅ ข้อ 6: คืน dayLabel ของวันนี้ตาม calendarConfig
+    getTodayDayLabel: () => {
+        const now   = new Date();
+        const cfg   = State.calendarConfig;
+        const day   = now.getDate();
+        const y     = now.getFullYear();
+        const m     = now.getMonth();
+        return CalendarCtrl.getDayLabelForCfg(day, cfg, State.allStores, y, m) || null;
+    },
+
     getDayLabelForCfg: (dateNum, cfg, stores, year, month) => {
+        if (cfg?.mapping && Object.keys(cfg.mapping).length > 0) {
+            return cfg.mapping[String(dateNum)] || null;
+        }
         if (!cfg || cfg.mode === 'date') {
             const label = `Day ${dateNum}`;
             return (stores || State.allStores).some(s => s.days?.includes(label)) ? label : null;
@@ -865,9 +1010,17 @@ const CalendarCtrl = {
 
         const modeEl = document.getElementById('calendar-mode-badge');
         if (modeEl) {
+            // ✅ UX-FIX-3: Sales ไม่ต้องเห็น warning ที่ทำอะไรไม่ได้
+            const _isSalesRole = Auth.getSession()?.role === 'sales';
             if (!cfg) {
-                modeEl.textContent = '⚠️ ยังไม่ได้ตั้งค่าปฏิทิน';
-                modeEl.style.background = '#fef3c7'; modeEl.style.color = '#92400e';
+                if (_isSalesRole) {
+                    // Sales เห็นข้อความที่ไม่ทำให้งง และไม่ให้ความรู้สึกว่ามี error
+                    modeEl.textContent = '📅 ปฏิทินวิ่งงาน';
+                    modeEl.style.background = '#f0f9ff'; modeEl.style.color = '#0369a1';
+                } else {
+                    modeEl.textContent = '⚠️ ยังไม่ได้ตั้งค่าปฏิทิน';
+                    modeEl.style.background = '#fef3c7'; modeEl.style.color = '#92400e';
+                }
             } else if (cfg.mode === 'cycle') {
                 modeEl.textContent = '🔄 Cycle D1-' + (cfg.cycleDays || 24);
                 modeEl.style.background = '#ede9fe'; modeEl.style.color = '#5b21b6';
@@ -883,7 +1036,7 @@ const CalendarCtrl = {
 
         const _renderYM    = `${year}_${String(month+1).padStart(2,'0')}`;
         const _renderPlan  = State.planCache[_renderYM];
-        const _renderCfg   = _renderPlan?.calendarConfig || cfg;
+        const _renderCfg   = _renderPlan !== undefined ? _renderPlan?.calendarConfig : cfg;
         const _renderStores = _renderPlan?.stores || State.allStores;
 
         for (let d = 1; d <= daysInMonth; d++) {
@@ -919,11 +1072,8 @@ const CalendarCtrl = {
             })() : [];
             const mktLabel = mktsInCell[0] || '';
             const mktMore  = mktsInCell.length > 1 ? '+' + (mktsInCell.length - 1) : '';
-            const _cellCfg    = State.calendarConfig;
-            const isDateMode  = !_cellCfg || _cellCfg.mode === 'date';
             const dayNum      = dayLabel ? parseInt(dayLabel.replace('Day ','')) : null;
-            // ✅ ซ่อน Day badge เมื่อตัวเลข Day ตรงกับวันที่ในทุก mode (ไม่ใช่แค่ date mode)
-            const isSameAsDate = dayNum === d;
+            const isSameAsDate = true; // ไม่แสดงเลข Day badge
             const clickHandler = dayLabel ? `CalendarCtrl.goToDay('${dayLabel}')` : '';
 
             html += `
@@ -951,19 +1101,21 @@ const CalendarCtrl = {
         const _calYM = `${CalendarCtrl._year}_${String(CalendarCtrl._month+1).padStart(2,'0')}`;
         if (_calYM !== (State.activePlanYM || '')) {
             const _pk = State.planList.find(p => p === _calYM);
-            if (_pk) { showSalesToast('⏳ กำลังโหลด...'); await App.switchToPlan(_pk); }
+            if (_pk) {
+                // ✅ UX-FIX-8: await ให้เสร็จก่อน render — ป้องกัน race condition แสดงร้านผิดเดือน
+                showSalesToast('⏳ กำลังโหลดข้อมูลเดือนนี้...');
+                await App.switchToPlan(_pk);
+            }
         }
-        setTimeout(() => {
-            State.currentDay       = dayLabel;
-            State._filterMarket    = market || '';
-            const el = document.getElementById('day-select');
-            if (el) el.value = dayLabel;
-            State.mapNeedsFit = true;
-            Processor.routeList();
-            UI.switchTab('route');
-            const mkts = getDayMarketList(dayLabel, CalendarCtrl._month, CalendarCtrl._year);
-            showSalesToast('📅 ' + (market || (mkts[0] || dayLabel)));
-        }, 320);
+        State.currentDay       = dayLabel;
+        State._filterMarket    = market || '';
+        const el = document.getElementById('day-select');
+        if (el) el.value = dayLabel;
+        State.mapNeedsFit = true;
+        Processor.routeList();
+        UI.switchTab('route');
+        const mkts = getDayMarketList(dayLabel, CalendarCtrl._month, CalendarCtrl._year);
+        showSalesToast('📅 ' + (market || (mkts[0] || dayLabel)));
     },
 
     showDaySheet: async (dayLabel) => {
@@ -973,8 +1125,22 @@ const CalendarCtrl = {
             if (_pk) await App.switchToPlan(_pk);
         }
         const _sy = CalendarCtrl._year, _sm = CalendarCtrl._month;
-        const mkts       = getDayMarketList(dayLabel, _sm, _sy);
-        const storeCount = State.allStores.filter(s => s.days?.includes(dayLabel)).length;
+
+        // ✅ FIX-SUP: Supervisor ที่เลือกสายแล้ว → ใช้เฉพาะร้านในสายนั้น
+        // ไม่ใช้ State.allStores ซึ่งรวมทุกสาย
+        const _activeStores = (App.isSupervisor() && SupervisorUI._selectedRoute)
+            ? (State.allRoutes[SupervisorUI._selectedRoute] || State.allStores)
+            : State.allStores;
+
+        const mkts       = (() => {
+            const names = new Set();
+            _activeStores.forEach(s => {
+                if (s.days?.includes(dayLabel) && s.marketName)
+                    names.add(trimMarketName(s.marketName));
+            });
+            return Array.from(names).filter(Boolean).sort();
+        })();
+        const storeCount = _activeStores.filter(s => s.days?.includes(dayLabel)).length;
         const dayNum     = parseInt(dayLabel.replace('Day ',''));
         const dateStr    = new Date(_sy, _sm, dayNum).toLocaleDateString('th-TH', {weekday:'long',day:'numeric',month:'long'});
 
@@ -993,8 +1159,8 @@ const CalendarCtrl = {
         <div style="padding:0 16px;">
             <button onclick="CalendarCtrl.navigateToDay('${dayLabel}','')" style="width:100%;padding:13px;border-radius:14px;border:none;background:#2563eb;color:#fff;font-size:15px;font-weight:800;cursor:pointer;margin-bottom:12px;">📋 ดูคิวงานทั้งหมด ${storeCount} ร้าน</button>
             ${mkts.length > 0 ? `<div style="font-size:11px;font-weight:800;color:#6b7280;margin-bottom:8px;padding:0 4px;">เลือกตลาด</div><div style="display:flex;flex-direction:column;gap:8px;">${mkts.map(mkt => {
-                const cnt = State.allStores.filter(s => s.days?.includes(dayLabel) && trimMarketName(s.marketName) === mkt).length;
-                return `<button onclick="CalendarCtrl.navigateToDay('${dayLabel}','${mkt.replace(/'/g,"\'")}')" style="width:100%;padding:12px 16px;border-radius:14px;border:1.5px solid #e5e7eb;background:#f9fafb;display:flex;justify-content:space-between;align-items:center;cursor:pointer;font-family:inherit;"><span style="font-size:14px;font-weight:700;color:#111827;">🏪 ${mkt}</span><span style="font-size:12px;font-weight:800;color:#6b7280;background:#e5e7eb;padding:3px 12px;border-radius:20px;">${cnt} ร้าน</span></button>`;
+                const cnt = _activeStores.filter(s => s.days?.includes(dayLabel) && trimMarketName(s.marketName) === mkt).length;
+                return `<button onclick="CalendarCtrl.navigateToDay('${dayLabel}','${mkt.replace(/'/g,"\\'")}')\" style="width:100%;padding:12px 16px;border-radius:14px;border:1.5px solid #e5e7eb;background:#f9fafb;display:flex;justify-content:space-between;align-items:center;cursor:pointer;font-family:inherit;"><span style="font-size:14px;font-weight:700;color:#111827;">🏪 ${mkt}</span><span style="font-size:12px;font-weight:800;color:#6b7280;background:#e5e7eb;padding:3px 12px;border-radius:20px;">${cnt} ร้าน</span></button>`;
             }).join('')}</div>` : '<div style="text-align:center;color:#9ca3af;font-size:13px;padding:16px 0;">ไม่มีข้อมูลตลาด</div>'}
         </div>`;
         requestAnimationFrame(() => { body.style.transform = 'translateY(0)'; });
@@ -1010,12 +1176,23 @@ const CalendarCtrl = {
         CalendarCtrl._month--;
         if (CalendarCtrl._month < 0) { CalendarCtrl._month = 11; CalendarCtrl._year--; }
         CalendarCtrl.render();
+        CalendarCtrl._bgLoadMonth();
     },
 
     nextMonth: () => {
         CalendarCtrl._month++;
         if (CalendarCtrl._month > 11) { CalendarCtrl._month = 0; CalendarCtrl._year++; }
         CalendarCtrl.render();
+        CalendarCtrl._bgLoadMonth();
+    },
+
+    // โหลด planCache เดือนปัจจุบัน background ถ้ายังไม่มี
+    _bgLoadMonth: () => {
+        const ym = `${CalendarCtrl._year}_${String(CalendarCtrl._month+1).padStart(2,'0')}`;
+        if (State.planCache[ym]) return; // มีแล้ว
+        if (!State.planList.includes(ym)) return; // ไม่มี plan เดือนนี้
+        const _loader = App.isSupervisor() ? App.loadPlanDataForSup : App.loadPlanData;
+        _loader(ym).then(() => CalendarCtrl.render()).catch(() => {});
     },
 
     openPopup: () => {
@@ -1040,7 +1217,14 @@ const CalendarCtrl = {
         });
         // โหลดเดือนอื่น background (non-blocking)
         if (State.planList?.length > 0) {
-            Promise.all(State.planList.map(ym => App.loadPlanData(ym).catch(() => {})))
+            const _loader = App.isSupervisor() ? App.loadPlanDataForSup : App.loadPlanData;
+            if (App.isSupervisor()) {
+                // เคลียร์ cache null ก่อน
+                State.planList.forEach(ym => {
+                    if (State.planCache[ym]?.calendarConfig === null) delete State.planCache[ym];
+                });
+            }
+            Promise.all(State.planList.map(ym => _loader(ym).catch(() => {})))
                 .then(() => CalendarCtrl.render());
         }
     },
@@ -1198,22 +1382,50 @@ const SupervisorUI = {
     _selectedRoute: null,
 
     init: () => {
-        const stores = Object.values(State.allRoutes).flat();
-        // Tab2: รายชื่อร้าน
-        const html = stores.map(s => `
-            <div onclick="UI.openModal('${s.id}')"
-                data-search="${s.id.toLowerCase()} ${s.name.toLowerCase()} ${(s.marketName||'').toLowerCase()}"
-                style="background:#fff;border-radius:14px;border:1px solid #e5e7eb;padding:11px 14px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;">
-                <div style="flex:1;min-width:0;margin-right:10px;">
-                    <div style="font-weight:800;font-size:13px;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${s.name}</div>
-                    <div style="font-size:10px;color:#9ca3af;font-family:monospace;">${s.id}</div>
-                </div>
-            </div>`).join('');
-        const el = document.getElementById('all-store-list');
-        if (el) el.innerHTML = html || '<p style="text-align:center;color:#9ca3af;padding:24px;font-size:13px;">ไม่พบร้านค้า</p>';
-
         SupervisorUI.renderRouteGrid();
+        SupervisorUI.renderStoreList();
         if (typeof SalesDashboard !== 'undefined') SalesDashboard.initSupervisor?.();
+    },
+
+    // render all-store-list ตามสายที่เลือก (ถ้าไม่เลือก = ทุกสาย)
+    renderStoreList: () => {
+        const el = document.getElementById('all-store-list');
+        if (!el) return;
+
+        const selected = SupervisorUI._selectedRoute;
+        // ยังไม่เลือกสาย → ไม่แสดงร้าน (tab route จะแสดง grid แทน)
+        if (!selected) {
+            el.innerHTML = '<p style="text-align:center;color:#9ca3af;padding:32px 16px;font-size:13px;">กรุณาเลือกสายวิ่งก่อนครับ</p>';
+            return;
+        }
+        const stores = State.allRoutes[selected] || [];
+
+        // header บอกว่ากำลังดูสายไหน
+        const header = selected ? `
+            <div style="display:flex;align-items:center;gap:8px;padding:8px 14px;background:#f8fafc;border-radius:12px;margin-bottom:10px;cursor:pointer;"
+                onclick="SupervisorUI.clearRoute()">
+                <span style="color:#9ca3af;font-size:12px;font-weight:700;">← กลับ · เลือกสายใหม่</span>
+                <span style="background:${/C\d/.test(selected)?'#ede9fe':'#dbeafe'};color:${/C\d/.test(selected)?'#7c3aed':'#2563eb'};font-size:11px;font-weight:900;padding:2px 10px;border-radius:8px;">${selected}</span>
+                <span style="font-size:11px;color:#6b7280;font-weight:700;">${stores.length} ร้าน</span>
+            </div>` : '';
+
+        const html = stores.map(s => {
+            const routeId = Object.keys(State.allRoutes).find(r =>
+                (State.allRoutes[r] || []).some(x => x.id === s.id)
+            ) || '';
+            const routeBadge = !selected && routeId ? `
+                <span style="font-size:9px;font-weight:900;padding:1px 6px;border-radius:6px;background:${/C\d/.test(routeId)?'#ede9fe':'#dbeafe'};color:${/C\d/.test(routeId)?'#7c3aed':'#2563eb'};">${routeId}</span>` : '';
+            return `<div onclick="UI.openModal('${s.id}')"
+                data-search="${s.id.toLowerCase()} ${s.name.toLowerCase()} ${(s.marketName||'').toLowerCase()} ${routeId.toLowerCase()}"
+                style="background:#fff;border-radius:14px;border:1px solid #e5e7eb;padding:11px 14px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;margin-bottom:6px;">
+                <div style="flex:1;min-width:0;margin-right:8px;">
+                    <div style="font-weight:800;font-size:13px;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${s.name}</div>
+                    <div style="font-size:10px;color:#9ca3af;font-family:monospace;margin-top:2px;">${s.id} ${routeBadge}</div>
+                </div>
+            </div>`;
+        }).join('');
+
+        el.innerHTML = header + (html || '<p style="text-align:center;color:#9ca3af;padding:24px;font-size:13px;">ไม่พบร้านค้า</p>');
     },
 
     renderRouteGrid: () => {
@@ -1259,10 +1471,13 @@ const SupervisorUI = {
         const backBtn = SupervisorUI._selectedRoute ? `
         <div onclick="SupervisorUI.clearRoute()"
             style="display:flex;align-items:center;gap:8px;padding:9px 14px;background:#f1f5f9;border-radius:12px;cursor:pointer;margin-bottom:12px;font-weight:700;font-size:12px;color:#374151;">
-            ← ยกเลิกเลือกสาย
+            ← กลับ · เลือกสายใหม่
         </div>` : '';
 
         container.innerHTML = backBtn
+            + `<div style="font-size:11px;color:#9ca3af;font-weight:600;text-align:center;padding:6px 0 12px;">
+                แตะสายวิ่งเพื่อดูรายละเอียดและแผนที่
+               </div>`
             + renderGroup('💳 Credit (C)', '#7c3aed', '#ede9fe', cRoutes)
             + renderGroup('🚐 Van (V)',    '#2563eb', '#dbeafe', vRoutes)
             + renderGroup('📦 อื่นๆ',      '#374151', '#f3f4f6', otherRoutes);
@@ -1274,9 +1489,11 @@ const SupervisorUI = {
         State.myRoute     = routeId;
         State.currentDay  = '';
         State.mapNeedsFit = true;
+        Processor.setupRoute();
         SupervisorUI._showDayBar(true);
         SupervisorUI._injectBackBtn(routeId);
-        Processor.setupRoute();
+        // ✅ แค่ switch ไป tab คิวงาน + render แผนที่
+        // ร้านค้า tab แยกอิสระ ไม่เกี่ยวกันเลย
         UI.switchTab('route');
     },
 
@@ -1291,7 +1508,7 @@ const SupervisorUI = {
         const isC        = /C\d/.test(routeId);
         const badgeColor = isC ? '#7c3aed' : '#2563eb';
         const badgeBg    = isC ? '#ede9fe' : '#dbeafe';
-        btn.innerHTML = `<span style="font-size:14px;">←</span><span style="color:#9ca3af;">เลือกสายใหม่</span><span style="background:${badgeBg};color:${badgeColor};font-size:10px;font-weight:900;padding:2px 10px;border-radius:8px;">${routeId}</span>`;
+        btn.innerHTML = `<span style="font-size:14px;">←</span><span style="color:#9ca3af;">กลับ · เลือกสายใหม่</span><span style="background:${badgeBg};color:${badgeColor};font-size:10px;font-weight:900;padding:2px 10px;border-radius:8px;">${routeId}</span>`;
         splitContainer.parentElement.insertBefore(btn, splitContainer);
     },
 
@@ -1301,6 +1518,7 @@ const SupervisorUI = {
         State.myRoute    = Auth.getSession()?.username || '';
         State.currentDay = '';
         SupervisorUI._showDayBar(false);
+        SupervisorUI.renderStoreList(); // reset กลับเป็นทุกสาย
         document.getElementById('sup-back-btn')?.remove();
         const c = document.getElementById('route-store-list');
         if (c) c.innerHTML = '';
@@ -1321,6 +1539,12 @@ const SupervisorUI = {
     handleDrag: () => {
         const routeId = SupervisorUI._selectedRoute;
         if (!routeId) return;
+
+        // ✅ UX-FIX-4: ป้องกัน path plans/undefined/routes/...
+        if (!State.activePlanYM) {
+            showSalesToast('⚠️ ระบบยังโหลดไม่เสร็จ กรุณารอสักครู่', true);
+            return;
+        }
         const items   = document.querySelectorAll('#route-store-list > .store-item');
         const updated = [...State.allStores];
         items.forEach((item, index) => {
@@ -1352,6 +1576,12 @@ document.getElementById('day-select').addEventListener('change', (e) => {
     if (_sEl) _sEl.textContent = _m
         ? 'สายวิ่งวันที่ ' + State.currentDay.replace('Day ','') + ' · ' + _m
         : 'รายชื่อร้านค้าทั้งหมด';
+    // ✅ ข้อ 5: sync label display
+    const _lbl = document.getElementById('day-label-display');
+    if (_lbl && State.currentDay) {
+        const _dn = State.currentDay.replace('Day ','');
+        _lbl.textContent = _m ? `Day ${_dn} · ${_m.split(' · ')[0]}` : `Day ${_dn}`;
+    }
     State.mapNeedsFit = true;
     Processor.routeList();
 });

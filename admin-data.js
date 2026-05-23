@@ -72,14 +72,40 @@ const App = {
     // ─── Load all routes ─────────────────────────────────────────────────
     _loadAllRoutes: async (ym, routeList) => {
         State.db.routes = {};
-        await Promise.all(routeList.map(name =>
-            App.planRoutesCol(ym).doc(name).get()
-                .then(d => {
-                    State.db.routes[name] = d.exists ? (d.data().stores || []) : [];
-                    App.log(`  ✅ ${name}: ${State.db.routes[name].length} ร้าน`);
-                })
-                .catch(e => { App.log(`  ⚠️ ${name}: ${e.code || e.message}`); State.db.routes[name] = []; })
-        ));
+        if (!routeList.length) return;
+
+        const col = App.planRoutesCol(ym);
+
+        // ── Step 1: โหลด active route ก่อน → แสดงผลทันที ────────────────
+        const activeRoute = localStorage.getItem(`last_route_${ym}`) || routeList[0];
+        try {
+            const d = await col.doc(activeRoute).get();
+            State.db.routes[activeRoute] = d.exists ? (d.data().stores || []) : [];
+            App.log(`  ✅ ${activeRoute}: ${State.db.routes[activeRoute].length} ร้าน (active)`);
+            // แสดงผลทันทีหลังได้ active route
+            State.localActiveRoute = activeRoute;
+            State.stores = State.db.routes[activeRoute];
+            App.sync();
+        } catch(e) {
+            App.log(`  ⚠️ ${activeRoute}: ${e.code || e.message}`);
+            State.db.routes[activeRoute] = [];
+        }
+
+        // ── Step 2: background load ที่เหลือ ทีละ 4 สาย ─────────────────
+        const remaining = routeList.filter(n => n !== activeRoute);
+        const BATCH = 4;
+        for (let i = 0; i < remaining.length; i += BATCH) {
+            const batch = remaining.slice(i, i + BATCH);
+            await Promise.all(batch.map(name =>
+                col.doc(name).get()
+                    .then(d => {
+                        State.db.routes[name] = d.exists ? (d.data().stores || []) : [];
+                        App.log(`  ✅ ${name}: ${State.db.routes[name].length} ร้าน`);
+                        UI.renderAllRoutes(); // อัปเดต route list ระหว่าง load
+                    })
+                    .catch(e => { App.log(`  ⚠️ ${name}: ${e.code || e.message}`); State.db.routes[name] = []; })
+            ));
+        }
     },
 
     // ─── Logger ──────────────────────────────────────────────────────────
