@@ -154,14 +154,19 @@ const UI = {
             }, 200);
         }
 
-        // Supervisor: tab ร้านค้า → ถ้ายังไม่เลือกสาย redirect ไป tab route (grid)
-        // ✅ UX-FIX-5: เพิ่ม guard ป้องกัน redirect วนซ้ำ
-        if (id === 'stores' && App.isSupervisor() && !SupervisorUI._selectedRoute) {
-            if (!UI._redirectingToRoute) {
-                UI._redirectingToRoute = true;
-                setTimeout(() => { UI._redirectingToRoute = false; UI.switchTab('route'); }, 0);
+        // Supervisor: tab ร้านค้า → ถ้ายังไม่เลือกสาย แสดงข้อความแทน redirect
+        // ✅ UX-FIX-5: ตรวจ _selectedRoute ที่ถูกต้อง ไม่ redirect ถ้าเลือกสายแล้ว
+        if (id === 'stores' && App.isSupervisor()) {
+            if (!SupervisorUI._selectedRoute) {
+                // ยังไม่เลือกสาย → ไป route grid พร้อม toast แนะนำ
+                if (!UI._redirectingToRoute) {
+                    UI._redirectingToRoute = true;
+                    showSalesToast('👆 เลือกสายวิ่งก่อน แล้วกดร้านค้า');
+                    setTimeout(() => { UI._redirectingToRoute = false; UI.switchTab('route'); }, 0);
+                }
+                return;
             }
-            return;
+            // เลือกสายแล้ว → ผ่านได้เลย
         }
         UI._redirectingToRoute = false;
     },
@@ -1453,11 +1458,13 @@ const SupervisorUI = {
         State.myRoute     = routeId;
         State.currentDay  = '';
         State.mapNeedsFit = true;
-        SupervisorUI.renderStoreList(); // อัปเดต tab ร้านค้าให้กรองตามสายที่เลือก
+        SupervisorUI.renderStoreList();
         SupervisorUI._showDayBar(true);
         SupervisorUI._injectBackBtn(routeId);
         Processor.setupRoute();
-        UI.switchTab('route');
+        // ✅ UX-FIX: ไม่ force switchTab('route') — ให้ผู้ใช้กด tab ที่ต้องการเอง
+        // render grid ใหม่เพื่ออัปเดต highlight สายที่เลือก
+        SupervisorUI.renderRouteGrid();
     },
 
     _injectBackBtn: (routeId) => {
