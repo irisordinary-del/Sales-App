@@ -154,20 +154,8 @@ const UI = {
             }, 200);
         }
 
-        // Supervisor: tab ร้านค้า → ถ้ายังไม่เลือกสาย แสดงข้อความแทน redirect
-        // ✅ UX-FIX-5: ตรวจ _selectedRoute ที่ถูกต้อง ไม่ redirect ถ้าเลือกสายแล้ว
-        if (id === 'stores' && App.isSupervisor()) {
-            if (!SupervisorUI._selectedRoute) {
-                // ยังไม่เลือกสาย → ไป route grid พร้อม toast แนะนำ
-                if (!UI._redirectingToRoute) {
-                    UI._redirectingToRoute = true;
-                    showSalesToast('👆 เลือกสายวิ่งก่อน แล้วกดร้านค้า');
-                    setTimeout(() => { UI._redirectingToRoute = false; UI.switchTab('route'); }, 0);
-                }
-                return;
-            }
-            // เลือกสายแล้ว → ผ่านได้เลย
-        }
+        // ✅ UX-FIX: Supervisor/ASM เข้า tab ร้านค้าได้เลย — แสดงร้านทั้งหมดทุกสาย
+        // ไม่ต้องเลือกสายก่อน (แยกออกจาก tab คิวงานที่ดูรายสาย)
         UI._redirectingToRoute = false;
     },
 
@@ -615,7 +603,19 @@ const Processor = {
     stores: () => {
         const hist = (typeof StoreHistory !== 'undefined') ? StoreHistory._storeMap : {};
         const mode = UI._sortMode || 'seq';
-        let list   = [...State.allStores];
+
+        // ✅ UX-FIX: Supervisor/ASM ไม่เลือกสาย → แสดงร้านทุกสายในศูนย์
+        // เลือกสายแล้ว → แสดงเฉพาะสายนั้น
+        const isSupAllRoutes = App.isSupervisor() && !SupervisorUI._selectedRoute;
+        let list = isSupAllRoutes
+            ? Object.values(State.allRoutes || {}).flat()
+            : [...State.allStores];
+
+        // กรองซ้ำ (ร้านที่อยู่หลายสาย)
+        if (isSupAllRoutes) {
+            const seen = new Set();
+            list = list.filter(s => seen.has(s.id) ? false : seen.add(s.id));
+        }
 
         if (mode === 'seq') {
             list.sort((a, b) => (a.seqs?.[State.currentDay] || 9999) - (b.seqs?.[State.currentDay] || 9999));
@@ -628,21 +628,31 @@ const Processor = {
         }
 
         const html = list.map(s => {
-            const h      = hist[s.id];
+            const h       = hist[s.id];
             const mktTag  = s.marketName
                 ? `<span style="font-size:10px;color:#3b82f6;font-weight:600;">${s.marketName}</span> ` : '';
             const histTag = h
                 ? `<div style="margin-top:3px;font-size:10px;color:#059669;font-weight:700;">💰 ${_fmtB(h.net)} · ${h.skuCount} SKU · ${h.invCount} บิล</div>` : '';
+            // Supervisor ดูรวม → แสดง route badge
+            const routeTag = isSupAllRoutes && s.salesCode
+                ? `<span style="font-size:10px;background:#dbeafe;color:#1e40af;font-weight:700;padding:1px 7px;border-radius:6px;margin-left:4px;">${s.salesCode}</span>` : '';
             return `<div onclick="UI.openModal('${s.id}')"
-                data-search="${s.id.toLowerCase()} ${s.name.toLowerCase()} ${(s.marketName||'').toLowerCase()}"
+                data-search="${s.id.toLowerCase()} ${s.name.toLowerCase()} ${(s.marketName||'').toLowerCase()} ${(s.salesCode||'').toLowerCase()}"
                 style="background:#fff;border-radius:14px;border:1px solid #e5e7eb;padding:11px 14px;cursor:pointer;">
-                <div style="font-weight:800;font-size:13px;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${s.name}</div>
+                <div style="display:flex;align-items:center;justify-content:space-between;">
+                    <div style="font-weight:800;font-size:13px;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${s.name}</div>
+                    ${routeTag}
+                </div>
                 <div style="font-size:10px;color:#9ca3af;font-family:monospace;margin-top:1px;">${mktTag}${s.id}</div>
                 ${histTag}
             </div>`;
         }).join('');
+
+        const emptyMsg = isSupAllRoutes
+            ? 'ไม่พบข้อมูลร้านในศูนย์นี้'
+            : 'ไม่พบข้อมูลร้านในสายนี้';
         document.getElementById('all-store-list').innerHTML = html
-            || '<p style="text-align:center;color:#9ca3af;margin-top:24px;font-size:13px;">ไม่พบข้อมูลร้านในสายนี้</p>';
+            || `<p style="text-align:center;color:#9ca3af;margin-top:24px;font-size:13px;">${emptyMsg}</p>`;
     },
 
     setupRoute: () => {
