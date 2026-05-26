@@ -7,6 +7,33 @@ const StoreMgr = {
         if (s) { s.selected = !s.selected; UI.switchTab('tab2'); UI.render(); App.saveDB(); }
     },
     clearSelection: () => { State.stores.forEach(s => s.selected = false); UI.render(); App.saveDB(); },
+
+    // ✅ ดึงร้าน inactive กลับมา active
+    reactivateStore: (id) => {
+        const s = State.stores.find(x => x.id === String(id));
+        if (!s) return;
+        s.inactive = false;
+        UI.render();
+        App.saveDB();
+        UI.showSaveToast(`↩️ ดึง "${s.name}" กลับมาแล้ว`);
+    },
+
+    // ✅ ลบร้านออกถาวร — ยืนยันก่อน
+    permanentDelete: (id) => {
+        const s = State.stores.find(x => x.id === String(id));
+        if (!s) return;
+        UI.showConfirm(
+            `ลบ "${s.name}" ถาวรใช่ไหมครับ?\n(ไม่สามารถกู้คืนได้)`,
+            () => {
+                State.stores = State.stores.filter(x => x.id !== String(id));
+                State.db.routes[State.localActiveRoute] = State.stores;
+                UI.render();
+                App.saveDB();
+                UI.showSaveToast(`🗑️ ลบ "${s.name}" ออกแล้ว`);
+            }
+        );
+    },
+
     changeDay: (id, d) => {
         const s = State.stores.find(x => x.id === String(id));
         if (!s) return;

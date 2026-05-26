@@ -87,6 +87,14 @@ const MapCtrl = {
             .join('');
 
         State.stores.forEach(store => {
+            // ✅ ซ่อนร้าน inactive — ยังเก็บใน Firestore แต่ไม่แสดงบนแผนที่
+            if (store.inactive) {
+                if (MapCtrl.markers[store.id]) {
+                    MapCtrl.map.removeLayer(MapCtrl.markers[store.id]);
+                    delete MapCtrl.markers[store.id];
+                }
+                return;
+            }
             const isAssigned = store.days && store.days.length > 0;
             const pDay = isAssigned ? store.days[0] : null;
 

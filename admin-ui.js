@@ -168,7 +168,7 @@ const UI = {
             .map(d => `<option value="${d}">${DAY_COLORS[d].name}</option>`)
             .join('');
 
-        const htmlU = [], htmlA = [], htmlP = [];
+        const htmlU = [], htmlA = [], htmlP = [], htmlI = [];
 
         State.stores.forEach(s => {
             const b = s.freq === 2 ? `<span class="f2-badge">F2</span>` : '';
@@ -178,6 +178,29 @@ const UI = {
                     ? `<span class="bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded text-[9px] font-bold">✅ ${kpi.vpo} ลัง | ${kpi.skuCount} SKU</span>`
                     : `<span class="bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded text-[9px] font-bold">❌ Inactive</span>`)
                 : '';
+
+            // ✅ ร้านที่ถูกพัก → แยก section ต่างหาก
+            if (s.inactive) {
+                htmlI.push(`
+                    <div class="p-3 bg-gray-50 border border-dashed border-gray-300 rounded-xl shadow-sm opacity-75">
+                        <div class="flex justify-between items-start mb-1">
+                            <span class="font-bold text-sm text-gray-500">${s.name} ${b}</span>
+                            <span class="text-[9px] font-bold bg-gray-200 text-gray-500 px-1.5 py-0.5 rounded">💤 พัก</span>
+                        </div>
+                        <p class="text-[10px] text-gray-400 font-mono mb-2">ID: ${s.id}</p>
+                        <div class="flex gap-2">
+                            <button onclick="StoreMgr.reactivateStore('${s.id}')"
+                                class="flex-1 text-[11px] font-bold py-1.5 rounded-lg bg-indigo-50 text-indigo-600 border border-indigo-200 hover:bg-indigo-100 transition">
+                                ↩️ ดึงกลับ
+                            </button>
+                            <button onclick="StoreMgr.permanentDelete('${s.id}')"
+                                class="flex-1 text-[11px] font-bold py-1.5 rounded-lg bg-red-50 text-red-500 border border-red-200 hover:bg-red-100 transition">
+                                🗑️ ลบถาวร
+                            </button>
+                        </div>
+                    </div>`);
+                return; // ไม่ render ใน section อื่น
+            }
 
             htmlP.push(`
                 <div class="p-3 bg-white border border-gray-200 rounded-xl shadow-sm">
@@ -233,6 +256,25 @@ const UI = {
         if (elUnassigned) elUnassigned.innerHTML = htmlU.join('');
         if (elAssigned) elAssigned.innerHTML = htmlA.join('');
 
+        // ✅ Section ร้านที่พัก (inactive)
+        let elInactive = document.getElementById('list-inactive-section');
+        if (htmlI.length > 0) {
+            if (!elInactive) {
+                elInactive = document.createElement('div');
+                elInactive.id = 'list-inactive-section';
+                // แทรกใต้ list-assigned
+                elAssigned?.parentElement?.appendChild(elInactive);
+            }
+            elInactive.innerHTML = `
+                <div class="mt-4 mb-1 px-1 flex items-center gap-2">
+                    <span class="text-xs font-bold text-gray-400 uppercase tracking-wide">💤 ร้านที่พัก (${htmlI.length})</span>
+                    <div class="flex-1 h-px bg-gray-200"></div>
+                </div>
+                <div class="flex flex-col gap-2">${htmlI.join('')}</div>`;
+        } else if (elInactive) {
+            elInactive.innerHTML = '';
+        }
+
         const sumH = [];
         Object.keys(sums).forEach(d => {
             if (sums[d] > 0) {
@@ -253,8 +295,9 @@ const UI = {
                 : '<p class="col-span-2 text-center text-xs text-gray-400 mt-4">ยังไม่จัดสาย</p>';
         }
 
-        const wait = State.stores.filter(s => !s.days || !s.days.length).length;
-        const tot = State.stores.length;
+        const activeStores = State.stores.filter(s => !s.inactive);
+        const wait = activeStores.filter(s => !s.days || !s.days.length).length;
+        const tot  = activeStores.length;
         const el = (id) => document.getElementById(id);
         if (el('stat-total')) el('stat-total').innerText = tot;
         if (el('stat-done')) el('stat-done').innerText = aCnt;

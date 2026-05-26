@@ -59,43 +59,30 @@ const StoreHistory = {
         try {
             const session  = Auth.getSession();
             const username = session?.username?.toUpperCase() || '';
-            const isSup = ['route_supervisor','asm'].includes(session?.role);
+            const isSup    = ['route_supervisor', 'asm'].includes(session?.role);
 
-            // ✅ FIX-PERF-1: ดึง chunk list ก่อน แล้ว fetch ทุก chunk พร้อมกัน
-            const chunkSnap = await db.collection('sellout').doc(ym)
-                .collection('chunks').get();
-
-            // ✅ FIX-OFFLINE: ตรวจสอบ fromCache
-            if (chunkSnap.metadata && chunkSnap.metadata.fromCache) {
-                console.warn('[StoreHistory] ข้อมูลมาจาก offline cache:', ym);
-            }
-
-            // ✅ FIX-PERF-2: Promise.allSettled — chunk ใดโหลดไม่ได้ไม่ทำให้ chunk อื่นหาย
-            const results = await Promise.allSettled(
-                chunkSnap.docs.map(doc => Promise.resolve(doc))
-            );
-
-            let rows = [];
-            let failCount = 0;
-            results.forEach((res, i) => {
-                if (res.status === 'fulfilled') {
-                    const chunkRows = res.value.data().rows || [];
-                    rows = rows.concat(
-                        isSup
-                            ? chunkRows
-                            : chunkRows.filter(r =>
-                                String(r.sCode || '').toUpperCase() === username
-                              )
-                    );
-                } else {
-                    failCount++;
-                    console.warn(`[StoreHistory] chunk ${i} failed:`, res.reason);
+            // ✅ PERF: ใช้ SalesDashboard._loadChunks แทนที่จะ fetch เอง
+            // → share _chunkCache เดียวกัน ไม่ดึง Firestore ซ้ำถ้า SalesDashboard โหลดไปแล้ว
+            let allRows;
+            if (typeof SalesDashboard !== 'undefined' && SalesDashboard._loadChunks) {
+                allRows = await SalesDashboard._loadChunks(ym);
+            } else {
+                // fallback: fetch เองถ้า SalesDashboard ยังไม่โหลด
+                const chunkSnap = await db.collection('sellout').doc(ym)
+                    .collection('chunks').get();
+                if (chunkSnap.metadata?.fromCache) {
+                    console.warn('[StoreHistory] ข้อมูลมาจาก offline cache:', ym);
                 }
-            });
-
-            if (failCount > 0) {
-                console.warn(`[StoreHistory] ${failCount}/${chunkSnap.size} chunks โหลดไม่สำเร็จ สำหรับ ${ym}`);
+                allRows = [];
+                chunkSnap.docs.forEach(doc => {
+                    allRows = allRows.concat(doc.data().rows || []);
+                });
             }
+
+            // กรองตาม role
+            const rows = isSup
+                ? allRows
+                : allRows.filter(r => String(r.sCode || '').toUpperCase() === username);
 
             StoreHistory._monthCache[ym] = rows;
         } catch (e) {
