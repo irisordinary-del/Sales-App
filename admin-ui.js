@@ -295,8 +295,9 @@ const UI = {
                 : '<p class="col-span-2 text-center text-xs text-gray-400 mt-4">ยังไม่จัดสาย</p>';
         }
 
-        const wait = State.stores.filter(s => !s.days || !s.days.length).length;
-        const tot = State.stores.length;
+        const activeStores = State.stores.filter(s => !s.inactive);
+        const wait = activeStores.filter(s => !s.days || !s.days.length).length;
+        const tot  = activeStores.length;
         const el = (id) => document.getElementById(id);
         if (el('stat-total')) el('stat-total').innerText = tot;
         if (el('stat-done')) el('stat-done').innerText = aCnt;

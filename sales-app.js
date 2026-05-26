@@ -256,7 +256,8 @@ const App = {
     },
 
     loadPlanData: async (ym) => {
-        if (State.planCache[ym]) return State.planCache[ym];
+        if (Object.prototype.hasOwnProperty.call(State.planCache, ym) &&
+            State.planCache[ym]?._ok) return State.planCache[ym];
         const centerDocId = State.planCenterDocId;
         // ✅ ระบบใหม่: ดึงจาก plans/{ym}/routes/{myRoute}
         try {
@@ -268,14 +269,15 @@ const App = {
             ]);
             const calendarConfig = cfgSnap.exists   ? (cfgSnap.data().calendarConfig || null) : null;
             const stores         = routeSnap.exists ? (routeSnap.data().stores        || [])  : [];
-            State.planCache[ym]  = { stores, calendarConfig, ym };
+            State.planCache[ym]  = { stores, calendarConfig, ym, _ok: true };
             return State.planCache[ym];
         } catch(e) {
             console.warn('loadPlanData:', ym, e);
-            State.planCache[ym] = ym === State.activePlanYM && State.allStores.length > 0
-                ? { stores: State.allStores, calendarConfig: State.calendarConfig, ym }
-                : { stores: [], calendarConfig: null, ym };
-            return State.planCache[ym];
+            const fallback = ym === State.activePlanYM && State.allStores.length > 0
+                ? { stores: State.allStores, calendarConfig: State.calendarConfig, ym, _ok: true }
+                : null;
+            if (fallback) State.planCache[ym] = fallback;
+            return fallback || { stores: [], calendarConfig: null, ym };
         }
     },
 
@@ -372,6 +374,7 @@ const App = {
             stores:         State.allStores,
             calendarConfig: State.calendarConfig,
             ym:             _useYM,
+            _ok:            true,
         };
 
         LoadBar.setProgress(80, 'โหลดยอดขาย...');
@@ -413,7 +416,8 @@ const App = {
     // ── loadPlanDataForSup: ดึง calendarConfig + stores ต่อเดือน ──────
     // เรียกเฉพาะ Supervisor — Sales ใช้ loadPlanData ปกติ
     loadPlanDataForSup: async (ym) => {
-        if (State.planCache[ym]) return State.planCache[ym];
+        if (Object.prototype.hasOwnProperty.call(State.planCache, ym) &&
+            State.planCache[ym]?._ok) return State.planCache[ym];
         const centerDocId = State.planCenterDocId;
         try {
             const planRef        = db.collection('appData').doc(centerDocId).collection('plans').doc(ym);
@@ -430,9 +434,10 @@ const App = {
                 );
                 docs.forEach(d => { if (d?.exists) stores = stores.concat(d.data().stores || []); });
             }
-            State.planCache[ym] = { stores, calendarConfig, ym };
+            State.planCache[ym] = { stores, calendarConfig, ym, _ok: true };
         } catch(e) {
-            State.planCache[ym] = { stores: [], calendarConfig: null, ym };
+            console.warn('loadPlanDataForSup:', ym, e);
+            return { stores: [], calendarConfig: null, ym };
         }
         return State.planCache[ym];
     },
@@ -548,7 +553,7 @@ const App = {
             if (!rd.exists) return;
             State.allStores = rd.data().stores || [];
             if (State.activePlanYM) {
-                State.planCache[State.activePlanYM] = { stores: State.allStores, calendarConfig: State.calendarConfig, ym: State.activePlanYM };
+                State.planCache[State.activePlanYM] = { stores: State.allStores, calendarConfig: State.calendarConfig, ym: State.activePlanYM, _ok: true };
             }
             if (State.isLoaded) {
                 Processor.run();
@@ -1189,8 +1194,8 @@ const CalendarCtrl = {
     // โหลด planCache เดือนปัจจุบัน background ถ้ายังไม่มี
     _bgLoadMonth: () => {
         const ym = `${CalendarCtrl._year}_${String(CalendarCtrl._month+1).padStart(2,'0')}`;
-        if (State.planCache[ym]) return; // มีแล้ว
-        if (!State.planList.includes(ym)) return; // ไม่มี plan เดือนนี้
+        if (State.planCache[ym]?._ok) return;
+        if (!State.planList.includes(ym)) return;
         const _loader = App.isSupervisor() ? App.loadPlanDataForSup : App.loadPlanData;
         _loader(ym).then(() => CalendarCtrl.render()).catch(() => {});
     },
@@ -1204,8 +1209,8 @@ const CalendarCtrl = {
         CalendarCtrl._month = now.getMonth();
         // seed cache ด้วยข้อมูลปัจจุบัน
         const _curYM = State.activePlanYM || '';
-        if (_curYM && State.allStores.length > 0 && !State.planCache[_curYM]) {
-            State.planCache[_curYM] = { stores: State.allStores, calendarConfig: State.calendarConfig, ym: _curYM };
+        if (_curYM && State.allStores.length > 0 && !State.planCache[_curYM]?._ok) {
+            State.planCache[_curYM] = { stores: State.allStores, calendarConfig: State.calendarConfig, ym: _curYM, _ok: true };
         }
         CalendarCtrl.render();
         popup.style.display = 'block';
@@ -1218,12 +1223,6 @@ const CalendarCtrl = {
         // โหลดเดือนอื่น background (non-blocking)
         if (State.planList?.length > 0) {
             const _loader = App.isSupervisor() ? App.loadPlanDataForSup : App.loadPlanData;
-            if (App.isSupervisor()) {
-                // เคลียร์ cache null ก่อน
-                State.planList.forEach(ym => {
-                    if (State.planCache[ym]?.calendarConfig === null) delete State.planCache[ym];
-                });
-            }
             Promise.all(State.planList.map(ym => _loader(ym).catch(() => {})))
                 .then(() => CalendarCtrl.render());
         }
@@ -1265,7 +1264,14 @@ const MapCtrl = {
         list.forEach((s, i) => {
             const seq  = s.seqs?.[State.currentDay] || i + 1;
             const icon = L.divIcon({
-                html: `<svg viewBox="0 0 24 24" width="30" height="40" style="filter:drop-shadow(0px 2px 3px rgba(0,0,0,0.3));overflow:visible;"><path d="M12 0C7 0 3 4 3 9c0 7 9 15 9 15s9-8 9-15c0-5-4-9-9-9z" fill="#2563eb" stroke="#fff" stroke-width="2"/><circle cx="12" cy="9" r="7" fill="#fff"/><text x="12" y="13" font-size="10" font-weight="900" fill="#000" text-anchor="middle">${seq}</text></svg>`,
+                html: `<div style="position:relative;display:inline-block;">
+                    <svg viewBox="0 0 24 24" width="30" height="40" style="filter:drop-shadow(0px 2px 3px rgba(0,0,0,0.3));overflow:visible;">
+                        <path d="M12 0C7 0 3 4 3 9c0 7 9 15 9 15s9-8 9-15c0-5-4-9-9-9z" fill="#2563eb" stroke="#fff" stroke-width="2"/>
+                        <circle cx="12" cy="9" r="7" fill="#fff"/>
+                        <text x="12" y="13" font-size="10" font-weight="900" fill="#000" text-anchor="middle">${seq}</text>
+                    </svg>
+                    <div style="position:absolute;bottom:42px;left:50%;transform:translateX(-50%);white-space:nowrap;font-size:10px;font-weight:700;color:#111827;text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 3px #fff,0 0 4px #fff;pointer-events:none;line-height:1.2;max-width:80px;text-align:center;overflow:hidden;text-overflow:ellipsis;">${s.name}</div>
+                </div>`,
                 className: '', iconSize: [30,40], iconAnchor: [15,40], popupAnchor: [0,-40],
             });
             const m = L.marker([s.lat, s.lng], { icon })
