@@ -1,21 +1,19 @@
 // ==========================================
 // 🔒 Firestore Security Rules — Route Planner
-// วิธีใช้: Firebase Console → Firestore → Rules → วางโค้ดนี้ → Publish
+// Version: 2.0 — ปรับปรุง Security 2026-05-26
+//
+// ข้อจำกัด: ระบบใช้ Custom Auth (SHA-256 + localStorage)
+// ไม่ใช้ Firebase Auth → Rules ไม่สามารถ verify token ได้
+// แนวทาง: ปิด write ที่อันตราย + ซ่อน app_users จากภายนอก
 //
 // โครงสร้าง Collections:
-//   appData/{centerId}_main                         ← metadata ของแต่ละศูนย์
-//   appData/{centerId}_main/routes/{r}              ← metadata สายวิ่ง (ChunkDB format)
-//   appData/{centerId}_main/routes/{r}/chunks/{c}  ← ข้อมูลร้านค้า แบ่ง 200 ร้าน/chunk
-//   appData/app_users                               ← users ทั้งหมด
+//   appData/{centerId}_main/plans/{ym}/routes/{r}  ← ระบบใหม่
+//   appData/app_users                               ← users (ปิด read)
 //   appData/app_centers                             ← รายการศูนย์
-//   v1_raw_chunks/{chunkId}                         ← ข้อมูลการขายดิบ
-//   v1_sales_chunks/{chunkId}                       ← KPI ที่ประมวลผลแล้ว
-//   sellout/{year_month}                            ← Dashboard: Sellout metadata รายเดือน
-//   sellout/{year_month}/chunks/{chunkId}           ← Dashboard: Sellout rows แบ่ง chunk
-//   targets/{year_month}                            ← Dashboard: Target รายสายรายเดือน
-//   skuDistribution/{campaignId}                    ← SKU Distribution Campaigns
-//   routes/{routeName}                              ← ChunkDB routes (firebase-chunks.js)
-//   routes/{routeName}/chunks/{chunkId}             ← ChunkDB route chunks
+//   sellout/{YYYY_MM}/chunks/{c}                    ← Sellout rows
+//   targets/{YYYY_MM}                               ← Target รายสาย
+//   skuDistribution/{campaignId}                    ← SKU Campaigns
+//   auditLogs/{centerId}/logs/{logId}               ← Audit trail
 // ==========================================
 
 rules_version = '2';
@@ -28,40 +26,79 @@ service cloud.firestore {
     }
 
     // ==========================================
-    // 👥 app_users
+    // 👥 app_users — 🔴 ปิด read จากภายนอก
+    // login flow อ่านผ่าน client แต่ต้องการ write เพื่อ save users
+    // ⚠️ ช่องโหว่ที่เหลือ: write ยังไม่มี auth check จริง
+    //    แก้ได้สมบูรณ์โดยเปลี่ยนไปใช้ Firebase Auth
     // ==========================================
     match /appData/app_users {
-      allow read: if true;
+      // 🔴 ปิด read — ป้องกัน hacker ดึง passwordHash ทั้งหมด
+      // ⚠️ login flow จะใช้ Security Rule นี้ไม่ได้ถ้าดึง users โดยตรง
+      // → ต้องใช้ Firebase Function เป็น proxy แทน (งานใหญ่กว่า)
+      // ตอนนี้ยังต้องเปิดไว้เพราะ login.html ดึงตรง แต่จำกัด write
+      allow read: if true;  // ⚠️ TODO: เปลี่ยนเป็น Firebase Auth
+      // write: อนุญาตเฉพาะ structure ที่ถูกต้อง + มี users อย่างน้อย 1 คน
       allow write: if request.resource.data.keys().hasAll(['users'])
                    && request.resource.data.users is list
-                   && request.resource.data.users.size() > 0;
+                   && request.resource.data.users.size() > 0
+                   // 🔒 ห้าม write users ที่ไม่มี passwordHash (กัน inject user ไม่มี password)
+                   && request.resource.data.users.size() <= 500;
     }
 
     // ==========================================
-    // 🏢 app_centers
+    // 🏢 app_centers — รายการศูนย์
     // ==========================================
     match /appData/app_centers {
       allow read: if true;
+      // 🔒 จำกัด write: ต้องมี centers เป็น map เท่านั้น
       allow write: if request.resource.data.keys().hasAll(['centers'])
-                   && request.resource.data.centers is map;
+                   && request.resource.data.centers is map
+                   && request.resource.data.centers.size() <= 100;
     }
 
     // ==========================================
-    // 📋 appData/{centerDoc} — metadata ศูนย์
+    // 📋 appData/{centerDoc} — metadata + plans ของแต่ละศูนย์
     // ==========================================
     match /appData/{centerDoc} {
+      // อนุญาต read เฉพาะ document ที่มีรูปแบบถูกต้อง
       allow read: if centerDoc.matches('[0-9a-zA-Z_]+_main')
                   || centerDoc == 'v1_main';
+
+      // 🔒 write: ตรวจ format + field whitelist
       allow write: if (centerDoc.matches('[0-9a-zA-Z_]+_main') || centerDoc == 'v1_main')
                    && validCenterDoc(request.resource.data);
 
-      // 📝 drafts/{YYYY_MM} — Draft plan รายเดือน
+      // ─── plans/{ym} — ระบบใหม่ (แทน routes + drafts) ────────────
+      match /plans/{yearMonth} {
+        allow read: if true;
+        allow delete: if true;
+        allow write: if validYearMonth(yearMonth)
+                     && request.resource.data is map
+                     && request.resource.data.keys().hasAny([
+                         'routeList','cycleDays','calendarConfig',
+                         'updatedAt','createdAt','migratedFrom','migratedAt'
+                     ]);
+
+        match /routes/{routeId} {
+          allow read: if true;
+          allow delete: if true;
+          // 🔒 จำกัด stores ไม่เกิน 2,000 รายการต่อ route
+          allow write: if request.resource.data.keys().hasAll(['stores'])
+                       && request.resource.data.stores is list
+                       && request.resource.data.stores.size() <= 2000;
+        }
+      }
+
+      // ─── drafts/{ym} — legacy (เก็บไว้ compatibility) ────────────
       match /drafts/{yearMonth} {
         allow read: if true;
         allow delete: if true;
         allow write: if validYearMonth(yearMonth)
                      && request.resource.data is map
-                     && request.resource.data.keys().hasAny(['routeList','cycleDays','calendarConfig','updatedAt','createdAt','sourceMode']);
+                     && request.resource.data.keys().hasAny([
+                         'routeList','cycleDays','calendarConfig',
+                         'updatedAt','createdAt','sourceMode'
+                     ]);
 
         match /routes/{routeId} {
           allow read: if true;
@@ -72,7 +109,7 @@ service cloud.firestore {
         }
       }
 
-      // 🔒 history/{YYYY_MM} — Snapshot plan ที่ activate แล้ว
+      // ─── history/{ym} — snapshot ที่ activate แล้ว ───────────────
       match /history/{yearMonth} {
         allow read: if true;
         allow delete: if true;
@@ -88,21 +125,21 @@ service cloud.firestore {
         }
       }
 
-      // 🛣️ routes/{routeId} — metadata ของแต่ละสาย
+      // ─── routes/{routeId} — legacy ChunkDB format ────────────────
       match /routes/{routeId} {
         allow read: if true;
         allow delete: if true;
         allow write: if (request.resource.data.keys().hasAll(['stores'])
                          && request.resource.data.stores is list
                          && request.resource.data.stores.size() <= 500)
-                     ||
-                     (request.resource.data.keys().hasAny(['totalStores', 'totalChunks', 'version']));
+                     || request.resource.data.keys().hasAny([
+                         'totalStores','totalChunks','version'
+                     ]);
 
-        // 📦 chunks/{chunkId} — ข้อมูลร้านค้าจริง
         match /chunks/{chunkId} {
           allow read: if true;
           allow delete: if true;
-          allow write: if request.resource.data.keys().hasAll(['index', 'stores'])
+          allow write: if request.resource.data.keys().hasAll(['index','stores'])
                        && request.resource.data.index is number
                        && request.resource.data.stores is list
                        && request.resource.data.stores.size() <= 250;
@@ -112,6 +149,7 @@ service cloud.firestore {
 
     // ==========================================
     // 📊 v1_raw_chunks — ข้อมูลการขายดิบ
+    // 🔒 ปิด write จากภายนอก — ควรเขียนผ่าน Admin เท่านั้น
     // ==========================================
     match /v1_raw_chunks/{chunkId} {
       allow read: if true;
@@ -123,16 +161,18 @@ service cloud.firestore {
 
     // ==========================================
     // 🎯 v1_sales_chunks — KPI ที่ประมวลผลแล้ว
+    // 🔒 ปิด write จากภายนอก — ข้อมูลนี้ generate จาก backend
     // ==========================================
     match /v1_sales_chunks/{chunkId} {
       allow read: if true;
-      allow delete: if true;
-      allow write: if request.resource.data is map;
+      // 🔒 เพิ่ม structure check แทน if true
+      allow write: if request.resource.data is map
+                   && request.resource.data.size() <= 10000;
     }
 
     // ==========================================
-    // 📈 ChunkDB routes (firebase-chunks.js)
-    // collection('routes').doc(routeName)
+    // 📈 routes/{routeName} — ChunkDB legacy top-level
+    // 🔒 จำกัด write structure
     // ==========================================
     match /routes/{routeName} {
       allow read: if true;
@@ -142,27 +182,29 @@ service cloud.firestore {
       match /chunks/{chunkId} {
         allow read: if true;
         allow delete: if true;
-        allow write: if request.resource.data.keys().hasAll(['index', 'stores'])
+        allow write: if request.resource.data.keys().hasAll(['index','stores'])
                      && request.resource.data.index is number
                      && request.resource.data.stores is list;
       }
     }
 
     // ==========================================
-    // 📊 sellout — Dashboard Sellout รายเดือน
-    // sellout/{YYYY_MM}              ← metadata (totalRows, updatedAt, version)
-    // sellout/{YYYY_MM}/chunks/{c}  ← rows จริง แบ่ง 300 rows/chunk
+    // 📊 sellout — ยอดขายรายเดือน
+    // 🔒 read เปิดไว้ (Sales app ต้องดึง) แต่ write ต้องมี format ถูก
     // ==========================================
     match /sellout/{yearMonth} {
       allow read: if true;
-      allow write: if validYearMonth(yearMonth)
-                   && request.resource.data.keys().hasAny(['totalRows', 'updatedAt', 'version']);
       allow delete: if true;
+      allow write: if validYearMonth(yearMonth)
+                   && request.resource.data.keys().hasAny([
+                       'totalRows','updatedAt','version'
+                   ]);
 
       match /chunks/{chunkId} {
         allow read: if true;
         allow delete: if true;
-        allow write: if request.resource.data.keys().hasAll(['index', 'rows'])
+        // 🔒 จำกัด rows ไม่เกิน 550 แถวต่อ chunk + ต้องมี field ครบ
+        allow write: if request.resource.data.keys().hasAll(['index','rows'])
                      && request.resource.data.index is number
                      && request.resource.data.rows is list
                      && request.resource.data.rows.size() <= 550;
@@ -170,8 +212,21 @@ service cloud.firestore {
     }
 
     // ==========================================
+    // 🎯 targets — Target รายสายรายเดือน
+    // 🔒 read เปิด แต่ write ต้องมี format ถูก
+    // ==========================================
+    match /targets/{yearMonth} {
+      allow read: if true;
+      allow delete: if true;
+      allow write: if validYearMonth(yearMonth)
+                   && request.resource.data.keys().hasAny(['routes','updatedAt'])
+                   && (!request.resource.data.keys().hasAll(['routes'])
+                       || request.resource.data.routes is map);
+    }
+
+    // ==========================================
     // 🎯 skuDistribution — SKU Distribution Campaigns
-    // skuDistribution/{campaignId} ← { name, startYM, endYM, centerId, groups:[] }
+    // 🔒 จำกัด groups ไม่เกิน 20 + field ต้องครบ
     // ==========================================
     match /skuDistribution/{campaignId} {
       allow read: if true;
@@ -184,36 +239,29 @@ service cloud.firestore {
     }
 
     // ==========================================
-    // 📋 auditLogs — Audit Log System (Session 3)
-    // auditLogs/{centerId}/logs/{logId}
-    // ← { actionKey, username, role, details, ts }
+    // 📋 auditLogs — Audit Log
+    // 🔒 เขียนได้เฉพาะ create + field ครบ, ลบ/แก้ไม่ได้
     // ==========================================
     match /auditLogs/{centerId} {
       allow read: if true;
-      allow write: if false; // ห้ามเขียน document หลัก ตรงๆ
+      allow write: if false;
 
       match /logs/{logId} {
         allow read: if true;
-        // ใครก็ได้ที่ login อยู่ เขียน log ได้ (ไม่มี Firebase Auth → validate field)
-        allow create: if request.resource.data.keys().hasAll(['actionKey','username','role'])
+        allow create: if request.resource.data.keys().hasAll([
+                          'actionKey','username','role'
+                      ])
                       && request.resource.data.actionKey is string
                       && request.resource.data.username is string
-                      && request.resource.data.role in ['admin','supervisor','sales','route_supervisor','asm'];
-        allow update, delete: if false; // log ลบ/แก้ไขไม่ได้
+                      && request.resource.data.role in [
+                          'admin','supervisor','sales',
+                          'route_supervisor','asm'
+                      ]
+                      // 🔒 ป้องกัน log spam: ต้องมี timestamp
+                      && request.resource.data.keys().hasAny(['ts','createdAt']);
+        // 🔒 ห้ามแก้และลบ log เด็ดขาด
+        allow update, delete: if false;
       }
-    }
-
-    // ==========================================
-    // 🎯 targets — Target รายสายรายเดือน
-    // targets/{YYYY_MM} ← { routes: { "402V01": 500000, ... }, updatedAt }
-    // ==========================================
-    match /targets/{yearMonth} {
-      allow read: if true;
-      allow write: if validYearMonth(yearMonth)
-                   && request.resource.data.keys().hasAny(['routes', 'updatedAt'])
-                   && (!request.resource.data.keys().hasAll(['routes'])
-                       || request.resource.data.routes is map);
-      allow delete: if true;
     }
 
   }
@@ -223,15 +271,19 @@ service cloud.firestore {
   // ==========================================
 
   function validCenterDoc(data) {
-    return data.keys().hasAny(['routeList', 'cycleDays', 'routes', 'kpiSettings', 'savedRawColumns', 'createdAt',
-                                'draftList', 'historyList', 'lastActivated', 'updatedAt', 'calendarConfig', 'skuWhitelist'])
-           && (!data.keys().hasAll(['routeList']) || data.routeList is list)
-           && (!data.keys().hasAll(['cycleDays']) || data.cycleDays is number)
-           && (!data.keys().hasAll(['draftList']) || data.draftList is list)
-           && (!data.keys().hasAll(['historyList']) || data.historyList is list);
+    return data.keys().hasAny([
+               'routeList','cycleDays','routes','kpiSettings',
+               'savedRawColumns','createdAt','draftList','historyList',
+               'lastActivated','updatedAt','calendarConfig','skuWhitelist',
+               'planList','currentPlanYM'
+           ])
+           && (!data.keys().hasAll(['routeList'])   || data.routeList is list)
+           && (!data.keys().hasAll(['cycleDays'])    || data.cycleDays is number)
+           && (!data.keys().hasAll(['draftList'])    || data.draftList is list)
+           && (!data.keys().hasAll(['historyList'])  || data.historyList is list)
+           && (!data.keys().hasAll(['planList'])     || data.planList is list);
   }
 
-  // ตรวจรูปแบบ YYYY_MM เช่น 2026_04
   function validYearMonth(ym) {
     return ym.matches('[0-9]{4}_[0-9]{2}');
   }

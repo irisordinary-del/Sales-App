@@ -1079,14 +1079,14 @@ const CalendarCtrl = {
             html += `
             <div onclick="${clickHandler}" ${isToday ? 'id="cal-today-cell"' : ''}
                 style="border-radius:10px;border:1px solid ${borderColor};background:${bgColor};
-                       padding:4px 2px;text-align:center;cursor:${dayLabel ? 'pointer' : 'default'};
-                       min-height:56px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;
-                       gap:1px;transition:background 0.1s;-webkit-tap-highlight-color:rgba(0,0,0,0.08);">
+                       padding:4px 3px;text-align:center;cursor:${dayLabel ? 'pointer' : 'default'};
+                       min-height:68px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;
+                       gap:2px;transition:background 0.1s;-webkit-tap-highlight-color:rgba(0,0,0,0.08);">
                 <div style="font-size:13px;font-weight:${isToday?'900':'700'};color:${textColor};line-height:1.3;">${d}</div>
                 ${dayLabel ? `
                 ${!isSameAsDate ? `<div style="font-size:9px;font-weight:800;padding:1px 5px;border-radius:5px;background:${isToday?'rgba(255,255,255,0.25)':'#ede9fe'};color:${isToday?'#fff':'#5b21b6'};white-space:nowrap;">${dayLabel.replace('Day ','')}</div>` : ''}
                 ${hasRoute ? `<div style="width:5px;height:5px;border-radius:50%;background:${isToday?'#fff':'#2563eb'};flex-shrink:0;"></div>` : hasPlanNotLoaded ? `<div style="width:5px;height:5px;border-radius:50%;background:#d1d5db;flex-shrink:0;"></div>` : ''}
-                ${mktLabel ? `<div style="font-size:8px;color:${isToday?'rgba(255,255,255,0.85)':'#2563eb'};font-weight:700;line-height:1.1;padding:0 2px;max-width:50px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${mktLabel}${mktMore?'<span style=color:#9ca3af> '+mktMore+'</span>':''}</div>` : ''}
+                ${mktLabel ? `<div style="font-size:9px;color:${isToday?'rgba(255,255,255,0.92)':'#1d4ed8'};font-weight:700;line-height:1.3;padding:0 2px;width:100%;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;word-break:break-all;">${mktLabel}${mktMore?`<span style="font-size:8px;color:${isToday?'rgba(255,255,255,0.65)':'#93c5fd'}"> ${mktMore}</span>`:''}</div>` : ''}
                 ` : (isHoliday ? `<div style="font-size:9px;color:#dc2626;font-weight:700;">หยุด</div>` : '')}
             </div>`;
         }
@@ -1265,14 +1265,7 @@ const MapCtrl = {
         list.forEach((s, i) => {
             const seq  = s.seqs?.[State.currentDay] || i + 1;
             const icon = L.divIcon({
-                html: `<div style="position:relative;display:inline-block;">
-                    <svg viewBox="0 0 24 24" width="30" height="40" style="filter:drop-shadow(0px 2px 3px rgba(0,0,0,0.3));overflow:visible;">
-                        <path d="M12 0C7 0 3 4 3 9c0 7 9 15 9 15s9-8 9-15c0-5-4-9-9-9z" fill="#2563eb" stroke="#fff" stroke-width="2"/>
-                        <circle cx="12" cy="9" r="7" fill="#fff"/>
-                        <text x="12" y="13" font-size="10" font-weight="900" fill="#000" text-anchor="middle">${seq}</text>
-                    </svg>
-                    <div style="position:absolute;bottom:42px;left:50%;transform:translateX(-50%);white-space:nowrap;font-size:10px;font-weight:700;color:#111827;text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 3px #fff,0 0 4px #fff;pointer-events:none;line-height:1.2;max-width:80px;text-align:center;word-break:keep-all;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${s.name}</div>
-                </div>`,
+                html: `<svg viewBox="0 0 24 24" width="30" height="40" style="filter:drop-shadow(0px 2px 3px rgba(0,0,0,0.3));overflow:visible;"><path d="M12 0C7 0 3 4 3 9c0 7 9 15 9 15s9-8 9-15c0-5-4-9-9-9z" fill="#2563eb" stroke="#fff" stroke-width="2"/><circle cx="12" cy="9" r="7" fill="#fff"/><text x="12" y="13" font-size="10" font-weight="900" fill="#000" text-anchor="middle">${seq}</text></svg>`,
                 className: '', iconSize: [30,40], iconAnchor: [15,40], popupAnchor: [0,-40],
             });
             const m = L.marker([s.lat, s.lng], { icon })
