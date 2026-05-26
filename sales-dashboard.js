@@ -298,22 +298,22 @@ const SalesDashboard = {
 
     _loadData: async (ym) => {
         try {
-            // ✅ FIX: ใช้ hasOwnProperty แยก "cache ว่างจริง" vs "ยังไม่เคยโหลด"
-            // เดิม: if (_rowCache[ym]) จะ miss เมื่อ cache = [] (falsy) → fetch ซ้ำ
-            if (Object.prototype.hasOwnProperty.call(SalesDashboard._rowCache, ym)) {
-                SalesDashboard._rows = SalesDashboard._rowCache[ym];
+            // ✅ FIX: ตรวจ _ok flag แทน hasOwnProperty
+            // hasOwnProperty คืน true แม้ cache = [] จาก error → ไม่ retry
+            // _ok = true เฉพาะเมื่อโหลดสำเร็จ allRows มีข้อมูล
+            if (SalesDashboard._rowCache[ym]?._ok !== undefined) {
+                SalesDashboard._rows = SalesDashboard._rowCache[ym].rows;
                 return;
             }
             const u = SalesDashboard._username;
             const allRows = await SalesDashboard._loadChunks(ym);
-            // ✅ PERF: กรอง sCode เฉพาะของตัวเอง แล้วเก็บ cache แยกจาก _chunkCache ทั้งศูนย์
             const filtered = u
                 ? allRows.filter(r => String(r.sCode || '').toUpperCase() === u)
                 : [];
             SalesDashboard._rows = filtered;
-            // ✅ FIX: cache เฉพาะเมื่อ allRows มีข้อมูล (ถ้าว่างเพราะ error ให้ retry ได้)
+            // cache เฉพาะเมื่อ allRows มีข้อมูล → retry ได้ถ้า error
             if (allRows.length > 0) {
-                SalesDashboard._rowCache[ym] = filtered;
+                SalesDashboard._rowCache[ym] = { rows: filtered, _ok: true };
             }
         } catch (e) {
             console.warn('SalesDashboard._loadData:', e);
@@ -875,24 +875,20 @@ const SupervisorDashboard = {
     },
 
     _loadData: async (ym) => {
-        // ✅ FIX: ใช้ cache ของ Supervisor แยก key เพื่อไม่ปนกับ SalesDashboard
         const centerId = (typeof State !== 'undefined' ? State.centerId : null) || Auth.getSession()?.centerId || '';
         const cacheKey = ym + '_sup_' + centerId;
-        // ✅ FIX: hasOwnProperty แยก "ว่างจริง" vs "ยังไม่โหลด"
-        if (Object.prototype.hasOwnProperty.call(SupervisorDashboard._rowCache, cacheKey)) {
-            SupervisorDashboard._allRows = SupervisorDashboard._rowCache[cacheKey];
+        // ✅ FIX: ตรวจ _ok flag — retry ได้ถ้า cache มาจาก error
+        if (SupervisorDashboard._rowCache[cacheKey]?._ok !== undefined) {
+            SupervisorDashboard._allRows = SupervisorDashboard._rowCache[cacheKey].rows;
             return;
         }
         try {
-            // โหลด chunk ทั้งหมด (ใช้ shared cache เพื่อไม่ fetch ซ้ำ)
             const allRows = await SalesDashboard._loadChunks(ym);
-            // กรองเฉพาะ sCode ที่ขึ้นต้นด้วย centerId
             const rows = centerId
                 ? allRows.filter(r => String(r.sCode || '').startsWith(centerId))
                 : allRows;
-            // ✅ FIX: cache เฉพาะเมื่อ allRows มีข้อมูล (ถ้าว่างเพราะ error ให้ retry ได้)
             if (allRows.length > 0) {
-                SupervisorDashboard._rowCache[cacheKey] = rows;
+                SupervisorDashboard._rowCache[cacheKey] = { rows, _ok: true };
             }
             SupervisorDashboard._allRows = rows;
         } catch(e) {
