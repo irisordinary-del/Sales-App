@@ -256,11 +256,7 @@ const App = {
     },
 
     loadPlanData: async (ym) => {
-        // ✅ FIX: hasOwnProperty แยก "cache มีค่าแล้ว" vs "ยังไม่เคยโหลด"
-        // เดิม: if (planCache[ym]) จะ miss เมื่อ cache = { stores:[] } (truthy แต่ว่าง)
-        // และถ้า error จะ cache { stores:[] } ทำให้ retry ไม่ได้
-        if (Object.prototype.hasOwnProperty.call(State.planCache, ym) &&
-            State.planCache[ym]?._ok) return State.planCache[ym];
+        if (State.planCache[ym]) return State.planCache[ym];
         const centerDocId = State.planCenterDocId;
         // ✅ ระบบใหม่: ดึงจาก plans/{ym}/routes/{myRoute}
         try {
@@ -272,17 +268,14 @@ const App = {
             ]);
             const calendarConfig = cfgSnap.exists   ? (cfgSnap.data().calendarConfig || null) : null;
             const stores         = routeSnap.exists ? (routeSnap.data().stores        || [])  : [];
-            // ✅ FIX: ติด flag _ok = true เพื่อแยกจาก error cache
-            State.planCache[ym] = { stores, calendarConfig, ym, _ok: true };
+            State.planCache[ym]  = { stores, calendarConfig, ym };
             return State.planCache[ym];
         } catch(e) {
             console.warn('loadPlanData:', ym, e);
-            // ✅ FIX: ถ้า error ให้ fallback ด้วยข้อมูลปัจจุบันถ้ามี แต่ไม่ cache → retry ได้
-            const fallback = ym === State.activePlanYM && State.allStores.length > 0
-                ? { stores: State.allStores, calendarConfig: State.calendarConfig, ym, _ok: true }
-                : null;
-            if (fallback) State.planCache[ym] = fallback;
-            return fallback || { stores: [], calendarConfig: null, ym };
+            State.planCache[ym] = ym === State.activePlanYM && State.allStores.length > 0
+                ? { stores: State.allStores, calendarConfig: State.calendarConfig, ym }
+                : { stores: [], calendarConfig: null, ym };
+            return State.planCache[ym];
         }
     },
 
@@ -379,7 +372,6 @@ const App = {
             stores:         State.allStores,
             calendarConfig: State.calendarConfig,
             ym:             _useYM,
-            _ok:            true,
         };
 
         LoadBar.setProgress(80, 'โหลดยอดขาย...');
@@ -421,9 +413,7 @@ const App = {
     // ── loadPlanDataForSup: ดึง calendarConfig + stores ต่อเดือน ──────
     // เรียกเฉพาะ Supervisor — Sales ใช้ loadPlanData ปกติ
     loadPlanDataForSup: async (ym) => {
-        // ✅ FIX: ตรวจ _ok flag เพื่อแยก "โหลดสำเร็จแล้ว" vs "error cache หรือยังไม่เคยโหลด"
-        if (Object.prototype.hasOwnProperty.call(State.planCache, ym) &&
-            State.planCache[ym]?._ok) return State.planCache[ym];
+        if (State.planCache[ym]) return State.planCache[ym];
         const centerDocId = State.planCenterDocId;
         try {
             const planRef        = db.collection('appData').doc(centerDocId).collection('plans').doc(ym);
@@ -440,12 +430,9 @@ const App = {
                 );
                 docs.forEach(d => { if (d?.exists) stores = stores.concat(d.data().stores || []); });
             }
-            // ✅ FIX: ติด _ok = true เพื่อแยกจาก error cache
-            State.planCache[ym] = { stores, calendarConfig, ym, _ok: true };
+            State.planCache[ym] = { stores, calendarConfig, ym };
         } catch(e) {
-            // ✅ FIX: ไม่ cache เมื่อ error → retry ได้ครั้งหน้า
-            console.warn('loadPlanDataForSup:', ym, e);
-            return { stores: [], calendarConfig: null, ym };
+            State.planCache[ym] = { stores: [], calendarConfig: null, ym };
         }
         return State.planCache[ym];
     },
@@ -561,7 +548,7 @@ const App = {
             if (!rd.exists) return;
             State.allStores = rd.data().stores || [];
             if (State.activePlanYM) {
-                State.planCache[State.activePlanYM] = { stores: State.allStores, calendarConfig: State.calendarConfig, ym: State.activePlanYM, _ok: true };
+                State.planCache[State.activePlanYM] = { stores: State.allStores, calendarConfig: State.calendarConfig, ym: State.activePlanYM };
             }
             if (State.isLoaded) {
                 Processor.run();
@@ -1099,7 +1086,7 @@ const CalendarCtrl = {
                 ${dayLabel ? `
                 ${!isSameAsDate ? `<div style="font-size:9px;font-weight:800;padding:1px 5px;border-radius:5px;background:${isToday?'rgba(255,255,255,0.25)':'#ede9fe'};color:${isToday?'#fff':'#5b21b6'};white-space:nowrap;">${dayLabel.replace('Day ','')}</div>` : ''}
                 ${hasRoute ? `<div style="width:5px;height:5px;border-radius:50%;background:${isToday?'#fff':'#2563eb'};flex-shrink:0;"></div>` : hasPlanNotLoaded ? `<div style="width:5px;height:5px;border-radius:50%;background:#d1d5db;flex-shrink:0;"></div>` : ''}
-                ${mktLabel ? `<div style="font-size:8px;color:${isToday?'rgba(255,255,255,0.85)':'#2563eb'};font-weight:700;line-height:1.1;padding:0 2px;max-width:50px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${mktLabel}${mktMore?'<span style=color:#9ca3af> '+mktMore+'</span>':''}</div>` : ''}
+                ${mktLabel ? `<div style="font-size:9px;color:${isToday?'rgba(255,255,255,0.9)':'#2563eb'};font-weight:700;line-height:1.2;padding:0 3px;width:100%;word-break:break-all;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">${mktLabel}${mktMore?`<span style="color:${isToday?'rgba(255,255,255,0.7)':'#9ca3af'}"> ${mktMore}</span>`:''}</div>` : ''}
                 ` : (isHoliday ? `<div style="font-size:9px;color:#dc2626;font-weight:700;">หยุด</div>` : '')}
             </div>`;
         }
@@ -1202,8 +1189,7 @@ const CalendarCtrl = {
     // โหลด planCache เดือนปัจจุบัน background ถ้ายังไม่มี
     _bgLoadMonth: () => {
         const ym = `${CalendarCtrl._year}_${String(CalendarCtrl._month+1).padStart(2,'0')}`;
-        // ✅ FIX: ตรวจ _ok flag แทน truthy — กันกรณีที่ cache มีแต่ว่างเพราะ error
-        if (State.planCache[ym]?._ok) return;
+        if (State.planCache[ym]) return; // มีแล้ว
         if (!State.planList.includes(ym)) return; // ไม่มี plan เดือนนี้
         const _loader = App.isSupervisor() ? App.loadPlanDataForSup : App.loadPlanData;
         _loader(ym).then(() => CalendarCtrl.render()).catch(() => {});
@@ -1218,9 +1204,8 @@ const CalendarCtrl = {
         CalendarCtrl._month = now.getMonth();
         // seed cache ด้วยข้อมูลปัจจุบัน
         const _curYM = State.activePlanYM || '';
-        // ✅ FIX: ตรวจ _ok แทน truthy check เพื่อกัน overwrite cache ที่ดีอยู่
-        if (_curYM && State.allStores.length > 0 && !State.planCache[_curYM]?._ok) {
-            State.planCache[_curYM] = { stores: State.allStores, calendarConfig: State.calendarConfig, ym: _curYM, _ok: true };
+        if (_curYM && State.allStores.length > 0 && !State.planCache[_curYM]) {
+            State.planCache[_curYM] = { stores: State.allStores, calendarConfig: State.calendarConfig, ym: _curYM };
         }
         CalendarCtrl.render();
         popup.style.display = 'block';
@@ -1231,9 +1216,14 @@ const CalendarCtrl = {
             }, 350);
         });
         // โหลดเดือนอื่น background (non-blocking)
-        // ✅ FIX: ลบ block "เคลียร์ cache null" ออก — _ok flag จัดการเองแล้ว
         if (State.planList?.length > 0) {
             const _loader = App.isSupervisor() ? App.loadPlanDataForSup : App.loadPlanData;
+            if (App.isSupervisor()) {
+                // เคลียร์ cache null ก่อน
+                State.planList.forEach(ym => {
+                    if (State.planCache[ym]?.calendarConfig === null) delete State.planCache[ym];
+                });
+            }
             Promise.all(State.planList.map(ym => _loader(ym).catch(() => {})))
                 .then(() => CalendarCtrl.render());
         }
