@@ -190,13 +190,16 @@ const SalesDashboard = {
         SalesDashboard._rows = [];
         SalesDashboard._target = 0;
 
+        // ✅ FIX: แสดง skeleton ระหว่างโหลด ไม่ให้ user เห็นหน้าว่างเปล่า
+        SalesDashboard._showSkeleton(document.getElementById('db-dashboard-wrap'));
+
         await Promise.all([
             SalesDashboard._loadData(ym),
             SalesDashboard._loadTarget(ym)
         ]);
         SalesDashboard._render();
-        // cache rows ของเดือนนี้ไว้ให้ campaign ใช้ด้วย
-        SalesDashboard._rowCache[ym] = SalesDashboard._rows;
+        // ✅ FIX: ลบบรรทัดนี้ออก — _loadData เขียน _rowCache แล้ว การเขียนซ้ำที่นี่
+        // จะ overwrite ด้วยค่าที่อาจผิด (ถ้า _rows ถูกแก้โดย concurrent call อื่น)
     },
 
     // ─── Shared chunk cache + in-flight dedup ────────────────────────────
@@ -206,8 +209,8 @@ const SalesDashboard = {
     _chunkInflight: {},   // ✅ PERF: กัน concurrent call fetch chunk ซ้ำ (Promise reuse)
 
     _loadChunks: async (ym) => {
-        // 1. มีใน cache แล้ว → คืนทันที
-        if (SalesDashboard._chunkCache[ym]) return SalesDashboard._chunkCache[ym];
+        // 1. มีใน cache แล้ว และไม่ใช่ผลจาก error → คืนทันที
+        if (SalesDashboard._chunkCache[ym] !== undefined) return SalesDashboard._chunkCache[ym];
 
         // 2. มี request กำลัง in-flight อยู่ → รอ Promise เดิม ไม่ fetch ซ้ำ
         if (SalesDashboard._chunkInflight[ym]) return SalesDashboard._chunkInflight[ym];
@@ -227,8 +230,7 @@ const SalesDashboard = {
                 const chunkDocs = chunkListSnap.docs
                     .sort((a, b) => (a.data().index || 0) - (b.data().index || 0));
 
-                // ✅ PERF: concat rows ตรงใน loop แทน allSettled แล้วค่อย concat
-                // (chunkDocs อยู่ใน memory แล้วหลัง .get() ไม่ต้อง fetch ซ้ำ)
+                // ✅ PERF: concat rows ตรงใน loop (chunkDocs อยู่ใน memory แล้วหลัง .get())
                 let rows = [];
                 let failCount = 0;
                 for (const doc of chunkDocs) {
@@ -246,14 +248,18 @@ const SalesDashboard = {
                     SalesDashboard._showDataWarning(failCount, chunkDocs.length);
                 }
 
-                SalesDashboard._chunkCache[ym] = rows;
+                // ✅ FIX: cache เฉพาะเมื่อสำเร็จและมี rows จริง
+                // ถ้า rows ว่างเพราะ error (404 ฯลฯ) ให้ retry ได้ครั้งหน้า
+                if (rows.length > 0 || failCount === 0) {
+                    SalesDashboard._chunkCache[ym] = rows;
+                }
                 return rows;
             } catch (e) {
                 console.warn('SalesDashboard._loadChunks:', ym, e);
-                SalesDashboard._chunkCache[ym] = [];
+                // ✅ FIX: ไม่ cache [] เมื่อ error → ให้ retry ได้ครั้งหน้า
                 return [];
             } finally {
-                // ✅ ลบ in-flight ออกหลัง resolve/reject (ไม่ว่าจะสำเร็จหรือไม่)
+                // ✅ ลบ in-flight ออกหลัง resolve/reject เสมอ
                 delete SalesDashboard._chunkInflight[ym];
             }
         })();
@@ -292,20 +298,23 @@ const SalesDashboard = {
 
     _loadData: async (ym) => {
         try {
-            // ✅ PERF: rowCache hit → คืนทันที
-            if (SalesDashboard._rowCache[ym]) {
+            // ✅ FIX: ใช้ hasOwnProperty แยก "cache ว่างจริง" vs "ยังไม่เคยโหลด"
+            // เดิม: if (_rowCache[ym]) จะ miss เมื่อ cache = [] (falsy) → fetch ซ้ำ
+            if (Object.prototype.hasOwnProperty.call(SalesDashboard._rowCache, ym)) {
                 SalesDashboard._rows = SalesDashboard._rowCache[ym];
                 return;
             }
             const u = SalesDashboard._username;
-            // ✅ PERF: กรอง sCode ระหว่าง _loadChunks แทนที่จะโหลดทั้งศูนย์แล้วกรองทีหลัง
-            // _loadChunks คืน rows ทั้งหมด (ใช้ shared cache กับ Supervisor/StoreHistory)
-            // แต่ Sales กรองก่อนเก็บใน _rowCache ของตัวเอง → ไม่กินหน่วยความจำเพิ่ม
             const allRows = await SalesDashboard._loadChunks(ym);
-            SalesDashboard._rows = u
+            // ✅ PERF: กรอง sCode เฉพาะของตัวเอง แล้วเก็บ cache แยกจาก _chunkCache ทั้งศูนย์
+            const filtered = u
                 ? allRows.filter(r => String(r.sCode || '').toUpperCase() === u)
                 : [];
-            SalesDashboard._rowCache[ym] = SalesDashboard._rows;
+            SalesDashboard._rows = filtered;
+            // ✅ FIX: cache เฉพาะเมื่อ allRows มีข้อมูล (ถ้าว่างเพราะ error ให้ retry ได้)
+            if (allRows.length > 0) {
+                SalesDashboard._rowCache[ym] = filtered;
+            }
         } catch (e) {
             console.warn('SalesDashboard._loadData:', e);
         }
@@ -869,7 +878,8 @@ const SupervisorDashboard = {
         // ✅ FIX: ใช้ cache ของ Supervisor แยก key เพื่อไม่ปนกับ SalesDashboard
         const centerId = (typeof State !== 'undefined' ? State.centerId : null) || Auth.getSession()?.centerId || '';
         const cacheKey = ym + '_sup_' + centerId;
-        if (SupervisorDashboard._rowCache[cacheKey]) {
+        // ✅ FIX: hasOwnProperty แยก "ว่างจริง" vs "ยังไม่โหลด"
+        if (Object.prototype.hasOwnProperty.call(SupervisorDashboard._rowCache, cacheKey)) {
             SupervisorDashboard._allRows = SupervisorDashboard._rowCache[cacheKey];
             return;
         }
@@ -878,9 +888,12 @@ const SupervisorDashboard = {
             const allRows = await SalesDashboard._loadChunks(ym);
             // กรองเฉพาะ sCode ที่ขึ้นต้นด้วย centerId
             const rows = centerId
-                ? allRows.filter(r => String(r.sCode||'').startsWith(centerId))
+                ? allRows.filter(r => String(r.sCode || '').startsWith(centerId))
                 : allRows;
-            SupervisorDashboard._rowCache[cacheKey] = rows;
+            // ✅ FIX: cache เฉพาะเมื่อ allRows มีข้อมูล (ถ้าว่างเพราะ error ให้ retry ได้)
+            if (allRows.length > 0) {
+                SupervisorDashboard._rowCache[cacheKey] = rows;
+            }
             SupervisorDashboard._allRows = rows;
         } catch(e) {
             console.warn('SupervisorDashboard._loadData:', e);
