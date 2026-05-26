@@ -402,68 +402,176 @@ const FileManager = {
                 }
 
                 // ─── Merge เข้า State.db.routes ──────────────────────────
-                let totalNew = 0;
+                let totalNew = 0, totalReactivated = 0;
                 const savedRoutes = [];
+
+                // สะสม missing stores ทุกสายก่อน แล้วค่อย popup ครั้งเดียว
+                const missingByRoute = {}; // { routeKey: [store, ...] }
 
                 for (const routeKey of routeKeys) {
                     const incoming    = Object.values(byRoute[routeKey]);
                     const existing    = State.db.routes[routeKey] || [];
-                    const existingIds = new Set(existing.map(s => s.id));
                     const incomingMap = {};
                     incoming.forEach(s => { incomingMap[s.id] = s; });
 
-                    // อัปเดตร้านเดิมที่มี ID ตรงกัน
+                    // อัปเดตร้านเดิมที่มี ID ตรงกัน + reactivate ร้านที่กลับมา
                     const updatedExisting = existing.map(s => {
-                        if (!incomingMap[s.id]) return s;
                         const inc = incomingMap[s.id];
-                        return {
+                        if (!inc) return s; // จัดการในขั้นถัดไป
+                        const wasInactive = s.inactive === true;
+                        const updated = {
                             ...s,
-                            days:        inc.days       || s.days,
-                            // ✅ FIX: merge seqs จากไฟล์ใหม่ด้วย — ไม่งั้น seq ว่างตลอด
-                            seqs:        (inc.seqs && Object.keys(inc.seqs).length > 0) ? inc.seqs : s.seqs, // seqs merge fix
-                            marketName:  inc.marketName || s.marketName,
-                            lat:         inc.lat        || s.lat,
-                            lng:         inc.lng        || s.lng,
-                            cy:          inc.cy         || s.cy || '',
+                            days:       inc.days       || s.days,
+                            seqs:       (inc.seqs && Object.keys(inc.seqs).length > 0) ? inc.seqs : s.seqs,
+                            marketName: inc.marketName || s.marketName,
+                            lat:        inc.lat        || s.lat,
+                            lng:        inc.lng        || s.lng,
+                            cy:         inc.cy         || s.cy || '',
+                            inactive:   false, // ✅ reactivate ถ้ากลับมาในไฟล์ใหม่
                         };
+                        if (wasInactive) totalReactivated++;
+                        return updated;
                     });
 
-                    const newStores = incoming.filter(s => !existingIds.has(s.id));
+                    // หาร้านที่หายไปจากไฟล์ใหม่ (ไม่นับร้านที่ inactive อยู่แล้ว)
+                    const missing = existing.filter(s => !incomingMap[s.id] && !s.inactive);
+                    if (missing.length > 0) missingByRoute[routeKey] = missing;
+
+                    const newStores = incoming.filter(s => !existing.some(e => e.id === s.id));
                     State.db.routes[routeKey] = [...updatedExisting, ...newStores];
                     totalNew += newStores.length;
                     savedRoutes.push(routeKey);
                 }
 
-                // ─── บันทึกลง Firebase ───────────────────────────────────
-                const routeList = Object.keys(State.db.routes)
-                    .sort((a, b) => a.localeCompare(b, 'th', { numeric: true }));
-
-                for (let _si = 0; _si < savedRoutes.length; _si++) {
-                    const _n = savedRoutes[_si];
-                    UI.showLoader(
-                        `💾 กำลังบันทึก... (${_si+1}/${savedRoutes.length} สาย)`,
-                        `สาย ${_n} — ${(State.db.routes[_n]||[]).length} ร้าน`
-                    );
-                    // ✅ ระบบใหม่: บันทึกไปที่ plans/{ym}/routes/{name}
-                    await App.planRoutesCol(App._currentPlanYM).doc(_n).set({ stores: State.db.routes[_n] || [] });
-                }
-
-                // อัปเดต plan metadata
-                const ym = App._currentPlanYM;
-                await App.planRef(ym).set(
-                    { routeList, cycleDays: State.db.cycleDays || 24, updatedAt: firebase.firestore.FieldValue.serverTimestamp() },
-                    { merge: true }
-                );
-
-                if (!State.localActiveRoute || !State.db.routes[State.localActiveRoute]) {
-                    State.localActiveRoute = routeList[0];
-                }
-                State.stores = State.db.routes[State.localActiveRoute] || [];
-
                 UI.hideLoader();
-                App.sync();
-                MapCtrl.fitToStores();
-                UI.showSaveToast(`✅ Bulk Import เสร็จ! ${routeKeys.length} สาย | เพิ่มใหม่ ${totalNew} ร้าน`);
+
+                // ─── Popup แจ้งร้านที่หายไป ──────────────────────────────
+                const allMissing = Object.entries(missingByRoute)
+                    .flatMap(([route, stores]) => stores.map(s => ({ ...s, _route: route })));
+
+                const doSaveAll = async () => {
+                    const routeList = Object.keys(State.db.routes)
+                        .sort((a, b) => a.localeCompare(b, 'th', { numeric: true }));
+                    for (let _si = 0; _si < savedRoutes.length; _si++) {
+                        const _n = savedRoutes[_si];
+                        UI.showLoader(
+                            `💾 กำลังบันทึก... (${_si+1}/${savedRoutes.length} สาย)`,
+                            `สาย ${_n} — ${(State.db.routes[_n]||[]).length} ร้าน`
+                        );
+                        await App.planRoutesCol(App._currentPlanYM).doc(_n).set({ stores: State.db.routes[_n] || [] });
+                    }
+                    const ym = App._currentPlanYM;
+                    await App.planRef(ym).set(
+                        { routeList, cycleDays: State.db.cycleDays || 24, updatedAt: firebase.firestore.FieldValue.serverTimestamp() },
+                        { merge: true }
+                    );
+                    if (!State.localActiveRoute || !State.db.routes[State.localActiveRoute]) {
+                        State.localActiveRoute = routeList[0];
+                    }
+                    State.stores = State.db.routes[State.localActiveRoute] || [];
+                    UI.hideLoader();
+                    App.sync();
+                    MapCtrl.fitToStores();
+                    let msg = `✅ Bulk Import เสร็จ! ${routeKeys.length} สาย | เพิ่มใหม่ ${totalNew} ร้าน`;
+                    if (totalReactivated > 0) msg += ` | กลับมา ${totalReactivated} ร้าน`;
+                    UI.showSaveToast(msg);
+                };
+
+                if (allMissing.length === 0) {
+                    // ไม่มีร้านหายไป → บันทึกทันที
+                    await doSaveAll();
+                    return;
+                }
+
+                // ─── สร้าง popup รายชื่อร้านที่หายไป ────────────────────
+                // decisions: { storeId: 'inactive' | 'delete' }
+                const decisions = {};
+                allMissing.forEach(s => { decisions[s.id] = 'inactive'; }); // default = พักไว้
+
+                const overlay = document.createElement('div');
+                overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px;font-family:Prompt,sans-serif;';
+
+                const renderRows = () => allMissing.map(s => `
+                    <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:10px;background:#f9fafb;border:1px solid #f3f4f6;margin-bottom:6px;">
+                        <div style="flex:1;min-width:0;">
+                            <div style="font-size:12px;font-weight:800;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${s.name}</div>
+                            <div style="font-size:10px;color:#9ca3af;font-family:monospace;">${s.id} · สาย ${s._route}</div>
+                        </div>
+                        <div style="display:flex;gap:4px;flex-shrink:0;">
+                            <button id="btn-inactive-${s.id}"
+                                onclick="window._bulkDecide('${s.id}','inactive')"
+                                style="padding:4px 10px;border-radius:7px;font-size:11px;font-weight:700;border:none;cursor:pointer;transition:all 0.12s;background:${decisions[s.id]==='inactive'?'#6366f1':'#e5e7eb'};color:${decisions[s.id]==='inactive'?'#fff':'#6b7280'};">
+                                💤 พัก
+                            </button>
+                            <button id="btn-delete-${s.id}"
+                                onclick="window._bulkDecide('${s.id}','delete')"
+                                style="padding:4px 10px;border-radius:7px;font-size:11px;font-weight:700;border:none;cursor:pointer;transition:all 0.12s;background:${decisions[s.id]==='delete'?'#ef4444':'#e5e7eb'};color:${decisions[s.id]==='delete'?'#fff':'#6b7280'};">
+                                🗑️ ลบ
+                            </button>
+                        </div>
+                    </div>`).join('');
+
+                const renderPopup = () => {
+                    overlay.innerHTML = `
+                    <div style="background:#fff;border-radius:20px;padding:24px;width:100%;max-width:480px;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+                        <div style="font-size:16px;font-weight:900;color:#111827;margin-bottom:4px;">⚠️ ร้านที่ไม่อยู่ในไฟล์ใหม่</div>
+                        <div style="font-size:12px;color:#6b7280;margin-bottom:14px;">พบ <b>${allMissing.length} ร้าน</b> ที่ไม่มีในไฟล์ที่อัปโหลด — เลือกว่าจะทำอะไรกับแต่ละร้าน</div>
+                        <div style="display:flex;gap:6px;margin-bottom:10px;">
+                            <button onclick="window._bulkDecideAll('inactive')" style="flex:1;padding:6px;border-radius:8px;font-size:11px;font-weight:800;border:1.5px solid #6366f1;background:#ede9fe;color:#5b21b6;cursor:pointer;">💤 พักทั้งหมด</button>
+                            <button onclick="window._bulkDecideAll('delete')" style="flex:1;padding:6px;border-radius:8px;font-size:11px;font-weight:800;border:1.5px solid #ef4444;background:#fee2e2;color:#991b1b;cursor:pointer;">🗑️ ลบทั้งหมด</button>
+                        </div>
+                        <div id="_bulk-list" style="overflow-y:auto;flex:1;padding-right:4px;">${renderRows()}</div>
+                        <div style="display:flex;gap:8px;margin-top:14px;">
+                            <button onclick="window._bulkConfirm()" style="flex:1;padding:12px;border-radius:12px;background:#2563eb;color:#fff;font-size:14px;font-weight:800;border:none;cursor:pointer;">✅ ยืนยัน</button>
+                            <button onclick="window._bulkCancel()" style="padding:12px 18px;border-radius:12px;background:#f3f4f6;color:#374151;font-size:14px;font-weight:700;border:none;cursor:pointer;">ยกเลิก</button>
+                        </div>
+                    </div>`;
+                };
+
+                window._bulkDecide = (id, action) => {
+                    decisions[id] = action;
+                    const li = document.getElementById('_bulk-list');
+                    if (li) li.innerHTML = renderRows();
+                };
+                window._bulkDecideAll = (action) => {
+                    allMissing.forEach(s => { decisions[s.id] = action; });
+                    const li = document.getElementById('_bulk-list');
+                    if (li) li.innerHTML = renderRows();
+                };
+                window._bulkCancel = () => {
+                    document.body.removeChild(overlay);
+                    delete window._bulkDecide;
+                    delete window._bulkDecideAll;
+                    delete window._bulkConfirm;
+                    delete window._bulkCancel;
+                };
+                window._bulkConfirm = async () => {
+                    document.body.removeChild(overlay);
+                    delete window._bulkDecide;
+                    delete window._bulkDecideAll;
+                    delete window._bulkConfirm;
+                    delete window._bulkCancel;
+
+                    // apply decisions
+                    for (const s of allMissing) {
+                        const route = State.db.routes[s._route];
+                        if (!route) continue;
+                        const idx = route.findIndex(r => r.id === s.id);
+                        if (idx === -1) continue;
+                        if (decisions[s.id] === 'inactive') {
+                            // ✅ พักไว้ใน history — ซ่อนจาก Sales แต่ยังอยู่ใน Firestore
+                            route[idx] = { ...route[idx], inactive: true, days: [], seqs: {} };
+                        } else {
+                            // ลบออกจาก array
+                            route.splice(idx, 1);
+                        }
+                    }
+
+                    await doSaveAll();
+                };
+
+                renderPopup();
+                document.body.appendChild(overlay);
 
             } catch (err) {
                 UI.hideLoader();

@@ -149,6 +149,7 @@ const UI = {
         let aCnt = 0;
 
         State.stores.forEach(s => {
+            if (s.inactive) return; // ✅ ไม่นับร้าน inactive ใน stats
             if (s.days && s.days.length) {
                 aCnt += s.days.length;
                 s.days.forEach(d => { if (sums[d] !== undefined) sums[d]++; });
@@ -253,8 +254,9 @@ const UI = {
                 : '<p class="col-span-2 text-center text-xs text-gray-400 mt-4">ยังไม่จัดสาย</p>';
         }
 
-        const wait = State.stores.filter(s => !s.days || !s.days.length).length;
-        const tot = State.stores.length;
+        const activeStores = State.stores.filter(s => !s.inactive); // ✅ ไม่นับ inactive
+        const wait = activeStores.filter(s => !s.days || !s.days.length).length;
+        const tot  = activeStores.length;
         const el = (id) => document.getElementById(id);
         if (el('stat-total')) el('stat-total').innerText = tot;
         if (el('stat-done')) el('stat-done').innerText = aCnt;
