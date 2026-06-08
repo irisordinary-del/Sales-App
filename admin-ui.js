@@ -149,6 +149,7 @@ const UI = {
         let aCnt = 0;
 
         State.stores.forEach(s => {
+            if (s.inactive) return; // ✅ ไม่นับ inactive ใน day sums
             if (s.days && s.days.length) {
                 aCnt += s.days.length;
                 s.days.forEach(d => { if (sums[d] !== undefined) sums[d]++; });

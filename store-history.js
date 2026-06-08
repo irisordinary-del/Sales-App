@@ -18,7 +18,15 @@ const StoreHistory = {
     init: async () => {
         try {
             const snap = await db.collection('sellout').get();
-            const months = snap.docs.map(d => d.id).sort().reverse();
+            // ✅ FIX: กรองเฉพาะ doc ของศูนย์นี้ แล้วแปลง key กลับเป็น YYYY_MM
+            const cid = window.CENTER_ID || Auth.getSession()?.centerId || '';
+            const prefix = cid ? `${cid}_` : '';
+            const months = snap.docs
+                .map(d => d.id)
+                .filter(id => prefix ? id.startsWith(prefix) : /^\d{4}_\d{2}$/.test(id))
+                .map(id => prefix ? id.slice(prefix.length) : id)
+                .filter(ym => /^\d{4}_\d{2}$/.test(ym))
+                .sort().reverse();
             StoreHistory._months = months;
 
             // populate month selector ใน store tab
@@ -54,21 +62,23 @@ const StoreHistory = {
 
     // ─── Load rows ของเดือนนั้น (cached) ─────────────────────────────────
     _loadYm: async (ym) => {
-        if (StoreHistory._monthCache[ym]) return; // ใช้ cache
+        // ✅ FIX: ตรวจ _ok flag แทน truthy — กัน cache [] จาก error ทำให้ retry ไม่ได้
+        if (StoreHistory._monthCache[ym]?._ok) return;
 
         try {
             const session  = Auth.getSession();
             const username = session?.username?.toUpperCase() || '';
             const isSup    = ['route_supervisor', 'asm'].includes(session?.role);
 
-            // ✅ PERF: ใช้ SalesDashboard._loadChunks แทนที่จะ fetch เอง
-            // → share _chunkCache เดียวกัน ไม่ดึง Firestore ซ้ำถ้า SalesDashboard โหลดไปแล้ว
+            // ✅ PERF: ใช้ SalesDashboard._loadChunks → share _chunkCache
             let allRows;
             if (typeof SalesDashboard !== 'undefined' && SalesDashboard._loadChunks) {
                 allRows = await SalesDashboard._loadChunks(ym);
             } else {
                 // fallback: fetch เองถ้า SalesDashboard ยังไม่โหลด
-                const chunkSnap = await db.collection('sellout').doc(ym)
+                const cid = window.CENTER_ID || Auth.getSession()?.centerId || '';
+                const key = cid ? `${cid}_${ym}` : ym;
+                const chunkSnap = await db.collection('sellout').doc(key)
                     .collection('chunks').get();
                 if (chunkSnap.metadata?.fromCache) {
                     console.warn('[StoreHistory] ข้อมูลมาจาก offline cache:', ym);
@@ -84,16 +94,19 @@ const StoreHistory = {
                 ? allRows
                 : allRows.filter(r => String(r.sCode || '').toUpperCase() === username);
 
-            StoreHistory._monthCache[ym] = rows;
+            // ✅ FIX: cache เฉพาะเมื่อ allRows มีข้อมูล → retry ได้ถ้า error
+            if (allRows.length > 0) {
+                StoreHistory._monthCache[ym] = { rows, _ok: true };
+            }
         } catch (e) {
             console.warn('StoreHistory._loadYm:', e);
-            StoreHistory._monthCache[ym] = [];
+            // ไม่ cache เมื่อ error → retry ได้ครั้งหน้า
         }
     },
 
     // ─── สร้าง storeMap สำหรับ list view ─────────────────────────────────
     _buildStoreMap: (ym) => {
-        const rows = StoreHistory._monthCache[ym] || [];
+        const rows = StoreHistory._monthCache[ym]?.rows || [];
         const map  = {};
         rows.forEach(r => {
             const id = String(r.custCode || '').trim();
@@ -172,7 +185,7 @@ const StoreHistory = {
 
         // โหลด (cached)
         await StoreHistory._loadYm(ym);
-        const rows = (StoreHistory._monthCache[ym] || [])
+        const rows = (StoreHistory._monthCache[ym]?.rows || [])
             .filter(r => String(r.custCode || '').trim() === storeId);
 
         if (!rows.length) {

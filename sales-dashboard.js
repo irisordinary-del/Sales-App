@@ -13,6 +13,12 @@ const SalesDashboard = {
     _target: 0,          // target เดือนนี้
     _username: '',       // Salesman Code (uppercase)
     _myRoute: '',        // route ของ sales เช่น "402V01"
+
+    // ✅ FIX: แยก sellout/targets ตาม centerId ป้องกัน data ทับกันข้ามศูนย์
+    _ymKey: (ym) => {
+        const cid = window.CENTER_ID || Auth.getSession()?.centerId || '';
+        return cid ? `${cid}_${ym}` : ym;
+    },
     _campaigns: [],      // active campaigns ของศูนย์นี้
     _rowCache: {},       // { 'YYYY_MM': rows[] } cache ไม่ต้องโหลดซ้ำ
     _ready: false,
@@ -123,7 +129,15 @@ const SalesDashboard = {
             SalesDashboard._showSkeleton(container);
 
             const snap = await db.collection('sellout').get();
-            const months = snap.docs.map(d => d.id).sort().reverse();
+            // ✅ FIX: กรองเฉพาะ doc ของศูนย์นี้ แล้วแปลง key กลับเป็น YYYY_MM
+            const cid = window.CENTER_ID || Auth.getSession()?.centerId || '';
+            const prefix = cid ? `${cid}_` : '';
+            const months = snap.docs
+                .map(d => d.id)
+                .filter(id => prefix ? id.startsWith(prefix) : /^\d{4}_\d{2}$/.test(id))
+                .map(id => prefix ? id.slice(prefix.length) : id)
+                .filter(ym => /^\d{4}_\d{2}$/.test(ym))
+                .sort().reverse();
 
             if (!sel) return;
 
@@ -218,8 +232,9 @@ const SalesDashboard = {
         // 3. สร้าง Promise และเก็บไว้ใน _chunkInflight
         SalesDashboard._chunkInflight[ym] = (async () => {
             try {
-                // ✅ FIX-PERF: ดึง chunks โดยตรง ไม่ต้องดึง metaDoc ก่อน (ลด 1 round-trip)
-                const chunkListSnap = await db.collection('sellout').doc(ym)
+                // ✅ FIX: ใช้ _ymKey เพื่อแยก key ตาม centerId
+                const key = SalesDashboard._ymKey(ym);
+                const chunkListSnap = await db.collection('sellout').doc(key)
                     .collection('chunks').get();
 
                 if (chunkListSnap.empty) {
@@ -298,32 +313,38 @@ const SalesDashboard = {
 
     _loadData: async (ym) => {
         try {
-            // ✅ FIX: ตรวจ _ok flag แทน hasOwnProperty
-            // hasOwnProperty คืน true แม้ cache = [] จาก error → ไม่ retry
-            // _ok = true เฉพาะเมื่อโหลดสำเร็จ allRows มีข้อมูล
+            // ✅ FIX: ตรวจ _ok flag — retry ได้เฉพาะเมื่อ error จริง
             if (SalesDashboard._rowCache[ym]?._ok !== undefined) {
                 SalesDashboard._rows = SalesDashboard._rowCache[ym].rows;
                 return;
             }
             const u = SalesDashboard._username;
             const allRows = await SalesDashboard._loadChunks(ym);
+
+            // ✅ FIX: กรอง sCode ของตัวเอง
             const filtered = u
                 ? allRows.filter(r => String(r.sCode || '').toUpperCase() === u)
                 : [];
+
             SalesDashboard._rows = filtered;
-            // cache เฉพาะเมื่อ allRows มีข้อมูล → retry ได้ถ้า error
-            if (allRows.length > 0) {
+
+            // ✅ FIX: cache ถ้า allRows โหลดสำเร็จ (แม้ filtered จะว่าง)
+            // "ว่างเพราะไม่มียอดเดือนนั้น" ≠ "ว่างเพราะ error"
+            // ตรวจ allRows มีข้อมูล = โหลด chunk สำเร็จแล้ว
+            if (allRows.length > 0 || SalesDashboard._chunkCache[ym] !== undefined) {
                 SalesDashboard._rowCache[ym] = { rows: filtered, _ok: true };
             }
         } catch (e) {
             console.warn('SalesDashboard._loadData:', e);
+            // ไม่ cache เมื่อ error จริง → retry ได้ครั้งหน้า
         }
     },
 
     // ─── โหลด Target ──────────────────────────────────────────────────────
     _loadTarget: async (ym) => {
         try {
-            const doc = await db.collection('targets').doc(ym).get();
+            const key = SalesDashboard._ymKey(ym);
+            const doc = await db.collection('targets').doc(key).get();
             if (!doc.exists) return;
             const routes = doc.data().routes || {};
             SalesDashboard._target = routes[SalesDashboard._username] || 0;
@@ -635,8 +656,14 @@ const SalesDashboard = {
             try {
                 // ✅ PERF: ใช้ _loadChunks → share cache กับ dashboard ไม่ fetch Firestore ซ้ำ
                 const listSnap = await db.collection('sellout').get();
-                const months = listSnap.docs.map(d => d.id)
-                    .filter(id => /^\d{4}_\d{2}$/.test(id)).sort().reverse();
+                const _cid2 = window.CENTER_ID || Auth.getSession()?.centerId || '';
+                const _pfx2 = _cid2 ? `${_cid2}_` : '';
+                const months = listSnap.docs
+                    .map(d => d.id)
+                    .filter(id => _pfx2 ? id.startsWith(_pfx2) : /^\d{4}_\d{2}$/.test(id))
+                    .map(id => _pfx2 ? id.slice(_pfx2.length) : id)
+                    .filter(ym => /^\d{4}_\d{2}$/.test(ym))
+                    .sort().reverse();
                 if (months.length) {
                     const firstMonthRows = await SalesDashboard._loadChunks(months[0]);
                     const seen = new Map();
@@ -831,10 +858,14 @@ const SupervisorDashboard = {
             }
 
             const snap = await db.collection('sellout').get();
-            // กรองเฉพาะ YYYY_MM ที่ถูกต้อง กันดึงเอกสาร meta อื่น
+            // ✅ FIX: กรองเฉพาะ doc ของศูนย์นี้ แล้วแปลง key กลับเป็น YYYY_MM
+            const _cid = window.CENTER_ID || Auth.getSession()?.centerId || '';
+            const _prefix = _cid ? `${_cid}_` : '';
             const months = snap.docs
                 .map(d => d.id)
-                .filter(id => /^\d{4}_\d{2}$/.test(id))
+                .filter(id => _prefix ? id.startsWith(_prefix) : /^\d{4}_\d{2}$/.test(id))
+                .map(id => _prefix ? id.slice(_prefix.length) : id)
+                .filter(ym => /^\d{4}_\d{2}$/.test(ym))
                 .sort().reverse();
 
             if (!sel) return;
@@ -887,7 +918,7 @@ const SupervisorDashboard = {
             const rows = centerId
                 ? allRows.filter(r => String(r.sCode || '').startsWith(centerId))
                 : allRows;
-            if (allRows.length > 0) {
+            if (allRows.length > 0 || SalesDashboard._chunkCache[ym] !== undefined) {
                 SupervisorDashboard._rowCache[cacheKey] = { rows, _ok: true };
             }
             SupervisorDashboard._allRows = rows;
@@ -899,7 +930,8 @@ const SupervisorDashboard = {
 
     _loadTargets: async (ym) => {
         try {
-            const doc = await db.collection('targets').doc(ym).get();
+            const key = SalesDashboard._ymKey(ym);
+            const doc = await db.collection('targets').doc(key).get();
             SupervisorDashboard._targets = doc.exists ? (doc.data().routes || {}) : {};
         } catch(e) { SupervisorDashboard._targets = {}; }
     },

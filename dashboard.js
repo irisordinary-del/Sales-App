@@ -28,7 +28,7 @@ const Dashboard = {
     // ─── State ───────────────────────────────────────────────────────────
     _session: null,
     _currentYM: '',          // 'YYYY_MM'
-    _rowCache: {},            // { 'YYYY_MM': rows[] } cache สำหรับ campaign
+    _rowCache: {},            // { 'CID_YYYY_MM': rows[] } cache สำหรับ campaign
     _amountMode: 'gross',     // 'gross' | 'net'
     _drillRoute: null,        // null = ศูนย์ทั้งหมด
     _drillShopType: null,     // null = ทุกประเภทร้าน
@@ -38,6 +38,13 @@ const Dashboard = {
     _allMonths: [],           // list of loaded YM keys
     _targets: {},             // { routeCode: amount }
     _CHUNK_SIZE: 500,
+
+    // ✅ FIX: แยก sellout/targets ตาม centerId ป้องกัน data ทับกันข้ามศูนย์
+    // key format: '{centerId}_{YYYY_MM}' เช่น '402_2026_05'
+    _ymKey: (ym) => {
+        const cid = window.CENTER_ID || '';
+        return cid ? `${cid}_${ym}` : ym;
+    },
 
     // ─── SKU Whitelist — prodCode ที่นับใน SKU เฉลี่ย/ร้าน ────────────────
     _skuWhitelist: null,   // null = ใช้ทุก SKU, Set = กรองเฉพาะที่เลือก
@@ -294,7 +301,15 @@ const Dashboard = {
     _loadMonthList: async () => {
         try {
             const snap = await cloudDB.collection('sellout').get();
-            const months = snap.docs.map(d => d.id).sort().reverse();
+            const cid = window.CENTER_ID || '';
+            const prefix = cid ? `${cid}_` : '';
+            // ✅ FIX: กรองเฉพาะ doc ของศูนย์นี้ แล้วแปลง key กลับเป็น YYYY_MM
+            const months = snap.docs
+                .map(d => d.id)
+                .filter(id => prefix ? id.startsWith(prefix) : /^\d{4}_\d{2}$/.test(id))
+                .map(id => prefix ? id.slice(prefix.length) : id)
+                .filter(ym => /^\d{4}_\d{2}$/.test(ym))
+                .sort().reverse();
             Dashboard._allMonths = months;
 
             const sel = document.getElementById('db-month-select');
@@ -331,10 +346,11 @@ const Dashboard = {
     _loadMonth: async (ym) => {
         try {
             Dashboard._showUploadBar('กำลังโหลดข้อมูล...', 10);
-            const metaDoc = await cloudDB.collection('sellout').doc(ym).get();
+            const key = Dashboard._ymKey(ym);
+            const metaDoc = await cloudDB.collection('sellout').doc(key).get();
             if (!metaDoc.exists) { Dashboard._rows = []; Dashboard._hideUploadBar(); return; }
 
-            const chunks = await cloudDB.collection('sellout').doc(ym).collection('chunks').get();
+            const chunks = await cloudDB.collection('sellout').doc(key).collection('chunks').get();
             const sortedDocs = chunks.docs.sort((a,b) => (a.data().index||0) - (b.data().index||0));
             let rows = [];
             sortedDocs.forEach(doc => { if (doc.data().rows) rows = rows.concat(doc.data().rows); });
@@ -466,10 +482,12 @@ const Dashboard = {
 
     _saveToFirestore: async (ym, rows) => {
         const batch = cloudDB.batch();
-        // Save meta doc
-        const metaRef = cloudDB.collection('sellout').doc(ym);
+        // ✅ FIX: ใช้ key รวม centerId ป้องกันทับข้ามศูนย์
+        const key = Dashboard._ymKey(ym);
+        const metaRef = cloudDB.collection('sellout').doc(key);
         batch.set(metaRef, {
             totalRows: rows.length,
+            centerId:  window.CENTER_ID || '',
             updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
             version: 1
         });
@@ -494,7 +512,8 @@ const Dashboard = {
     // ─── Targets ──────────────────────────────────────────────────────────
     _loadTargets: async (ym) => {
         try {
-            const doc = await cloudDB.collection('targets').doc(ym).get();
+            const key = Dashboard._ymKey(ym);
+            const doc = await cloudDB.collection('targets').doc(key).get();
             Dashboard._targets = doc.exists ? (doc.data().routes || {}) : {};
         } catch (e) { Dashboard._targets = {}; }
     },
@@ -524,7 +543,8 @@ const Dashboard = {
             if (val > 0) targets[r] = val;
         });
         try {
-            await cloudDB.collection('targets').doc(Dashboard._currentYM).set({ routes: targets, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+            const key = Dashboard._ymKey(Dashboard._currentYM);
+            await cloudDB.collection('targets').doc(key).set({ routes: targets, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
             Dashboard._targets = targets;
             Dashboard._closeTargetModal();
             Dashboard._render();
@@ -1157,16 +1177,17 @@ const Dashboard = {
 
             // helper: โหลด rows ของเดือน (cached + tag _route)
             const loadMonthRows = async (ym) => {
-                if (Dashboard._rowCache[ym]) return Dashboard._rowCache[ym];
+                const cacheKey = Dashboard._ymKey(ym);
+                if (Dashboard._rowCache[cacheKey]) return Dashboard._rowCache[cacheKey];
                 try {
-                    const chunks = await cloudDB.collection('sellout').doc(ym).collection('chunks').get();
+                    const chunks = await cloudDB.collection('sellout').doc(cacheKey).collection('chunks').get();
                     let rows = [];
                     chunks.forEach(doc => rows = rows.concat(doc.data().rows || []));
                     rows.forEach(r => { r._route = custToRoute[String(r.custCode||'')] || null; });
-                    Dashboard._rowCache[ym] = rows;
+                    Dashboard._rowCache[cacheKey] = rows;
                     return rows;
                 } catch(e) {
-                    Dashboard._rowCache[ym] = [];
+                    Dashboard._rowCache[cacheKey] = [];
                     return [];
                 }
             };
@@ -1319,9 +1340,17 @@ const Dashboard = {
         if (Dashboard._skuOptions.length > 0) return;
         try {
             const snap = await cloudDB.collection('sellout').get();
-            const months = snap.docs.map(d => d.id).filter(id => /^\d{4}_\d{2}$/.test(id)).sort().reverse();
+            const cid = window.CENTER_ID || '';
+            const prefix = cid ? `${cid}_` : '';
+            const months = snap.docs
+                .map(d => d.id)
+                .filter(id => prefix ? id.startsWith(prefix) : /^\d{4}_\d{2}$/.test(id))
+                .map(id => prefix ? id.slice(prefix.length) : id)
+                .filter(ym => /^\d{4}_\d{2}$/.test(ym))
+                .sort().reverse();
             if (!months.length) return;
-            const chunks = await cloudDB.collection('sellout').doc(months[0]).collection('chunks').get();
+            const key = Dashboard._ymKey(months[0]);
+            const chunks = await cloudDB.collection('sellout').doc(key).collection('chunks').get();
             const seen = new Map();
             chunks.docs.sort((a,b) => (a.data().index||0)-(b.data().index||0))
                 .forEach(doc => (doc.data().rows||[]).forEach(r => {
