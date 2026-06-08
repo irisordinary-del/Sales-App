@@ -232,12 +232,21 @@ const SalesDashboard = {
 
     // ─── Internal: fetch legacy path (old format chunks flat) ─────────────
     _fetchLegacyChunks: async (ym) => {
-        const key = SalesDashboard._ymKey(ym);
-        const snap = await db.collection('sellout').doc(key).collection('chunks').get();
-        let rows = [];
-        snap.docs.sort((a,b)=>(a.data().index||0)-(b.data().index||0))
-            .forEach(doc => { if (Array.isArray(doc.data().rows)) rows = rows.concat(doc.data().rows); });
-        return rows;
+        // ลอง key ใหม่ก่อน (centerId_ym) แล้ว fallback legacy (ym เปล่า)
+        const tryKeys = [SalesDashboard._ymKey(ym)];
+        if (tryKeys[0] !== ym) tryKeys.push(ym); // เพิ่ม ym เปล่าถ้า key ต่างกัน
+        for (const key of tryKeys) {
+            try {
+                const snap = await db.collection('sellout').doc(key).collection('chunks').get();
+                if (!snap.empty) {
+                    let rows = [];
+                    snap.docs.sort((a,b)=>(a.data().index||0)-(b.data().index||0))
+                        .forEach(doc => { if (Array.isArray(doc.data().rows)) rows = rows.concat(doc.data().rows); });
+                    if (rows.length > 0) return rows;
+                }
+            } catch(e) { /* ลอง key ถัดไป */ }
+        }
+        return [];
     },
 
     // ─── FAST PATH: Sales — ดึงเฉพาะ sCode ตัวเอง ───────────────────────
@@ -260,7 +269,7 @@ const SalesDashboard = {
                     .forEach(doc => { if (Array.isArray(doc.data().rows)) rows = rows.concat(doc.data().rows); });
 
                 // fallback: path ใหม่ว่าง → ลอง legacy path (ข้อมูลก่อน migrate)
-                if (rows.length === 0 && !snap.metadata?.fromCache) {
+                if (rows.length === 0) {
                     const legacy = await SalesDashboard._fetchLegacyChunks(ym);
                     rows = legacy.filter(r => String(r.sCode||'').toUpperCase() === sCode);
                 }
