@@ -18,7 +18,15 @@ const StoreHistory = {
     init: async () => {
         try {
             const snap = await db.collection('sellout').get();
-            const months = snap.docs.map(d => d.id).sort().reverse();
+            // ✅ FIX: กรองเฉพาะ doc ของศูนย์นี้ แล้วแปลง key กลับเป็น YYYY_MM
+            const cid = window.CENTER_ID || Auth.getSession()?.centerId || '';
+            const prefix = cid ? `${cid}_` : '';
+            const months = snap.docs
+                .map(d => d.id)
+                .filter(id => prefix ? id.startsWith(prefix) : /^\d{4}_\d{2}$/.test(id))
+                .map(id => prefix ? id.slice(prefix.length) : id)
+                .filter(ym => /^\d{4}_\d{2}$/.test(ym))
+                .sort().reverse();
             StoreHistory._months = months;
 
             // populate month selector ใน store tab
@@ -67,7 +75,10 @@ const StoreHistory = {
             if (typeof SalesDashboard !== 'undefined' && SalesDashboard._loadChunks) {
                 allRows = await SalesDashboard._loadChunks(ym);
             } else {
-                const chunkSnap = await db.collection('sellout').doc(ym)
+                // fallback: fetch เองถ้า SalesDashboard ยังไม่โหลด
+                const cid = window.CENTER_ID || Auth.getSession()?.centerId || '';
+                const key = cid ? `${cid}_${ym}` : ym;
+                const chunkSnap = await db.collection('sellout').doc(key)
                     .collection('chunks').get();
                 if (chunkSnap.metadata?.fromCache) {
                     console.warn('[StoreHistory] ข้อมูลมาจาก offline cache:', ym);
