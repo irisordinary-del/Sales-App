@@ -190,35 +190,53 @@ service cloud.firestore {
 
     // ==========================================
     // 📊 sellout — ยอดขายรายเดือน
-    // 🔒 read เปิดไว้ (Sales app ต้องดึง) แต่ write ต้องมี format ถูก
+    // key format: '{centerId}_{YYYY_MM}' เช่น '402_2026_05'
+    // หรือ legacy format: 'YYYY_MM'
     // ==========================================
-    match /sellout/{yearMonth} {
+    match /sellout/{docKey} {
       allow read: if true;
       allow delete: if true;
-      allow write: if validYearMonth(yearMonth)
+      allow write: if (validYearMonth(docKey) || validCenterYM(docKey))
                    && request.resource.data.keys().hasAny([
-                       'totalRows','updatedAt','version'
+                       'totalRows','updatedAt','version','centerId','sCodes'
                    ]);
 
+      // ✅ legacy flat chunks (format เก่า)
       match /chunks/{chunkId} {
         allow read: if true;
         allow delete: if true;
-        // 🔒 จำกัด rows ไม่เกิน 550 แถวต่อ chunk + ต้องมี field ครบ
         allow write: if request.resource.data.keys().hasAll(['index','rows'])
                      && request.resource.data.index is number
                      && request.resource.data.rows is list
                      && request.resource.data.rows.size() <= 550;
       }
+
+      // ✅ NEW: per-sCode subcollection (format ใหม่)
+      match /routes/{sCode} {
+        allow read: if true;
+        allow delete: if true;
+        allow write: if request.resource.data.keys().hasAny(['count','updatedAt']);
+
+        match /chunks/{chunkId} {
+          allow read: if true;
+          allow delete: if true;
+          allow write: if request.resource.data.keys().hasAll(['index','rows'])
+                       && request.resource.data.index is number
+                       && request.resource.data.rows is list
+                       && request.resource.data.rows.size() <= 550;
+        }
+      }
     }
 
     // ==========================================
     // 🎯 targets — Target รายสายรายเดือน
-    // 🔒 read เปิด แต่ write ต้องมี format ถูก
+    // key format: '{centerId}_{YYYY_MM}' หรือ legacy 'YYYY_MM'
     // ==========================================
-    match /targets/{yearMonth} {
+    match /targets/{docKey} {
       allow read: if true;
       allow delete: if true;
-      allow write: if validYearMonth(yearMonth)
+      // ✅ FIX: รองรับทั้ง 'YYYY_MM' และ '{centerId}_{YYYY_MM}'
+      allow write: if (validYearMonth(docKey) || validCenterYM(docKey))
                    && request.resource.data.keys().hasAny(['routes','updatedAt'])
                    && (!request.resource.data.keys().hasAll(['routes'])
                        || request.resource.data.routes is map);
@@ -286,6 +304,11 @@ service cloud.firestore {
 
   function validYearMonth(ym) {
     return ym.matches('[0-9]{4}_[0-9]{2}');
+  }
+
+  // ✅ FIX: รองรับ key format ใหม่ '{centerId}_{YYYY_MM}' เช่น '402_2026_05'
+  function validCenterYM(key) {
+    return key.matches('[0-9a-zA-Z]+_[0-9]{4}_[0-9]{2}');
   }
 
 }
