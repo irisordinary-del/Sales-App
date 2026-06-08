@@ -418,6 +418,15 @@ const Dashboard = {
 
             await Dashboard._saveToFirestore(ym, rows);
 
+            // ✅ PERF: อัปเดต selloutMonths ใน centerDoc → sales-dashboard ไม่ต้อง query sellout collection
+            try {
+                const centerDocRef = cloudDB.collection('appData').doc(window.CENTER_DOC || 'v1_main');
+                const centerSnap   = await centerDocRef.get();
+                const existing     = centerSnap.exists ? (centerSnap.data().selloutMonths || []) : [];
+                const updated      = [...new Set([ym, ...existing])].sort().reverse();
+                await centerDocRef.set({ selloutMonths: updated }, { merge: true });
+            } catch(e) { console.warn('selloutMonths update:', e); }
+
             Dashboard._rows = rows;
             Dashboard._currentYM = ym;
             await Dashboard._loadMonthList();
@@ -481,31 +490,68 @@ const Dashboard = {
     },
 
     _saveToFirestore: async (ym, rows) => {
-        const batch = cloudDB.batch();
-        // ✅ FIX: ใช้ key รวม centerId ป้องกันทับข้ามศูนย์
         const key = Dashboard._ymKey(ym);
         const metaRef = cloudDB.collection('sellout').doc(key);
-        batch.set(metaRef, {
+        const CS = Dashboard._CHUNK_SIZE;
+
+        // ✅ NEW STRUCTURE: แยก rows ตาม sCode → sellout/{key}/routes/{sCode}/chunks/
+        // Sales ดึงได้เฉพาะสายตัวเองตรงๆ ไม่ต้องโหลดทั้งศูนย์
+        const bySCode = {};
+        rows.forEach(r => {
+            const sc = String(r.sCode || '').toUpperCase().trim() || '_unknown';
+            if (!bySCode[sc]) bySCode[sc] = [];
+            bySCode[sc].push(r);
+        });
+        const sCodes = Object.keys(bySCode);
+
+        // 1. ลบข้อมูลเก่าทุก route ก่อน
+        Dashboard._showUploadBar('ล้างข้อมูลเก่า...', 10);
+        try {
+            const oldRoutes = await metaRef.collection('routes').get();
+            if (!oldRoutes.empty) {
+                for (const routeDoc of oldRoutes.docs) {
+                    const oldChunks = await routeDoc.ref.collection('chunks').get();
+                    const delBatch = cloudDB.batch();
+                    oldChunks.docs.forEach(c => delBatch.delete(c.ref));
+                    delBatch.delete(routeDoc.ref);
+                    await delBatch.commit();
+                }
+            }
+            // ลบ legacy chunks (format เก่า) ถ้ามี
+            const oldChunks = await metaRef.collection('chunks').get();
+            if (!oldChunks.empty) {
+                const b = cloudDB.batch();
+                oldChunks.docs.forEach(d => b.delete(d.ref));
+                await b.commit();
+            }
+        } catch(e) { console.warn('cleanup old:', e); }
+
+        // 2. เขียน meta doc
+        await metaRef.set({
             totalRows: rows.length,
             centerId:  window.CENTER_ID || '',
+            sCodes,
             updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-            version: 1
+            version:   2,
         });
-        // Delete old chunks
-        const old = await metaRef.collection('chunks').get();
-        old.forEach(d => batch.delete(d.ref));
-        await batch.commit();
 
-        // Save new chunks
-        const CS = Dashboard._CHUNK_SIZE;
-        const total = Math.ceil(rows.length / CS);
-        for (let i = 0; i < total; i++) {
-            const pct = 40 + Math.round((i / total) * 55);
-            Dashboard._showUploadBar(`บันทึก chunk ${i+1}/${total}`, pct);
-            await metaRef.collection('chunks').doc(`chunk_${String(i).padStart(4,'0')}`).set({
-                index: i,
-                rows: rows.slice(i * CS, (i+1) * CS)
-            });
+        // 3. เขียน routes/{sCode}/chunks/ ทีละสาย
+        const totalSCodes = sCodes.length;
+        let doneCount = 0;
+        for (const sCode of sCodes) {
+            const sRows  = bySCode[sCode];
+            const total  = Math.ceil(sRows.length / CS);
+            const routeRef = metaRef.collection('routes').doc(sCode);
+            await routeRef.set({ count: sRows.length, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+            for (let i = 0; i < total; i++) {
+                const pct = 20 + Math.round((doneCount / totalSCodes + (i / total) / totalSCodes) * 75);
+                Dashboard._showUploadBar(`บันทึก ${sCode} chunk ${i+1}/${total}`, pct);
+                await routeRef.collection('chunks').doc(`chunk_${String(i).padStart(4,'0')}`).set({
+                    index: i,
+                    rows:  sRows.slice(i * CS, (i+1) * CS),
+                });
+            }
+            doneCount++;
         }
     },
 

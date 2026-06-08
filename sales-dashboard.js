@@ -123,24 +123,36 @@ const SalesDashboard = {
     // ─── โหลดรายการเดือนที่มีข้อมูล ──────────────────────────────────────
     _loadMonthList: async () => {
         try {
-            // ✅ FIX-PERF-4: แสดง skeleton ทันที ไม่ต้องรอ Firestore
             const sel = document.getElementById('db-month-sel');
             const container = sel?.closest('[id]') || document.getElementById('db-dashboard-wrap');
             SalesDashboard._showSkeleton(container);
 
-            const snap = await db.collection('sellout').get();
-            // ✅ FIX: กรองเฉพาะ doc ของศูนย์นี้ แล้วแปลง key กลับเป็น YYYY_MM
             const cid = window.CENTER_ID || Auth.getSession()?.centerId || '';
-            const prefix = cid ? `${cid}_` : '';
-            const months = snap.docs
-                .map(d => d.id)
-                .filter(id => prefix ? id.startsWith(prefix) : /^\d{4}_\d{2}$/.test(id))
-                .map(id => prefix ? id.slice(prefix.length) : id)
-                .filter(ym => /^\d{4}_\d{2}$/.test(ym))
-                .sort().reverse();
+            const centerDocId = cid ? `${cid}_main` : (window.CENTER_DOC || '');
+
+            // ✅ PERF: ดึง selloutMonths จาก centerDoc (1 doc) แทน query sellout collection ทั้งหมด
+            let months = [];
+            if (centerDocId) {
+                try {
+                    const centerSnap = await db.collection('appData').doc(centerDocId).get();
+                    const stored = centerSnap.exists ? (centerSnap.data().selloutMonths || []) : [];
+                    months = stored.filter(ym => /^\d{4}_\d{2}$/.test(ym)).sort().reverse();
+                } catch(e) { /* fallback */ }
+            }
+
+            // Fallback: ถ้า centerDoc ยังไม่มี selloutMonths → query sellout (ข้อมูลเก่าก่อน deploy)
+            if (months.length === 0) {
+                const snap = await db.collection('sellout').get();
+                const prefix = cid ? `${cid}_` : '';
+                months = snap.docs
+                    .map(d => d.id)
+                    .filter(id => prefix ? id.startsWith(prefix) : /^\d{4}_\d{2}$/.test(id))
+                    .map(id => prefix ? id.slice(prefix.length) : id)
+                    .filter(ym => /^\d{4}_\d{2}$/.test(ym))
+                    .sort().reverse();
+            }
 
             if (!sel) return;
-
             sel.innerHTML = '<option value="">-- เดือน --</option>' +
                 months.map(ym => {
                     const [y, m] = ym.split('_');
@@ -149,18 +161,11 @@ const SalesDashboard = {
                     return `<option value="${ym}">${label}</option>`;
                 }).join('');
 
-            // ✅ FIX-PERF-5: โหลดเดือนล่าสุดก่อน แล้ว preload ทุกเดือนที่เหลือเบื้องหลัง
             if (months.length > 0) {
-                // ✅ FIX: รอ browser render <option> เสร็จก่อน set value
-                // sel.value = months[0] ทันทีหลัง innerHTML อาจไม่ติดใน browser บางตัว
                 await new Promise(r => requestAnimationFrame(r));
                 sel.value = months[0];
-                // ตรวจสอบว่า set สำเร็จ ถ้าไม่ติดให้ force select option แรก
-                if (sel.value !== months[0]) {
-                    sel.selectedIndex = 1; // index 0 = "-- เดือน --", index 1 = เดือนล่าสุด
-                }
+                if (sel.value !== months[0]) sel.selectedIndex = 1;
                 await SalesDashboard.onMonthChange(months[0]);
-                // preload ทุกเดือนที่เหลือ — staggered ทุก 2 วิ ไม่บล็อก render
                 months.slice(1).forEach((ym, i) => {
                     setTimeout(() => {
                         SalesDashboard._loadData(ym).catch(() => {});
@@ -217,69 +222,142 @@ const SalesDashboard = {
     },
 
     // ─── Shared chunk cache + in-flight dedup ────────────────────────────
-    // key = YYYY_MM, value = rows[] ทั้งหมด (ไม่กรอง sCode)
-    // ใช้ร่วมกัน: SalesDashboard, SupervisorDashboard, StoreHistory, _renderCampaigns
+    // ✅ NEW: cache แยกตาม sCode → 'ym:sCode' หรือ 'ym:*' สำหรับ supervisor
+    // key = YYYY_MM, value = rows[] ทั้งหมด (ไม่กรอง sCode) — ใช้โดย Supervisor/StoreHistory
     _chunkCache: {},
-    _chunkInflight: {},   // ✅ PERF: กัน concurrent call fetch chunk ซ้ำ (Promise reuse)
+    _chunkInflight: {},
 
-    _loadChunks: async (ym) => {
-        // 1. มีใน cache แล้ว และไม่ใช่ผลจาก error → คืนทันที
-        if (SalesDashboard._chunkCache[ym] !== undefined) return SalesDashboard._chunkCache[ym];
+    // ✅ FAST PATH: ดึง rows เฉพาะ sCode เดียว (Sales role)
+    // path: sellout/{key}/routes/{sCode}/chunks/
+    _loadChunksBySCode: async (ym, sCode) => {
+        const cacheKey = `${ym}:${sCode}`;
+        if (SalesDashboard._chunkCache[cacheKey] !== undefined) return SalesDashboard._chunkCache[cacheKey];
+        if (SalesDashboard._chunkInflight[cacheKey]) return SalesDashboard._chunkInflight[cacheKey];
 
-        // 2. มี request กำลัง in-flight อยู่ → รอ Promise เดิม ไม่ fetch ซ้ำ
-        if (SalesDashboard._chunkInflight[ym]) return SalesDashboard._chunkInflight[ym];
-
-        // 3. สร้าง Promise และเก็บไว้ใน _chunkInflight
-        SalesDashboard._chunkInflight[ym] = (async () => {
+        SalesDashboard._chunkInflight[cacheKey] = (async () => {
             try {
-                // ✅ FIX: ใช้ _ymKey เพื่อแยก key ตาม centerId
                 const key = SalesDashboard._ymKey(ym);
-                const chunkListSnap = await db.collection('sellout').doc(key)
+                const snap = await db.collection('sellout').doc(key)
+                    .collection('routes').doc(sCode)
                     .collection('chunks').get();
-
-                if (chunkListSnap.empty) {
-                    SalesDashboard._chunkCache[ym] = [];
-                    return [];
-                }
-
-                const chunkDocs = chunkListSnap.docs
-                    .sort((a, b) => (a.data().index || 0) - (b.data().index || 0));
-
-                // ✅ PERF: concat rows ตรงใน loop (chunkDocs อยู่ใน memory แล้วหลัง .get())
                 let rows = [];
-                let failCount = 0;
-                for (const doc of chunkDocs) {
-                    try {
-                        const chunkRows = doc.data().rows;
-                        if (Array.isArray(chunkRows)) rows = rows.concat(chunkRows);
-                    } catch (e) {
-                        failCount++;
-                        console.warn(`[Dashboard] chunk parse failed:`, e);
+                snap.docs.sort((a,b) => (a.data().index||0)-(b.data().index||0))
+                    .forEach(doc => { if (Array.isArray(doc.data().rows)) rows = rows.concat(doc.data().rows); });
+                // ✅ fallback: ถ้า path ใหม่ว่าง ลอง path เก่า (legacy ก่อน migrate)
+                if (rows.length === 0) {
+                    const legacy = await SalesDashboard._loadChunks(ym);
+                    rows = legacy.filter(r => String(r.sCode||'').toUpperCase() === sCode);
+                }
+                SalesDashboard._chunkCache[cacheKey] = rows;
+                return rows;
+            } catch(e) {
+                // fallback to legacy
+                try {
+                    const legacy = await SalesDashboard._loadChunks(ym);
+                    const rows = legacy.filter(r => String(r.sCode||'').toUpperCase() === sCode);
+                    SalesDashboard._chunkCache[cacheKey] = rows;
+                    return rows;
+                } catch(e2) { return []; }
+            } finally {
+                delete SalesDashboard._chunkInflight[cacheKey];
+            }
+        })();
+        return SalesDashboard._chunkInflight[cacheKey];
+    },
+
+    // ✅ SUPERVISOR PATH: ดึงทุก sCode ใน centerId parallel
+    // path: sellout/{key}/routes/{sCode}/chunks/ — fetch parallel ทุก sCode
+    _loadChunksForCenter: async (ym, centerId) => {
+        const cacheKey = `${ym}:center:${centerId}`;
+        if (SalesDashboard._chunkCache[cacheKey] !== undefined) return SalesDashboard._chunkCache[cacheKey];
+        if (SalesDashboard._chunkInflight[cacheKey]) return SalesDashboard._chunkInflight[cacheKey];
+
+        SalesDashboard._chunkInflight[cacheKey] = (async () => {
+            try {
+                const key = SalesDashboard._ymKey(ym);
+                const metaSnap = await db.collection('sellout').doc(key).get();
+                // ดึง sCodes จาก meta doc (เร็วกว่า list subcollection)
+                const sCodes = metaSnap.exists
+                    ? (metaSnap.data().sCodes || []).filter(sc => sc.startsWith(centerId))
+                    : [];
+
+                if (sCodes.length === 0) {
+                    // fallback: legacy path
+                    const legacy = await SalesDashboard._loadChunks(ym);
+                    const rows = legacy.filter(r => String(r.sCode||'').startsWith(centerId));
+                    SalesDashboard._chunkCache[cacheKey] = rows;
+                    return rows;
+                }
+
+                // fetch ทุก sCode parallel
+                const BATCH = 5;
+                let allRows = [];
+                for (let i = 0; i < sCodes.length; i += BATCH) {
+                    const chunk = sCodes.slice(i, i + BATCH);
+                    const results = await Promise.allSettled(
+                        chunk.map(sc => SalesDashboard._loadChunksBySCode(ym, sc))
+                    );
+                    results.forEach(r => { if (r.status === 'fulfilled') allRows = allRows.concat(r.value); });
+                }
+                SalesDashboard._chunkCache[cacheKey] = allRows;
+                return allRows;
+            } catch(e) {
+                console.warn('_loadChunksForCenter:', ym, e);
+                return [];
+            } finally {
+                delete SalesDashboard._chunkInflight[cacheKey];
+            }
+        })();
+        return SalesDashboard._chunkInflight[cacheKey];
+    },
+
+    // Legacy: ดึงทั้งหมด (ใช้ตอน fallback หรือ StoreHistory)
+    _loadChunks: async (ym) => {
+        const cacheKey = `${ym}:all`;
+        if (SalesDashboard._chunkCache[cacheKey] !== undefined) return SalesDashboard._chunkCache[cacheKey];
+        if (SalesDashboard._chunkInflight[cacheKey]) return SalesDashboard._chunkInflight[cacheKey];
+
+        SalesDashboard._chunkInflight[cacheKey] = (async () => {
+            try {
+                const key = SalesDashboard._ymKey(ym);
+                // ลอง path ใหม่ก่อน (routes subcollection)
+                const metaSnap = await db.collection('sellout').doc(key).get();
+                const sCodes = metaSnap.exists ? (metaSnap.data().sCodes || []) : [];
+
+                if (sCodes.length > 0) {
+                    // มีข้อมูล path ใหม่ → fetch ทุก sCode
+                    const BATCH = 5;
+                    let allRows = [];
+                    for (let i = 0; i < sCodes.length; i += BATCH) {
+                        const chunk = sCodes.slice(i, i + BATCH);
+                        const results = await Promise.allSettled(
+                            chunk.map(sc => SalesDashboard._loadChunksBySCode(ym, sc))
+                        );
+                        results.forEach(r => { if (r.status === 'fulfilled') allRows = allRows.concat(r.value); });
                     }
+                    SalesDashboard._chunkCache[cacheKey] = allRows;
+                    return allRows;
                 }
 
-                if (failCount > 0) {
-                    console.warn(`[Dashboard] ${failCount}/${chunkDocs.length} chunks parse ไม่สำเร็จ`);
-                    SalesDashboard._showDataWarning(failCount, chunkDocs.length);
-                }
+                // fallback: legacy chunks path
+                const chunkListSnap = await db.collection('sellout').doc(key).collection('chunks').get();
+                if (chunkListSnap.empty) { SalesDashboard._chunkCache[cacheKey] = []; return []; }
 
-                // ✅ FIX: cache เฉพาะเมื่อสำเร็จและมี rows จริง
-                // ถ้า rows ว่างเพราะ error (404 ฯลฯ) ให้ retry ได้ครั้งหน้า
-                if (rows.length > 0 || failCount === 0) {
-                    SalesDashboard._chunkCache[ym] = rows;
-                }
+                let rows = [];
+                chunkListSnap.docs
+                    .sort((a, b) => (a.data().index || 0) - (b.data().index || 0))
+                    .forEach(doc => { if (Array.isArray(doc.data().rows)) rows = rows.concat(doc.data().rows); });
+
+                if (rows.length > 0) SalesDashboard._chunkCache[cacheKey] = rows;
                 return rows;
             } catch (e) {
                 console.warn('SalesDashboard._loadChunks:', ym, e);
-                // ✅ FIX: ไม่ cache [] เมื่อ error → ให้ retry ได้ครั้งหน้า
                 return [];
             } finally {
-                // ✅ ลบ in-flight ออกหลัง resolve/reject เสมอ
-                delete SalesDashboard._chunkInflight[ym];
+                delete SalesDashboard._chunkInflight[cacheKey];
             }
         })();
-
-        return SalesDashboard._chunkInflight[ym];
+        return SalesDashboard._chunkInflight[cacheKey];
     },
 
     // ✅ NEW: แสดง banner เมื่อ offline จริง (ตรวจ navigator.onLine)
@@ -313,30 +391,18 @@ const SalesDashboard = {
 
     _loadData: async (ym) => {
         try {
-            // ✅ FIX: ตรวจ _ok flag — retry ได้เฉพาะเมื่อ error จริง
             if (SalesDashboard._rowCache[ym]?._ok !== undefined) {
                 SalesDashboard._rows = SalesDashboard._rowCache[ym].rows;
                 return;
             }
             const u = SalesDashboard._username;
-            const allRows = await SalesDashboard._loadChunks(ym);
-
-            // ✅ FIX: กรอง sCode ของตัวเอง
-            const filtered = u
-                ? allRows.filter(r => String(r.sCode || '').toUpperCase() === u)
-                : [];
-
+            if (!u) { SalesDashboard._rows = []; return; }
+            // ✅ FAST PATH: ดึงเฉพาะ sCode ตัวเอง ไม่โหลดทั้งศูนย์
+            const filtered = await SalesDashboard._loadChunksBySCode(ym, u);
             SalesDashboard._rows = filtered;
-
-            // ✅ FIX: cache ถ้า allRows โหลดสำเร็จ (แม้ filtered จะว่าง)
-            // "ว่างเพราะไม่มียอดเดือนนั้น" ≠ "ว่างเพราะ error"
-            // ตรวจ allRows มีข้อมูล = โหลด chunk สำเร็จแล้ว
-            if (allRows.length > 0 || SalesDashboard._chunkCache[ym] !== undefined) {
-                SalesDashboard._rowCache[ym] = { rows: filtered, _ok: true };
-            }
+            SalesDashboard._rowCache[ym] = { rows: filtered, _ok: true };
         } catch (e) {
             console.warn('SalesDashboard._loadData:', e);
-            // ไม่ cache เมื่อ error จริง → retry ได้ครั้งหน้า
         }
     },
 
@@ -849,7 +915,6 @@ const SupervisorDashboard = {
 
     _loadMonthList: async () => {
         try {
-            // ✅ PERF: แสดง skeleton ทันทีก่อน fetch
             const sel = document.getElementById('db-month-sel');
             if (typeof SalesDashboard._showSkeleton === 'function') {
                 const container = document.getElementById('db-dashboard-wrap') ||
@@ -857,16 +922,30 @@ const SupervisorDashboard = {
                 SalesDashboard._showSkeleton(container);
             }
 
-            const snap = await db.collection('sellout').get();
-            // ✅ FIX: กรองเฉพาะ doc ของศูนย์นี้ แล้วแปลง key กลับเป็น YYYY_MM
             const _cid = window.CENTER_ID || Auth.getSession()?.centerId || '';
-            const _prefix = _cid ? `${_cid}_` : '';
-            const months = snap.docs
-                .map(d => d.id)
-                .filter(id => _prefix ? id.startsWith(_prefix) : /^\d{4}_\d{2}$/.test(id))
-                .map(id => _prefix ? id.slice(_prefix.length) : id)
-                .filter(ym => /^\d{4}_\d{2}$/.test(ym))
-                .sort().reverse();
+            const _centerDocId = _cid ? `${_cid}_main` : (window.CENTER_DOC || '');
+
+            // ✅ PERF: ดึง selloutMonths จาก centerDoc (1 doc) แทน query sellout collection
+            let months = [];
+            if (_centerDocId) {
+                try {
+                    const _cSnap = await db.collection('appData').doc(_centerDocId).get();
+                    const _stored = _cSnap.exists ? (_cSnap.data().selloutMonths || []) : [];
+                    months = _stored.filter(ym => /^\d{4}_\d{2}$/.test(ym)).sort().reverse();
+                } catch(e) { /* fallback */ }
+            }
+
+            // Fallback: ถ้ายังไม่มี selloutMonths → query sellout collection
+            if (months.length === 0) {
+                const snap = await db.collection('sellout').get();
+                const _prefix = _cid ? `${_cid}_` : '';
+                months = snap.docs
+                    .map(d => d.id)
+                    .filter(id => _prefix ? id.startsWith(_prefix) : /^\d{4}_\d{2}$/.test(id))
+                    .map(id => _prefix ? id.slice(_prefix.length) : id)
+                    .filter(ym => /^\d{4}_\d{2}$/.test(ym))
+                    .sort().reverse();
+            }
 
             if (!sel) return;
             sel.innerHTML = '<option value="">-- เดือน --</option>' +
@@ -881,11 +960,8 @@ const SupervisorDashboard = {
                 sel.value = months[0];
                 if (sel.value !== months[0]) sel.selectedIndex = 1;
                 await SupervisorDashboard.onMonthChange(months[0]);
-
-                // ✅ PERF: preload เดือนอื่น background — staggered ทุก 2.5 วิ ไม่บล็อก render
                 months.slice(1).forEach((ym, i) => {
                     setTimeout(() => {
-                        // preload chunk cache ไว้ล่วงหน้า (Supervisor ใช้ shared cache)
                         SalesDashboard._loadChunks(ym).catch(() => {});
                         SupervisorDashboard._loadTargets(ym).catch(() => {});
                     }, (i + 1) * 2500);
@@ -908,19 +984,16 @@ const SupervisorDashboard = {
     _loadData: async (ym) => {
         const centerId = (typeof State !== 'undefined' ? State.centerId : null) || Auth.getSession()?.centerId || '';
         const cacheKey = ym + '_sup_' + centerId;
-        // ✅ FIX: ตรวจ _ok flag — retry ได้ถ้า cache มาจาก error
         if (SupervisorDashboard._rowCache[cacheKey]?._ok !== undefined) {
             SupervisorDashboard._allRows = SupervisorDashboard._rowCache[cacheKey].rows;
             return;
         }
         try {
-            const allRows = await SalesDashboard._loadChunks(ym);
+            // ✅ FAST PATH: ดึงทุก sCode ของศูนย์นี้ parallel ไม่โหลดข้ามศูนย์
             const rows = centerId
-                ? allRows.filter(r => String(r.sCode || '').startsWith(centerId))
-                : allRows;
-            if (allRows.length > 0 || SalesDashboard._chunkCache[ym] !== undefined) {
-                SupervisorDashboard._rowCache[cacheKey] = { rows, _ok: true };
-            }
+                ? await SalesDashboard._loadChunksForCenter(ym, centerId)
+                : await SalesDashboard._loadChunks(ym);
+            SupervisorDashboard._rowCache[cacheKey] = { rows, _ok: true };
             SupervisorDashboard._allRows = rows;
         } catch(e) {
             console.warn('SupervisorDashboard._loadData:', e);
