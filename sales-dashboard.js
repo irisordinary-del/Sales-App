@@ -298,25 +298,30 @@ const SalesDashboard = {
 
     _loadData: async (ym) => {
         try {
-            // ✅ FIX: ตรวจ _ok flag แทน hasOwnProperty
-            // hasOwnProperty คืน true แม้ cache = [] จาก error → ไม่ retry
-            // _ok = true เฉพาะเมื่อโหลดสำเร็จ allRows มีข้อมูล
+            // ✅ FIX: ตรวจ _ok flag — retry ได้เฉพาะเมื่อ error จริง
             if (SalesDashboard._rowCache[ym]?._ok !== undefined) {
                 SalesDashboard._rows = SalesDashboard._rowCache[ym].rows;
                 return;
             }
             const u = SalesDashboard._username;
             const allRows = await SalesDashboard._loadChunks(ym);
+
+            // ✅ FIX: กรอง sCode ของตัวเอง
             const filtered = u
                 ? allRows.filter(r => String(r.sCode || '').toUpperCase() === u)
                 : [];
+
             SalesDashboard._rows = filtered;
-            // cache เฉพาะเมื่อ allRows มีข้อมูล → retry ได้ถ้า error
-            if (allRows.length > 0) {
+
+            // ✅ FIX: cache ถ้า allRows โหลดสำเร็จ (แม้ filtered จะว่าง)
+            // "ว่างเพราะไม่มียอดเดือนนั้น" ≠ "ว่างเพราะ error"
+            // ตรวจ allRows มีข้อมูล = โหลด chunk สำเร็จแล้ว
+            if (allRows.length > 0 || SalesDashboard._chunkCache[ym] !== undefined) {
                 SalesDashboard._rowCache[ym] = { rows: filtered, _ok: true };
             }
         } catch (e) {
             console.warn('SalesDashboard._loadData:', e);
+            // ไม่ cache เมื่อ error จริง → retry ได้ครั้งหน้า
         }
     },
 
@@ -887,7 +892,7 @@ const SupervisorDashboard = {
             const rows = centerId
                 ? allRows.filter(r => String(r.sCode || '').startsWith(centerId))
                 : allRows;
-            if (allRows.length > 0) {
+            if (allRows.length > 0 || SalesDashboard._chunkCache[ym] !== undefined) {
                 SupervisorDashboard._rowCache[cacheKey] = { rows, _ok: true };
             }
             SupervisorDashboard._allRows = rows;
