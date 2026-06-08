@@ -303,12 +303,12 @@ const Dashboard = {
             const snap = await cloudDB.collection('sellout').get();
             const cid = window.CENTER_ID || '';
             const prefix = cid ? `${cid}_` : '';
-            // ✅ FIX: กรองเฉพาะ doc ของศูนย์นี้ แล้วแปลง key กลับเป็น YYYY_MM
+            // ✅ FIX: กรอง doc ของศูนย์นี้ + ตรวจว่าเป็น YYYY_MM จริง (ปี 2000-2099)
             const months = snap.docs
                 .map(d => d.id)
                 .filter(id => prefix ? id.startsWith(prefix) : /^\d{4}_\d{2}$/.test(id))
                 .map(id => prefix ? id.slice(prefix.length) : id)
-                .filter(ym => /^\d{4}_\d{2}$/.test(ym))
+                .filter(ym => /^20\d{2}_(0[1-9]|1[0-2])$/.test(ym)) // ✅ เข้มขึ้น: 2000-2099 เดือน 01-12
                 .sort().reverse();
             Dashboard._allMonths = months;
 
