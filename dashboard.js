@@ -37,7 +37,7 @@ const Dashboard = {
     _rows: [],                // flat filtered rows (current month)
     _allMonths: [],           // list of loaded YM keys
     _targets: {},             // { routeCode: amount }
-    _CHUNK_SIZE: 500,
+    _CHUNK_SIZE: 200,  // ✅ ลดจาก 500 → 200 rows/chunk ป้องกัน Firestore resource-exhausted
 
     // ✅ FIX: แยก sellout/targets ตาม centerId ป้องกัน data ทับกันข้ามศูนย์
     // key format: '{centerId}_{YYYY_MM}' เช่น '402_2026_05'
@@ -552,6 +552,8 @@ const Dashboard = {
                 });
             }
             doneCount++;
+            // ✅ หยุดพักเล็กน้อยระหว่าง sCode ป้องกัน Firestore queue overflow
+            if (doneCount < totalSCodes) await new Promise(r => setTimeout(r, 150));
         }
     },
 
