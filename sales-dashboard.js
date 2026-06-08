@@ -372,6 +372,24 @@ const SalesDashboard = {
         setTimeout(() => warn.remove(), 5000);
     },
 
+    // ─── Online/Offline listener ─────────────────────────────────────────
+    _initOfflineListener: () => {
+        window.addEventListener('online', () => {
+            const banner = document.getElementById('_dash-offline-banner');
+            if (banner) banner.remove();
+            // reload data เมื่อกลับมา online
+            if (SalesDashboard._ym) SalesDashboard.onMonthChange(SalesDashboard._ym).catch(() => {});
+        });
+        window.addEventListener('offline', () => {
+            if (document.getElementById('_dash-offline-banner')) return;
+            const el = document.createElement('div');
+            el.id = '_dash-offline-banner';
+            el.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#ef4444;color:#fff;padding:8px 16px;font-size:12px;font-weight:700;z-index:99999;text-align:center;';
+            el.textContent = '📡 ไม่มีอินเทอร์เน็ต — ข้อมูลอาจไม่ใช่ล่าสุด';
+            document.body.appendChild(el);
+        });
+    },
+
 
     _loadData: async (ym) => {
         try {
