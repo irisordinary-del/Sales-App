@@ -37,14 +37,8 @@ const Dashboard = {
     _rows: [],                // flat filtered rows (current month)
     _allMonths: [],           // list of loaded YM keys
     _targets: {},             // { routeCode: amount }
-    _CHUNK_SIZE: 200,  // ✅ ลดจาก 500 → 200 rows/chunk ป้องกัน Firestore resource-exhausted
+    _CHUNK_SIZE: 500,
 
-    // ✅ FIX: แยก sellout/targets ตาม centerId ป้องกัน data ทับกันข้ามศูนย์
-    // key format: '{centerId}_{YYYY_MM}' เช่น '402_2026_05'
-    _ymKey: (ym) => {
-        const cid = window.CENTER_ID || '';
-        return cid ? `${cid}_${ym}` : ym;
-    },
 
     // ─── SKU Whitelist — prodCode ที่นับใน SKU เฉลี่ย/ร้าน ────────────────
     _skuWhitelist: null,   // null = ใช้ทุก SKU, Set = กรองเฉพาะที่เลือก
@@ -301,14 +295,9 @@ const Dashboard = {
     _loadMonthList: async () => {
         try {
             const snap = await cloudDB.collection('sellout').get();
-            const cid = window.CENTER_ID || '';
-            const prefix = cid ? `${cid}_` : '';
-            // ✅ FIX: กรอง doc ของศูนย์นี้ + ตรวจว่าเป็น YYYY_MM จริง (ปี 2000-2099)
             const months = snap.docs
                 .map(d => d.id)
-                .filter(id => prefix ? id.startsWith(prefix) : /^\d{4}_\d{2}$/.test(id))
-                .map(id => prefix ? id.slice(prefix.length) : id)
-                .filter(ym => /^20\d{2}_(0[1-9]|1[0-2])$/.test(ym)) // ✅ เข้มขึ้น: 2000-2099 เดือน 01-12
+                .filter(ym => /^20\d{2}_(0[1-9]|1[0-2])$/.test(ym))
                 .sort().reverse();
             Dashboard._allMonths = months;
 
@@ -346,7 +335,7 @@ const Dashboard = {
     _loadMonth: async (ym) => {
         try {
             Dashboard._showUploadBar('กำลังโหลดข้อมูล...', 10);
-            const key = Dashboard._ymKey(ym);
+            const key = ym;
             const metaDoc = await cloudDB.collection('sellout').doc(key).get();
             if (!metaDoc.exists) { Dashboard._rows = []; Dashboard._hideUploadBar(); return; }
 
@@ -418,14 +407,7 @@ const Dashboard = {
 
             await Dashboard._saveToFirestore(ym, rows);
 
-            // ✅ PERF: อัปเดต selloutMonths ใน centerDoc → sales-dashboard ไม่ต้อง query sellout collection
-            try {
-                const centerDocRef = cloudDB.collection('appData').doc(window.CENTER_DOC || 'v1_main');
-                const centerSnap   = await centerDocRef.get();
-                const existing     = centerSnap.exists ? (centerSnap.data().selloutMonths || []) : [];
-                const updated      = [...new Set([ym, ...existing])].sort().reverse();
-                await centerDocRef.set({ selloutMonths: updated }, { merge: true });
-            } catch(e) { console.warn('selloutMonths update:', e); }
+
 
             Dashboard._rows = rows;
             Dashboard._currentYM = ym;
@@ -490,77 +472,37 @@ const Dashboard = {
     },
 
     _saveToFirestore: async (ym, rows) => {
-        const key = Dashboard._ymKey(ym);
+        const batch = cloudDB.batch();
+        const key = ym;
         const metaRef = cloudDB.collection('sellout').doc(key);
-        const CS = Dashboard._CHUNK_SIZE;
-
-        // ✅ NEW STRUCTURE: แยก rows ตาม sCode → sellout/{key}/routes/{sCode}/chunks/
-        // Sales ดึงได้เฉพาะสายตัวเองตรงๆ ไม่ต้องโหลดทั้งศูนย์
-        const bySCode = {};
-        rows.forEach(r => {
-            const sc = String(r.sCode || '').toUpperCase().trim() || '_unknown';
-            if (!bySCode[sc]) bySCode[sc] = [];
-            bySCode[sc].push(r);
-        });
-        const sCodes = Object.keys(bySCode);
-
-        // 1. ลบข้อมูลเก่าทุก route ก่อน
-        Dashboard._showUploadBar('ล้างข้อมูลเก่า...', 10);
-        try {
-            const oldRoutes = await metaRef.collection('routes').get();
-            if (!oldRoutes.empty) {
-                for (const routeDoc of oldRoutes.docs) {
-                    const oldChunks = await routeDoc.ref.collection('chunks').get();
-                    const delBatch = cloudDB.batch();
-                    oldChunks.docs.forEach(c => delBatch.delete(c.ref));
-                    delBatch.delete(routeDoc.ref);
-                    await delBatch.commit();
-                }
-            }
-            // ลบ legacy chunks (format เก่า) ถ้ามี
-            const oldChunks = await metaRef.collection('chunks').get();
-            if (!oldChunks.empty) {
-                const b = cloudDB.batch();
-                oldChunks.docs.forEach(d => b.delete(d.ref));
-                await b.commit();
-            }
-        } catch(e) { console.warn('cleanup old:', e); }
-
-        // 2. เขียน meta doc
-        await metaRef.set({
+        batch.set(metaRef, {
             totalRows: rows.length,
             centerId:  window.CENTER_ID || '',
-            sCodes,
             updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-            version:   2,
+            version: 1
         });
+        // Delete old chunks
+        const old = await metaRef.collection('chunks').get();
+        old.forEach(d => batch.delete(d.ref));
+        await batch.commit();
 
-        // 3. เขียน routes/{sCode}/chunks/ ทีละสาย
-        const totalSCodes = sCodes.length;
-        let doneCount = 0;
-        for (const sCode of sCodes) {
-            const sRows  = bySCode[sCode];
-            const total  = Math.ceil(sRows.length / CS);
-            const routeRef = metaRef.collection('routes').doc(sCode);
-            await routeRef.set({ count: sRows.length, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
-            for (let i = 0; i < total; i++) {
-                const pct = 20 + Math.round((doneCount / totalSCodes + (i / total) / totalSCodes) * 75);
-                Dashboard._showUploadBar(`บันทึก ${sCode} chunk ${i+1}/${total}`, pct);
-                await routeRef.collection('chunks').doc(`chunk_${String(i).padStart(4,'0')}`).set({
-                    index: i,
-                    rows:  sRows.slice(i * CS, (i+1) * CS),
-                });
-            }
-            doneCount++;
-            // ✅ หยุดพักเล็กน้อยระหว่าง sCode ป้องกัน Firestore queue overflow
-            if (doneCount < totalSCodes) await new Promise(r => setTimeout(r, 150));
+        // Save new chunks sequentially
+        const CS = Dashboard._CHUNK_SIZE;
+        const total = Math.ceil(rows.length / CS);
+        for (let i = 0; i < total; i++) {
+            const pct = 20 + Math.round((i / total) * 75);
+            Dashboard._showUploadBar(`บันทึก chunk ${i+1}/${total}`, pct);
+            await metaRef.collection('chunks').doc(`chunk_${String(i).padStart(4,'0')}`).set({
+                index: i,
+                rows: rows.slice(i * CS, (i+1) * CS)
+            });
         }
     },
 
-    // ─── Targets ──────────────────────────────────────────────────────────
+        // ─── Targets ──────────────────────────────────────────────────────────
     _loadTargets: async (ym) => {
         try {
-            const key = Dashboard._ymKey(ym);
+            const key = ym;
             const doc = await cloudDB.collection('targets').doc(key).get();
             Dashboard._targets = doc.exists ? (doc.data().routes || {}) : {};
         } catch (e) { Dashboard._targets = {}; }
@@ -591,7 +533,7 @@ const Dashboard = {
             if (val > 0) targets[r] = val;
         });
         try {
-            const key = Dashboard._ymKey(Dashboard._currentYM);
+            const key = Dashboard._currentYM;
             await cloudDB.collection('targets').doc(key).set({ routes: targets, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
             Dashboard._targets = targets;
             Dashboard._closeTargetModal();
@@ -1225,7 +1167,7 @@ const Dashboard = {
 
             // helper: โหลด rows ของเดือน (cached + tag _route)
             const loadMonthRows = async (ym) => {
-                const cacheKey = Dashboard._ymKey(ym);
+                const cacheKey = ym;
                 if (Dashboard._rowCache[cacheKey]) return Dashboard._rowCache[cacheKey];
                 try {
                     const chunks = await cloudDB.collection('sellout').doc(cacheKey).collection('chunks').get();
@@ -1388,17 +1330,10 @@ const Dashboard = {
         if (Dashboard._skuOptions.length > 0) return;
         try {
             const snap = await cloudDB.collection('sellout').get();
-            const cid = window.CENTER_ID || '';
-            const prefix = cid ? `${cid}_` : '';
-            const months = snap.docs
-                .map(d => d.id)
-                .filter(id => prefix ? id.startsWith(prefix) : /^\d{4}_\d{2}$/.test(id))
-                .map(id => prefix ? id.slice(prefix.length) : id)
-                .filter(ym => /^\d{4}_\d{2}$/.test(ym))
-                .sort().reverse();
+            const months = snap.docs.map(d => d.id)
+                .filter(ym => /^20\d{2}_(0[1-9]|1[0-2])$/.test(ym)).sort().reverse();
             if (!months.length) return;
-            const key = Dashboard._ymKey(months[0]);
-            const chunks = await cloudDB.collection('sellout').doc(key).collection('chunks').get();
+            const chunks = await cloudDB.collection('sellout').doc(months[0]).collection('chunks').get();
             const seen = new Map();
             chunks.docs.sort((a,b) => (a.data().index||0)-(b.data().index||0))
                 .forEach(doc => (doc.data().rows||[]).forEach(r => {
