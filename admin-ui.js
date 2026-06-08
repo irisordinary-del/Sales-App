@@ -373,6 +373,22 @@ const UI = {
         const routes = State.db.routes;
         const routeKeys = Object.keys(routes);
 
+        // ✅ Populate month dropdown จาก planList
+        const sel = document.getElementById('export-month-sel');
+        if (sel && State.planList?.length > 0) {
+            const currentVal = sel.value;
+            sel.innerHTML = '<option value="">-- เดือนปัจจุบัน --</option>' +
+                State.planList.map(ym => {
+                    const [y, m] = ym.split('_');
+                    const label = new Date(+y, +m - 1, 1)
+                        .toLocaleDateString('th-TH', { year: 'numeric', month: 'short' });
+                    const isCurrent = ym === App._currentPlanYM;
+                    return `<option value="${ym}"${isCurrent ? ' selected' : ''}>${label}${isCurrent ? ' (ปัจจุบัน)' : ''}</option>`;
+                }).join('');
+            // restore ถ้าเคยเลือกไว้
+            if (currentVal) sel.value = currentVal;
+        }
+
         const summaryEl = document.getElementById('allroutes-summary');
         const totalStores = routeKeys.reduce((sum, r) => sum + (routes[r] || []).length, 0);
         if (summaryEl) {

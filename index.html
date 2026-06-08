@@ -597,9 +597,16 @@
             <!-- Action bar -->
             <div class="bg-white border-b border-gray-200 px-4 py-2.5 flex items-center justify-between shrink-0 shadow-sm z-[4999]">
                 <h2 class="text-sm font-black text-gray-800">📋 รายการร้านค้าทุกสาย</h2>
-                <button onclick="FileManager.exportAllRoutes()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-xs font-bold shadow-sm transition flex items-center gap-1.5">
-                    💾 Export ทุกสาย
-                </button>
+                <div class="flex items-center gap-2">
+                    <!-- ✅ เลือกเดือนก่อน Export -->
+                    <select id="export-month-sel"
+                        class="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-xs font-bold outline-none focus:ring-2 focus:ring-emerald-300 text-gray-700">
+                        <option value="">-- เดือนปัจจุบัน --</option>
+                    </select>
+                    <button onclick="FileManager.exportAllRoutes()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-xs font-bold shadow-sm transition flex items-center gap-1.5">
+                        💾 Export ทุกสาย
+                    </button>
+                </div>
             </div>
 
             <!-- Content -->
