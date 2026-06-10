@@ -18,14 +18,10 @@ const StoreHistory = {
     init: async () => {
         try {
             const snap = await db.collection('sellout').get();
-            // ✅ FIX: กรองเฉพาะ doc ของศูนย์นี้ แล้วแปลง key กลับเป็น YYYY_MM
-            const cid = window.CENTER_ID || Auth.getSession()?.centerId || '';
-            const prefix = cid ? `${cid}_` : '';
+            // กรองเฉพาะ YYYY_MM ที่ถูกต้อง (2000-2099)
             const months = snap.docs
                 .map(d => d.id)
-                .filter(id => prefix ? id.startsWith(prefix) : /^\d{4}_\d{2}$/.test(id))
-                .map(id => prefix ? id.slice(prefix.length) : id)
-                .filter(ym => /^\d{4}_\d{2}$/.test(ym))
+                .filter(ym => /^20\d{2}_(0[1-9]|1[0-2])$/.test(ym))
                 .sort().reverse();
             StoreHistory._months = months;
 
@@ -62,7 +58,6 @@ const StoreHistory = {
 
     // ─── Load rows ของเดือนนั้น (cached) ─────────────────────────────────
     _loadYm: async (ym) => {
-        // ✅ FIX: ตรวจ _ok flag แทน truthy — กัน cache [] จาก error ทำให้ retry ไม่ได้
         if (StoreHistory._monthCache[ym]?._ok) return;
 
         try {
@@ -75,32 +70,20 @@ const StoreHistory = {
             if (typeof SalesDashboard !== 'undefined' && SalesDashboard._loadChunks) {
                 allRows = await SalesDashboard._loadChunks(ym);
             } else {
-                // fallback: fetch เองถ้า SalesDashboard ยังไม่โหลด
-                const cid = window.CENTER_ID || Auth.getSession()?.centerId || '';
-                const key = cid ? `${cid}_${ym}` : ym;
-                const chunkSnap = await db.collection('sellout').doc(key)
-                    .collection('chunks').get();
-                if (chunkSnap.metadata?.fromCache) {
-                    console.warn('[StoreHistory] ข้อมูลมาจาก offline cache:', ym);
-                }
+                const chunkSnap = await db.collection('sellout').doc(ym).collection('chunks').get();
                 allRows = [];
-                chunkSnap.docs.forEach(doc => {
-                    allRows = allRows.concat(doc.data().rows || []);
-                });
+                chunkSnap.docs.forEach(doc => { allRows = allRows.concat(doc.data().rows || []); });
             }
 
-            // กรองตาม role
             const rows = isSup
                 ? allRows
                 : allRows.filter(r => String(r.sCode || '').toUpperCase() === username);
 
-            // ✅ FIX: cache เฉพาะเมื่อ allRows มีข้อมูล → retry ได้ถ้า error
             if (allRows.length > 0) {
                 StoreHistory._monthCache[ym] = { rows, _ok: true };
             }
         } catch (e) {
             console.warn('StoreHistory._loadYm:', e);
-            // ไม่ cache เมื่อ error → retry ได้ครั้งหน้า
         }
     },
 

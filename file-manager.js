@@ -177,22 +177,52 @@ const FileManager = {
         }
     },
 
-    // ─── exportAllRoutes: Export ทุกสาย ─────────────────────────────────
+    // ─── exportAllRoutes: Export ทุกสาย (เลือกเดือนได้) ─────────────────
     exportAllRoutes: async () => {
         try {
-            const routes    = State.db.routes;
+            // ✅ ดึงเดือนที่เลือกจาก dropdown
+            const sel = document.getElementById('export-month-sel');
+            const selectedYM = sel?.value || App._currentPlanYM || '';
+
+            // โหลด plan ของเดือนที่เลือก (ถ้าต่างจากเดือนปัจจุบัน)
+            let routes = State.db.routes;
+            let planLabel = selectedYM || 'ปัจจุบัน';
+
+            if (selectedYM && selectedYM !== App._currentPlanYM) {
+                UI.showLoader('⏳ โหลดข้อมูลเดือน ' + planLabel + '...', 'กำลังดึงข้อมูลจาก Firestore');
+                try {
+                    const planRef = db.collection('appData').doc(window.CENTER_DOC)
+                        .collection('plans').doc(selectedYM);
+                    const routeList = State.db.routeList || [];
+                    routes = {};
+                    const BATCH = 5;
+                    for (let i = 0; i < routeList.length; i += BATCH) {
+                        const chunk = routeList.slice(i, i + BATCH);
+                        const docs = await Promise.all(
+                            chunk.map(r => planRef.collection('routes').doc(r).get().catch(() => null))
+                        );
+                        docs.forEach((d, j) => {
+                            if (d?.exists) routes[chunk[j]] = d.data().stores || [];
+                        });
+                    }
+                } catch(e) {
+                    UI.hideLoader();
+                    return UI.showErrorToast('❌ โหลดข้อมูลเดือน ' + planLabel + ' ไม่สำเร็จ');
+                }
+            }
+
             const routeKeys = Object.keys(routes);
-
             if (routeKeys.length === 0)
-                return UI.showErrorToast('⚠️ ไม่มีข้อมูลสายวิ่งในระบบ กรุณาอัพโหลดไฟล์ก่อน');
+                return UI.showErrorToast('⚠️ ไม่มีข้อมูลสายวิ่งในระบบ');
 
-            UI.showLoader('💾 กำลังรวมข้อมูลทุกสาย...', `รวม ${routeKeys.length} สาย`);
+            UI.showLoader('💾 กำลังรวมข้อมูลทุกสาย...', `รวม ${routeKeys.length} สาย เดือน ${planLabel}`);
 
-            const wb       = XLSX.utils.book_new();
+            const wb = XLSX.utils.book_new();
             const allStores = [];
 
             routeKeys.forEach(routeName => {
                 (routes[routeName] || []).forEach(store => {
+                    if (store.inactive) return; // ✅ ข้าม inactive
                     allStores.push({
                         'A': routeName,
                         'B': store.code || store.id,
@@ -236,7 +266,7 @@ const FileManager = {
 
             // Sheet ต่อสาย
             routeKeys.forEach(routeName => {
-                const stores = routes[routeName] || [];
+                const stores = (routes[routeName] || []).filter(s => !s.inactive);
                 if (!stores.length) return;
 
                 const exportData = stores.map(store => ({
@@ -279,13 +309,14 @@ const FileManager = {
                 XLSX.utils.book_append_sheet(wb, ws, routeName.substring(0, 31));
             });
 
-            const now      = new Date();
-            const dateStr  = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
-            const filename = `Route_Plan_ALL_${routeKeys.length}สาย_${dateStr}.xlsx`;
+            const now     = new Date();
+            const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+            const ymStr   = selectedYM ? `_${selectedYM}` : '';
+            const filename = `Route_Plan_ALL${ymStr}_${routeKeys.length}สาย_${dateStr}.xlsx`;
             XLSX.writeFile(wb, filename);
 
             UI.hideLoader();
-            UI.showSaveToast(`✅ Export ทุกสาย: ${allStores.length} ร้าน จาก ${routeKeys.length} สาย`);
+            UI.showSaveToast(`✅ Export ทุกสาย เดือน ${planLabel}: ${allStores.length} ร้าน จาก ${routeKeys.length} สาย`);
 
         } catch (err) {
             UI.hideLoader();
