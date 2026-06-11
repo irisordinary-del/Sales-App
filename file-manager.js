@@ -177,8 +177,8 @@ const FileManager = {
         }
     },
 
-    // ─── exportAllRoutes: Export ทุกสาย (เลือกเดือนได้) ─────────────────
-    exportAllRoutes: async () => {
+    // ─── exportAllRoutes: Export ทุกสาย หรือสายที่เลือก ─────────────────
+    exportAllRoutes: async (routeFilter = 'ALL') => {
         try {
             // ✅ ดึงเดือนที่เลือกจาก dropdown
             const sel = document.getElementById('export-month-sel');
@@ -211,7 +211,11 @@ const FileManager = {
                 }
             }
 
-            const routeKeys = Object.keys(routes);
+            // ✅ กรองสายที่เลือก
+            let routeKeys = Object.keys(routes);
+            if (routeFilter && routeFilter !== 'ALL') {
+                routeKeys = routeKeys.filter(r => r === routeFilter);
+            }
             if (routeKeys.length === 0)
                 return UI.showErrorToast('⚠️ ไม่มีข้อมูลสายวิ่งในระบบ');
 
