@@ -443,3 +443,34 @@ const UI = {
         renderBatch();
     },
 };
+
+// ==========================================
+// 📤 ExportCtrl — จัดการ Export Modal
+// ==========================================
+const ExportCtrl = {
+    openModal: () => {
+        // populate route selector
+        const routeSel = document.getElementById('export-route-sel');
+        if (routeSel) {
+            routeSel.innerHTML = '<option value="ALL">📦 ทุกสาย</option>' +
+                (State.db.routeList || Object.keys(State.db.routes || {}))
+                    .map(r => `<option value="${r}">${r}</option>`).join('');
+        }
+        document.getElementById('export-modal')?.classList.remove('hidden');
+    },
+
+    closeModal: () => {
+        document.getElementById('export-modal')?.classList.add('hidden');
+    },
+
+    doExport: () => {
+        const routeSel = document.getElementById('export-route-sel');
+        const selectedRoute = routeSel?.value || 'ALL';
+        ExportCtrl.closeModal();
+        if (typeof FileManager !== 'undefined' && FileManager.exportAllRoutes) {
+            FileManager.exportAllRoutes(selectedRoute);
+        } else if (typeof ExcelIO !== 'undefined' && ExcelIO.export) {
+            ExcelIO.export();
+        }
+    },
+};
