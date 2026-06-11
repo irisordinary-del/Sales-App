@@ -350,8 +350,10 @@ const App = {
 
         const _planData      = _planSnap?.exists ? _planSnap.data() : {};
         State.calendarConfig = _planData.calendarConfig || null;
-        // routeList มาจาก plans/{ym} ไม่ใช่ root
-        State.routeList      = (_planData.routeList || [])
+        // ✅ FIX: fallback ไปใช้ routeList จาก centerDoc ถ้า plan doc ไม่มี
+        State.routeList      = ((_planData.routeList?.length > 0
+            ? _planData.routeList
+            : _centerData.routeList) || [])
             .sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
 
         LoadBar.setProgress(30, `โหลด ${State.routeList.length} สาย...`);
