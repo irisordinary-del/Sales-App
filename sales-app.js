@@ -334,11 +334,19 @@ const App = {
 
         LoadBar.setProgress(20, `📅 Plan ${_useYM}...`);
 
-        // ── Step 2: ดึง plan metadata (เหมือน start()) ────────────────
+        // ── Step 2: ดึง plan metadata ─────────────────────────────────────
         const _planRef = _centerRef.collection('plans').doc(_useYM);
         let _planSnap;
-        try { _planSnap = await App._getWithTimeout(_planRef, 8000); }
-        catch(e) { _planSnap = null; }
+        // ✅ FIX: เพิ่ม timeout เป็น 15 วิ + retry 1 ครั้งถ้า timeout
+        for (let attempt = 0; attempt < 2; attempt++) {
+            try {
+                _planSnap = await App._getWithTimeout(_planRef, 15000);
+                if (_planSnap) break;
+            } catch(e) {
+                console.warn(`startSupervisor plan fetch attempt ${attempt+1}:`, e.message);
+                if (attempt === 0) await new Promise(r => setTimeout(r, 1000));
+            }
+        }
 
         const _planData      = _planSnap?.exists ? _planSnap.data() : {};
         State.calendarConfig = _planData.calendarConfig || null;
