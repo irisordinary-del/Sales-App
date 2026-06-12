@@ -117,12 +117,33 @@ const SalesDashboard = {
 
     // ─── โหลดรายการเดือนที่มีข้อมูล ──────────────────────────────────────
     _loadMonthList: async () => {
-        try {
-            const sel = document.getElementById('db-month-sel');
-            const container = sel?.closest('[id]') || document.getElementById('db-dashboard-wrap');
-            SalesDashboard._showSkeleton(container);
+        const sel = document.getElementById('db-month-sel');
+        const container = sel?.closest('[id]') || document.getElementById('db-dashboard-wrap');
+        SalesDashboard._showSkeleton(container);
 
-            const snap = await db.collection('sellout').get();
+        // ✅ FIX: ลอง 2 รอบ รอบละ 10 วิ ถ้า timeout/error → แสดง retry banner
+        let snap = null;
+        for (let attempt = 0; attempt < 2; attempt++) {
+            try {
+                snap = await Promise.race([
+                    db.collection('sellout').get(),
+                    new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 10000))
+                ]);
+                break;
+            } catch(e) {
+                console.warn(`SalesDashboard._loadMonthList attempt ${attempt+1}:`, e.message);
+                if (attempt === 0) await new Promise(r => setTimeout(r, 2000));
+            }
+        }
+
+        if (!snap) {
+            // แสดง retry banner แทนหน้าว่าง
+            SalesDashboard._showDataWarning('⚠️ โหลดข้อมูลไม่สำเร็จ กรุณาตรวจสอบอินเทอร์เน็ตแล้ว',
+                () => SalesDashboard._loadMonthList());
+            return;
+        }
+
+        try {
             const months = snap.docs
                 .map(d => d.id)
                 .filter(ym => /^20\d{2}_(0[1-9]|1[0-2])$/.test(ym))
@@ -148,6 +169,8 @@ const SalesDashboard = {
                         SalesDashboard._loadTarget(ym).catch(() => {});
                     }, (i + 1) * 2000);
                 });
+            } else {
+                SalesDashboard._showEmpty();
             }
         } catch (e) {
             console.warn('SalesDashboard._loadMonthList:', e);
@@ -785,15 +808,37 @@ const SupervisorDashboard = {
     initSupervisor: () => SupervisorDashboard.init(),
 
     _loadMonthList: async () => {
-        try {
-            const sel = document.getElementById('db-month-sel');
-            if (typeof SalesDashboard._showSkeleton === 'function') {
-                const container = document.getElementById('db-dashboard-wrap') ||
-                                  document.getElementById('dashboard-tab');
-                SalesDashboard._showSkeleton(container);
-            }
+        const sel = document.getElementById('db-month-sel');
+        if (typeof SalesDashboard._showSkeleton === 'function') {
+            const container = document.getElementById('db-dashboard-wrap') ||
+                              document.getElementById('dashboard-tab');
+            SalesDashboard._showSkeleton(container);
+        }
 
-            const snap = await db.collection('sellout').get();
+        // ✅ FIX: timeout + retry 2 รอบ
+        let snap = null;
+        for (let attempt = 0; attempt < 2; attempt++) {
+            try {
+                snap = await Promise.race([
+                    db.collection('sellout').get(),
+                    new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 10000))
+                ]);
+                break;
+            } catch(e) {
+                console.warn(`SupervisorDashboard._loadMonthList attempt ${attempt+1}:`, e.message);
+                if (attempt === 0) await new Promise(r => setTimeout(r, 2000));
+            }
+        }
+
+        if (!snap) {
+            if (typeof SalesDashboard._showDataWarning === 'function') {
+                SalesDashboard._showDataWarning('⚠️ โหลดข้อมูลไม่สำเร็จ กรุณาตรวจสอบอินเทอร์เน็ตแล้ว',
+                    () => SupervisorDashboard._loadMonthList());
+            }
+            return;
+        }
+
+        try {
             const months = snap.docs
                 .map(d => d.id)
                 .filter(ym => /^20\d{2}_(0[1-9]|1[0-2])$/.test(ym))

@@ -295,11 +295,29 @@ const Dashboard = {
     _loadMonthList: async () => {
         try {
             const snap = await cloudDB.collection('sellout').get();
-            const months = snap.docs
-                .map(d => d.id)
-                .filter(ym => /^20\d{2}_(0[1-9]|1[0-2])$/.test(ym))
-                .sort().reverse();
+            const cid  = (window.CENTER_ID || '').toUpperCase();
+
+            // ✅ FIX: รองรับ 2 format — "402_2026_06" (ใหม่) และ "2026_06" (เก่า)
+            // สร้าง map: YYYY_MM → docId ที่ใช้โหลดจริง (prefer centerId prefix)
+            const ymMap = {}; // { '2026_06': '402_2026_06' } หรือ { '2026_06': '2026_06' }
+            snap.docs.forEach(d => {
+                const id = d.id;
+                // format ใหม่: {centerId}_{YYYY_MM}
+                if (cid && id.startsWith(cid + '_')) {
+                    const ym = id.slice(cid.length + 1);
+                    if (/^20\d{2}_(0[1-9]|1[0-2])$/.test(ym)) {
+                        ymMap[ym] = id; // prefer centerId version
+                    }
+                }
+                // format เก่า: {YYYY_MM} — ใช้ถ้าไม่มี centerId version
+                else if (/^20\d{2}_(0[1-9]|1[0-2])$/.test(id)) {
+                    if (!ymMap[id]) ymMap[id] = id;
+                }
+            });
+
+            const months = Object.keys(ymMap).sort().reverse();
             Dashboard._allMonths = months;
+            Dashboard._ymKeyMap  = ymMap; // เก็บไว้ให้ _loadMonth ใช้
 
             const sel = document.getElementById('db-month-select');
             if (!sel) return;
@@ -335,7 +353,8 @@ const Dashboard = {
     _loadMonth: async (ym) => {
         try {
             Dashboard._showUploadBar('กำลังโหลดข้อมูล...', 10);
-            const key = ym;
+            // ✅ FIX: ใช้ key จาก _ymKeyMap — รองรับทั้ง "402_2026_06" และ "2026_06"
+            const key = (Dashboard._ymKeyMap && Dashboard._ymKeyMap[ym]) || ym;
             const metaDoc = await cloudDB.collection('sellout').doc(key).get();
             if (!metaDoc.exists) { Dashboard._rows = []; Dashboard._hideUploadBar(); return; }
 
@@ -472,30 +491,57 @@ const Dashboard = {
     },
 
     _saveToFirestore: async (ym, rows) => {
-        const batch = cloudDB.batch();
-        const key = ym;
+        const key     = ym;
         const metaRef = cloudDB.collection('sellout').doc(key);
-        batch.set(metaRef, {
+
+        // ── Step 1: ลบ chunks เก่า + เขียน metadata ─────────────────────
+        Dashboard._showUploadBar('เตรียมลบข้อมูลเดิม...', 5);
+        const old = await metaRef.collection('chunks').get();
+        if (old.size > 0) {
+            // ลบ batch 400 ต่อครั้ง (Firestore limit 500)
+            const DEL_BATCH = 400;
+            for (let i = 0; i < old.docs.length; i += DEL_BATCH) {
+                const b = cloudDB.batch();
+                old.docs.slice(i, i + DEL_BATCH).forEach(d => b.delete(d.ref));
+                await b.commit();
+            }
+        }
+        await metaRef.set({
             totalRows: rows.length,
             centerId:  window.CENTER_ID || '',
             updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
             version: 1
         });
-        // Delete old chunks
-        const old = await metaRef.collection('chunks').get();
-        old.forEach(d => batch.delete(d.ref));
-        await batch.commit();
 
-        // Save new chunks sequentially
-        const CS = Dashboard._CHUNK_SIZE;
+        // ── Step 2: เขียน chunks parallel 3 พร้อมกัน ───────────────────
+        const CS    = Dashboard._CHUNK_SIZE;
         const total = Math.ceil(rows.length / CS);
-        for (let i = 0; i < total; i++) {
-            const pct = 20 + Math.round((i / total) * 75);
-            Dashboard._showUploadBar(`บันทึก chunk ${i+1}/${total}`, pct);
-            await metaRef.collection('chunks').doc(`chunk_${String(i).padStart(4,'0')}`).set({
-                index: i,
-                rows: rows.slice(i * CS, (i+1) * CS)
-            });
+        const PARA  = 3; // parallel writes ต่อรอบ
+
+        // helper: เขียน 1 chunk พร้อม retry ถ้า resource-exhausted
+        const writeChunk = async (i, retries = 3) => {
+            const ref = metaRef.collection('chunks').doc(`chunk_${String(i).padStart(4,'0')}`);
+            for (let attempt = 0; attempt < retries; attempt++) {
+                try {
+                    await ref.set({ index: i, rows: rows.slice(i * CS, (i+1) * CS) });
+                    return;
+                } catch(e) {
+                    if (attempt < retries - 1 && (e.code === 'resource-exhausted' || e.message?.includes('exhausted'))) {
+                        // หน่วง exponential backoff
+                        await new Promise(r => setTimeout(r, 800 * Math.pow(2, attempt)));
+                    } else {
+                        throw e;
+                    }
+                }
+            }
+        };
+
+        for (let i = 0; i < total; i += PARA) {
+            const batch = [];
+            for (let j = i; j < Math.min(i + PARA, total); j++) batch.push(writeChunk(j));
+            await Promise.all(batch);
+            const pct = 15 + Math.round(((i + PARA) / total) * 80);
+            Dashboard._showUploadBar(`บันทึก ${Math.min(i + PARA, total)}/${total} chunks`, Math.min(pct, 95));
         }
     },
 
@@ -546,11 +592,22 @@ const Dashboard = {
         let rows = Dashboard._rows;
         const role = Dashboard._session.role;
 
-        // กรองเฉพาะ sCode ที่อยู่ในศูนย์ปัจจุบัน (admin/supervisor)
-        // State.db.routeList คือ list ของ sCode ในศูนย์นี้ เช่น ['406V01','406V02',...]
-        if (role !== 'sales' && typeof State !== 'undefined' && State.db && State.db.routeList && State.db.routeList.length > 0) {
-            const centerRoutes = new Set(State.db.routeList.map(r => r.toUpperCase()));
-            rows = rows.filter(r => centerRoutes.has((r.sCode || '').toUpperCase()));
+        // ✅ FIX: รองรับทั้ง Admin (State.db.routeList) และ Supervisor (State.routeList)
+        if (role !== 'sales' && typeof State !== 'undefined') {
+            const routeList = (State.db?.routeList?.length > 0)
+                ? State.db.routeList
+                : (State.routeList?.length > 0 ? State.routeList : null);
+
+            // ✅ ข้าม filter ถ้า routeList มีแค่ route default ปลอม หรือว่าง
+            const isFakeList = !routeList ||
+                (routeList.length === 1 && routeList[0] === 'สายที่ 1');
+
+            if (routeList && !isFakeList) {
+                const centerRoutes = new Set(routeList.map(r => r.toUpperCase()));
+                const filtered = rows.filter(r => centerRoutes.has((r.sCode || '').toUpperCase()));
+                // ✅ ถ้า filter แล้วว่างเปล่า → ไม่ filter (กัน routeList ไม่ตรงกับ sCode)
+                if (filtered.length > 0) rows = filtered;
+            }
         }
 
         // Sales user sees only own rows
@@ -569,13 +626,18 @@ const Dashboard = {
     _getRoutes: () => {
         const role = Dashboard._session.role;
         if (role === 'sales') return [Dashboard._session.username.toUpperCase()];
-        // เอาเฉพาะ sCode ที่อยู่ใน routeList ของศูนย์นี้
-        if (typeof State !== 'undefined' && State.db && State.db.routeList && State.db.routeList.length > 0) {
-            const centerRoutes = new Set(State.db.routeList.map(r => r.toUpperCase()));
-            const codes = [...new Set(Dashboard._rows.map(r => r.sCode))]
-                .filter(c => centerRoutes.has((c || '').toUpperCase()))
-                .sort();
-            return codes;
+        // ✅ FIX: รองรับทั้ง Admin และ Supervisor
+        if (typeof State !== 'undefined') {
+            const routeList = (State.db?.routeList?.length > 0)
+                ? State.db.routeList
+                : (State.routeList?.length > 0 ? State.routeList : null);
+            if (routeList) {
+                const centerRoutes = new Set(routeList.map(r => r.toUpperCase()));
+                const codes = [...new Set(Dashboard._rows.map(r => r.sCode))]
+                    .filter(c => centerRoutes.has((c || '').toUpperCase()))
+                    .sort();
+                return codes;
+            }
         }
         const codes = [...new Set(Dashboard._rows.map(r => r.sCode))].sort();
         return codes;
@@ -1170,7 +1232,9 @@ const Dashboard = {
                 const cacheKey = ym;
                 if (Dashboard._rowCache[cacheKey]) return Dashboard._rowCache[cacheKey];
                 try {
-                    const chunks = await cloudDB.collection('sellout').doc(cacheKey).collection('chunks').get();
+                    // ✅ FIX: ใช้ key จาก _ymKeyMap
+                    const key = (Dashboard._ymKeyMap && Dashboard._ymKeyMap[ym]) || ym;
+                    const chunks = await cloudDB.collection('sellout').doc(key).collection('chunks').get();
                     let rows = [];
                     chunks.forEach(doc => rows = rows.concat(doc.data().rows || []));
                     rows.forEach(r => { r._route = custToRoute[String(r.custCode||'')] || null; });

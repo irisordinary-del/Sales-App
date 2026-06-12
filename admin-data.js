@@ -102,37 +102,60 @@ const App = {
         if (!routeList.length) return;
 
         const col = App.planRoutesCol(ym);
+        const total = routeList.length;
 
         // ── Step 1: โหลด active route ก่อน → แสดงผลทันที ────────────────
         const activeRoute = localStorage.getItem(`last_route_${ym}`) || routeList[0];
+        UI.showRouteLoadPopup(0, total);
         try {
             const d = await col.doc(activeRoute).get();
             State.db.routes[activeRoute] = d.exists ? (d.data().stores || []) : [];
             App.log(`  ✅ ${activeRoute}: ${State.db.routes[activeRoute].length} ร้าน (active)`);
-            // แสดงผลทันทีหลังได้ active route
             State.localActiveRoute = activeRoute;
             State.stores = State.db.routes[activeRoute];
+            UI.updateRouteLoadPopup(1, total, activeRoute);
+            // ✅ ซ่อน loader ทันทีหลังได้ active route — ไม่รอ background
+            UI.hideLoader();
             App.sync();
         } catch(e) {
             App.log(`  ⚠️ ${activeRoute}: ${e.code || e.message}`);
             State.db.routes[activeRoute] = [];
+            UI.hideLoader();
         }
 
-        // ── Step 2: background load ที่เหลือ ทีละ 4 สาย ─────────────────
+        // ── Step 2: background load ที่เหลือ (non-blocking) ──────────────
         const remaining = routeList.filter(n => n !== activeRoute);
-        const BATCH = 4;
-        for (let i = 0; i < remaining.length; i += BATCH) {
-            const batch = remaining.slice(i, i + BATCH);
-            await Promise.all(batch.map(name =>
-                col.doc(name).get()
-                    .then(d => {
-                        State.db.routes[name] = d.exists ? (d.data().stores || []) : [];
-                        App.log(`  ✅ ${name}: ${State.db.routes[name].length} ร้าน`);
-                        UI.renderAllRoutes(); // อัปเดต route list ระหว่าง load
-                    })
-                    .catch(e => { App.log(`  ⚠️ ${name}: ${e.code || e.message}`); State.db.routes[name] = []; })
-            ));
+        if (!remaining.length) {
+            UI.hideRouteLoadPopup();
+            return;
         }
+
+        const BATCH = 4;
+        let loadedCount = 1; // นับ active route ที่โหลดไปแล้ว
+        // ✅ ไม่ await — ปล่อยทำงาน background จริงๆ
+        (async () => {
+            for (let i = 0; i < remaining.length; i += BATCH) {
+                const batch = remaining.slice(i, i + BATCH);
+                await Promise.all(batch.map(name =>
+                    col.doc(name).get()
+                        .then(d => {
+                            State.db.routes[name] = d.exists ? (d.data().stores || []) : [];
+                            App.log(`  ✅ ${name}: ${State.db.routes[name].length} ร้าน`);
+                            loadedCount++;
+                            UI.updateRouteLoadPopup(loadedCount, total, name);
+                            UI.renderAllRoutes();
+                        })
+                        .catch(e => {
+                            App.log(`  ⚠️ ${name}: ${e.code || e.message}`);
+                            State.db.routes[name] = [];
+                            loadedCount++;
+                            UI.updateRouteLoadPopup(loadedCount, total, name);
+                        })
+                ));
+            }
+            // โหลดครบทั้งหมด → จางหาย
+            UI.hideRouteLoadPopup();
+        })();
     },
 
     // ─── Logger ──────────────────────────────────────────────────────────
@@ -184,16 +207,26 @@ const App = {
             const routeList = (data.routeList || []).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
             State.db.cycleDays     = data.cycleDays     || 24;
             State.db.calendarConfig = data.calendarConfig || null;
-            State.db.routeList     = routeList.length ? routeList : ['สายที่ 1'];
 
-            if (!snap.exists) {
-                // plan ใหม่ยังไม่มี — สร้างเปล่าไว้ก่อน
-                App.log(`⚠️ plan ${ym} ยังไม่มี — สร้างใหม่`);
+            // ✅ FIX: fallback ถ้า plan ไม่มี หรือ routeList ว่าง หรือมีแค่ route default ปลอม
+            const hasFakeRoute = routeList.length === 1 && routeList[0] === 'สายที่ 1';
+            if (!snap.exists || routeList.length === 0 || hasFakeRoute) {
+                const fallbackYM = (State.db.planList || []).find(p => p !== ym);
+                if (fallbackYM) {
+                    App.log(`⚠️ plan ${ym} ไม่มีข้อมูลจริง → fallback ไป ${fallbackYM}`);
+                    UI.hideLoader();
+                    return App._loadPlan(fallbackYM);
+                }
+                // ไม่มี fallback → set routeList ว่าง
+                App.log(`⚠️ plan ${ym} ยังไม่มี — รอ Admin สร้าง`);
+                State.db.routeList = [];
                 await App.planRef(ym).set({
                     routeList:  [],
                     cycleDays:  State.db.cycleDays,
                     updatedAt:  firebase.firestore.FieldValue.serverTimestamp(),
                 });
+            } else {
+                State.db.routeList = routeList;
             }
 
             await App._loadAllRoutes(ym, State.db.routeList);
@@ -206,7 +239,7 @@ const App = {
 
             App._currentPlanYM = ym;
             App.fetchSalesData();
-            App.sync();
+            // UI.sync() ถูกเรียกใน _loadAllRoutes แล้ว
             PlanUI.updateBadge();
             MapCtrl.fitToStores();
 
