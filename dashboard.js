@@ -491,30 +491,57 @@ const Dashboard = {
     },
 
     _saveToFirestore: async (ym, rows) => {
-        const batch = cloudDB.batch();
-        const key = ym;
+        const key     = ym;
         const metaRef = cloudDB.collection('sellout').doc(key);
-        batch.set(metaRef, {
+
+        // ── Step 1: ลบ chunks เก่า + เขียน metadata ─────────────────────
+        Dashboard._showUploadBar('เตรียมลบข้อมูลเดิม...', 5);
+        const old = await metaRef.collection('chunks').get();
+        if (old.size > 0) {
+            // ลบ batch 400 ต่อครั้ง (Firestore limit 500)
+            const DEL_BATCH = 400;
+            for (let i = 0; i < old.docs.length; i += DEL_BATCH) {
+                const b = cloudDB.batch();
+                old.docs.slice(i, i + DEL_BATCH).forEach(d => b.delete(d.ref));
+                await b.commit();
+            }
+        }
+        await metaRef.set({
             totalRows: rows.length,
             centerId:  window.CENTER_ID || '',
             updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
             version: 1
         });
-        // Delete old chunks
-        const old = await metaRef.collection('chunks').get();
-        old.forEach(d => batch.delete(d.ref));
-        await batch.commit();
 
-        // Save new chunks sequentially
-        const CS = Dashboard._CHUNK_SIZE;
+        // ── Step 2: เขียน chunks parallel 3 พร้อมกัน ───────────────────
+        const CS    = Dashboard._CHUNK_SIZE;
         const total = Math.ceil(rows.length / CS);
-        for (let i = 0; i < total; i++) {
-            const pct = 20 + Math.round((i / total) * 75);
-            Dashboard._showUploadBar(`บันทึก chunk ${i+1}/${total}`, pct);
-            await metaRef.collection('chunks').doc(`chunk_${String(i).padStart(4,'0')}`).set({
-                index: i,
-                rows: rows.slice(i * CS, (i+1) * CS)
-            });
+        const PARA  = 3; // parallel writes ต่อรอบ
+
+        // helper: เขียน 1 chunk พร้อม retry ถ้า resource-exhausted
+        const writeChunk = async (i, retries = 3) => {
+            const ref = metaRef.collection('chunks').doc(`chunk_${String(i).padStart(4,'0')}`);
+            for (let attempt = 0; attempt < retries; attempt++) {
+                try {
+                    await ref.set({ index: i, rows: rows.slice(i * CS, (i+1) * CS) });
+                    return;
+                } catch(e) {
+                    if (attempt < retries - 1 && (e.code === 'resource-exhausted' || e.message?.includes('exhausted'))) {
+                        // หน่วง exponential backoff
+                        await new Promise(r => setTimeout(r, 800 * Math.pow(2, attempt)));
+                    } else {
+                        throw e;
+                    }
+                }
+            }
+        };
+
+        for (let i = 0; i < total; i += PARA) {
+            const batch = [];
+            for (let j = i; j < Math.min(i + PARA, total); j++) batch.push(writeChunk(j));
+            await Promise.all(batch);
+            const pct = 15 + Math.round(((i + PARA) / total) * 80);
+            Dashboard._showUploadBar(`บันทึก ${Math.min(i + PARA, total)}/${total} chunks`, Math.min(pct, 95));
         }
     },
 

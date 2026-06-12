@@ -66,6 +66,59 @@ const UI = {
         }, 3000);
     },
 
+    // ─── Route Load Progress Popup ────────────────────────────────────────
+    _routeLoadEl: null,
+
+    showRouteLoadPopup: (loaded, total) => {
+        let el = document.getElementById('_route-load-popup');
+        if (!el) {
+            el = document.createElement('div');
+            el.id = '_route-load-popup';
+            el.style.cssText = [
+                'position:fixed', 'bottom:24px', 'right:20px', 'z-index:9990',
+                'background:#1e293b', 'color:#fff',
+                'padding:12px 16px', 'border-radius:14px',
+                'font-family:Prompt,sans-serif', 'font-size:13px',
+                'box-shadow:0 8px 24px rgba(0,0,0,0.35)',
+                'min-width:200px', 'transition:opacity 0.5s',
+                'display:flex', 'flex-direction:column', 'gap:8px',
+            ].join(';');
+            el.innerHTML = `
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
+                    <span style="font-size:12px;color:#94a3b8;font-weight:600;">📦 โหลดข้อมูลสาย</span>
+                    <span id="_rlp-count" style="font-size:13px;font-weight:800;color:#fff;"></span>
+                </div>
+                <div style="background:#334155;border-radius:99px;height:5px;overflow:hidden;">
+                    <div id="_rlp-bar" style="height:5px;border-radius:99px;background:linear-gradient(90deg,#6366f1,#0ea5e9);transition:width 0.3s;width:0%;"></div>
+                </div>
+                <div id="_rlp-names" style="font-size:11px;color:#64748b;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px;"></div>
+            `;
+            document.body.appendChild(el);
+            UI._routeLoadEl = el;
+        }
+        const pct = total > 0 ? Math.round((loaded / total) * 100) : 0;
+        const countEl = el.querySelector('#_rlp-count');
+        const barEl   = el.querySelector('#_rlp-bar');
+        if (countEl) countEl.textContent = `${loaded} / ${total} สาย`;
+        if (barEl)   barEl.style.width   = pct + '%';
+        el.style.opacity = '1';
+    },
+
+    updateRouteLoadPopup: (loaded, total, routeName) => {
+        UI.showRouteLoadPopup(loaded, total);
+        const el = document.getElementById('_route-load-popup');
+        if (!el) return;
+        const namesEl = el.querySelector('#_rlp-names');
+        if (namesEl) namesEl.textContent = routeName ? `✅ ${routeName}` : '';
+    },
+
+    hideRouteLoadPopup: () => {
+        const el = document.getElementById('_route-load-popup');
+        if (!el) return;
+        el.style.opacity = '0';
+        setTimeout(() => { el.remove(); UI._routeLoadEl = null; }, 600);
+    },
+
     showConfirm: (message, onConfirm, onCancel) => {
         const overlay = document.createElement('div');
         overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.55);z-index:9999;display:flex;align-items:center;justify-content:center;';
