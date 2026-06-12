@@ -570,9 +570,16 @@ const Dashboard = {
             const routeList = (State.db?.routeList?.length > 0)
                 ? State.db.routeList
                 : (State.routeList?.length > 0 ? State.routeList : null);
-            if (routeList) {
+
+            // ✅ ข้าม filter ถ้า routeList มีแค่ route default ปลอม หรือว่าง
+            const isFakeList = !routeList ||
+                (routeList.length === 1 && routeList[0] === 'สายที่ 1');
+
+            if (routeList && !isFakeList) {
                 const centerRoutes = new Set(routeList.map(r => r.toUpperCase()));
-                rows = rows.filter(r => centerRoutes.has((r.sCode || '').toUpperCase()));
+                const filtered = rows.filter(r => centerRoutes.has((r.sCode || '').toUpperCase()));
+                // ✅ ถ้า filter แล้วว่างเปล่า → ไม่ filter (กัน routeList ไม่ตรงกับ sCode)
+                if (filtered.length > 0) rows = filtered;
             }
         }
 

@@ -184,16 +184,26 @@ const App = {
             const routeList = (data.routeList || []).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
             State.db.cycleDays     = data.cycleDays     || 24;
             State.db.calendarConfig = data.calendarConfig || null;
-            State.db.routeList     = routeList.length ? routeList : ['สายที่ 1'];
 
-            if (!snap.exists) {
-                // plan ใหม่ยังไม่มี — สร้างเปล่าไว้ก่อน
-                App.log(`⚠️ plan ${ym} ยังไม่มี — สร้างใหม่`);
+            // ✅ FIX: fallback ถ้า plan ไม่มี หรือ routeList ว่าง หรือมีแค่ route default ปลอม
+            const hasFakeRoute = routeList.length === 1 && routeList[0] === 'สายที่ 1';
+            if (!snap.exists || routeList.length === 0 || hasFakeRoute) {
+                const fallbackYM = (State.db.planList || []).find(p => p !== ym);
+                if (fallbackYM) {
+                    App.log(`⚠️ plan ${ym} ไม่มีข้อมูลจริง → fallback ไป ${fallbackYM}`);
+                    UI.hideLoader();
+                    return App._loadPlan(fallbackYM);
+                }
+                // ไม่มี fallback → set routeList ว่าง
+                App.log(`⚠️ plan ${ym} ยังไม่มี — รอ Admin สร้าง`);
+                State.db.routeList = [];
                 await App.planRef(ym).set({
                     routeList:  [],
                     cycleDays:  State.db.cycleDays,
                     updatedAt:  firebase.firestore.FieldValue.serverTimestamp(),
                 });
+            } else {
+                State.db.routeList = routeList;
             }
 
             await App._loadAllRoutes(ym, State.db.routeList);
