@@ -295,11 +295,29 @@ const Dashboard = {
     _loadMonthList: async () => {
         try {
             const snap = await cloudDB.collection('sellout').get();
-            const months = snap.docs
-                .map(d => d.id)
-                .filter(ym => /^20\d{2}_(0[1-9]|1[0-2])$/.test(ym))
-                .sort().reverse();
+            const cid  = (window.CENTER_ID || '').toUpperCase();
+
+            // ✅ FIX: รองรับ 2 format — "402_2026_06" (ใหม่) และ "2026_06" (เก่า)
+            // สร้าง map: YYYY_MM → docId ที่ใช้โหลดจริง (prefer centerId prefix)
+            const ymMap = {}; // { '2026_06': '402_2026_06' } หรือ { '2026_06': '2026_06' }
+            snap.docs.forEach(d => {
+                const id = d.id;
+                // format ใหม่: {centerId}_{YYYY_MM}
+                if (cid && id.startsWith(cid + '_')) {
+                    const ym = id.slice(cid.length + 1);
+                    if (/^20\d{2}_(0[1-9]|1[0-2])$/.test(ym)) {
+                        ymMap[ym] = id; // prefer centerId version
+                    }
+                }
+                // format เก่า: {YYYY_MM} — ใช้ถ้าไม่มี centerId version
+                else if (/^20\d{2}_(0[1-9]|1[0-2])$/.test(id)) {
+                    if (!ymMap[id]) ymMap[id] = id;
+                }
+            });
+
+            const months = Object.keys(ymMap).sort().reverse();
             Dashboard._allMonths = months;
+            Dashboard._ymKeyMap  = ymMap; // เก็บไว้ให้ _loadMonth ใช้
 
             const sel = document.getElementById('db-month-select');
             if (!sel) return;
@@ -335,7 +353,8 @@ const Dashboard = {
     _loadMonth: async (ym) => {
         try {
             Dashboard._showUploadBar('กำลังโหลดข้อมูล...', 10);
-            const key = ym;
+            // ✅ FIX: ใช้ key จาก _ymKeyMap — รองรับทั้ง "402_2026_06" และ "2026_06"
+            const key = (Dashboard._ymKeyMap && Dashboard._ymKeyMap[ym]) || ym;
             const metaDoc = await cloudDB.collection('sellout').doc(key).get();
             if (!metaDoc.exists) { Dashboard._rows = []; Dashboard._hideUploadBar(); return; }
 
@@ -1170,7 +1189,9 @@ const Dashboard = {
                 const cacheKey = ym;
                 if (Dashboard._rowCache[cacheKey]) return Dashboard._rowCache[cacheKey];
                 try {
-                    const chunks = await cloudDB.collection('sellout').doc(cacheKey).collection('chunks').get();
+                    // ✅ FIX: ใช้ key จาก _ymKeyMap
+                    const key = (Dashboard._ymKeyMap && Dashboard._ymKeyMap[ym]) || ym;
+                    const chunks = await cloudDB.collection('sellout').doc(key).collection('chunks').get();
                     let rows = [];
                     chunks.forEach(doc => rows = rows.concat(doc.data().rows || []));
                     rows.forEach(r => { r._route = custToRoute[String(r.custCode||'')] || null; });
