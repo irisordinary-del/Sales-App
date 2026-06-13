@@ -279,8 +279,8 @@ const App = {
             State.campaignIcons = icons;
             console.log(`[CampaignIcons] ${snap.size} campaigns, ${Object.keys(icons).length} stores tagged`);
             if (State.isLoaded) {
-                Processor.routeList(); // ✅ update tab คิวงาน (Day view)
-                Processor.stores();   // ✅ update tab ร้านค้า
+                try { Processor.routeList(); } catch(e) {}
+                try { Processor.stores(); } catch(e) {}
             }
         } catch(e) {
             console.warn('_loadCampaignIcons:', e);
