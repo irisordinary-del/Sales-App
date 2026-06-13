@@ -313,7 +313,7 @@ const App = {
             State.campaignIcons = icons;
             console.log(`[CampaignIcons] ${Object.keys(icons).length} stores bought campaign products`);
             if (State.isLoaded) {
-                try { Processor.routeList(); } catch(e) {}
+                try { if (State.currentDay) Processor.routeList(); } catch(e) {}
                 try { Processor.stores(); } catch(e) {}
             }
         } catch(e) {
@@ -815,7 +815,7 @@ const Processor = {
         c.innerHTML = html || '<p class="text-center text-gray-400 mt-5">ไม่มีคิวงาน</p>';
 
         const _markets = getDayMarkets(State.currentDay);
-        const _dayNum  = State.currentDay.replace('Day ', '');
+        const _dayNum  = State.currentDay ? State.currentDay.replace('Day ', '') : '';
         const _mkt     = _markets ? ' · ' + _markets.split(' · ')[0] : '';
         document.getElementById('route-title').innerText = `Day ${_dayNum}${_mkt} (${list.length} ร้าน)`;
 
