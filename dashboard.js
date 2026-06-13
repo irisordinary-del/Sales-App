@@ -1424,8 +1424,42 @@ const Dashboard = {
                 </div>
                 <button onclick="document.getElementById('_camp-detail-overlay').remove()" style="width:30px;height:30px;border-radius:50%;border:1px solid #e5e7eb;background:#fff;font-size:16px;cursor:pointer;color:#6b7280;">✕</button>`;
 
+            // ── pre-compute groupData (ใช้ร่วมกันทั้ง group tabs และ Daily tab) ──
+            const groupData = groups.map(g => {
+                const kws = (g.keywords || []).map(k => k.toLowerCase());
+                const byRoute = {};
+                routes.forEach(route => {
+                    const stores   = (State.db.routes?.[route] || []).map(s => String(s.id));
+                    const storeSet = new Set(stores);
+                    const rawTgt   = rawTargets[route] ?? null;
+                    const tgtPct   = rawTgt !== null
+                        ? (targetUnit === 'count' ? (stores.length > 0 ? rawTgt/stores.length*100 : 0) : rawTgt)
+                        : defaultTarget;
+                    const tgtCount = Math.round(tgtPct / 100 * stores.length);
+                    const matched  = allRows.filter(r =>
+                        r._route === route && storeSet.has(String(r.custCode||'')) &&
+                        kws.some(k => (r.prodCode||'').toLowerCase().includes(k) || (r.prodName||'').toLowerCase().includes(k))
+                    );
+                    const byDate = {};
+                    allDates.forEach(d => { byDate[d] = new Set(); });
+                    matched.forEach(r => { if (r.kpiDate && byDate[r.kpiDate]) byDate[r.kpiDate].add(String(r.custCode)); });
+                    byRoute[route] = {
+                        byDate, tgtCount, tgtPct,
+                        total:       stores.length,
+                        totalBought: new Set(matched.map(r => String(r.custCode))).size,
+                    };
+                });
+                return byRoute;
+            });
+
+            const dateHeadersHtml = allDates.map(d => {
+                const dt  = new Date(d);
+                const lbl = !isNaN(dt) ? `${dt.getDate()}/${dt.getMonth()+1}` : d.slice(5).replace('_','/');
+                return `<th style="padding:6px 4px;font-size:10px;font-weight:700;color:#6b7280;text-align:center;white-space:nowrap;">${lbl}</th>`;
+            }).join('');
+
             // สร้าง tab per group + Daily tab
-            const totalTabs = groups.length + 1; // +1 สำหรับ Daily
+            const totalTabs = groups.length + 1;
             const dailyIdx  = groups.length;
 
             const tabsHtml = [
@@ -1438,66 +1472,41 @@ const Dashboard = {
                            background:#f3f4f6;color:#6b7280;">📅 Daily</button>`
             ].join('');
 
+            // group tabs — สาย × วัน เฉพาะ group นั้น
             const tabContents = groups.map((g, gi) => {
-                const kws = (g.keywords || []).map(k => k.toLowerCase());
-
+                const rd_all = groupData[gi];
                 const routeRows = routes.map(route => {
-                    const stores   = (State.db.routes?.[route] || []).map(s => String(s.id));
-                    const storeSet = new Set(stores);
-                    const rawTgt   = rawTargets[route] ?? null;
-                    const tgtPct   = rawTgt !== null
-                        ? (targetUnit === 'count' ? (stores.length > 0 ? rawTgt/stores.length*100 : 0) : rawTgt)
-                        : defaultTarget;
-                    const tgtCount = Math.round(tgtPct / 100 * stores.length);
-
-                    const routeAllRows = allRows.filter(r =>
-                        r._route === route && storeSet.has(String(r.custCode||'')) &&
-                        kws.some(k => (r.prodCode||'').toLowerCase().includes(k) || (r.prodName||'').toLowerCase().includes(k))
-                    );
-                    const totalBought = new Set(routeAllRows.map(r => String(r.custCode))).size;
-                    const totalPct    = stores.length > 0 ? Math.round(totalBought / stores.length * 100) : 0;
-                    const color       = totalPct >= tgtPct ? '#10b981' : totalPct >= tgtPct * 0.8 ? '#f59e0b' : '#ef4444';
-
-                    const byDate = {};
-                    allDates.forEach(d => { byDate[d] = new Set(); });
-                    routeAllRows.forEach(r => { if (r.kpiDate && byDate[r.kpiDate] !== undefined) byDate[r.kpiDate].add(String(r.custCode)); });
-
+                    const rd       = rd_all[route];
+                    const totalPct = rd.total > 0 ? Math.round(rd.totalBought/rd.total*100) : 0;
+                    const color    = totalPct >= rd.tgtPct ? '#10b981' : totalPct >= rd.tgtPct*0.8 ? '#f59e0b' : '#ef4444';
                     const dateCells = allDates.map(d => {
-                        const cnt = byDate[d]?.size || 0;
-                        const bg  = cnt > 0 ? (cnt >= tgtCount * 0.1 ? '#d1fae5' : '#fef3c7') : '#f9fafb';
-                        const tc  = cnt > 0 ? (cnt >= tgtCount * 0.1 ? '#065f46' : '#92400e') : '#d1d5db';
-                        return `<td style="text-align:center;padding:5px 4px;font-size:11px;font-weight:700;color:${tc};background:${bg};border-radius:6px;">${cnt > 0 ? cnt : '—'}</td>`;
+                        const cnt = rd.byDate[d]?.size || 0;
+                        const bg  = cnt > 0 ? (cnt >= rd.tgtCount*0.1 ? '#d1fae5' : '#fef3c7') : '#f9fafb';
+                        const tc  = cnt > 0 ? (cnt >= rd.tgtCount*0.1 ? '#065f46' : '#92400e') : '#d1d5db';
+                        return `<td style="text-align:center;padding:5px 4px;font-size:11px;font-weight:700;color:${tc};background:${bg};border-radius:6px;">${cnt||'—'}</td>`;
                     }).join('');
-
                     return `<tr style="border-bottom:1px solid #f3f4f6;">
                         <td style="padding:8px 10px;font-size:12px;font-weight:800;color:#374151;white-space:nowrap;">${route}</td>
                         <td style="padding:8px 6px;text-align:center;">
                             <span style="font-size:12px;font-weight:900;color:${color};">${totalPct}%</span>
-                            <div style="font-size:10px;color:#9ca3af;">${totalBought}/${stores.length}</div>
+                            <div style="font-size:10px;color:#9ca3af;">${rd.totalBought}/${rd.total}</div>
                         </td>
                         ${dateCells}
                     </tr>`;
                 }).join('');
-
-                const dateHeaders = allDates.map(d => {
-                    const dt = new Date(d); const isValid = !isNaN(dt);
-                    const lbl = isValid ? `${dt.getDate()}/${dt.getMonth()+1}` : d.slice(5).replace('_','/');
-                    return `<th style="padding:6px 4px;font-size:10px;font-weight:700;color:#6b7280;text-align:center;white-space:nowrap;">${lbl}</th>`;
-                }).join('');
-
                 return `<div id="_ctab-content-${gi}" style="display:${gi===0?'block':'none'};">
-                    <div style="overflow-x:auto;">
+                    <div style="overflow-x:auto;max-height:55vh;">
                         <table style="width:100%;border-collapse:separate;border-spacing:2px;">
-                            <thead><tr style="background:#f9fafb;">
+                            <thead><tr style="background:#f9fafb;position:sticky;top:0;z-index:2;">
                                 <th style="padding:8px 10px;text-align:left;font-size:11px;font-weight:700;color:#6b7280;">สาย</th>
                                 <th style="padding:8px 6px;text-align:center;font-size:11px;font-weight:700;color:#6b7280;white-space:nowrap;">รวม</th>
-                                ${dateHeaders}
+                                ${dateHeadersHtml}
                             </tr></thead>
                             <tbody>${routeRows}</tbody>
                         </table>
                     </div>
-                    <div style="padding:10px 0 0;font-size:10px;color:#9ca3af;">
-                        💡 ตัวเลขในช่องคือจำนวนร้านที่ซื้อสินค้าในกลุ่ม "${g.name}" วันนั้น · สีเขียว = ดี · สีเหลือง = น้อย
+                    <div style="padding:8px 0 0;font-size:10px;color:#9ca3af;">
+                        💡 ตัวเลข = จำนวนร้านที่ซื้อ "${g.name}" วันนั้น · สีเขียว = ดี · สีเหลือง = น้อย
                     </div>
                 </div>`;
             }).join('');
@@ -1510,13 +1519,7 @@ const Dashboard = {
             ).join('');
 
             const dailyGroupContents = groups.map((g, gi) => {
-                const rd_all = groupData[gi]; // byRoute data สำหรับ group นี้
-                const dateHeadersHtml2 = allDates.map(d => {
-                    const dt  = new Date(d);
-                    const lbl = !isNaN(dt) ? `${dt.getDate()}/${dt.getMonth()+1}` : d.slice(5).replace('_','/');
-                    return `<th style="padding:6px 4px;font-size:10px;font-weight:700;color:#6b7280;text-align:center;white-space:nowrap;">${lbl}</th>`;
-                }).join('');
-
+                const rd_all = groupData[gi];
                 const rows2 = routes.map(route => {
                     const rd      = rd_all[route];
                     const totalPct = rd.total > 0 ? Math.round(rd.totalBought/rd.total*100) : 0;
@@ -1536,14 +1539,13 @@ const Dashboard = {
                         ${cells}
                     </tr>`;
                 }).join('');
-
                 return `<div id="_daily-content-${gi}" style="display:${gi===0?'block':'none'};">
                     <div style="overflow-x:auto;max-height:55vh;">
                         <table style="width:100%;border-collapse:separate;border-spacing:2px;">
                             <thead><tr style="background:#f9fafb;position:sticky;top:0;z-index:2;">
                                 <th style="padding:8px 10px;text-align:left;font-size:11px;font-weight:700;color:#6b7280;position:sticky;left:0;background:#f9fafb;z-index:3;">สาย</th>
                                 <th style="padding:8px 6px;text-align:center;font-size:11px;font-weight:700;color:#6b7280;white-space:nowrap;">รวม</th>
-                                ${dateHeadersHtml2}
+                                ${dateHeadersHtml}
                             </tr></thead>
                             <tbody>${rows2}</tbody>
                         </table>
