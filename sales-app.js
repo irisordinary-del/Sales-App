@@ -57,6 +57,7 @@ let State = {
     viewMode: 'sales', centerId: null, allRoutes: {}, routeList: [],
     _filterMarket: '',
     planList: [], planCache: {}, planCenterDocId: '',
+    campaignIcons: {}, // { custCode: [{iconUrl, name}] } — icons ของ campaign ที่ active
 };
 let map = null, mapMarkers = [], sortableList = null, markerClusterGroup = null;
 
@@ -239,6 +240,48 @@ const App = {
     },
 
     isSupervisor: () => ['route_supervisor','asm'].includes(State.viewMode),
+
+    // ✅ โหลด active campaigns → build custCode → icons map
+    _loadCampaignIcons: async () => {
+        try {
+            const session    = Auth.getSession();
+            const centerDoc  = session?.centerDoc || window.CENTER_DOC || '';
+            const nowYM      = (() => { const d = new Date(); return `${d.getFullYear()}_${String(d.getMonth()+1).padStart(2,'0')}`; })();
+
+            const snap = await db.collection('skuDistribution')
+                .where('centerId', '==', centerDoc)
+                .get();
+
+            const icons = {}; // { custCode: [{iconUrl, name}] }
+
+            snap.docs.forEach(doc => {
+                const c = doc.data();
+                if (!c.iconUrl) return;                  // ไม่มี icon ข้าม
+                if ((c.endYM || '') < nowYM) return;     // หมดอายุแล้ว ข้าม
+
+                // หา custCode ของร้านในสาย
+                const routes = State.db?.routeList || State.allRoutes
+                    ? Object.keys(State.allRoutes || {})
+                    : [];
+
+                // ใช้ State.allStores ซึ่งมีทุกร้านของสายนี้
+                const stores = State.allStores || [];
+                stores.forEach(s => {
+                    if (!icons[s.id]) icons[s.id] = [];
+                    // ไม่ซ้ำ
+                    if (!icons[s.id].find(x => x.iconUrl === c.iconUrl)) {
+                        icons[s.id].push({ iconUrl: c.iconUrl, name: c.name });
+                    }
+                });
+            });
+
+            State.campaignIcons = icons;
+            // re-render store list เพื่อแสดง icons
+            if (State.isLoaded) Processor.stores();
+        } catch(e) {
+            console.warn('_loadCampaignIcons:', e);
+        }
+    },
 
     _getWithTimeout: (ref, ms = 8000) =>
         Promise.race([ref.get(), new Promise((_,rej) => setTimeout(() => rej(new Error('timeout')), ms))]),
@@ -497,6 +540,8 @@ const App = {
                     State.isLoaded = true;
                     if (typeof CalendarCtrl !== 'undefined') CalendarCtrl.init();
                     waitForLeaflet(() => MapCtrl.initAndDraw());
+                    // ✅ โหลด campaign icons background
+                    App._loadCampaignIcons().catch(() => {});
                 }
             }
         };
@@ -709,12 +754,20 @@ const Processor = {
         const html = list.map((s, i) => {
             const seq     = s.seqs?.[State.currentDay] || i + 1;
             const navLink = `https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}&travelmode=driving`;
+
+            // ✅ Campaign icons — แสดงข้าง KPI button
+            const campIcons = (State.campaignIcons?.[s.id] || [])
+                .map(c => `<img src="${c.iconUrl}" title="${c.name}"
+                    style="width:22px;height:22px;border-radius:6px;object-fit:cover;border:1.5px solid #e5e7eb;box-shadow:0 1px 3px rgba(0,0,0,0.1);"
+                    onerror="this.style.display='none'">`).join('');
+
             return `
             <div data-id="${s.id}" class="store-item bg-white p-2.5 rounded-xl border shadow-sm flex items-center gap-2 relative mb-2.5">
                 <div class="drag-handle text-gray-300 px-1 cursor-grab active:cursor-grabbing">≡</div>
                 <div data-seq class="w-7 h-7 rounded-full bg-blue-600 text-white flex items-center justify-center font-black text-xs shrink-0 shadow-sm">${seq}</div>
                 <div class="flex-1 font-bold text-sm text-gray-800 leading-tight cursor-pointer truncate" onclick="UI.openModal('${s.id}')">${s.name}</div>
                 <div class="flex items-center gap-1.5 shrink-0">
+                    ${campIcons}
                     <button onclick="UI.openModal('${s.id}')" class="bg-blue-50 hover:bg-blue-100 text-blue-600 px-2 py-1.5 rounded-lg font-bold text-[10px] border border-blue-100 transition active:scale-95">📊 KPI</button>
                     <a href="${navLink}" target="_blank" class="bg-emerald-50 hover:bg-emerald-100 text-emerald-600 px-2 py-1.5 rounded-lg font-bold text-[10px] text-center border border-emerald-100 transition active:scale-95">🚗 นำทาง</a>
                 </div>
