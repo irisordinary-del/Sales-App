@@ -254,6 +254,7 @@ const App = {
                 return `${d.getFullYear()}_${String(d.getMonth()+1).padStart(2,'0')}`;
             })();
 
+            // โหลด campaigns
             let snap = await db.collection('skuDistribution')
                 .where('centerId', '==', centerDoc).get();
             if (snap.empty && centerId) {
@@ -262,22 +263,55 @@ const App = {
             }
 
             const icons = {};
-            const stores = State.allStores || [];
+            const username = session?.username?.toUpperCase() || '';
 
-            snap.docs.forEach(doc => {
+            for (const doc of snap.docs) {
                 const c = doc.data();
-                if (!c.iconUrl) return;
-                if ((c.endYM || '') < nowYM) return;
-                stores.forEach(s => {
-                    if (!icons[s.id]) icons[s.id] = [];
-                    if (!icons[s.id].find(x => x.iconUrl === c.iconUrl)) {
-                        icons[s.id].push({ iconUrl: c.iconUrl, name: c.name });
+                if (!c.iconUrl) continue;
+                if ((c.endYM || '') < nowYM) continue;
+
+                const groups = c.groups || [];
+                const kws = groups.flatMap(g => (g.keywords || []).map(k => k.toLowerCase()));
+                if (!kws.length) continue;
+
+                // ดึง sellout rows ของเดือนปัจจุบัน — ใช้ SalesDashboard cache ถ้ามี
+                let allRows = [];
+                try {
+                    if (typeof SalesDashboard !== 'undefined' && SalesDashboard._loadChunks) {
+                        allRows = await SalesDashboard._loadChunks(nowYM);
+                    } else {
+                        const key = (typeof Dashboard !== 'undefined' && Dashboard._ymKeyMap?.[nowYM]) || nowYM;
+                        const cs  = await db.collection('sellout').doc(key).collection('chunks').get();
+                        cs.forEach(d => allRows = allRows.concat(d.data().rows || []));
+                    }
+                } catch(e) { continue; }
+
+                // กรองเฉพาะ sCode ของ sales คนนี้
+                const myRows = username
+                    ? allRows.filter(r => String(r.sCode || '').toUpperCase() === username)
+                    : allRows;
+
+                // หา custCode ที่ซื้อสินค้าใน campaign นี้จริงๆ
+                const boughtStores = new Set(
+                    myRows
+                        .filter(r => kws.some(k =>
+                            (r.prodCode || '').toLowerCase().includes(k) ||
+                            (r.prodName || '').toLowerCase().includes(k)
+                        ))
+                        .map(r => String(r.custCode || '').trim())
+                );
+
+                // ใส่ icon เฉพาะร้านที่ซื้อแล้ว
+                boughtStores.forEach(custCode => {
+                    if (!icons[custCode]) icons[custCode] = [];
+                    if (!icons[custCode].find(x => x.iconUrl === c.iconUrl)) {
+                        icons[custCode].push({ iconUrl: c.iconUrl, name: c.name });
                     }
                 });
-            });
+            }
 
             State.campaignIcons = icons;
-            console.log(`[CampaignIcons] ${snap.size} campaigns, ${Object.keys(icons).length} stores tagged`);
+            console.log(`[CampaignIcons] ${Object.keys(icons).length} stores bought campaign products`);
             if (State.isLoaded) {
                 try { Processor.routeList(); } catch(e) {}
                 try { Processor.stores(); } catch(e) {}

@@ -144,10 +144,22 @@ const SalesDashboard = {
         }
 
         try {
-            const months = snap.docs
-                .map(d => d.id)
-                .filter(ym => /^20\d{2}_(0[1-9]|1[0-2])$/.test(ym))
-                .sort().reverse();
+            const session  = Auth.getSession();
+            const centerId = (State.centerId || session?.centerId || '').toUpperCase();
+
+            // ✅ FIX: รองรับทั้ง "2026_06" และ "402_2026_06" (centerId prefix)
+            const ymMap = {};
+            snap.docs.forEach(d => {
+                const id = d.id;
+                if (centerId && id.startsWith(centerId + '_')) {
+                    const ym = id.slice(centerId.length + 1);
+                    if (/^20\d{2}_(0[1-9]|1[0-2])$/.test(ym)) ymMap[ym] = id;
+                } else if (/^20\d{2}_(0[1-9]|1[0-2])$/.test(id)) {
+                    if (!ymMap[id]) ymMap[id] = id;
+                }
+            });
+            SalesDashboard._ymKeyMap = ymMap;
+            const months = Object.keys(ymMap).sort().reverse();
 
             if (!sel) return;
             sel.innerHTML = '<option value="">-- เดือน --</option>' +
@@ -236,7 +248,20 @@ const SalesDashboard = {
 
         SalesDashboard._chunkInflight[cacheKey] = (async () => {
             try {
-                const snap = await db.collection('sellout').doc(ym).collection('chunks').get();
+                // ✅ FIX: ใช้ key จาก _ymKeyMap รองรับทั้ง "2026_06" และ "402_2026_06"
+                const key  = SalesDashboard._ymKeyMap?.[ym] || ym;
+                const snap = await db.collection('sellout').doc(key).collection('chunks').get();
+                if (snap.empty && key !== ym) {
+                    // fallback: ลอง key เดิม
+                    const snap2 = await db.collection('sellout').doc(ym).collection('chunks').get();
+                    if (!snap2.empty) {
+                        let rows2 = [];
+                        snap2.docs.sort((a,b) => (a.data().index||0)-(b.data().index||0))
+                            .forEach(doc => { if (Array.isArray(doc.data().rows)) rows2 = rows2.concat(doc.data().rows); });
+                        SalesDashboard._chunkCache[cacheKey] = rows2;
+                        return rows2;
+                    }
+                }
                 if (snap.empty) {
                     SalesDashboard._chunkCache[cacheKey] = [];
                     return [];
@@ -839,10 +864,22 @@ const SupervisorDashboard = {
         }
 
         try {
-            const months = snap.docs
-                .map(d => d.id)
-                .filter(ym => /^20\d{2}_(0[1-9]|1[0-2])$/.test(ym))
-                .sort().reverse();
+            const session  = Auth.getSession();
+            const centerId = (State.centerId || session?.centerId || '').toUpperCase();
+
+            // ✅ FIX: รองรับทั้ง "2026_06" และ "402_2026_06"
+            const ymMap = {};
+            snap.docs.forEach(d => {
+                const id = d.id;
+                if (centerId && id.startsWith(centerId + '_')) {
+                    const ym = id.slice(centerId.length + 1);
+                    if (/^20\d{2}_(0[1-9]|1[0-2])$/.test(ym)) ymMap[ym] = id;
+                } else if (/^20\d{2}_(0[1-9]|1[0-2])$/.test(id)) {
+                    if (!ymMap[id]) ymMap[id] = id;
+                }
+            });
+            SalesDashboard._ymKeyMap = ymMap; // share กับ _loadChunks
+            const months = Object.keys(ymMap).sort().reverse();
 
             if (!sel) return;
             sel.innerHTML = '<option value="">-- เดือน --</option>' +
