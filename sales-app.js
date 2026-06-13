@@ -244,31 +244,32 @@ const App = {
     // ✅ โหลด active campaigns → build custCode → icons map
     _loadCampaignIcons: async () => {
         try {
-            const session    = Auth.getSession();
-            const centerDoc  = session?.centerDoc || window.CENTER_DOC || '';
-            const nowYM      = (() => { const d = new Date(); return `${d.getFullYear()}_${String(d.getMonth()+1).padStart(2,'0')}`; })();
+            const session   = Auth.getSession();
+            const centerId  = State.centerId || session?.centerId || '';
+            const centerDoc = centerId ? (centerId + '_main') : (session?.centerDoc || '');
+            if (!centerId && !centerDoc) return;
 
-            const snap = await db.collection('skuDistribution')
-                .where('centerId', '==', centerDoc)
-                .get();
+            const nowYM = (() => {
+                const d = new Date();
+                return `${d.getFullYear()}_${String(d.getMonth()+1).padStart(2,'0')}`;
+            })();
 
-            const icons = {}; // { custCode: [{iconUrl, name}] }
+            let snap = await db.collection('skuDistribution')
+                .where('centerId', '==', centerDoc).get();
+            if (snap.empty && centerId) {
+                snap = await db.collection('skuDistribution')
+                    .where('centerId', '==', centerId).get();
+            }
+
+            const icons = {};
+            const stores = State.allStores || [];
 
             snap.docs.forEach(doc => {
                 const c = doc.data();
-                if (!c.iconUrl) return;                  // ไม่มี icon ข้าม
-                if ((c.endYM || '') < nowYM) return;     // หมดอายุแล้ว ข้าม
-
-                // หา custCode ของร้านในสาย
-                const routes = State.db?.routeList || State.allRoutes
-                    ? Object.keys(State.allRoutes || {})
-                    : [];
-
-                // ใช้ State.allStores ซึ่งมีทุกร้านของสายนี้
-                const stores = State.allStores || [];
+                if (!c.iconUrl) return;
+                if ((c.endYM || '') < nowYM) return;
                 stores.forEach(s => {
                     if (!icons[s.id]) icons[s.id] = [];
-                    // ไม่ซ้ำ
                     if (!icons[s.id].find(x => x.iconUrl === c.iconUrl)) {
                         icons[s.id].push({ iconUrl: c.iconUrl, name: c.name });
                     }
@@ -276,13 +277,12 @@ const App = {
             });
 
             State.campaignIcons = icons;
-            // re-render store list เพื่อแสดง icons
+            console.log(`[CampaignIcons] ${snap.size} campaigns, ${Object.keys(icons).length} stores tagged`);
             if (State.isLoaded) Processor.stores();
         } catch(e) {
             console.warn('_loadCampaignIcons:', e);
         }
     },
-
     _getWithTimeout: (ref, ms = 8000) =>
         Promise.race([ref.get(), new Promise((_,rej) => setTimeout(() => rej(new Error('timeout')), ms))]),
 
