@@ -254,6 +254,18 @@ const App = {
                 return `${d.getFullYear()}_${String(d.getMonth()+1).padStart(2,'0')}`;
             })();
 
+            // helper: สร้าง list ของ YYYY_MM ระหว่าง startYM และ endYM
+            const getMonthRange = (startYM, endYM) => {
+                const months = [];
+                let [y, m] = startYM.split('_').map(Number);
+                const [ey, em] = endYM.split('_').map(Number);
+                while (y < ey || (y === ey && m <= em)) {
+                    months.push(`${y}_${String(m).padStart(2,'0')}`);
+                    m++; if (m > 12) { m = 1; y++; }
+                }
+                return months;
+            };
+
             // โหลด campaigns
             let snap = await db.collection('skuDistribution')
                 .where('centerId', '==', centerDoc).get();
@@ -268,30 +280,40 @@ const App = {
             for (const doc of snap.docs) {
                 const c = doc.data();
                 if (!c.iconUrl) continue;
-                if ((c.endYM || '') < nowYM) continue;
+                if ((c.endYM || '') < nowYM.slice(0,7).replace('-','_')) continue;
 
                 const groups = c.groups || [];
                 const kws = groups.flatMap(g => (g.keywords || []).map(k => k.toLowerCase()));
                 if (!kws.length) continue;
 
-                // ดึง sellout rows ของเดือนปัจจุบัน — ใช้ SalesDashboard cache ถ้ามี
+                // ✅ โหลดทุกเดือนใน campaign range ตั้งแต่เริ่ม campaign
+                const startYM = c.startYM || nowYM;
+                const endYM   = c.endYM   || nowYM;
+                const months  = getMonthRange(startYM, endYM);
+
+                // รวม rows ทุกเดือน
                 let allRows = [];
-                try {
-                    if (typeof SalesDashboard !== 'undefined' && SalesDashboard._loadChunks) {
-                        allRows = await SalesDashboard._loadChunks(nowYM);
-                    } else {
-                        const key = (typeof Dashboard !== 'undefined' && Dashboard._ymKeyMap?.[nowYM]) || nowYM;
-                        const cs  = await db.collection('sellout').doc(key).collection('chunks').get();
-                        cs.forEach(d => allRows = allRows.concat(d.data().rows || []));
-                    }
-                } catch(e) { continue; }
+                for (const ym of months) {
+                    try {
+                        let rows = [];
+                        if (typeof SalesDashboard !== 'undefined' && SalesDashboard._loadChunks) {
+                            rows = await SalesDashboard._loadChunks(ym);
+                        } else {
+                            const cs = await db.collection('sellout').doc(ym).collection('chunks').get();
+                            cs.forEach(d => rows = rows.concat(d.data().rows || []));
+                        }
+                        allRows = allRows.concat(rows);
+                    } catch(e) { /* เดือนนี้ไม่มีข้อมูล ข้ามไป */ }
+                }
+
+                if (!allRows.length) continue;
 
                 // กรองเฉพาะ sCode ของ sales คนนี้
                 const myRows = username
                     ? allRows.filter(r => String(r.sCode || '').toUpperCase() === username)
                     : allRows;
 
-                // หา custCode ที่ซื้อสินค้าใน campaign นี้จริงๆ
+                // หา custCode ที่ซื้อสินค้าใน campaign นี้จริงๆ ตลอดช่วง
                 const boughtStores = new Set(
                     myRows
                         .filter(r => kws.some(k =>
@@ -300,6 +322,8 @@ const App = {
                         ))
                         .map(r => String(r.custCode || '').trim())
                 );
+
+                console.log(`[CampaignIcons] ${c.name}: ${boughtStores.size} ร้านที่ซื้อตลอด campaign (${startYM}→${endYM})`);
 
                 // ใส่ icon เฉพาะร้านที่ซื้อแล้ว
                 boughtStores.forEach(custCode => {
@@ -311,7 +335,7 @@ const App = {
             }
 
             State.campaignIcons = icons;
-            console.log(`[CampaignIcons] ${Object.keys(icons).length} stores bought campaign products`);
+            console.log(`[CampaignIcons] รวม ${Object.keys(icons).length} ร้านที่มี icon`);
             if (State.isLoaded) {
                 try { if (State.currentDay) Processor.routeList(); } catch(e) {}
                 try { Processor.stores(); } catch(e) {}
