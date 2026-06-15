@@ -491,7 +491,9 @@ const Dashboard = {
     },
 
     _saveToFirestore: async (ym, rows) => {
-        const key     = ym;
+        // ✅ ใช้ centerId prefix เพื่อแยกข้อมูลต่างศูนย์ เช่น "402_2026_06"
+        const cid     = (window.CENTER_ID || '').toUpperCase();
+        const key     = cid ? `${cid}_${ym}` : ym;
         const metaRef = cloudDB.collection('sellout').doc(key);
 
         // ── Step 1: ลบ chunks เก่า + เขียน metadata ─────────────────────
