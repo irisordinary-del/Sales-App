@@ -1317,16 +1317,13 @@ const SupervisorDashboard = {
                     <div style="margin-bottom:8px;">
                         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">
                             <span style="font-size:11px;font-weight:800;color:#374151;">${route}</span>
-                            <span style="font-size:11px;font-weight:900;color:${color};">${pct}%
-                                <span style="font-size:9px;font-weight:600;color:${vs >= 0 ? '#10b981' : '#ef4444'};">${vs >= 0 ? '+' : ''}${vs}%</span>
+                            <span style="font-size:11px;font-weight:700;color:#374151;">
+                                ${boughtCount} / ${tgtCount}
+                                <span style="font-size:10px;font-weight:900;color:${color};"> ${pct}%</span>
                             </span>
                         </div>
-                        <div style="position:relative;height:7px;background:#e5e7eb;border-radius:99px;overflow:visible;margin-bottom:3px;">
-                            <div style="width:${Math.min(pct,100)}%;height:7px;background:${color};border-radius:99px;opacity:0.85;"></div>
-                            <div style="position:absolute;left:${Math.min(tgtPct,100)}%;top:-2px;width:2px;height:11px;background:#6366f1;border-radius:1px;" title="target ${tgtPct}%"></div>
-                        </div>
-                        <div style="font-size:9px;color:#9ca3af;">
-                            ${boughtCount} / ${tgtCount} ร้าน &nbsp;·&nbsp; ร้านทั้งหมด ${totalOutlets}
+                        <div style="height:7px;background:#e5e7eb;border-radius:99px;overflow:hidden;margin-bottom:2px;">
+                            <div style="width:${Math.min(pct,100)}%;height:7px;background:${color};border-radius:99px;"></div>
                         </div>
                     </div>`;
                 }).join('');
@@ -1348,14 +1345,18 @@ const SupervisorDashboard = {
             </div>`;
         }).join('');
 
+        // ลบอันเก่าและ flag ก่อน inject — กัน async race จาก _render() เรียกซ้ำ
+        const oldEl = document.getElementById('_sup-campaign-section');
+        if (oldEl) oldEl.remove();
         const campDiv = document.createElement('div');
         campDiv.id = '_sup-campaign-section';
         campDiv.innerHTML = `
             <div style="height:1px;background:#f3f4f6;margin:12px 0;"></div>
             <div style="font-size:11px;font-weight:800;color:#9ca3af;margin-bottom:8px;">🎯 Campaign ที่กำลังดำเนินการ</div>
             ${cardsHtml}`;
-        const oldEl = document.getElementById('_sup-campaign-section');
-        if (oldEl) oldEl.remove();
+        // เช็คซ้ำอีกครั้งหลัง await (กัน race)
+        const dupEl = document.getElementById('_sup-campaign-section');
+        if (dupEl) dupEl.remove();
         wrap.appendChild(campDiv);
     },
 
@@ -1384,19 +1385,21 @@ const SupervisorDashboard = {
 
         const sorted = Object.entries(byRoute).sort((a,b) => sortByCode ? a[0].localeCompare(b[0],'th',{numeric:true}) : b[1].amt - a[1].amt);
         if (!sorted.length) return '<div style="font-size:11px;color:#9ca3af;padding:6px 0;">ไม่มีข้อมูล</div>';
-        const maxAmt = sorted[0][1].amt || 1;
 
         return sorted.map(([route, d]) => {
-            const barW   = Math.round((d.amt / maxAmt) * 100);
             const tgt    = SupervisorDashboard._targets[route] || 0;
             const pct    = tgt > 0 ? (d.amt / tgt * 100) : null;
-            const pctTxt = pct !== null ? (pct.toFixed(0) + '%') : '';
+            // bar: ถ้ามี target ใช้ target เป็น max, ถ้าไม่มีใช้ยอดสูงสุดในกลุ่ม
+            const maxAmt = tgt > 0 ? tgt : (sorted[0][1].amt || 1);
+            const barW   = Math.min(Math.round((d.amt / maxAmt) * 100), 100);
+            const barColor = pct === null ? color
+                : pct >= 100 ? '#059669' : pct >= 80 ? '#d97706' : '#dc2626';
 
             // ASO = ร้านที่มียอด > 0
             const outlets = Object.values(d.byOutlet).filter(o => o.vol > 0);
             const aso = outlets.length;
 
-            // SKU เฉลี่ยต่อร้าน (เหมือน Sales dashboard)
+            // SKU เฉลี่ยต่อร้าน
             const avgSku = aso > 0
                 ? (outlets.reduce((s, o) => s + o.skus.size, 0) / aso).toFixed(1)
                 : '—';
@@ -1406,14 +1409,19 @@ const SupervisorDashboard = {
                 ? Math.round(d.amt / aso).toLocaleString('th-TH')
                 : '—';
 
+            // แสดง actual / target XX%
+            const rightTxt = tgt > 0
+                ? `${SupervisorDashboard._fmt(d.amt)} / ${SupervisorDashboard._fmt(tgt)} <span style="font-size:10px;font-weight:800;color:${barColor};">${pct.toFixed(0)}%</span>`
+                : `${SupervisorDashboard._fmt(d.amt)}`;
+
             return `
             <div style="margin-bottom:8px;">
-                <div style="display:flex;justify-content:space-between;margin-bottom:3px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">
                     <span style="font-size:11px;font-weight:800;color:#374151;">${route}</span>
-                    <span style="font-size:11px;font-weight:700;color:${color};">${SupervisorDashboard._fmt(d.amt)} ${pctTxt ? '<span style="color:#9ca3af;font-weight:400;font-size:10px;">'+pctTxt+'</span>' : ''}</span>
+                    <span style="font-size:11px;font-weight:700;color:#374151;">${rightTxt}</span>
                 </div>
                 <div style="height:6px;background:#f3f4f6;border-radius:99px;overflow:hidden;margin-bottom:4px;">
-                    <div style="height:6px;background:${color};border-radius:99px;width:${barW}%;opacity:0.7;"></div>
+                    <div style="height:6px;background:${barColor};border-radius:99px;width:${barW}%;"></div>
                 </div>
                 <div style="display:flex;gap:10px;font-size:10px;color:#6b7280;font-weight:600;">
                     <span>🏪 ASO <b style="color:#374151;">${aso}</b></span>
