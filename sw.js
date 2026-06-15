@@ -7,7 +7,7 @@
 //   Tiles (maps)   → Stale-While-Revalidate
 // ==========================================
 
-const CACHE_VERSION = 'rp-v4';
+const CACHE_VERSION = 'rp-v5';
 const STATIC_CACHE  = `${CACHE_VERSION}-static`;
 const TILE_CACHE    = `${CACHE_VERSION}-tiles`;
 const CDN_CACHE     = `${CACHE_VERSION}-cdn`;
