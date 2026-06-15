@@ -1182,30 +1182,65 @@ const SupervisorDashboard = {
     },
 
     _renderRouteBreakdown: (rows, color) => {
+        const EXCL = SupervisorDashboard.EXCLUDED_BRANDS;
         const byRoute = {};
         rows.forEach(r => {
             const s = String(r.sCode||'').toUpperCase();
             if (!s) return;
-            if (!byRoute[s]) byRoute[s] = { amt: 0, invs: new Set() };
-            byRoute[s].amt += SupervisorDashboard._amt(r);
-            if (r.invNum) byRoute[s].invs.add(r.invNum);
+            if (!byRoute[s]) byRoute[s] = {
+                amt: 0,
+                // byOutlet: custCode → { skus: Set, vol: number }
+                byOutlet: {},
+            };
+            const custCode = String(r.custCode || '').trim();
+            if (!custCode) return;
+            if (!byRoute[s].byOutlet[custCode]) byRoute[s].byOutlet[custCode] = { skus: new Set(), vol: 0 };
+            // ยอด + SKU — กรอง EXCLUDED_BRANDS เหมือน Sales dashboard
+            if (!EXCL.has(r.brandDesc)) {
+                const amt = SupervisorDashboard._amt(r);
+                byRoute[s].amt += amt;
+                byRoute[s].byOutlet[custCode].vol += amt;
+                if (r.prodCode) byRoute[s].byOutlet[custCode].skus.add(String(r.prodCode).trim());
+            }
         });
+
         const sorted = Object.entries(byRoute).sort((a,b) => b[1].amt - a[1].amt);
         if (!sorted.length) return '<div style="font-size:11px;color:#9ca3af;padding:6px 0;">ไม่มีข้อมูล</div>';
         const maxAmt = sorted[0][1].amt || 1;
+
         return sorted.map(([route, d]) => {
-            const barW  = Math.round((d.amt / maxAmt) * 100);
-            const tgt   = SupervisorDashboard._targets[route] || 0;
-            const pct   = tgt > 0 ? (d.amt / tgt * 100) : null;
+            const barW   = Math.round((d.amt / maxAmt) * 100);
+            const tgt    = SupervisorDashboard._targets[route] || 0;
+            const pct    = tgt > 0 ? (d.amt / tgt * 100) : null;
             const pctTxt = pct !== null ? (pct.toFixed(0) + '%') : '';
+
+            // ASO = ร้านที่มียอด > 0
+            const outlets = Object.values(d.byOutlet).filter(o => o.vol > 0);
+            const aso = outlets.length;
+
+            // SKU เฉลี่ยต่อร้าน (เหมือน Sales dashboard)
+            const avgSku = aso > 0
+                ? (outlets.reduce((s, o) => s + o.skus.size, 0) / aso).toFixed(1)
+                : '—';
+
+            // VPO = ยอดรวม ÷ ASO
+            const vpo = aso > 0
+                ? Math.round(d.amt / aso).toLocaleString('th-TH')
+                : '—';
+
             return `
             <div style="margin-bottom:8px;">
                 <div style="display:flex;justify-content:space-between;margin-bottom:3px;">
                     <span style="font-size:11px;font-weight:800;color:#374151;">${route}</span>
                     <span style="font-size:11px;font-weight:700;color:${color};">${SupervisorDashboard._fmt(d.amt)} ${pctTxt ? '<span style="color:#9ca3af;font-weight:400;font-size:10px;">'+pctTxt+'</span>' : ''}</span>
                 </div>
-                <div style="height:6px;background:#f3f4f6;border-radius:99px;overflow:hidden;">
+                <div style="height:6px;background:#f3f4f6;border-radius:99px;overflow:hidden;margin-bottom:4px;">
                     <div style="height:6px;background:${color};border-radius:99px;width:${barW}%;opacity:0.7;"></div>
+                </div>
+                <div style="display:flex;gap:10px;font-size:10px;color:#6b7280;font-weight:600;">
+                    <span>🏪 ASO <b style="color:#374151;">${aso}</b></span>
+                    <span>📦 SKU <b style="color:#374151;">${avgSku}</b></span>
+                    <span>💰 VPO <b style="color:#374151;">${vpo}</b></span>
                 </div>
             </div>`;
         }).join('');
