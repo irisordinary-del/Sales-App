@@ -491,7 +491,9 @@ const Dashboard = {
     },
 
     _saveToFirestore: async (ym, rows) => {
-        const key     = ym;
+        // ✅ ใช้ centerId prefix เพื่อแยกข้อมูลต่างศูนย์ เช่น "402_2026_06"
+        const cid     = (window.CENTER_ID || '').toUpperCase();
+        const key     = cid ? `${cid}_${ym}` : ym;
         const metaRef = cloudDB.collection('sellout').doc(key);
 
         // ── Step 1: ลบ chunks เก่า + เขียน metadata ─────────────────────
@@ -1310,7 +1312,7 @@ const Dashboard = {
                                 <span class="text-sm font-black text-gray-800">${campaign.name}</span>
                                 <span class="text-xs text-gray-400 font-medium">${startLbl} → ${endLbl} · ยอดรวมทั้งช่วง</span>
                             </div>
-                            <button onclick="Nav.go('skudist')" class="text-xs text-pink-600 font-bold hover:underline">ดูรายละเอียด →</button>
+                            <button onclick="Dashboard._openCampaignDetail('${campaign.id}')" class="text-xs text-pink-600 font-bold hover:underline">ดูรายละเอียด →</button>
                         </div>
                         <div class="p-4 grid grid-cols-1 sm:grid-cols-${Math.min(groupSummaries.length, 4)} gap-4">
                             ${groupSummaries.map(gs => `
@@ -1346,6 +1348,255 @@ const Dashboard = {
         }
     },
 
+
+    // ─── Campaign Detail Modal — รายวัน แยกสาย ───────────────────────────
+    _openCampaignDetail: async (campaignId) => {
+        // สร้าง overlay
+        let overlay = document.getElementById('_camp-detail-overlay');
+        if (overlay) overlay.remove();
+        overlay = document.createElement('div');
+        overlay.id = '_camp-detail-overlay';
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9990;display:flex;align-items:flex-start;justify-content:center;padding:24px 16px;overflow-y:auto;';
+        overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
+        document.body.appendChild(overlay);
+
+        const box = document.createElement('div');
+        box.style.cssText = 'background:#fff;border-radius:20px;width:100%;max-width:900px;box-shadow:0 20px 60px rgba(0,0,0,0.3);font-family:Prompt,sans-serif;overflow:hidden;';
+        box.innerHTML = `<div style="padding:16px 20px;border-bottom:1px solid #f3f4f6;display:flex;align-items:center;justify-content:space-between;">
+            <span style="font-size:15px;font-weight:900;color:#111827;">⏳ กำลังโหลด...</span>
+            <button onclick="document.getElementById('_camp-detail-overlay').remove()" style="width:30px;height:30px;border-radius:50%;border:1px solid #e5e7eb;background:#fff;font-size:16px;cursor:pointer;color:#6b7280;">✕</button>
+        </div><div id="_camp-detail-body" style="padding:20px;"><div style="text-align:center;padding:40px;color:#9ca3af;font-size:13px;">⏳ กำลังคำนวณ...</div></div>`;
+        overlay.appendChild(box);
+
+        try {
+            // โหลด campaign
+            const snap = await cloudDB.collection('skuDistribution').doc(campaignId).get();
+            if (!snap.exists) return;
+            const campaign = { id: snap.id, ...snap.data() };
+            const groups   = campaign.groups || [];
+            const routes   = State?.db?.routeList || [];
+
+            // build custCode → route
+            const custToRoute = {};
+            routes.forEach(route => {
+                (State.db.routes?.[route] || []).forEach(s => { custToRoute[String(s.id)] = route; });
+            });
+
+            // โหลด rows ทุกเดือน
+            const getRange = (s, e) => {
+                const ms = []; let [y, m] = s.split('_').map(Number);
+                const [ey, em] = e.split('_').map(Number);
+                while (y < ey || (y === ey && m <= em)) {
+                    ms.push(`${y}_${String(m).padStart(2,'0')}`); m++; if (m > 12) { m = 1; y++; }
+                }
+                return ms;
+            };
+            const months = getRange(campaign.startYM, campaign.endYM);
+            let allRows = [];
+            for (const ym of months) {
+                const cached = Dashboard._rowCache[ym];
+                if (cached) { allRows = allRows.concat(Array.isArray(cached) ? cached : (cached.rows || [])); continue; }
+                const key = (Dashboard._ymKeyMap && Dashboard._ymKeyMap[ym]) || ym;
+                try {
+                    const cs = await cloudDB.collection('sellout').doc(key).collection('chunks').get();
+                    const r  = []; cs.forEach(d => r.push(...(d.data().rows || [])));
+                    r.forEach(x => { x._route = custToRoute[String(x.custCode||'')] || null; });
+                    Dashboard._rowCache[ym] = r;
+                    allRows = allRows.concat(r);
+                } catch(e) {}
+            }
+
+            // แยกข้อมูลรายวัน (kpiDate) per route per group
+            const rawTargets    = campaign.routeTargets || {};
+            const targetUnit    = campaign.targetUnit || 'pct';
+            const defaultTarget = campaign.defaultTarget ?? 80;
+
+            // สร้างตาราง: rows = สาย, cols = วันที่ unique
+            const allDates = [...new Set(allRows.map(r => r.kpiDate).filter(Boolean))].sort();
+
+            const startLbl = DateUtil ? DateUtil.ymToThaiShort(campaign.startYM) : campaign.startYM;
+            const endLbl   = DateUtil ? DateUtil.ymToThaiShort(campaign.endYM)   : campaign.endYM;
+
+            // สร้าง HTML
+            const headerEl = box.querySelector('div');
+            headerEl.innerHTML = `
+                <div style="display:flex;align-items:center;gap:10px;">
+                    <span style="font-size:15px;font-weight:900;color:#111827;">🎯 ${campaign.name}</span>
+                    <span style="font-size:11px;color:#9ca3af;font-weight:500;">${startLbl} → ${endLbl}</span>
+                </div>
+                <button onclick="document.getElementById('_camp-detail-overlay').remove()" style="width:30px;height:30px;border-radius:50%;border:1px solid #e5e7eb;background:#fff;font-size:16px;cursor:pointer;color:#6b7280;">✕</button>`;
+
+            // ── pre-compute groupData (ใช้ร่วมกันทั้ง group tabs และ Daily tab) ──
+            const groupData = groups.map(g => {
+                const kws = (g.keywords || []).map(k => k.toLowerCase());
+                const byRoute = {};
+                routes.forEach(route => {
+                    const stores   = (State.db.routes?.[route] || []).map(s => String(s.id));
+                    const storeSet = new Set(stores);
+                    const rawTgt   = rawTargets[route] ?? null;
+                    const tgtPct   = rawTgt !== null
+                        ? (targetUnit === 'count' ? (stores.length > 0 ? rawTgt/stores.length*100 : 0) : rawTgt)
+                        : defaultTarget;
+                    const tgtCount = Math.round(tgtPct / 100 * stores.length);
+                    const matched  = allRows.filter(r =>
+                        r._route === route && storeSet.has(String(r.custCode||'')) &&
+                        kws.some(k => (r.prodCode||'').toLowerCase().includes(k) || (r.prodName||'').toLowerCase().includes(k))
+                    );
+                    const byDate = {};
+                    allDates.forEach(d => { byDate[d] = new Set(); });
+                    matched.forEach(r => { if (r.kpiDate && byDate[r.kpiDate]) byDate[r.kpiDate].add(String(r.custCode)); });
+                    byRoute[route] = {
+                        byDate, tgtCount, tgtPct,
+                        total:       stores.length,
+                        totalBought: new Set(matched.map(r => String(r.custCode))).size,
+                    };
+                });
+                return byRoute;
+            });
+
+            const dateHeadersHtml = allDates.map(d => {
+                const dt  = new Date(d);
+                const lbl = !isNaN(dt) ? `${dt.getDate()}/${dt.getMonth()+1}` : d.slice(5).replace('_','/');
+                return `<th style="padding:6px 4px;font-size:10px;font-weight:700;color:#6b7280;text-align:center;white-space:nowrap;">${lbl}</th>`;
+            }).join('');
+
+            // สร้าง tab per group + Daily tab
+            const totalTabs = groups.length + 1;
+            const dailyIdx  = groups.length;
+
+            const tabsHtml = [
+                ...groups.map((g, gi) => `
+                <button id="_ctab-${gi}" onclick="Dashboard._switchCampaignTab(${gi}, ${totalTabs})"
+                    style="padding:7px 14px;border-radius:20px;border:none;font-size:12px;font-weight:800;cursor:pointer;transition:all 0.15s;
+                           background:${gi===0?'#ec4899':'#f3f4f6'};color:${gi===0?'#fff':'#6b7280'};">${g.name}</button>`),
+                `<button id="_ctab-${dailyIdx}" onclick="Dashboard._switchCampaignTab(${dailyIdx}, ${totalTabs})"
+                    style="padding:7px 14px;border-radius:20px;border:none;font-size:12px;font-weight:800;cursor:pointer;transition:all 0.15s;
+                           background:#f3f4f6;color:#6b7280;">📅 Daily</button>`
+            ].join('');
+
+            // group tabs — สาย × วัน เฉพาะ group นั้น
+            const tabContents = groups.map((g, gi) => {
+                const rd_all = groupData[gi];
+                const routeRows = routes.map(route => {
+                    const rd       = rd_all[route];
+                    const totalPct = rd.total > 0 ? Math.round(rd.totalBought/rd.total*100) : 0;
+                    const color    = totalPct >= rd.tgtPct ? '#10b981' : totalPct >= rd.tgtPct*0.8 ? '#f59e0b' : '#ef4444';
+                    const dateCells = allDates.map(d => {
+                        const cnt = rd.byDate[d]?.size || 0;
+                        const bg  = cnt > 0 ? (cnt >= rd.tgtCount*0.1 ? '#d1fae5' : '#fef3c7') : '#f9fafb';
+                        const tc  = cnt > 0 ? (cnt >= rd.tgtCount*0.1 ? '#065f46' : '#92400e') : '#d1d5db';
+                        return `<td style="text-align:center;padding:5px 4px;font-size:11px;font-weight:700;color:${tc};background:${bg};border-radius:6px;">${cnt||'—'}</td>`;
+                    }).join('');
+                    return `<tr style="border-bottom:1px solid #f3f4f6;">
+                        <td style="padding:8px 10px;font-size:12px;font-weight:800;color:#374151;white-space:nowrap;">${route}</td>
+                        <td style="padding:8px 6px;text-align:center;">
+                            <span style="font-size:12px;font-weight:900;color:${color};">${totalPct}%</span>
+                            <div style="font-size:10px;color:#9ca3af;">${rd.totalBought}/${rd.total}</div>
+                        </td>
+                        ${dateCells}
+                    </tr>`;
+                }).join('');
+                return `<div id="_ctab-content-${gi}" style="display:${gi===0?'block':'none'};">
+                    <div style="overflow-x:auto;max-height:55vh;">
+                        <table style="width:100%;border-collapse:separate;border-spacing:2px;">
+                            <thead><tr style="background:#f9fafb;position:sticky;top:0;z-index:2;">
+                                <th style="padding:8px 10px;text-align:left;font-size:11px;font-weight:700;color:#6b7280;">สาย</th>
+                                <th style="padding:8px 6px;text-align:center;font-size:11px;font-weight:700;color:#6b7280;white-space:nowrap;">รวม</th>
+                                ${dateHeadersHtml}
+                            </tr></thead>
+                            <tbody>${routeRows}</tbody>
+                        </table>
+                    </div>
+                    <div style="padding:8px 0 0;font-size:10px;color:#9ca3af;">
+                        💡 ตัวเลข = จำนวนร้านที่ซื้อ "${g.name}" วันนั้น · สีเขียว = ดี · สีเหลือง = น้อย
+                    </div>
+                </div>`;
+            }).join('');
+
+            // ── Daily tab: group selector + แสดงทีละ group ───────────────
+            const dailyGroupBtns = groups.map((g, gi) =>
+                `<button id="_daily-g-${gi}" onclick="Dashboard._switchDailyGroup(${gi}, ${groups.length})"
+                    style="padding:5px 12px;border-radius:16px;border:none;font-size:11px;font-weight:800;cursor:pointer;transition:all 0.15s;
+                           background:${gi===0?'#ec4899':'#f3f4f6'};color:${gi===0?'#fff':'#6b7280'};">${g.name}</button>`
+            ).join('');
+
+            const dailyGroupContents = groups.map((g, gi) => {
+                const rd_all = groupData[gi];
+                const rows2 = routes.map(route => {
+                    const rd      = rd_all[route];
+                    const totalPct = rd.total > 0 ? Math.round(rd.totalBought/rd.total*100) : 0;
+                    const color    = totalPct >= rd.tgtPct ? '#10b981' : totalPct >= rd.tgtPct*0.8 ? '#f59e0b' : '#ef4444';
+                    const cells    = allDates.map(d => {
+                        const cnt = rd.byDate[d]?.size || 0;
+                        const bg  = cnt > 0 ? (cnt >= rd.tgtCount*0.1 ? '#d1fae5' : '#fef3c7') : '#f9fafb';
+                        const tc  = cnt > 0 ? (cnt >= rd.tgtCount*0.1 ? '#065f46' : '#92400e') : '#d1d5db';
+                        return `<td style="text-align:center;padding:5px 4px;font-size:11px;font-weight:700;color:${tc};background:${bg};border-radius:6px;">${cnt||'—'}</td>`;
+                    }).join('');
+                    return `<tr style="border-bottom:1px solid #f3f4f6;">
+                        <td style="padding:8px 10px;font-size:12px;font-weight:800;color:#374151;white-space:nowrap;position:sticky;left:0;background:#fff;z-index:1;">${route}</td>
+                        <td style="padding:8px 6px;text-align:center;">
+                            <span style="font-size:12px;font-weight:900;color:${color};">${totalPct}%</span>
+                            <div style="font-size:10px;color:#9ca3af;">${rd.totalBought}/${rd.total}</div>
+                        </td>
+                        ${cells}
+                    </tr>`;
+                }).join('');
+                return `<div id="_daily-content-${gi}" style="display:${gi===0?'block':'none'};">
+                    <div style="overflow-x:auto;max-height:55vh;">
+                        <table style="width:100%;border-collapse:separate;border-spacing:2px;">
+                            <thead><tr style="background:#f9fafb;position:sticky;top:0;z-index:2;">
+                                <th style="padding:8px 10px;text-align:left;font-size:11px;font-weight:700;color:#6b7280;position:sticky;left:0;background:#f9fafb;z-index:3;">สาย</th>
+                                <th style="padding:8px 6px;text-align:center;font-size:11px;font-weight:700;color:#6b7280;white-space:nowrap;">รวม</th>
+                                ${dateHeadersHtml}
+                            </tr></thead>
+                            <tbody>${rows2}</tbody>
+                        </table>
+                    </div>
+                </div>`;
+            }).join('');
+
+            const dailyTabContent = `<div id="_ctab-content-${dailyIdx}" style="display:none;">
+                <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid #f3f4f6;">
+                    ${dailyGroupBtns}
+                </div>
+                ${dailyGroupContents}
+                <div style="padding:8px 0 0;font-size:10px;color:#9ca3af;">
+                    📅 ทุกสายพร้อมกัน แยกรายวัน — เลือก group ด้านบน · สีเขียว = ดี · สีเหลือง = น้อย
+                </div>
+            </div>`;
+
+            document.getElementById('_camp-detail-body').innerHTML = `
+                <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">${tabsHtml}</div>
+                ${tabContents}
+                ${dailyTabContent}`;
+
+        } catch(e) {
+            console.warn('_openCampaignDetail:', e);
+            document.getElementById('_camp-detail-body').innerHTML = '<div style="text-align:center;padding:40px;color:#ef4444;font-size:13px;">❌ โหลดไม่สำเร็จ</div>';
+        }
+    },
+
+    _switchCampaignTab: (gi, total) => {
+        for (let i = 0; i < total; i++) {
+            const tab     = document.getElementById(`_ctab-${i}`);
+            const content = document.getElementById(`_ctab-content-${i}`);
+            const isDaily = i === total - 1;
+            if (tab) {
+                tab.style.background = i === gi ? (isDaily ? '#6366f1' : '#ec4899') : '#f3f4f6';
+                tab.style.color      = i === gi ? '#fff' : '#6b7280';
+            }
+            if (content) content.style.display = i === gi ? 'block' : 'none';
+        }
+    },
+
+    _switchDailyGroup: (gi, total) => {
+        for (let i = 0; i < total; i++) {
+            const btn = document.getElementById(`_daily-g-${i}`);
+            const cnt = document.getElementById(`_daily-content-${i}`);
+            if (btn) { btn.style.background = i === gi ? '#ec4899' : '#f3f4f6'; btn.style.color = i === gi ? '#fff' : '#6b7280'; }
+            if (cnt)  cnt.style.display = i === gi ? 'block' : 'none';
+        }
+    },
 
     // ─── SKU Whitelist Modal ──────────────────────────────────────────────
     openSkuWhitelistModal: async () => {

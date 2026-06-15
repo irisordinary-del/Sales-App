@@ -57,6 +57,7 @@ let State = {
     viewMode: 'sales', centerId: null, allRoutes: {}, routeList: [],
     _filterMarket: '',
     planList: [], planCache: {}, planCenterDocId: '',
+    campaignIcons: {}, // { custCode: [{iconUrl, name}] } — icons ของ campaign ที่ active
 };
 let map = null, mapMarkers = [], sortableList = null, markerClusterGroup = null;
 
@@ -240,6 +241,85 @@ const App = {
 
     isSupervisor: () => ['route_supervisor','asm'].includes(State.viewMode),
 
+    // ✅ โหลด active campaigns → build custCode → icons map
+    _loadCampaignIcons: async () => {
+        try {
+            const session   = Auth.getSession();
+            const centerId  = State.centerId || session?.centerId || '';
+            const centerDoc = centerId ? (centerId + '_main') : (session?.centerDoc || '');
+            if (!centerId && !centerDoc) return;
+
+            const nowYM = (() => {
+                const d = new Date();
+                return `${d.getFullYear()}_${String(d.getMonth()+1).padStart(2,'0')}`;
+            })();
+
+            // โหลด campaigns
+            let snap = await db.collection('skuDistribution')
+                .where('centerId', '==', centerDoc).get();
+            if (snap.empty && centerId) {
+                snap = await db.collection('skuDistribution')
+                    .where('centerId', '==', centerId).get();
+            }
+
+            const icons = {};
+            const username = session?.username?.toUpperCase() || '';
+
+            for (const doc of snap.docs) {
+                const c = doc.data();
+                if (!c.iconUrl) continue;
+                if ((c.endYM || '') < nowYM) continue;
+
+                const groups = c.groups || [];
+                const kws = groups.flatMap(g => (g.keywords || []).map(k => k.toLowerCase()));
+                if (!kws.length) continue;
+
+                // ดึง sellout rows ของเดือนปัจจุบัน — ใช้ SalesDashboard cache ถ้ามี
+                let allRows = [];
+                try {
+                    if (typeof SalesDashboard !== 'undefined' && SalesDashboard._loadChunks) {
+                        allRows = await SalesDashboard._loadChunks(nowYM);
+                    } else {
+                        const key = (typeof Dashboard !== 'undefined' && Dashboard._ymKeyMap?.[nowYM]) || nowYM;
+                        const cs  = await db.collection('sellout').doc(key).collection('chunks').get();
+                        cs.forEach(d => allRows = allRows.concat(d.data().rows || []));
+                    }
+                } catch(e) { continue; }
+
+                // กรองเฉพาะ sCode ของ sales คนนี้
+                const myRows = username
+                    ? allRows.filter(r => String(r.sCode || '').toUpperCase() === username)
+                    : allRows;
+
+                // หา custCode ที่ซื้อสินค้าใน campaign นี้จริงๆ
+                const boughtStores = new Set(
+                    myRows
+                        .filter(r => kws.some(k =>
+                            (r.prodCode || '').toLowerCase().includes(k) ||
+                            (r.prodName || '').toLowerCase().includes(k)
+                        ))
+                        .map(r => String(r.custCode || '').trim())
+                );
+
+                // ใส่ icon เฉพาะร้านที่ซื้อแล้ว
+                boughtStores.forEach(custCode => {
+                    if (!icons[custCode]) icons[custCode] = [];
+                    if (!icons[custCode].find(x => x.iconUrl === c.iconUrl)) {
+                        icons[custCode].push({ iconUrl: c.iconUrl, name: c.name });
+                    }
+                });
+            }
+
+            State.campaignIcons = icons;
+            console.log(`[CampaignIcons] ${Object.keys(icons).length} stores bought campaign products`);
+            if (State.isLoaded) {
+                try { if (State.currentDay) Processor.routeList(); } catch(e) {}
+                try { Processor.stores(); } catch(e) {}
+            }
+        } catch(e) {
+            console.warn('_loadCampaignIcons:', e);
+        }
+    },
     _getWithTimeout: (ref, ms = 8000) =>
         Promise.race([ref.get(), new Promise((_,rej) => setTimeout(() => rej(new Error('timeout')), ms))]),
 
@@ -497,6 +577,8 @@ const App = {
                     State.isLoaded = true;
                     if (typeof CalendarCtrl !== 'undefined') CalendarCtrl.init();
                     waitForLeaflet(() => MapCtrl.initAndDraw());
+                    // ✅ โหลด campaign icons background
+                    App._loadCampaignIcons().catch(() => {});
                 }
             }
         };
@@ -709,12 +791,20 @@ const Processor = {
         const html = list.map((s, i) => {
             const seq     = s.seqs?.[State.currentDay] || i + 1;
             const navLink = `https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}&travelmode=driving`;
+
+            // ✅ Campaign icons — แสดงข้าง KPI button
+            const campIcons = (State.campaignIcons?.[s.id] || [])
+                .map(c => `<img src="${c.iconUrl}" title="${c.name}"
+                    style="width:22px;height:22px;border-radius:6px;object-fit:cover;border:1.5px solid #e5e7eb;box-shadow:0 1px 3px rgba(0,0,0,0.1);"
+                    onerror="this.style.display='none'">`).join('');
+
             return `
             <div data-id="${s.id}" class="store-item bg-white p-2.5 rounded-xl border shadow-sm flex items-center gap-2 relative mb-2.5">
                 <div class="drag-handle text-gray-300 px-1 cursor-grab active:cursor-grabbing">≡</div>
                 <div data-seq class="w-7 h-7 rounded-full bg-blue-600 text-white flex items-center justify-center font-black text-xs shrink-0 shadow-sm">${seq}</div>
                 <div class="flex-1 font-bold text-sm text-gray-800 leading-tight cursor-pointer truncate" onclick="UI.openModal('${s.id}')">${s.name}</div>
                 <div class="flex items-center gap-1.5 shrink-0">
+                    ${campIcons}
                     <button onclick="UI.openModal('${s.id}')" class="bg-blue-50 hover:bg-blue-100 text-blue-600 px-2 py-1.5 rounded-lg font-bold text-[10px] border border-blue-100 transition active:scale-95">📊 KPI</button>
                     <a href="${navLink}" target="_blank" class="bg-emerald-50 hover:bg-emerald-100 text-emerald-600 px-2 py-1.5 rounded-lg font-bold text-[10px] text-center border border-emerald-100 transition active:scale-95">🚗 นำทาง</a>
                 </div>
@@ -725,7 +815,7 @@ const Processor = {
         c.innerHTML = html || '<p class="text-center text-gray-400 mt-5">ไม่มีคิวงาน</p>';
 
         const _markets = getDayMarkets(State.currentDay);
-        const _dayNum  = State.currentDay.replace('Day ', '');
+        const _dayNum  = State.currentDay ? State.currentDay.replace('Day ', '') : '';
         const _mkt     = _markets ? ' · ' + _markets.split(' · ')[0] : '';
         document.getElementById('route-title').innerText = `Day ${_dayNum}${_mkt} (${list.length} ร้าน)`;
 

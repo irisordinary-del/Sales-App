@@ -202,6 +202,26 @@ const SkuDist = {
                             <input id="skudist-c-end" type="text" placeholder="เช่น 2025_03"
                                 class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-pink-300 font-mono">
                         </div>
+                        <div class="sm:col-span-2">
+                            <label class="block text-xs font-bold text-gray-500 uppercase mb-1.5">🖼️ รูปสินค้า <span class="text-gray-400 font-normal normal-case">(แสดงข้าง KPI ในแอป Sales)</span></label>
+                            <div class="flex gap-3 items-center">
+                                <div id="skudist-icon-preview"
+                                    style="width:56px;height:56px;border-radius:12px;border:2px dashed #e5e7eb;background:#f9fafb;overflow:hidden;flex-shrink:0;display:flex;align-items:center;justify-content:center;cursor:pointer;"
+                                    onclick="document.getElementById('skudist-icon-file').click()">
+                                    <span style="font-size:22px;">🖼️</span>
+                                </div>
+                                <div class="flex-1">
+                                    <input type="file" id="skudist-icon-file" accept="image/*" style="display:none"
+                                        onchange="SkuDist._processIcon(this)">
+                                    <input id="skudist-c-icon" type="hidden" value="">
+                                    <button onclick="document.getElementById('skudist-icon-file').click()"
+                                        class="w-full bg-gray-50 hover:bg-gray-100 border border-dashed border-gray-300 rounded-xl px-4 py-2 text-sm font-bold text-gray-500 transition text-left flex items-center gap-2">
+                                        <span>📁</span> เลือกรูปจากเครื่อง
+                                    </button>
+                                    <div id="skudist-icon-status" class="text-xs text-gray-400 mt-1.5">รองรับ JPG, PNG — ระบบจะย่อรูปอัตโนมัติ ไม่ต้องใช้ Storage</div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
 
                     <!-- Target Coverage ต่อสาย -->
@@ -338,10 +358,75 @@ const SkuDist = {
         document.getElementById('skudist-c-start').value = c.startYM || '';
         document.getElementById('skudist-c-end').value   = c.endYM   || '';
         document.getElementById('skudist-c-default-target').value = c.defaultTarget ?? 80;
+        // ✅ โหลด iconUrl เดิม
+        const iconEl    = document.getElementById('skudist-c-icon');
+        const previewEl = document.getElementById('skudist-icon-preview');
+        const statusEl  = document.getElementById('skudist-icon-status');
+        if (iconEl) iconEl.value = c.iconUrl || '';
+        if (previewEl) {
+            previewEl.innerHTML = c.iconUrl
+                ? `<img src="${c.iconUrl}" style="width:100%;height:100%;object-fit:cover;" onerror="this.parentElement.innerHTML='<span style=font-size:20px;color:#d1d5db>🖼️</span>'">`
+                : '<span style="font-size:20px;color:#d1d5db;">🖼️</span>';
+        }
+        if (statusEl) statusEl.innerHTML = c.iconUrl
+            ? '<span style="color:#10b981">✅ มีรูปอยู่แล้ว — เลือกใหม่เพื่อเปลี่ยน</span>'
+            : 'รองรับ JPG, PNG, WebP — แนะนำขนาด 100×100px';
         SkuDist._targetUnit = c.targetUnit || 'pct';
         SkuDist._setTargetUnit(SkuDist._targetUnit);
         SkuDist._renderGroups();
         document.getElementById('skudist-campaign-modal').classList.remove('hidden');
+    },
+
+    // ✅ preview icon URL แบบ real-time
+    _previewIcon: (src) => {
+        const el = document.getElementById('skudist-icon-preview');
+        if (!el) return;
+        if (src) {
+            el.innerHTML = `<img src="${src}" style="width:100%;height:100%;object-fit:cover;border-radius:10px;"
+                onerror="this.parentElement.innerHTML='<span style=font-size:22px>❌</span>'">`;
+        } else {
+            el.innerHTML = '<span style="font-size:22px;">🖼️</span>';
+        }
+    },
+
+    // ✅ resize รูปเป็น 64×64px แล้วแปลงเป็น Base64 เก็บใน Firestore
+    // ไม่ต้องใช้ Firebase Storage เลย
+    _processIcon: (input) => {
+        const file = input.files?.[0];
+        if (!file) return;
+        const statusEl = document.getElementById('skudist-icon-status');
+        const hiddenEl = document.getElementById('skudist-c-icon');
+        if (file.size > 5 * 1024 * 1024) {
+            if (statusEl) statusEl.innerHTML = '<span style="color:#ef4444">❌ รูปใหญ่เกิน 5MB</span>';
+            return;
+        }
+        if (statusEl) statusEl.innerHTML = '⏳ กำลังประมวลผล...';
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const img = new Image();
+            img.onload = () => {
+                const SIZE = 64;
+                const canvas = document.createElement('canvas');
+                canvas.width = SIZE; canvas.height = SIZE;
+                const ctx = canvas.getContext('2d');
+                const side = Math.min(img.width, img.height);
+                const sx = (img.width - side) / 2;
+                const sy = (img.height - side) / 2;
+                ctx.drawImage(img, sx, sy, side, side, 0, 0, SIZE, SIZE);
+                const base64 = canvas.toDataURL('image/jpeg', 0.85);
+                const sizeKB = Math.round(base64.length * 0.75 / 1024);
+                if (hiddenEl) hiddenEl.value = base64;
+                SkuDist._previewIcon(base64);
+                if (statusEl) statusEl.innerHTML =
+                    `<span style="color:#10b981">✅ พร้อมแล้ว — ${SIZE}×${SIZE}px (~${sizeKB}KB)</span>`;
+            };
+            img.onerror = () => {
+                if (statusEl) statusEl.innerHTML = '<span style="color:#ef4444">❌ โหลดรูปไม่สำเร็จ</span>';
+            };
+            img.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+        input.value = '';
     },
 
     // render input target รายสาย
@@ -592,9 +677,10 @@ const SkuDist = {
 
     // ─── Save Campaign ────────────────────────────────────────────────────
     saveCampaign: async () => {
-        const name   = document.getElementById('skudist-c-name').value.trim();
+        const name    = document.getElementById('skudist-c-name').value.trim();
         const startYM = document.getElementById('skudist-c-start').value.trim();
         const endYM   = document.getElementById('skudist-c-end').value.trim();
+        const iconUrl = (document.getElementById('skudist-c-icon')?.value || '').trim();
 
         if (!name) return UI.showErrorToast('⚠️ กรุณาใส่ชื่อ Campaign');
         if (!/^\d{4}_\d{2}$/.test(startYM)) return UI.showErrorToast('⚠️ เดือนเริ่มต้องเป็น YYYY_MM');
@@ -610,6 +696,7 @@ const SkuDist = {
             const defaultTarget = parseFloat(document.getElementById('skudist-c-default-target')?.value) || 80;
             const data = {
                 name, startYM, endYM,
+                iconUrl:       iconUrl || '',  // ✅ บันทึก URL รูปสินค้า
                 centerId:      SkuDist._centerDoc(),
                 groups:        SkuDist._groups,
                 defaultTarget,
