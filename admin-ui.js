@@ -119,6 +119,81 @@ const UI = {
         setTimeout(() => { el.remove(); UI._routeLoadEl = null; }, 600);
     },
 
+    // ✅ Toast แจ้งสายที่โหลดไม่สำเร็จ + ปุ่ม Retry
+    _showRetryFailedToast: (failedNames, col) => {
+        const old = document.getElementById('_retry-failed-toast');
+        if (old) old.remove();
+
+        const el = document.createElement('div');
+        el.id = '_retry-failed-toast';
+        el.style.cssText = [
+            'position:fixed', 'bottom:24px', 'right:20px', 'z-index:9990',
+            'background:#7f1d1d', 'color:#fecaca',
+            'padding:12px 16px', 'border-radius:14px',
+            'font-family:Prompt,sans-serif', 'font-size:13px',
+            'box-shadow:0 8px 24px rgba(0,0,0,0.4)',
+            'min-width:220px', 'display:flex', 'flex-direction:column', 'gap:10px',
+        ].join(';');
+        el.innerHTML = `
+            <div style="font-weight:800;font-size:12px;color:#fca5a5;">
+                ⚠️ โหลดไม่สำเร็จ ${failedNames.length} สาย
+            </div>
+            <div style="font-size:11px;color:#f87171;line-height:1.6;">
+                ${failedNames.join(', ')}
+            </div>
+            <div style="display:flex;gap:8px;">
+                <button id="_retry-btn"
+                    style="flex:1;background:#dc2626;color:#fff;border:none;border-radius:8px;
+                           padding:7px 0;font-size:12px;font-weight:800;cursor:pointer;
+                           font-family:Prompt,sans-serif;">
+                    🔄 โหลดใหม่
+                </button>
+                <button onclick="document.getElementById('_retry-failed-toast').remove()"
+                    style="background:#991b1b;color:#fca5a5;border:none;border-radius:8px;
+                           padding:7px 10px;font-size:12px;font-weight:700;cursor:pointer;
+                           font-family:Prompt,sans-serif;">
+                    ✕
+                </button>
+            </div>`;
+        document.body.appendChild(el);
+
+        document.getElementById('_retry-btn').onclick = async () => {
+            el.remove();
+            const retryList = [...failedNames];
+            State.db._failedRoutes = {};
+            UI.showRouteLoadPopup(0, retryList.length);
+
+            const _getWithTimeout = (ref, ms = 15000) =>
+                Promise.race([
+                    ref.get(),
+                    new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))
+                ]);
+
+            let done = 0;
+            const stillFailed = [];
+            for (const name of retryList) {
+                try {
+                    const d = await _getWithTimeout(col.doc(name));
+                    State.db.routes[name] = d.exists ? (d.data().stores || []) : [];
+                    done++;
+                    UI.updateRouteLoadPopup(done, retryList.length, name);
+                    UI.renderAllRoutes();
+                } catch(e) {
+                    State.db.routes[name] = null;
+                    stillFailed.push(name);
+                    done++;
+                    UI.updateRouteLoadPopup(done, retryList.length, name);
+                }
+            }
+            UI.hideRouteLoadPopup();
+            if (stillFailed.length > 0) {
+                UI._showRetryFailedToast(stillFailed, col);
+            } else {
+                UI.showSaveToast('✅ โหลดสำเร็จทุกสายแล้ว');
+            }
+        };
+    },
+
     showConfirm: (message, onConfirm, onCancel) => {
         const overlay = document.createElement('div');
         overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.55);z-index:9999;display:flex;align-items:center;justify-content:center;';
