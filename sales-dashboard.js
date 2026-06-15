@@ -248,28 +248,33 @@ const SalesDashboard = {
 
         SalesDashboard._chunkInflight[cacheKey] = (async () => {
             try {
-                // ✅ FIX: ใช้ key จาก _ymKeyMap รองรับทั้ง "2026_06" และ "402_2026_06"
+                // ✅ ลอง key จาก _ymKeyMap ก่อน (อาจเป็น 402_2026_06)
                 const key  = SalesDashboard._ymKeyMap?.[ym] || ym;
                 const snap = await db.collection('sellout').doc(key).collection('chunks').get();
-                if (snap.empty && key !== ym) {
-                    // fallback: ลอง key เดิม
+
+                let rows = [];
+                if (!snap.empty) {
+                    snap.docs
+                        .sort((a,b) => (a.data().index||0)-(b.data().index||0))
+                        .forEach(doc => { if (Array.isArray(doc.data().rows)) rows = rows.concat(doc.data().rows); });
+                }
+
+                // ✅ ถ้า rows ว่าง และ key ต่างจาก ym → fallback ไป YYYY_MM format เก่า
+                if (rows.length === 0 && key !== ym) {
                     const snap2 = await db.collection('sellout').doc(ym).collection('chunks').get();
                     if (!snap2.empty) {
                         let rows2 = [];
-                        snap2.docs.sort((a,b) => (a.data().index||0)-(b.data().index||0))
+                        snap2.docs
+                            .sort((a,b) => (a.data().index||0)-(b.data().index||0))
                             .forEach(doc => { if (Array.isArray(doc.data().rows)) rows2 = rows2.concat(doc.data().rows); });
-                        SalesDashboard._chunkCache[cacheKey] = rows2;
-                        return rows2;
+                        if (rows2.length > 0) {
+                            console.log(`[SalesDash] ${ym}: fallback YYYY_MM → ${rows2.length} rows`);
+                            SalesDashboard._chunkCache[cacheKey] = rows2;
+                            return rows2;
+                        }
                     }
                 }
-                if (snap.empty) {
-                    SalesDashboard._chunkCache[cacheKey] = [];
-                    return [];
-                }
-                let rows = [];
-                snap.docs
-                    .sort((a, b) => (a.data().index || 0) - (b.data().index || 0))
-                    .forEach(doc => { if (Array.isArray(doc.data().rows)) rows = rows.concat(doc.data().rows); });
+
                 SalesDashboard._chunkCache[cacheKey] = rows;
                 return rows;
             } catch (e) {

@@ -226,6 +226,8 @@ const App = {
         if (session?.role === 'sales') {
             State.myRoute  = session.username;
             State.viewMode = 'sales';
+            // ✅ FIX: set centerId สำหรับ sales ด้วย (ใช้ดึง sellout ถูก path)
+            State.centerId = session.centerId || State.myRoute.match(/^(\d+)/)?.[1] || '';
             App.start();
         } else if (session && ['route_supervisor','asm'].includes(session.role)) {
             State.myRoute  = session.username;
