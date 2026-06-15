@@ -559,7 +559,7 @@ const SalesDashboard = {
         if (empty) empty.style.display = 'block';
         // Clear all KPIs
         ['db-kpi-total','db-kpi-pct','db-kpi-shops','db-kpi-avgsku','db-kpi-avgvol-v','db-kpi-avgvol-c','db-kpi-inv'].forEach(id => SalesDashboard._setText(id, '—'));
-        ['db-cat-body','db-shop-body'].forEach(id => {
+        ['db-cat-body'].forEach(id => {
             const el = document.getElementById(id);
             if (el) el.innerHTML = '<div style="text-align:center;padding:12px;color:#9ca3af;font-size:12px;">ยังไม่มีข้อมูล</div>';
         });
@@ -1214,7 +1214,7 @@ const SupervisorDashboard = {
     // ─── ตารางรายสายด้านล่าง ─────────────────────────────────────────────
     _renderRouteTable: (mainRows) => {
         const shopEl = document.getElementById('db-shop-body');
-        if (!shopEl) return;
+        if (!shopEl) return; // UI ถูกเอาออกแล้ว — dead code กัน future refactor
         const byRoute = {};
         mainRows.forEach(r => {
             const s = String(r.sCode||'').toUpperCase();

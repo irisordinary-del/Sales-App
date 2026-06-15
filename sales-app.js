@@ -177,7 +177,6 @@ const UI = {
         if (!s) return;
         document.getElementById('m-name').textContent     = s.name;
         document.getElementById('m-id').textContent       = 'ID: ' + s.id;
-        document.getElementById('m-shoptype').textContent = s.shopType || '';
         document.getElementById('m-nav-btn').onclick = () =>
             window.open(`https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}&travelmode=driving`);
         if (typeof StoreHistory !== 'undefined') StoreHistory.openFor(id);
