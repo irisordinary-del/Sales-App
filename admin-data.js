@@ -325,8 +325,11 @@ const App = {
     sync: () => {
         const rs = document.getElementById('routeSelector');
         if (rs) {
-            const sorted = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
-            const newHTML = sorted.map(r => `<option value="${r}">${r}</option>`).join('');
+            // ✅ FIX: ใช้ routeList (ครบทุกสาย) แทน Object.keys(routes) ที่อาจยังโหลดไม่ครบ
+            const fullList = (State.db.routeList && State.db.routeList.length > 0)
+                ? [...State.db.routeList].sort((a,b) => a.localeCompare(b,'th',{numeric:true}))
+                : Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
+            const newHTML = fullList.map(r => `<option value="${r}">${r}</option>`).join('');
             if (rs.innerHTML !== newHTML) rs.innerHTML = newHTML;
             rs.value = State.localActiveRoute;
         }
