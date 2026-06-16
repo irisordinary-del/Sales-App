@@ -132,29 +132,61 @@ const App = {
 
         const BATCH = 4;
         let loadedCount = 1; // นับ active route ที่โหลดไปแล้ว
+
+        // ✅ helper: get พร้อม timeout + retry 1 ครั้ง กัน WebChannel transport hang
+        const _getWithTimeout = (ref, ms = 12000) =>
+            Promise.race([
+                ref.get(),
+                new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))
+            ]);
+
+        const _loadOne = async (name) => {
+            try {
+                const d = await _getWithTimeout(col.doc(name));
+                State.db.routes[name] = d.exists ? (d.data().stores || []) : [];
+                delete State.db._failedRoutes?.[name]; // เคลียร์ failed flag ถ้า retry สำเร็จ
+                App.log(`  ✅ ${name}: ${State.db.routes[name].length} ร้าน`);
+                return true;
+            } catch(e) {
+                // retry 1 ครั้ง (กรณี WebChannel หลุดชั่วคราว)
+                try {
+                    App.log(`  🔄 retry ${name}...`);
+                    await new Promise(r => setTimeout(r, 1500));
+                    const d2 = await _getWithTimeout(col.doc(name), 15000);
+                    State.db.routes[name] = d2.exists ? (d2.data().stores || []) : [];
+                    delete State.db._failedRoutes?.[name];
+                    App.log(`  ✅ ${name} (retry): ${State.db.routes[name].length} ร้าน`);
+                    return true;
+                } catch(e2) {
+                    App.log(`  ⚠️ ${name}: unavailable — ${e2.message}`);
+                    // ✅ ไม่ set [] — เก็บ failed flag ไว้ให้ retry ได้ทีหลัง
+                    if (!State.db._failedRoutes) State.db._failedRoutes = {};
+                    State.db._failedRoutes[name] = true;
+                    // ถ้ายังไม่มีข้อมูลเลย ใส่ undefined sentinel (ไม่ใช่ [])
+                    if (!State.db.routes[name]) State.db.routes[name] = null;
+                    return false;
+                }
+            }
+        };
+
         // ✅ ไม่ await — ปล่อยทำงาน background จริงๆ
         (async () => {
             for (let i = 0; i < remaining.length; i += BATCH) {
                 const batch = remaining.slice(i, i + BATCH);
-                await Promise.all(batch.map(name =>
-                    col.doc(name).get()
-                        .then(d => {
-                            State.db.routes[name] = d.exists ? (d.data().stores || []) : [];
-                            App.log(`  ✅ ${name}: ${State.db.routes[name].length} ร้าน`);
-                            loadedCount++;
-                            UI.updateRouteLoadPopup(loadedCount, total, name);
-                            UI.renderAllRoutes();
-                        })
-                        .catch(e => {
-                            App.log(`  ⚠️ ${name}: ${e.code || e.message}`);
-                            State.db.routes[name] = [];
-                            loadedCount++;
-                            UI.updateRouteLoadPopup(loadedCount, total, name);
-                        })
-                ));
+                await Promise.all(batch.map(async name => {
+                    await _loadOne(name);
+                    loadedCount++;
+                    UI.updateRouteLoadPopup(loadedCount, total, name);
+                    UI.renderAllRoutes();
+                }));
             }
-            // โหลดครบทั้งหมด → จางหาย
             UI.hideRouteLoadPopup();
+
+            // ✅ ถ้ามี failed routes → แสดง toast + ปุ่ม retry
+            const failed = Object.keys(State.db._failedRoutes || {});
+            if (failed.length > 0) {
+                UI._showRetryFailedToast(failed, col);
+            }
         })();
     },
 
@@ -325,8 +357,11 @@ const App = {
     sync: () => {
         const rs = document.getElementById('routeSelector');
         if (rs) {
-            const sorted = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
-            const newHTML = sorted.map(r => `<option value="${r}">${r}</option>`).join('');
+            // ✅ FIX: ใช้ routeList (ครบทุกสาย) แทน Object.keys(routes) ที่อาจยังโหลดไม่ครบ
+            const fullList = (State.db.routeList && State.db.routeList.length > 0)
+                ? [...State.db.routeList].sort((a,b) => a.localeCompare(b,'th',{numeric:true}))
+                : Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
+            const newHTML = fullList.map(r => `<option value="${r}">${r}</option>`).join('');
             if (rs.innerHTML !== newHTML) rs.innerHTML = newHTML;
             rs.value = State.localActiveRoute;
         }
@@ -436,13 +471,22 @@ const App = {
         if (State.localActiveRoute === name) return;
         State.localActiveRoute = name;
         localStorage.setItem(`last_route_${App._currentPlanYM}`, name);
-        if (State.db.routes[name] === undefined) {
-            UI.showLoader('กำลังโหลดสาย ' + name + '...');
+        // null = failed ระหว่าง background load, undefined = ยังไม่โหลด → ทั้งคู่ fetch ใหม่
+        const needFetch = State.db.routes[name] === undefined || State.db.routes[name] === null;
+        if (needFetch) {
+            const isRetry = State.db.routes[name] === null;
+            UI.showLoader((isRetry ? '🔄 โหลดใหม่ ' : 'กำลังโหลด ') + name + '...');
             App.planRoutesCol(App._currentPlanYM).doc(name).get().then(d => {
                 State.db.routes[name] = d.exists ? (d.data().stores || []) : [];
+                if (State.db._failedRoutes) delete State.db._failedRoutes[name];
                 State.stores = State.db.routes[name];
                 App.sync(); MapCtrl.fitToStores(); UI.hideLoader();
-            }).catch(() => { State.stores = []; App.sync(); UI.hideLoader(); });
+            }).catch(() => {
+                State.db.routes[name] = null; // ยังไม่สำเร็จ — เก็บ null ไว้ retry ครั้งต่อไป
+                State.stores = [];
+                App.sync(); UI.hideLoader();
+                UI.showErrorToast('⚠️ โหลด ' + name + ' ไม่สำเร็จ กดสายนี้อีกครั้งเพื่อลอง');
+            });
         } else {
             State.stores = State.db.routes[name] || [];
             App.sync(); MapCtrl.fitToStores();

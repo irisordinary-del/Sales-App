@@ -7,7 +7,9 @@
 //   Tiles (maps)   → Stale-While-Revalidate
 // ==========================================
 
-const CACHE_VERSION = 'rp-v5';
+// ✅ Auto-bump: timestamp ถูก inject ตอน deploy โดย vercel.json build command
+// ไม่ต้องแก้มือทุกครั้งอีกแล้ว
+const CACHE_VERSION = 'rp-__BUILD_TS__';
 const STATIC_CACHE  = `${CACHE_VERSION}-static`;
 const TILE_CACHE    = `${CACHE_VERSION}-tiles`;
 const CDN_CACHE     = `${CACHE_VERSION}-cdn`;

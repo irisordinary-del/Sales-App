@@ -559,7 +559,7 @@ const SalesDashboard = {
         if (empty) empty.style.display = 'block';
         // Clear all KPIs
         ['db-kpi-total','db-kpi-pct','db-kpi-shops','db-kpi-avgsku','db-kpi-avgvol-v','db-kpi-avgvol-c','db-kpi-inv'].forEach(id => SalesDashboard._setText(id, '—'));
-        ['db-cat-body','db-shop-body'].forEach(id => {
+        ['db-cat-body'].forEach(id => {
             const el = document.getElementById(id);
             if (el) el.innerHTML = '<div style="text-align:center;padding:12px;color:#9ca3af;font-size:12px;">ยังไม่มีข้อมูล</div>';
         });
@@ -953,12 +953,14 @@ const SupervisorDashboard = {
     _amt: (r) => SupervisorDashboard._amtMode === 'gross' ? (r.gross||0) : (r.net||0),
     setAmtMode: (mode) => {
         SupervisorDashboard._amtMode = mode;
-        // อัป toggle button
         ['gross','net'].forEach(m => {
             const btn = document.getElementById('sup-db-btn-' + m);
             if (btn) btn.style.background = m === mode ? '#6366f1' : '#f3f4f6';
             if (btn) btn.style.color = m === mode ? '#fff' : '#374151';
         });
+        // ✅ ลบ _sup-campaign-section ก่อน _render() เพื่อกัน campaign ซ้ำ
+        const campEl = document.getElementById('_sup-campaign-section');
+        if (campEl) campEl.remove();
         SupervisorDashboard._render();
     },
 
@@ -1117,13 +1119,18 @@ const SupervisorDashboard = {
                     <span style="font-size:13px;font-weight:900;color:#2563eb;">🚐 Van (V-routes)</span>
                     <span style="font-size:14px;font-weight:900;color:#2563eb;">${fmt(totalV)}</span>
                 </div>
-                <div style="background:#eff6ff;border-radius:12px;padding:10px 12px;border:1px solid #bfdbfe;margin-bottom:8px;">
-                    <div style="font-size:9px;font-weight:700;color:#1d4ed8;margin-bottom:2px;">📋 บิลขาย</div>
-                    <div style="font-size:16px;font-weight:900;color:#1e40af;">${invCountV.toLocaleString()} บิล</div>
-                </div>
-                ${SupervisorDashboard._renderRouteBreakdown(vInvoiced, '#2563eb')}
+                ${SupervisorDashboard._renderVSummaryBoxes(vInvoiced, invCountV)}
+                ${SupervisorDashboard._renderRouteBreakdown(vInvoiced, '#2563eb', true)}
             </div>`;
         }
+
+        // ─── Campaign section (ใต้ target bar ใน db-cat-body) ──────────
+        // ✅ reset flag + ลบ element เก่าก่อนเสมอ กัน race จาก _render() เรียกซ้ำ
+        SupervisorDashboard._supCampRunning = false;
+        const _oldCamp = document.getElementById('_sup-campaign-section');
+        if (_oldCamp) _oldCamp.remove();
+        SupervisorDashboard._renderSupCampaigns();
+
 
         // ─── Route table ─────────────────────────────────────────────────
         SupervisorDashboard._renderRouteTable(mainRows);
@@ -1181,31 +1188,271 @@ const SupervisorDashboard = {
         modal.style.display = 'flex';
     },
 
-    _renderRouteBreakdown: (rows, color) => {
+    // ─── กล่องสรุป ASO / VPO / SKU รวมทุกสาย V ─────────────────────────
+    _renderVSummaryBoxes: (vInvoiced, invCountV) => {
+        const EXCL = SupervisorDashboard.EXCLUDED_BRANDS;
+        const byOutlet = {};
+        vInvoiced.forEach(r => {
+            if (EXCL.has(r.brandDesc)) return;
+            const cust = String(r.custCode || '').trim();
+            if (!cust) return;
+            if (!byOutlet[cust]) byOutlet[cust] = { skus: new Set(), vol: 0 };
+            const amt = SupervisorDashboard._amt(r);
+            byOutlet[cust].vol += amt;
+            if (r.prodCode) byOutlet[cust].skus.add(String(r.prodCode).trim());
+        });
+        const outlets = Object.values(byOutlet).filter(o => o.vol > 0);
+        const aso    = outlets.length;
+        const avgSku = aso > 0
+            ? (outlets.reduce((s,o) => s + o.skus.size, 0) / aso).toFixed(1)
+            : '—';
+        const vpo = aso > 0
+            ? Math.round(outlets.reduce((s,o) => s + o.vol, 0) / aso).toLocaleString('th-TH')
+            : '—';
+        return `
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px;">
+            <div style="background:#eff6ff;border-radius:12px;padding:10px 8px;border:1px solid #bfdbfe;text-align:center;">
+                <div style="font-size:9px;font-weight:700;color:#1d4ed8;margin-bottom:3px;">🏪 ASO</div>
+                <div style="font-size:18px;font-weight:900;color:#1e40af;">${aso.toLocaleString()}</div>
+                <div style="font-size:9px;color:#93c5fd;margin-top:1px;">ร้านที่มียอด</div>
+            </div>
+            <div style="background:#eff6ff;border-radius:12px;padding:10px 8px;border:1px solid #bfdbfe;text-align:center;">
+                <div style="font-size:9px;font-weight:700;color:#1d4ed8;margin-bottom:3px;">💰 VPO</div>
+                <div style="font-size:18px;font-weight:900;color:#1e40af;">${vpo}</div>
+                <div style="font-size:9px;color:#93c5fd;margin-top:1px;">ยอด/ร้าน</div>
+            </div>
+            <div style="background:#eff6ff;border-radius:12px;padding:10px 8px;border:1px solid #bfdbfe;text-align:center;">
+                <div style="font-size:9px;font-weight:700;color:#1d4ed8;margin-bottom:3px;">📦 SKU</div>
+                <div style="font-size:18px;font-weight:900;color:#1e40af;">${avgSku}</div>
+                <div style="font-size:9px;color:#93c5fd;margin-top:1px;">เฉลี่ย/ร้าน</div>
+            </div>
+        </div>`;
+    },
+
+    // ─── Campaign ของ Supervisor (ใต้ target bar) ─────────────────────
+    _supCampRunning: false,
+    _renderSupCampaigns: async () => {
+        if (SupervisorDashboard._supCampRunning) return;
+        SupervisorDashboard._supCampRunning = true;
+        const wrap = document.getElementById('db-cat-body');
+        if (!wrap) { SupervisorDashboard._supCampRunning = false; return; }
+
+        // โหลด campaigns
+        let campaigns = SalesDashboard._campaigns || [];
+        if (!campaigns.length) {
+            try {
+                const snap = await db.collection('skuDistribution').get();
+                campaigns = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+                SalesDashboard._campaigns = campaigns;
+            } catch(e) { SupervisorDashboard._supCampRunning = false; return; }
+        }
+
+        const nowYM = typeof DateUtil !== 'undefined'
+            ? DateUtil.currentYM()
+            : (() => { const d = new Date(); return `${d.getFullYear()}_${String(d.getMonth()+1).padStart(2,'0')}`; })();
+
+        const active = campaigns.filter(c =>
+            c.startYM <= nowYM && c.endYM >= nowYM && (c.groups || []).length > 0
+        );
+        if (!active.length) { SupervisorDashboard._supCampRunning = false; return; }
+
+        const allRows = SupervisorDashboard._allRows || [];
+        const targets = SupervisorDashboard._targets || {};
+
+        // routeList เรียงตามรหัส
+        const routeSet = new Set();
+        allRows.forEach(r => { if (r.sCode) routeSet.add(String(r.sCode).toUpperCase()); });
+        const routeList = [...routeSet].sort((a,b) => a.localeCompare(b, 'th', { numeric: true }));
+
+        // ร้านที่มียอดแต่ละสาย
+        const routeOutlets = {};
+        allRows.forEach(r => {
+            const s = String(r.sCode || '').toUpperCase();
+            const c = String(r.custCode || '').trim();
+            if (!s || !c) return;
+            if (!routeOutlets[s]) routeOutlets[s] = new Set();
+            routeOutlets[s].add(c);
+        });
+
+        // ─── 1 campaign = 1 กล่อง เหมือน Sales ───────────────────────
+        const cardsHtml = active.map(campaign => {
+            const groups        = campaign.groups || [];
+            const targetUnit    = campaign.targetUnit || 'pct';
+            const defaultTarget = campaign.defaultTarget ?? 80;
+            const rawTargets    = campaign.routeTargets || {};
+            const iconUrl       = campaign.iconUrl || '';
+
+            const startLbl = typeof DateUtil !== 'undefined' ? DateUtil.ymToThaiShort(campaign.startYM) : campaign.startYM;
+            const endLbl   = typeof DateUtil !== 'undefined' ? DateUtil.ymToThaiShort(campaign.endYM)   : campaign.endYM;
+
+            // icon
+            const iconHtml = iconUrl
+                ? `<img src="${iconUrl}" style="width:36px;height:36px;border-radius:8px;object-fit:cover;flex-shrink:0;" />`
+                : '';
+
+            // แต่ละ group = 1 section ภายในกล่อง (แสดงทุก route ใต้ group)
+            const groupsHtml = groups.map(g => {
+                const kws = (g.keywords || []).map(k => k.toLowerCase());
+
+                // match rows per route
+                const byRoute = {};
+                allRows.forEach(r => {
+                    const s = String(r.sCode || '').toUpperCase();
+                    const c = String(r.custCode || '').trim();
+                    if (!s || !c) return;
+                    const code = (r.prodCode || '').toLowerCase();
+                    const name = (r.prodName || '').toLowerCase();
+                    if (!kws.some(k => code.includes(k) || name.includes(k))) return;
+                    if (!byRoute[s]) byRoute[s] = new Set();
+                    byRoute[s].add(c);
+                });
+
+                const routeBars = routeList.map(route => {
+                    const totalOutlets = routeOutlets[route]?.size || 0;
+                    if (!totalOutlets) return '';
+
+                    const boughtCount = byRoute[route]?.size || 0;
+                    const pct = Math.round(boughtCount / totalOutlets * 100);
+
+                    const rawTgt = rawTargets[route] ?? null;
+                    let tgtCount, tgtPct;
+                    if (rawTgt !== null) {
+                        if (targetUnit === 'count') {
+                            tgtCount = rawTgt;
+                            tgtPct   = totalOutlets > 0 ? Math.round(rawTgt / totalOutlets * 100) : 0;
+                        } else {
+                            tgtPct   = rawTgt;
+                            tgtCount = Math.round(tgtPct / 100 * totalOutlets);
+                        }
+                    } else {
+                        tgtPct   = defaultTarget;
+                        tgtCount = Math.round(tgtPct / 100 * totalOutlets);
+                    }
+
+                    const vs    = pct - tgtPct;
+                    const color = pct >= tgtPct ? '#10b981' : pct >= tgtPct * 0.8 ? '#f59e0b' : '#ef4444';
+
+                    return `
+                    <div style="margin-bottom:8px;">
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">
+                            <span style="font-size:11px;font-weight:800;color:#374151;">${route}</span>
+                            <span style="font-size:11px;font-weight:700;color:#374151;">
+                                ${boughtCount}/${tgtCount}
+                                <span style="font-size:10px;font-weight:900;color:${color};"> ${pct}%</span>
+                                <span style="font-size:9px;font-weight:600;color:${vs>=0?'#10b981':'#ef4444'};">${vs>=0?'+':''}${vs}%</span>
+                            </span>
+                        </div>
+                        <div style="height:6px;background:#e5e7eb;border-radius:99px;overflow:hidden;">
+                            <div style="width:${Math.min(pct,100)}%;height:6px;background:${color};border-radius:99px;"></div>
+                        </div>
+                    </div>`;
+                }).join('');
+
+                return `
+                <div style="margin-bottom:14px;">
+                    <div style="font-size:11px;font-weight:800;color:#ec4899;margin-bottom:8px;
+                                padding-bottom:4px;border-bottom:1px solid #fce7f3;">
+                        ${g.name}
+                    </div>
+                    ${routeBars || '<div style="font-size:10px;color:#9ca3af;">ไม่มีข้อมูล</div>'}
+                </div>`;
+            }).join('');
+
+            return `
+            <div style="background:#fff;border-radius:14px;padding:12px;
+                        border:1px solid #fce7f3;border-left:4px solid #ec4899;margin-bottom:10px;">
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+                    ${iconHtml}
+                    <div>
+                        <div style="font-size:12px;font-weight:900;color:#111827;">🎯 ${campaign.name}</div>
+                        <div style="font-size:10px;color:#9ca3af;">${startLbl} → ${endLbl}</div>
+                    </div>
+                </div>
+                ${groupsHtml}
+            </div>`;
+        }).join('');
+
+        const oldEl = document.getElementById('_sup-campaign-section');
+        if (oldEl) oldEl.remove();
+        const campDiv = document.createElement('div');
+        campDiv.id = '_sup-campaign-section';
+        campDiv.innerHTML = `
+            <div style="height:1px;background:#f3f4f6;margin:12px 0;"></div>
+            <div style="font-size:11px;font-weight:800;color:#9ca3af;margin-bottom:8px;">🎯 Campaign ที่กำลังดำเนินการ</div>
+            ${cardsHtml}`;
+        const dupEl = document.getElementById('_sup-campaign-section');
+        if (dupEl) dupEl.remove();
+        wrap.appendChild(campDiv);
+        SupervisorDashboard._supCampRunning = false;
+    },
+
+        _renderRouteBreakdown: (rows, color, sortByCode = false) => {
+        const EXCL = SupervisorDashboard.EXCLUDED_BRANDS;
         const byRoute = {};
         rows.forEach(r => {
             const s = String(r.sCode||'').toUpperCase();
             if (!s) return;
-            if (!byRoute[s]) byRoute[s] = { amt: 0, invs: new Set() };
-            byRoute[s].amt += SupervisorDashboard._amt(r);
-            if (r.invNum) byRoute[s].invs.add(r.invNum);
+            if (!byRoute[s]) byRoute[s] = {
+                amt: 0,
+                // byOutlet: custCode → { skus: Set, vol: number }
+                byOutlet: {},
+            };
+            const custCode = String(r.custCode || '').trim();
+            if (!custCode) return;
+            if (!byRoute[s].byOutlet[custCode]) byRoute[s].byOutlet[custCode] = { skus: new Set(), vol: 0 };
+            // ยอด + SKU — กรอง EXCLUDED_BRANDS เหมือน Sales dashboard
+            if (!EXCL.has(r.brandDesc)) {
+                const amt = SupervisorDashboard._amt(r);
+                byRoute[s].amt += amt;
+                byRoute[s].byOutlet[custCode].vol += amt;
+                if (r.prodCode) byRoute[s].byOutlet[custCode].skus.add(String(r.prodCode).trim());
+            }
         });
-        const sorted = Object.entries(byRoute).sort((a,b) => b[1].amt - a[1].amt);
+
+        const sorted = Object.entries(byRoute).sort((a,b) => sortByCode ? a[0].localeCompare(b[0],'th',{numeric:true}) : b[1].amt - a[1].amt);
         if (!sorted.length) return '<div style="font-size:11px;color:#9ca3af;padding:6px 0;">ไม่มีข้อมูล</div>';
-        const maxAmt = sorted[0][1].amt || 1;
+
         return sorted.map(([route, d]) => {
-            const barW  = Math.round((d.amt / maxAmt) * 100);
-            const tgt   = SupervisorDashboard._targets[route] || 0;
-            const pct   = tgt > 0 ? (d.amt / tgt * 100) : null;
-            const pctTxt = pct !== null ? (pct.toFixed(0) + '%') : '';
+            const tgt    = SupervisorDashboard._targets[route] || 0;
+            const pct    = tgt > 0 ? (d.amt / tgt * 100) : null;
+            // bar: ถ้ามี target ใช้ target เป็น max, ถ้าไม่มีใช้ยอดสูงสุดในกลุ่ม
+            const maxAmt = tgt > 0 ? tgt : (sorted[0][1].amt || 1);
+            const barW   = Math.min(Math.round((d.amt / maxAmt) * 100), 100);
+            const barColor = pct === null ? color
+                : pct >= 100 ? '#059669' : pct >= 80 ? '#d97706' : '#dc2626';
+
+            // ASO = ร้านที่มียอด > 0
+            const outlets = Object.values(d.byOutlet).filter(o => o.vol > 0);
+            const aso = outlets.length;
+
+            // SKU เฉลี่ยต่อร้าน
+            const avgSku = aso > 0
+                ? (outlets.reduce((s, o) => s + o.skus.size, 0) / aso).toFixed(1)
+                : '—';
+
+            // VPO = ยอดรวม ÷ ASO
+            const vpo = aso > 0
+                ? Math.round(d.amt / aso).toLocaleString('th-TH')
+                : '—';
+
+            // แสดง actual / target XX%
+            const rightTxt = tgt > 0
+                ? `${SupervisorDashboard._fmt(d.amt)} / ${SupervisorDashboard._fmt(tgt)} <span style="font-size:10px;font-weight:800;color:${barColor};">${pct.toFixed(0)}%</span>`
+                : `${SupervisorDashboard._fmt(d.amt)}`;
+
             return `
             <div style="margin-bottom:8px;">
-                <div style="display:flex;justify-content:space-between;margin-bottom:3px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">
                     <span style="font-size:11px;font-weight:800;color:#374151;">${route}</span>
-                    <span style="font-size:11px;font-weight:700;color:${color};">${SupervisorDashboard._fmt(d.amt)} ${pctTxt ? '<span style="color:#9ca3af;font-weight:400;font-size:10px;">'+pctTxt+'</span>' : ''}</span>
+                    <span style="font-size:11px;font-weight:700;color:#374151;">${rightTxt}</span>
                 </div>
-                <div style="height:6px;background:#f3f4f6;border-radius:99px;overflow:hidden;">
-                    <div style="height:6px;background:${color};border-radius:99px;width:${barW}%;opacity:0.7;"></div>
+                <div style="height:6px;background:#f3f4f6;border-radius:99px;overflow:hidden;margin-bottom:4px;">
+                    <div style="height:6px;background:${barColor};border-radius:99px;width:${barW}%;"></div>
+                </div>
+                <div style="display:flex;gap:10px;font-size:10px;color:#6b7280;font-weight:600;">
+                    <span>🏪 ASO <b style="color:#374151;">${aso}</b></span>
+                    <span>📦 SKU <b style="color:#374151;">${avgSku}</b></span>
+                    <span>💰 VPO <b style="color:#374151;">${vpo}</b></span>
                 </div>
             </div>`;
         }).join('');
@@ -1214,7 +1461,7 @@ const SupervisorDashboard = {
     // ─── ตารางรายสายด้านล่าง ─────────────────────────────────────────────
     _renderRouteTable: (mainRows) => {
         const shopEl = document.getElementById('db-shop-body');
-        if (!shopEl) return;
+        if (!shopEl) return; // UI ถูกเอาออกแล้ว — dead code กัน future refactor
         const byRoute = {};
         mainRows.forEach(r => {
             const s = String(r.sCode||'').toUpperCase();

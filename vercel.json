@@ -1,4 +1,6 @@
 {
+  "buildCommand": "sed -i \"s/__BUILD_TS__/$(date +%Y%m%d%H%M%S)/g\" sw.js",
+  "outputDirectory": ".",
   "headers": [
     {
       "source": "/sw.js",
