@@ -58,12 +58,15 @@ const UI = {
         const t = document.getElementById('save-toast');
         if (!t) return;
         t.style.background = '#dc2626';
+        // ✅ ยก z-index ให้สูงกว่า modal ทุกตัว
+        t.style.zIndex = '99999';
         document.getElementById('toast-msg').innerText = msg || 'เกิดข้อผิดพลาด';
         t.classList.remove('translate-y-24', 'opacity-0');
         setTimeout(() => {
             t.classList.add('translate-y-24', 'opacity-0');
             t.style.background = '';
-        }, 3000);
+            t.style.zIndex = '';
+        }, 3500);
     },
 
     // ─── Route Load Progress Popup ────────────────────────────────────────
