@@ -953,12 +953,14 @@ const SupervisorDashboard = {
     _amt: (r) => SupervisorDashboard._amtMode === 'gross' ? (r.gross||0) : (r.net||0),
     setAmtMode: (mode) => {
         SupervisorDashboard._amtMode = mode;
-        // อัป toggle button
         ['gross','net'].forEach(m => {
             const btn = document.getElementById('sup-db-btn-' + m);
             if (btn) btn.style.background = m === mode ? '#6366f1' : '#f3f4f6';
             if (btn) btn.style.color = m === mode ? '#fff' : '#374151';
         });
+        // ✅ ลบ _sup-campaign-section ก่อน _render() เพื่อกัน campaign ซ้ำ
+        const campEl = document.getElementById('_sup-campaign-section');
+        if (campEl) campEl.remove();
         SupervisorDashboard._render();
     },
 
@@ -1123,6 +1125,10 @@ const SupervisorDashboard = {
         }
 
         // ─── Campaign section (ใต้ target bar ใน db-cat-body) ──────────
+        // ✅ reset flag + ลบ element เก่าก่อนเสมอ กัน race จาก _render() เรียกซ้ำ
+        SupervisorDashboard._supCampRunning = false;
+        const _oldCamp = document.getElementById('_sup-campaign-section');
+        if (_oldCamp) _oldCamp.remove();
         SupervisorDashboard._renderSupCampaigns();
 
 
