@@ -1224,18 +1224,21 @@ const SupervisorDashboard = {
     },
 
     // ─── Campaign ของ Supervisor (ใต้ target bar) ─────────────────────
+    _supCampRunning: false,
     _renderSupCampaigns: async () => {
+        if (SupervisorDashboard._supCampRunning) return;
+        SupervisorDashboard._supCampRunning = true;
         const wrap = document.getElementById('db-cat-body');
-        if (!wrap) return;
+        if (!wrap) { SupervisorDashboard._supCampRunning = false; return; }
 
-        // โหลด campaigns ถ้ายังไม่มี
+        // โหลด campaigns
         let campaigns = SalesDashboard._campaigns || [];
         if (!campaigns.length) {
             try {
                 const snap = await db.collection('skuDistribution').get();
                 campaigns = snap.docs.map(d => ({ id: d.id, ...d.data() }));
                 SalesDashboard._campaigns = campaigns;
-            } catch(e) { return; }
+            } catch(e) { SupervisorDashboard._supCampRunning = false; return; }
         }
 
         const nowYM = typeof DateUtil !== 'undefined'
@@ -1245,17 +1248,17 @@ const SupervisorDashboard = {
         const active = campaigns.filter(c =>
             c.startYM <= nowYM && c.endYM >= nowYM && (c.groups || []).length > 0
         );
-        if (!active.length) return;
+        if (!active.length) { SupervisorDashboard._supCampRunning = false; return; }
 
-        const allRows  = SupervisorDashboard._allRows || [];
-        const targets  = SupervisorDashboard._targets || {};
+        const allRows = SupervisorDashboard._allRows || [];
+        const targets = SupervisorDashboard._targets || {};
 
-        // สร้าง routeList จาก sCode ที่มีใน allRows (V-routes) เรียงตามรหัส
+        // routeList เรียงตามรหัส
         const routeSet = new Set();
         allRows.forEach(r => { if (r.sCode) routeSet.add(String(r.sCode).toUpperCase()); });
         const routeList = [...routeSet].sort((a,b) => a.localeCompare(b, 'th', { numeric: true }));
 
-        // สร้าง byRoute custCode set — ร้านที่มียอดในแต่ละสาย (ASO denominator)
+        // ร้านที่มียอดแต่ละสาย
         const routeOutlets = {};
         allRows.forEach(r => {
             const s = String(r.sCode || '').toUpperCase();
@@ -1265,34 +1268,37 @@ const SupervisorDashboard = {
             routeOutlets[s].add(c);
         });
 
+        // ─── 1 campaign = 1 กล่อง เหมือน Sales ───────────────────────
         const cardsHtml = active.map(campaign => {
-            const groups        = campaign.groups        || [];
-            const targetUnit    = campaign.targetUnit    || 'pct';
+            const groups        = campaign.groups || [];
+            const targetUnit    = campaign.targetUnit || 'pct';
             const defaultTarget = campaign.defaultTarget ?? 80;
-            const rawTargets    = campaign.routeTargets  || {};
+            const rawTargets    = campaign.routeTargets || {};
+            const iconUrl       = campaign.iconUrl || '';
 
             const startLbl = typeof DateUtil !== 'undefined' ? DateUtil.ymToThaiShort(campaign.startYM) : campaign.startYM;
             const endLbl   = typeof DateUtil !== 'undefined' ? DateUtil.ymToThaiShort(campaign.endYM)   : campaign.endYM;
 
-            // render แต่ละ group → แต่ละ route
+            // icon
+            const iconHtml = iconUrl
+                ? `<img src="${iconUrl}" style="width:36px;height:36px;border-radius:8px;object-fit:cover;flex-shrink:0;" />`
+                : '';
+
+            // แต่ละ group = 1 section ภายในกล่อง (แสดงทุก route ใต้ group)
             const groupsHtml = groups.map(g => {
                 const kws = (g.keywords || []).map(k => k.toLowerCase());
 
-                // กรอง rows ที่ match keyword
-                const matchedRows = allRows.filter(r => {
+                // match rows per route
+                const byRoute = {};
+                allRows.forEach(r => {
+                    const s = String(r.sCode || '').toUpperCase();
+                    const c = String(r.custCode || '').trim();
+                    if (!s || !c) return;
                     const code = (r.prodCode || '').toLowerCase();
                     const name = (r.prodName || '').toLowerCase();
-                    return kws.some(k => code.includes(k) || name.includes(k));
-                });
-
-                // แยก matchedRows per route
-                const byRoute = {};
-                matchedRows.forEach(r => {
-                    const s = String(r.sCode || '').toUpperCase();
-                    if (!s) return;
+                    if (!kws.some(k => code.includes(k) || name.includes(k))) return;
                     if (!byRoute[s]) byRoute[s] = new Set();
-                    const c = String(r.custCode || '').trim();
-                    if (c) byRoute[s].add(c);
+                    byRoute[s].add(c);
                 });
 
                 const routeBars = routeList.map(route => {
@@ -1302,14 +1308,21 @@ const SupervisorDashboard = {
                     const boughtCount = byRoute[route]?.size || 0;
                     const pct = Math.round(boughtCount / totalOutlets * 100);
 
-                    // target ของสายนี้
                     const rawTgt = rawTargets[route] ?? null;
-                    const tgtPct = rawTgt !== null
-                        ? (targetUnit === 'count'
-                            ? (totalOutlets > 0 ? Math.round(rawTgt / totalOutlets * 100) : 0)
-                            : rawTgt)
-                        : defaultTarget;
-                    const tgtCount = Math.round(tgtPct / 100 * totalOutlets);
+                    let tgtCount, tgtPct;
+                    if (rawTgt !== null) {
+                        if (targetUnit === 'count') {
+                            tgtCount = rawTgt;
+                            tgtPct   = totalOutlets > 0 ? Math.round(rawTgt / totalOutlets * 100) : 0;
+                        } else {
+                            tgtPct   = rawTgt;
+                            tgtCount = Math.round(tgtPct / 100 * totalOutlets);
+                        }
+                    } else {
+                        tgtPct   = defaultTarget;
+                        tgtCount = Math.round(tgtPct / 100 * totalOutlets);
+                    }
+
                     const vs    = pct - tgtPct;
                     const color = pct >= tgtPct ? '#10b981' : pct >= tgtPct * 0.8 ? '#f59e0b' : '#ef4444';
 
@@ -1318,19 +1331,21 @@ const SupervisorDashboard = {
                         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">
                             <span style="font-size:11px;font-weight:800;color:#374151;">${route}</span>
                             <span style="font-size:11px;font-weight:700;color:#374151;">
-                                ${boughtCount} / ${tgtCount}
+                                ${boughtCount}/${tgtCount}
                                 <span style="font-size:10px;font-weight:900;color:${color};"> ${pct}%</span>
+                                <span style="font-size:9px;font-weight:600;color:${vs>=0?'#10b981':'#ef4444'};">${vs>=0?'+':''}${vs}%</span>
                             </span>
                         </div>
-                        <div style="height:7px;background:#e5e7eb;border-radius:99px;overflow:hidden;margin-bottom:2px;">
-                            <div style="width:${Math.min(pct,100)}%;height:7px;background:${color};border-radius:99px;"></div>
+                        <div style="height:6px;background:#e5e7eb;border-radius:99px;overflow:hidden;">
+                            <div style="width:${Math.min(pct,100)}%;height:6px;background:${color};border-radius:99px;"></div>
                         </div>
                     </div>`;
                 }).join('');
 
                 return `
                 <div style="margin-bottom:14px;">
-                    <div style="font-size:11px;font-weight:800;color:#ec4899;margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid #fce7f3;">
+                    <div style="font-size:11px;font-weight:800;color:#ec4899;margin-bottom:8px;
+                                padding-bottom:4px;border-bottom:1px solid #fce7f3;">
                         ${g.name}
                     </div>
                     ${routeBars || '<div style="font-size:10px;color:#9ca3af;">ไม่มีข้อมูล</div>'}
@@ -1338,14 +1353,19 @@ const SupervisorDashboard = {
             }).join('');
 
             return `
-            <div style="background:#fff;border-radius:14px;padding:12px;border:1px solid #fce7f3;border-left:4px solid #ec4899;margin-bottom:10px;">
-                <div style="font-size:12px;font-weight:900;color:#111827;margin-bottom:2px;">🎯 ${campaign.name}</div>
-                <div style="font-size:10px;color:#9ca3af;margin-bottom:10px;">${startLbl} → ${endLbl}</div>
+            <div style="background:#fff;border-radius:14px;padding:12px;
+                        border:1px solid #fce7f3;border-left:4px solid #ec4899;margin-bottom:10px;">
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+                    ${iconHtml}
+                    <div>
+                        <div style="font-size:12px;font-weight:900;color:#111827;">🎯 ${campaign.name}</div>
+                        <div style="font-size:10px;color:#9ca3af;">${startLbl} → ${endLbl}</div>
+                    </div>
+                </div>
                 ${groupsHtml}
             </div>`;
         }).join('');
 
-        // ลบอันเก่าและ flag ก่อน inject — กัน async race จาก _render() เรียกซ้ำ
         const oldEl = document.getElementById('_sup-campaign-section');
         if (oldEl) oldEl.remove();
         const campDiv = document.createElement('div');
@@ -1354,10 +1374,10 @@ const SupervisorDashboard = {
             <div style="height:1px;background:#f3f4f6;margin:12px 0;"></div>
             <div style="font-size:11px;font-weight:800;color:#9ca3af;margin-bottom:8px;">🎯 Campaign ที่กำลังดำเนินการ</div>
             ${cardsHtml}`;
-        // เช็คซ้ำอีกครั้งหลัง await (กัน race)
         const dupEl = document.getElementById('_sup-campaign-section');
         if (dupEl) dupEl.remove();
         wrap.appendChild(campDiv);
+        SupervisorDashboard._supCampRunning = false;
     },
 
         _renderRouteBreakdown: (rows, color, sortByCode = false) => {
