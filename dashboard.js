@@ -1620,6 +1620,7 @@ const Dashboard = {
                         style="flex:1;background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;padding:8px 12px;font-size:12px;outline:none;font-family:inherit;">
                     <button onclick="Dashboard._selectAllSku(true)" style="background:#f3f4f6;border:1px solid #e5e7eb;border-radius:8px;padding:6px 10px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;">ทั้งหมด</button>
                     <button onclick="Dashboard._selectAllSku(false)" style="background:#f3f4f6;border:1px solid #e5e7eb;border-radius:8px;padding:6px 10px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;">ล้าง</button>
+                    <button onclick="Dashboard._refreshSkuOptions()" title="สแกนหา SKU ใหม่จากข้อมูลล่าสุด" style="background:#eef2ff;color:#4f46e5;border:1px solid #c7d2fe;border-radius:8px;padding:6px 10px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;">🔄 รีเฟรช</button>
                 </div>
                 <div style="padding:8px 20px;background:#f8fafc;flex-shrink:0;border-bottom:1px solid #f1f5f9;">
                     <span id="sku-wl-count" style="font-size:11px;font-weight:700;color:#6366f1;"></span>
@@ -1641,21 +1642,42 @@ const Dashboard = {
 
     _skuOptions: [],
 
-    _ensureSkuOptions: async () => {
-        if (Dashboard._skuOptions.length > 0) return;
+    _ensureSkuOptions: async (force = false) => {
+        if (!force && Dashboard._skuOptions.length > 0) return;
         try {
             const snap = await cloudDB.collection('sellout').get();
-            const months = snap.docs.map(d => d.id)
-                .filter(ym => /^20\d{2}_(0[1-9]|1[0-2])$/.test(ym)).sort().reverse();
+            const cid  = (window.CENTER_ID || '').toUpperCase();
+
+            // ✅ FIX: รองรับ 2 format เหมือน _loadMonthList — "402_2026_06" (ใหม่) และ "2026_06" (เก่า)
+            // ของเดิม regex เช็คแค่ format เก่า ทำให้เดือนที่เขียนแบบใหม่ (มี centerId prefix) หลุดหมด
+            const ymMap = {}; // { '2026_06': '402_2026_06' } — เลือกใช้ version ที่มี centerId ก่อนถ้ามี
+            snap.docs.forEach(d => {
+                const id = d.id;
+                if (cid && id.startsWith(cid + '_')) {
+                    const ym = id.slice(cid.length + 1);
+                    if (/^20\d{2}_(0[1-9]|1[0-2])$/.test(ym)) ymMap[ym] = id;
+                } else if (/^20\d{2}_(0[1-9]|1[0-2])$/.test(id)) {
+                    if (!ymMap[id]) ymMap[id] = id;
+                }
+            });
+
+            const months = Object.keys(ymMap).sort().reverse();
             if (!months.length) return;
-            const chunks = await cloudDB.collection('sellout').doc(months[0]).collection('chunks').get();
+
             const seen = new Map();
-            chunks.docs.sort((a,b) => (a.data().index||0)-(b.data().index||0))
-                .forEach(doc => (doc.data().rows||[]).forEach(r => {
-                    const code = String(r.prodCode||'').trim();
-                    const name = String(r.prodName||'').trim();
-                    if (code && !seen.has(code)) seen.set(code, name);
-                }));
+            // ✅ FIX: สแกนทุกเดือนที่มี ไม่ใช่แค่เดือนล่าสุด — กัน SKU ใหม่ตกหล่นถ้ายังไม่ถูกเลือกเป็นเดือนที่แสดง
+            for (const ym of months) {
+                try {
+                    const chunks = await cloudDB.collection('sellout').doc(ymMap[ym]).collection('chunks').get();
+                    chunks.docs.sort((a, b) => (a.data().index || 0) - (b.data().index || 0))
+                        .forEach(doc => (doc.data().rows || []).forEach(r => {
+                            const code = String(r.prodCode || '').trim();
+                            const name = String(r.prodName || '').trim();
+                            if (code && !seen.has(code)) seen.set(code, name);
+                        }));
+                } catch (e) { console.warn('_ensureSkuOptions: ข้ามเดือน', ym, e); }
+            }
+
             Dashboard._skuOptions = [...seen.entries()]
                 .map(([code, name]) => ({ code, name }))
                 .sort((a,b) => a.code.localeCompare(b.code));
@@ -1683,6 +1705,13 @@ const Dashboard = {
     },
 
     _filterSkuList: (q) => Dashboard._renderSkuList(q.trim().toLowerCase()),
+
+    _refreshSkuOptions: async () => {
+        const listEl = document.getElementById('sku-wl-list');
+        if (listEl) listEl.innerHTML = '<div style="text-align:center;padding:24px;color:#9ca3af;font-size:13px;">⏳ กำลังสแกนหา SKU ใหม่...</div>';
+        await Dashboard._ensureSkuOptions(true);
+        Dashboard._renderSkuList('');
+    },
 
     _selectAllSku: (checked) => {
         document.querySelectorAll('#sku-wl-list input[type=checkbox]').forEach(cb => cb.checked = checked);

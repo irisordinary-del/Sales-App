@@ -324,13 +324,32 @@ const App = {
                         .map(r => String(r.custCode || '').trim())
                 );
 
-                console.log(`[CampaignIcons] ${c.name}: ${boughtStores.size} ร้านที่ซื้อตลอด campaign (${startYM}→${endYM})`);
+                // ✅ FIX: Campaign โหมด "ระบุร้านเอง" (เช่น ค่าเช่า Headboard เฉพาะร้าน)
+                // ต้องแสดง icon เฉพาะร้านที่อยู่ใน participantStores เท่านั้น
+                // ไม่งั้นร้านอื่นที่บังเอิญซื้อสินค้าตัวเดียวกัน (แต่ไม่ได้เข้าร่วมกิจกรรม) จะได้ icon ไปด้วย
+                let eligibleStores = boughtStores;
+                let pendingStores  = new Set(); // เข้าร่วมแล้วแต่ยังไม่ซื้อ — ใช้ mark แบบจางๆ ให้ sale รู้ว่าเป็นร้านเข้าร่วม
+                if (c.scopeMode === 'custom') {
+                    const participantSet = new Set(c.participantStores || []);
+                    eligibleStores = new Set([...boughtStores].filter(cc => participantSet.has(cc)));
+                    pendingStores  = new Set([...participantSet].filter(cc => !eligibleStores.has(cc)));
+                }
 
-                // ใส่ icon เฉพาะร้านที่ซื้อแล้ว
-                boughtStores.forEach(custCode => {
+                console.log(`[CampaignIcons] ${c.name}: ${eligibleStores.size} ร้านที่ซื้อตลอด campaign (${startYM}→${endYM})`);
+
+                // ใส่ icon เฉพาะร้านที่ซื้อแล้ว (และเข้าเงื่อนไข scope) — แสดงเต็มสี
+                eligibleStores.forEach(custCode => {
                     if (!icons[custCode]) icons[custCode] = [];
                     if (!icons[custCode].find(x => x.iconUrl === c.iconUrl)) {
-                        icons[custCode].push({ iconUrl: c.iconUrl, name: c.name });
+                        icons[custCode].push({ iconUrl: c.iconUrl, name: c.name, bought: true });
+                    }
+                });
+
+                // ✅ ร้านที่เข้าร่วมแต่ยังไม่ซื้อ — ใส่ icon แบบจาง ๆ ให้ sale เห็นว่า "ร้านนี้เข้าร่วมกิจกรรม รอผลักดัน"
+                pendingStores.forEach(custCode => {
+                    if (!icons[custCode]) icons[custCode] = [];
+                    if (!icons[custCode].find(x => x.iconUrl === c.iconUrl)) {
+                        icons[custCode].push({ iconUrl: c.iconUrl, name: c.name + ' — เข้าร่วม (ยังไม่ซื้อ)', bought: false });
                     }
                 });
             }
@@ -818,10 +837,18 @@ const Processor = {
             const navLink = `https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}&travelmode=driving`;
 
             // ✅ Campaign icons — แสดงข้าง KPI button
+            // เต็มสี = ซื้อแล้ว, จาง+เส้นประ = เข้าร่วมกิจกรรมแล้วแต่ยังไม่ซื้อ (โหมด "ระบุร้านเอง")
             const campIcons = (State.campaignIcons?.[s.id] || [])
-                .map(c => `<img src="${c.iconUrl}" title="${c.name}"
-                    style="width:22px;height:22px;border-radius:6px;object-fit:cover;border:1.5px solid #e5e7eb;box-shadow:0 1px 3px rgba(0,0,0,0.1);"
-                    onerror="this.style.display='none'">`).join('');
+                .map(c => c.bought === false
+                    ? `<span title="${c.name}" style="position:relative;display:inline-block;width:22px;height:22px;">
+                        <img src="${c.iconUrl}" style="width:22px;height:22px;border-radius:6px;object-fit:cover;border:1.5px dashed #f59e0b;opacity:0.45;"
+                            onerror="this.style.display='none'">
+                        <span style="position:absolute;top:-3px;right:-3px;width:9px;height:9px;background:#f59e0b;border-radius:50%;border:1.5px solid #fff;"></span>
+                    </span>`
+                    : `<img src="${c.iconUrl}" title="${c.name}"
+                        style="width:22px;height:22px;border-radius:6px;object-fit:cover;border:1.5px solid #e5e7eb;box-shadow:0 1px 3px rgba(0,0,0,0.1);"
+                        onerror="this.style.display='none'">`)
+                .join('');
 
             return `
             <div data-id="${s.id}" class="store-item bg-white p-2.5 rounded-xl border shadow-sm flex items-center gap-1.5 relative mb-2.5">
