@@ -65,9 +65,9 @@ const SkuDist = {
     },
 
     // ─── โหลด prodCode/prodName options ─────────────────────────────────
-    // ลำดับ: 1) sellout (3 เดือนล่าสุด รวม SKU)  2) v1_raw_chunks (fallback)
-    _loadProdOptions: async () => {
-        if (SkuDist._allProdOptions.length > 0) return;
+    // ลำดับ: 1) sellout (ทุกเดือนตั้งแต่เริ่มมีข้อมูล รวม SKU)  2) v1_raw_chunks (fallback)
+    _loadProdOptions: async (force = false) => {
+        if (!force && SkuDist._allProdOptions.length > 0) return;
         const seen = new Map();
 
         const extractFromRows = (rows) => {
@@ -81,16 +81,29 @@ const SkuDist = {
         // ── แหล่งที่ 1: sellout chunks (normalized rows มี prodCode/prodName) ──
         try {
             const listSnap = await cloudDB.collection('sellout').get();
-            const months = listSnap.docs
-                .map(d => d.id)
-                .filter(id => /^\d{4}_\d{2}$/.test(id))
-                .sort().reverse();
+            const cid = (window.CENTER_ID || '').toUpperCase();
 
-            // โหลด 3 เดือนล่าสุด → union SKU options ครบกว่าเดือนเดียว
-            const loadMonths = months.slice(0, 3);
+            // ✅ FIX: รองรับ 2 format เหมือน dashboard.js _loadMonthList —
+            // "402_2026_06" (ใหม่ มี centerId prefix) และ "2026_06" (เก่า)
+            // ของเดิม regex เช็คแค่ /^\d{4}_\d{2}$/ ทำให้ doc แบบใหม่หลุดหมด
+            const ymMap = {};
+            listSnap.docs.forEach(d => {
+                const id = d.id;
+                if (cid && id.startsWith(cid + '_')) {
+                    const ym = id.slice(cid.length + 1);
+                    if (/^20\d{2}_(0[1-9]|1[0-2])$/.test(ym)) ymMap[ym] = id;
+                } else if (/^20\d{2}_(0[1-9]|1[0-2])$/.test(id)) {
+                    if (!ymMap[id]) ymMap[id] = id;
+                }
+            });
+
+            const months = Object.keys(ymMap).sort().reverse();
+
+            // ✅ สแกนทุกเดือนตั้งแต่เริ่มมีข้อมูล ไม่จำกัด 3 เดือนล่าสุด — กัน SKU เก่าตกหล่นจาก autocomplete
+            const loadMonths = months;
             await Promise.all(loadMonths.map(async ym => {
                 try {
-                    const chunks = await cloudDB.collection('sellout').doc(ym)
+                    const chunks = await cloudDB.collection('sellout').doc(ymMap[ym])
                         .collection('chunks').get();
                     chunks.docs.forEach(doc => extractFromRows(doc.data().rows || []));
                 } catch(e) { /* ข้ามถ้า chunk ใดโหลดไม่ได้ */ }
@@ -556,6 +569,16 @@ const SkuDist = {
         if (g) g.name = val;
     },
 
+    _refreshProdOptions: async (gId, currentVal) => {
+        const dropdown = document.getElementById(`kw-dropdown-${gId}`);
+        if (dropdown) dropdown.innerHTML = `<div class="px-3 py-2.5 text-xs text-gray-400 flex items-center gap-2">
+            <span style="display:inline-block;width:12px;height:12px;border:2px solid #e5e7eb;border-top-color:#6366f1;border-radius:50%;animation:spin 0.7s linear infinite;"></span>
+            กำลังสแกนหา SKU ใหม่...
+        </div>`;
+        await SkuDist._loadProdOptions(true);
+        SkuDist._onKwInput(gId, currentVal);
+    },
+
     _removeKeyword: (gId, kw) => {
         const g = SkuDist._groups.find(x => x.id === gId);
         if (!g) return;
@@ -594,6 +617,8 @@ const SkuDist = {
                     ? '<span class="text-amber-600"> — ยังไม่มีข้อมูล sellout ในระบบ</span>'
                     : ''}
                 <br><button onclick="SkuDist._addKeywordRaw('${gId}','${qEsc}')" class="text-indigo-600 font-bold hover:underline mt-1 inline-block">+ เพิ่ม "${qEsc}" เป็น keyword ตรงๆ</button>
+                &nbsp;·&nbsp;
+                <button onclick="SkuDist._refreshProdOptions('${gId}', '${qEsc}')" class="text-gray-400 font-bold hover:underline mt-1 inline-block">🔄 รีเฟรช SKU ล่าสุด</button>
             </div>`;
             dropdown.classList.remove('hidden');
             return;
