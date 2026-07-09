@@ -1,6 +1,20 @@
 # 📁 Working Files Registry — Route Planner
-> อัพเดทล่าสุด: 2026-06-15
+> อัพเดทล่าสุด: 2026-07-09
 > ⚠️ ทุกครั้งที่แก้ไฟล์ ให้ดึงจาก /home/claude/ เท่านั้น ไม่ใช่จาก /mnt/user-data/uploads/
+
+## 🧹 Cleanup (2026-07-09) — ลบไฟล์ orphaned/ไม่ได้ใช้งานจริง
+ตรวจสอบทั้ง repo (syntax check + onclick/namespace wiring check ทุกไฟล์) พบว่าไฟล์ต่อไปนี้**ไม่ได้ถูกโหลด**จาก index.html/sales.html/center-select.html เลย จึงลบออกจาก working directory:
+- `sales-app_2.js` — เวอร์ชันเก่ากว่า sales-app.js (ขาด campaign icons, ขาด `_ok` flag, ขาด centerId fix)
+- `center-select.js` — center-select.html มี Modal/App logic ของตัวเองแบบ inline `<script>` แทนแล้ว ไม่ได้เรียกไฟล์นี้
+- `FEATURES_IMPLEMENTATION.js` — stub เริ่มต้นโปรเจกต์ ถูกแทนที่หมดแล้ว ไม่ได้ถูก include ที่ไหน
+- `firebase-chunks.js` (ChunkDB) — ระบบเปลี่ยนไปใช้ chunk structure ใน `sellout/` แทนแล้ว ไม่ได้ถูก include ที่ไหน
+
+**ต้องทำเพิ่มตอน deploy จริง**: ลบ 4 ไฟล์นี้ออกจาก GitHub repo ด้วย (ตอนนี้ลบแค่ใน working dir ของ Claude เท่านั้น)
+ปรับ `sw.js` แล้ว — เอา `/firebase-chunks.js` และ `/center-select.js` ออกจาก `STATIC_ASSETS` precache list (ของเดิมอ้างถึงไฟล์ที่ไม่มีแล้ว)
+
+## ✅ Bug Audit (2026-07-09)
+ตรวจ syntax ทุกไฟล์ .js (node --check) + ตรวจ onclick/namespace wiring ทุกหน้า → **ไม่พบบั๊กใหม่ที่ทำให้ระบบพัง**
+BUG-01 ถึง BUG-10 จาก PROJECT_ANALYSIS.md (2026-05-13) ยืนยันว่าแก้ครบทุกตัวแล้วในโค้ดปัจจุบัน
 
 ---
 
