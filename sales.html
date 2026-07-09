@@ -302,10 +302,33 @@
             </div>
         </div>
 
+        <!-- Tab: กิจกรรม (Campaign แบบระบุรายชื่อร้าน) -->
+        <div id="tab-activities" class="app-tab bg-gray-50 flex-col">
+            <div class="shrink-0 bg-white border-b shadow-sm px-4 py-3">
+                <div style="font-size:16px;font-weight:900;color:#111827;">🎉 กิจกรรมส่งเสริมการขาย</div>
+                <div style="font-size:11px;color:#6b7280;font-weight:600;margin-top:2px;">กิจกรรมที่ระบุรายชื่อร้านเข้าร่วมเฉพาะ</div>
+            </div>
+            <div class="flex-1 overflow-y-auto p-3 pb-24">
+                <!-- รายการกิจกรรม -->
+                <div id="activity-list-view">
+                    <div id="activity-list"><div style="text-align:center;padding:30px;color:#9ca3af;font-size:12px;">⏳ กำลังโหลด...</div></div>
+                </div>
+                <!-- รายชื่อร้านของกิจกรรมที่เลือก -->
+                <div id="activity-detail-view" class="hidden">
+                    <button onclick="ActivityCtrl.backToList()"
+                        style="background:#f3f4f6;border:1px solid #e5e7eb;border-radius:10px;padding:6px 12px;font-size:11px;font-weight:700;color:#374151;margin-bottom:12px;cursor:pointer;">
+                        ← กลับ
+                    </button>
+                    <div id="activity-detail-header" class="mb-3"></div>
+                    <div id="activity-store-list"></div>
+                </div>
+            </div>
+        </div>
+
     </div>
 
     <!-- Bottom Navigation Bar -->
-    <nav id="bottom-nav" style="grid-template-columns:repeat(3,1fr);">
+    <nav id="bottom-nav" style="grid-template-columns:repeat(4,1fr);">
         <button class="bnav-item active" id="nav-dashboard" onclick="UI.switchTab('dashboard')">
             <span class="bnav-icon">📊</span>
             <span>ยอดขาย</span>
@@ -318,7 +341,12 @@
             <span class="bnav-icon">📋</span>
             <span>คิวงาน</span>
         </button>
+        <button class="bnav-item" id="nav-activities" onclick="UI.switchTab('activities')">
+            <span class="bnav-icon">🎉</span>
+            <span>กิจกรรม</span>
+        </button>
     </nav>
+
 
     <!-- Calendar Popup — full screen slide up -->
     <div id="calendar-popup"

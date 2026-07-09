@@ -62,7 +62,7 @@ let State = {
 let map = null, mapMarkers = [], sortableList = null, markerClusterGroup = null;
 
 // ─── Tab config ───────────────────────────────────────────────────────────
-const VALID_TABS     = ['dashboard', 'stores', 'route'];
+const VALID_TABS     = ['dashboard', 'stores', 'route', 'activities'];
 const DEFAULT_TAB    = 'dashboard';
 const FORCE_DEFAULT_TAB = true;
 
@@ -127,7 +127,9 @@ const UI = {
     switchTab: (id) => {
         if (!VALID_TABS.includes(id)) id = DEFAULT_TAB;
 
-        document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+        // ✅ FIX: ปุ่ม bottom nav ใช้ class "bnav-item" ไม่ใช่ "nav-item"
+        // ของเดิม query ผิด class ทำให้ active state ค้าง ไม่หลุดตอนสลับ tab (หลายปุ่มสว่างพร้อมกัน)
+        document.querySelectorAll('.bnav-item').forEach(el => el.classList.remove('active'));
         const navEl = document.getElementById('nav-' + id);
         if (navEl) navEl.classList.add('active');
 
@@ -153,6 +155,10 @@ const UI = {
                     else { map.invalidateSize(); if (State.mapNeedsFit) MapCtrl.fitBounds(); }
                 }
             }, 200);
+        }
+
+        if (id === 'activities' && typeof ActivityCtrl !== 'undefined') {
+            ActivityCtrl.init();
         }
 
         // ✅ UX-FIX: Supervisor/ASM เข้า tab ร้านค้าได้เลย — แสดงร้านทั้งหมดทุกสาย
@@ -1723,6 +1729,113 @@ const SupervisorUI = {
         _writeRef.set({ stores: updated })
             .then(() => showSalesToast('✅ บันทึกลำดับเรียบร้อย'))
             .catch(e  => showSalesToast('❌ บันทึกไม่สำเร็จ: ' + e.message, true));
+    },
+};
+
+// ==========================================
+// 🎉 ActivityCtrl — กิจกรรมส่งเสริมการขาย (Campaign โหมด "ระบุร้านเอง")
+// แสดงเฉพาะ Campaign ที่ scopeMode === 'custom' — มีรายชื่อร้านเข้าร่วมเจาะจง
+// ==========================================
+const ActivityCtrl = {
+    _campaigns: [],
+    _loaded: false,
+    _activeCampaign: null,
+
+    init: async () => {
+        if (ActivityCtrl._loaded) { ActivityCtrl._renderList(); return; }
+        try {
+            const session   = Auth.getSession();
+            const centerId  = State.centerId || session?.centerId || '';
+            const centerDoc = centerId ? (centerId + '_main') : (session?.centerDoc || '');
+            if (!centerId && !centerDoc) return;
+
+            let snap = await db.collection('skuDistribution')
+                .where('centerId', '==', centerDoc).get();
+            if (snap.empty && centerId) {
+                snap = await db.collection('skuDistribution')
+                    .where('centerId', '==', centerId).get();
+            }
+
+            // ✅ เอาเฉพาะกิจกรรมที่ระบุรายชื่อร้าน (scopeMode === 'custom')
+            ActivityCtrl._campaigns = snap.docs
+                .map(d => ({ id: d.id, ...d.data() }))
+                .filter(c => c.scopeMode === 'custom')
+                .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+
+            ActivityCtrl._loaded = true;
+        } catch (e) {
+            console.warn('ActivityCtrl.init:', e);
+        }
+        ActivityCtrl._renderList();
+    },
+
+    _renderList: () => {
+        const el = document.getElementById('activity-list');
+        if (!el) return;
+        if (!ActivityCtrl._campaigns.length) {
+            el.innerHTML = `<div style="text-align:center;padding:40px 20px;">
+                <div style="font-size:32px;margin-bottom:8px;">📭</div>
+                <div style="font-size:12px;color:#9ca3af;font-weight:600;">ยังไม่มีกิจกรรมที่ระบุรายชื่อร้าน</div>
+            </div>`;
+            return;
+        }
+        el.innerHTML = ActivityCtrl._campaigns.map(c => {
+            const startLbl = typeof DateUtil !== 'undefined' ? DateUtil.ymToThaiShort(c.startYM) : c.startYM;
+            const endLbl   = typeof DateUtil !== 'undefined' ? DateUtil.ymToThaiShort(c.endYM)   : c.endYM;
+            const count = (c.participantStores || []).length;
+            const iconHtml = c.iconUrl
+                ? `<img src="${c.iconUrl}" style="width:36px;height:36px;border-radius:9px;object-fit:cover;flex-shrink:0;" onerror="this.style.display='none'">`
+                : `<span style="font-size:26px;flex-shrink:0;">🎉</span>`;
+            return `
+            <div onclick="ActivityCtrl.openCampaign('${c.id}')"
+                class="bg-white p-3 rounded-xl border shadow-sm mb-2.5 flex items-center gap-3 cursor-pointer active:scale-[0.98] transition">
+                ${iconHtml}
+                <div class="flex-1 min-w-0">
+                    <div class="font-bold text-sm text-gray-800 truncate">${c.name}</div>
+                    <div style="font-size:11px;color:#9ca3af;margin-top:1px;">📅 ${startLbl} → ${endLbl}</div>
+                    <div style="font-size:11px;color:#4f46e5;font-weight:700;margin-top:2px;">📋 ${count} ร้านเข้าร่วม</div>
+                </div>
+                <span style="color:#d1d5db;font-size:18px;">›</span>
+            </div>`;
+        }).join('');
+    },
+
+    openCampaign: (id) => {
+        const c = ActivityCtrl._campaigns.find(x => x.id === id);
+        if (!c) return;
+        ActivityCtrl._activeCampaign = c;
+
+        document.getElementById('activity-list-view').classList.add('hidden');
+        document.getElementById('activity-detail-view').classList.remove('hidden');
+
+        const startLbl = typeof DateUtil !== 'undefined' ? DateUtil.ymToThaiShort(c.startYM) : c.startYM;
+        const endLbl   = typeof DateUtil !== 'undefined' ? DateUtil.ymToThaiShort(c.endYM)   : c.endYM;
+        const stores   = c.participantStores || [];
+        document.getElementById('activity-detail-header').innerHTML = `
+            <div style="font-size:15px;font-weight:900;color:#111827;">${c.name}</div>
+            <div style="font-size:11px;color:#9ca3af;margin-top:2px;">📅 ${startLbl} → ${endLbl} &nbsp;|&nbsp; 📋 ${stores.length} ร้านเข้าร่วม</div>`;
+
+        const meta = c.participantMeta || {};
+        const list = stores
+            .map(code => ({ code, name: meta[code] || '' }))
+            .sort((a, b) => (a.name || a.code).localeCompare(b.name || b.code, 'th'));
+
+        const listEl = document.getElementById('activity-store-list');
+        listEl.innerHTML = list.length
+            ? list.map(s => `
+                <div class="bg-white p-2.5 rounded-xl border shadow-sm mb-2 flex items-center gap-2.5">
+                    <span style="font-size:16px;flex-shrink:0;">🏪</span>
+                    <div class="flex-1 min-w-0">
+                        <div class="font-bold text-xs text-gray-800 truncate">${s.name || '(ไม่พบชื่อร้านในระบบ)'}</div>
+                        <div style="font-size:10px;color:#9ca3af;font-family:monospace;">${s.code}</div>
+                    </div>
+                </div>`).join('')
+            : '<p style="text-align:center;color:#9ca3af;font-size:12px;padding:24px 0;">ไม่มีร้านเข้าร่วม</p>';
+    },
+
+    backToList: () => {
+        document.getElementById('activity-detail-view').classList.add('hidden');
+        document.getElementById('activity-list-view').classList.remove('hidden');
     },
 };
 
