@@ -324,10 +324,19 @@ const App = {
                         .map(r => String(r.custCode || '').trim())
                 );
 
-                console.log(`[CampaignIcons] ${c.name}: ${boughtStores.size} ร้านที่ซื้อตลอด campaign (${startYM}→${endYM})`);
+                // ✅ FIX: Campaign โหมด "ระบุร้านเอง" (เช่น ค่าเช่า Headboard เฉพาะร้าน)
+                // ต้องแสดง icon เฉพาะร้านที่อยู่ใน participantStores เท่านั้น
+                // ไม่งั้นร้านอื่นที่บังเอิญซื้อสินค้าตัวเดียวกัน (แต่ไม่ได้เข้าร่วมกิจกรรม) จะได้ icon ไปด้วย
+                let eligibleStores = boughtStores;
+                if (c.scopeMode === 'custom') {
+                    const participantSet = new Set(c.participantStores || []);
+                    eligibleStores = new Set([...boughtStores].filter(cc => participantSet.has(cc)));
+                }
 
-                // ใส่ icon เฉพาะร้านที่ซื้อแล้ว
-                boughtStores.forEach(custCode => {
+                console.log(`[CampaignIcons] ${c.name}: ${eligibleStores.size} ร้านที่ซื้อตลอด campaign (${startYM}→${endYM})`);
+
+                // ใส่ icon เฉพาะร้านที่ซื้อแล้ว (และเข้าเงื่อนไข scope)
+                eligibleStores.forEach(custCode => {
                     if (!icons[custCode]) icons[custCode] = [];
                     if (!icons[custCode].find(x => x.iconUrl === c.iconUrl)) {
                         icons[custCode].push({ iconUrl: c.iconUrl, name: c.name });

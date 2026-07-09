@@ -237,8 +237,34 @@ const SkuDist = {
                         </div>
                     </div>
 
-                    <!-- Target Coverage ต่อสาย -->
+                    <!-- ขอบเขตร้าน: ตามสาย vs ระบุร้านเอง -->
                     <div class="border-t border-gray-100 pt-4">
+                        <p class="text-sm font-black text-gray-800 mb-1">📍 ขอบเขตร้าน</p>
+                        <p class="text-xs text-gray-400 mb-3">"ตามสายวิ่ง" ใช้วัด % coverage ทั้งสาย · "ระบุร้านเอง" ใช้ตอนมีลิสต์ร้านที่เข้าร่วมกิจกรรมเจาะจง เช่น ค่าเช่า Headboard</p>
+                        <div class="flex gap-1.5 mb-3 p-1 bg-gray-100 rounded-xl w-fit">
+                            <button id="skudist-scope-route" onclick="SkuDist._setScopeMode('route')"
+                                class="px-3 py-1.5 rounded-lg text-xs font-bold transition bg-white text-indigo-700 shadow-sm">🛣️ ตามสายวิ่ง</button>
+                            <button id="skudist-scope-custom" onclick="SkuDist._setScopeMode('custom')"
+                                class="px-3 py-1.5 rounded-lg text-xs font-bold transition text-gray-500">📋 ระบุร้านเอง</button>
+                        </div>
+
+                        <!-- Custom store list upload -->
+                        <div id="skudist-custom-scope-box" class="hidden bg-gray-50 border border-gray-200 rounded-xl p-3">
+                            <div class="flex items-center gap-2 mb-2">
+                                <input type="file" id="skudist-store-file" accept=".xlsx,.xls,.csv" class="hidden" onchange="SkuDist._handleStoreListUpload(this)">
+                                <button onclick="document.getElementById('skudist-store-file').click()"
+                                    class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-lg text-xs font-bold transition flex items-center gap-1.5">
+                                    📁 อัปโหลดรายชื่อร้าน (Excel)
+                                </button>
+                                <span id="skudist-store-count" class="text-xs font-bold text-gray-500"></span>
+                            </div>
+                            <p class="text-[11px] text-gray-400 mb-2">ไฟล์ต้องมีคอลัมน์ <b>custCode</b> หรือ <b>รหัส</b> (ชื่อร้านจะดึงจากระบบให้อัตโนมัติถ้าเจอ)</p>
+                            <div id="skudist-store-preview" class="max-h-32 overflow-y-auto text-xs"></div>
+                        </div>
+                    </div>
+
+                    <!-- Target Coverage ต่อสาย -->
+                    <div id="skudist-route-target-section" class="border-t border-gray-100 pt-4">
                         <p class="text-sm font-black text-gray-800 mb-1">🎯 Target Coverage ต่อสาย</p>
                         <p class="text-xs text-gray-400 mb-3">ตั้ง target store coverage ที่ต้องการ — เลือกว่าจะตั้งเป็น % หรือจำนวนร้าน</p>
 
@@ -316,11 +342,14 @@ const SkuDist = {
             const endLbl   = DateUtil ? DateUtil.ymToThaiShort(c.endYM)   : c.endYM;
             const groups   = (c.groups || []).length;
             const isActive = SkuDist._activeCampaign?.id === c.id;
+            const scopeBadge = c.scopeMode === 'custom'
+                ? `<span class="bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded font-bold">📋 ${(c.participantStores||[]).length} ร้าน (ระบุเอง)</span>`
+                : `<span class="bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded font-bold">🛣️ ตามสาย</span>`;
             return `
             <div class="flex items-center gap-3 p-3 rounded-xl border ${isActive ? 'border-pink-300 bg-pink-50' : 'border-gray-100 bg-gray-50'} mb-2">
                 <div class="flex-1 min-w-0">
                     <p class="font-bold text-sm text-gray-800 truncate">${c.name}</p>
-                    <p class="text-xs text-gray-400 mt-0.5">📅 ${startLbl} → ${endLbl} &nbsp;|&nbsp; 🎯 ${groups} กลุ่ม SKU</p>
+                    <p class="text-xs text-gray-400 mt-0.5">📅 ${startLbl} → ${endLbl} &nbsp;|&nbsp; 🎯 ${groups} กลุ่ม SKU &nbsp;|&nbsp; ${scopeBadge}</p>
                 </div>
                 <div class="flex gap-1.5 flex-shrink-0">
                     <button onclick="SkuDist.calc('${c.id}')"
@@ -343,16 +372,113 @@ const SkuDist = {
     // ─── Create / Edit Modal ──────────────────────────────────────────────
     _editingId: null,
     _groups: [],   // [ { id, name, keywords: [] } ]
+    _scopeMode: 'route',      // 'route' | 'custom'
+    _customStores: [],        // [ { custCode, name } ] — ใช้ตอน scopeMode === 'custom'
+
+    _setScopeMode: (mode) => {
+        SkuDist._scopeMode = mode;
+        const routeBtn  = document.getElementById('skudist-scope-route');
+        const customBtn = document.getElementById('skudist-scope-custom');
+        const customBox = document.getElementById('skudist-custom-scope-box');
+        const targetSec = document.getElementById('skudist-route-target-section');
+        if (routeBtn && customBtn) {
+            const activeCls   = 'px-3 py-1.5 rounded-lg text-xs font-bold transition bg-white text-indigo-700 shadow-sm';
+            const inactiveCls = 'px-3 py-1.5 rounded-lg text-xs font-bold transition text-gray-500';
+            routeBtn.className  = mode === 'route'  ? activeCls : inactiveCls;
+            customBtn.className = mode === 'custom' ? activeCls : inactiveCls;
+        }
+        if (customBox) customBox.classList.toggle('hidden', mode !== 'custom');
+        // โหมด "ระบุร้านเอง" ไม่มี "สาย" ให้อ้างอิง จึงซ่อน target coverage ต่อสาย
+        if (targetSec) targetSec.classList.toggle('hidden', mode === 'custom');
+        SkuDist._renderStorePreview();
+    },
+
+    // ─── อัปโหลด Excel รายชื่อร้านที่เข้าร่วม (custom scope) ──────────────
+    _handleStoreListUpload: (input) => {
+        const file = input.files?.[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const wb  = XLSX.read(e.target.result, { type: 'array' });
+                const ws  = wb.Sheets[wb.SheetNames[0]];
+                const raw = XLSX.utils.sheet_to_json(ws, { defval: '' });
+                if (!raw.length) { UI.showErrorToast('⚠️ ไฟล์ว่างเปล่า'); return; }
+
+                // หา column ที่เป็น custCode — รองรับหลายชื่อ header
+                const headers = Object.keys(raw[0]);
+                const codeCol = headers.find(h =>
+                    ['custcode', 'customer code', 'รหัส', 'รหัสร้าน', 'รหัสลูกค้า'].includes(h.trim().toLowerCase())
+                ) || headers.find(h => h.trim().toLowerCase().includes('code'));
+
+                if (!codeCol) {
+                    UI.showErrorToast('⚠️ ไม่พบคอลัมน์ custCode/รหัส ในไฟล์');
+                    return;
+                }
+
+                // ✅ สร้าง map ชื่อร้านจากข้อมูลในระบบ (State.db.routes) เพื่อ auto-fill ชื่อ
+                const nameMap = {};
+                if (typeof State !== 'undefined' && State.db?.routes) {
+                    Object.values(State.db.routes).forEach(stores => {
+                        (stores || []).forEach(s => { nameMap[String(s.id)] = s.name || ''; });
+                    });
+                }
+
+                const seen = new Set();
+                const list = [];
+                raw.forEach(r => {
+                    const code = String(r[codeCol] || '').trim();
+                    if (!code || seen.has(code)) return;
+                    seen.add(code);
+                    list.push({ custCode: code, name: nameMap[code] || '' });
+                });
+
+                if (!list.length) { UI.showErrorToast('⚠️ ไม่พบรหัสร้านในไฟล์'); return; }
+
+                SkuDist._customStores = list;
+                SkuDist._renderStorePreview();
+                const notFound = list.filter(s => !s.name).length;
+                UI.showSaveToast(`✅ โหลดรายชื่อร้าน ${list.length} ร้าน` + (notFound ? ` (⚠️ ${notFound} ร้านหาชื่อไม่เจอในระบบ)` : ''));
+            } catch (err) {
+                UI.showErrorToast('❌ อ่านไฟล์ไม่สำเร็จ: ' + err.message);
+            }
+        };
+        reader.readAsArrayBuffer(file);
+        input.value = '';
+    },
+
+    _renderStorePreview: () => {
+        const countEl = document.getElementById('skudist-store-count');
+        const listEl  = document.getElementById('skudist-store-preview');
+        if (!countEl || !listEl) return;
+        const list = SkuDist._customStores || [];
+        countEl.textContent = list.length ? `เลือกไว้ ${list.length} ร้าน` : 'ยังไม่ได้อัปโหลด';
+        listEl.innerHTML = list.length
+            ? list.map(s => `
+                <div class="flex items-center justify-between py-1 border-b border-gray-100">
+                    <span><span class="font-mono text-indigo-600">${s.custCode}</span> ${s.name ? '— ' + s.name : '<span class=\"text-amber-500\">(หาชื่อไม่เจอ)</span>'}</span>
+                    <button onclick="SkuDist._removeCustomStore('${s.custCode}')" class="text-gray-300 hover:text-red-500 font-black">×</button>
+                </div>`).join('')
+            : '';
+    },
+
+    _removeCustomStore: (custCode) => {
+        SkuDist._customStores = (SkuDist._customStores || []).filter(s => s.custCode !== custCode);
+        SkuDist._renderStorePreview();
+    },
 
     openCreateCampaign: () => {
         SkuDist._editingId = null;
         SkuDist._groups = [];
         SkuDist._routeTargets = {};
         SkuDist._targetUnit = 'pct';
+        SkuDist._scopeMode = 'route';
+        SkuDist._customStores = [];
         document.getElementById('skudist-modal-title').textContent = 'สร้าง Campaign';
         document.getElementById('skudist-c-name').value = '';
         document.getElementById('skudist-c-default-target').value = '80';
         SkuDist._setTargetUnit('pct');
+        SkuDist._setScopeMode('route');
         const ym = DateUtil ? DateUtil.currentYM() : '';
         document.getElementById('skudist-c-start').value = ym;
         document.getElementById('skudist-c-end').value   = ym;
@@ -366,11 +492,15 @@ const SkuDist = {
         SkuDist._editingId = id;
         SkuDist._groups       = JSON.parse(JSON.stringify(c.groups || []));
         SkuDist._routeTargets = JSON.parse(JSON.stringify(c.routeTargets || {}));
+        SkuDist._scopeMode    = c.scopeMode || 'route';
+        SkuDist._customStores = (c.participantStores || []).map(code =>
+            ({ custCode: code, name: (c.participantMeta || {})[code] || '' }));
         document.getElementById('skudist-modal-title').textContent = 'แก้ไข Campaign';
         document.getElementById('skudist-c-name').value  = c.name || '';
         document.getElementById('skudist-c-start').value = c.startYM || '';
         document.getElementById('skudist-c-end').value   = c.endYM   || '';
         document.getElementById('skudist-c-default-target').value = c.defaultTarget ?? 80;
+        SkuDist._setScopeMode(SkuDist._scopeMode);
         // ✅ โหลด iconUrl เดิม
         const iconEl    = document.getElementById('skudist-c-icon');
         const previewEl = document.getElementById('skudist-icon-preview');
@@ -716,9 +846,15 @@ const SkuDist = {
         const emptyGroup = SkuDist._groups.find(g => !g.name || !g.keywords.length);
         if (emptyGroup) return UI.showErrorToast('⚠️ กลุ่ม SKU ต้องมีชื่อและอย่างน้อย 1 keyword');
 
+        if (SkuDist._scopeMode === 'custom' && !(SkuDist._customStores || []).length) {
+            return UI.showErrorToast('⚠️ โหมด "ระบุร้านเอง" ต้องอัปโหลดรายชื่อร้านที่เข้าร่วมก่อน');
+        }
+
         UI.showLoader('กำลังบันทึก Campaign...', '');
         try {
             const defaultTarget = parseFloat(document.getElementById('skudist-c-default-target')?.value) || 80;
+            const participantMeta = {};
+            (SkuDist._customStores || []).forEach(s => { participantMeta[s.custCode] = s.name || ''; });
             const data = {
                 name, startYM, endYM,
                 iconUrl:       iconUrl || '',  // ✅ บันทึก URL รูปสินค้า
@@ -727,6 +863,10 @@ const SkuDist = {
                 defaultTarget,
                 targetUnit:    SkuDist._targetUnit || 'pct',
                 routeTargets:  SkuDist._routeTargets,
+                scopeMode:         SkuDist._scopeMode || 'route',
+                participantStores: SkuDist._scopeMode === 'custom'
+                    ? (SkuDist._customStores || []).map(s => s.custCode) : [],
+                participantMeta:   SkuDist._scopeMode === 'custom' ? participantMeta : {},
                 updatedAt:     firebase.firestore.FieldValue.serverTimestamp(),
             };
 
@@ -777,14 +917,80 @@ const SkuDist = {
         try {
             // โหลดทุกเดือนใน range
             const months = SkuDist._getYMRange(campaign.startYM, campaign.endYM);
+            const cid = (window.CENTER_ID || '').toUpperCase();
             let allRows = [];
             for (const ym of months) {
-                try {
-                    const chunks = await cloudDB.collection('sellout').doc(ym)
-                        .collection('chunks').get();
-                    const sorted = chunks.docs.sort((a,b) => (a.data().index||0) - (b.data().index||0));
-                    sorted.forEach(doc => { allRows = allRows.concat(doc.data().rows || []); });
-                } catch (e) { /* เดือนนั้นอาจไม่มีข้อมูล */ }
+                // ✅ FIX: รองรับ 2 format ของ sellout doc — "{centerId}_{YYYY_MM}" (ใหม่) และ "{YYYY_MM}" (เก่า)
+                // ของเดิม query ด้วย ym ตรงๆ ทำให้เดือนที่เขียนแบบใหม่ (มี centerId prefix) หาไม่เจอเลย
+                const candidates = cid ? [`${cid}_${ym}`, ym] : [ym];
+                for (const docId of candidates) {
+                    try {
+                        const chunks = await cloudDB.collection('sellout').doc(docId)
+                            .collection('chunks').get();
+                        if (!chunks.empty) {
+                            const sorted = chunks.docs.sort((a,b) => (a.data().index||0) - (b.data().index||0));
+                            sorted.forEach(doc => { allRows = allRows.concat(doc.data().rows || []); });
+                            break; // เจอแล้ว ไม่ต้องลอง candidate ถัดไป
+                        }
+                    } catch (e) { /* ลอง candidate ถัดไป */ }
+                }
+            }
+
+            // ═══════════════════════════════════════════════════════════
+            // 📋 โหมด "ระบุร้านเอง" — ขอบเขตร้านมาจาก participantStores
+            // ไม่ใช้ route เลย เพราะร้านอาจอยู่คนละสายกัน (เช่น Campaign ค่าเช่า Headboard)
+            // ═══════════════════════════════════════════════════════════
+            if (campaign.scopeMode === 'custom') {
+                const participants = campaign.participantStores || [];
+                const storeMeta    = campaign.participantMeta || {}; // { custCode: name }
+                const storeSet     = new Set(participants);
+                const groups       = campaign.groups || [];
+                const rowsInScope  = allRows.filter(r => storeSet.has(String(r.custCode || '').trim()));
+
+                const storeResult = {};
+                participants.forEach(cust => {
+                    const custRows = rowsInScope.filter(r => String(r.custCode || '').trim() === cust);
+                    const groupResult = {};
+                    let totalVol = 0;
+                    const totalInvSet = new Set();
+                    groups.forEach(g => {
+                        const kws = (g.keywords || []).map(k => k.toLowerCase());
+                        const matchedRows = custRows.filter(r => {
+                            const code = (r.prodCode || '').toLowerCase();
+                            const name = (r.prodName || '').toLowerCase();
+                            return kws.some(k => code.includes(k) || name.includes(k));
+                        });
+                        const vol = matchedRows.reduce((s, r) => s + (r.net || r.gross || 0), 0);
+                        const qty = matchedRows.reduce((s, r) => s + (r.qtyEA || 0), 0);
+                        const invSet = new Set(matchedRows.map(r => r.invNum).filter(Boolean));
+                        invSet.forEach(inv => totalInvSet.add(inv));
+                        totalVol += vol;
+                        groupResult[g.id] = {
+                            groupName: g.name,
+                            bought:    matchedRows.length > 0,
+                            vol, qty,
+                            invCount:  invSet.size,
+                        };
+                    });
+                    storeResult[cust] = {
+                        name:          storeMeta[cust] || cust,
+                        groups:        groupResult,
+                        totalVol,
+                        totalInvCount: totalInvSet.size,
+                    };
+                });
+
+                SkuDist._result = { __custom: true, stores: storeResult, groups };
+                SkuDist._renderGroupFilter(groups);
+                SkuDist._renderResult();
+                document.getElementById('skudist-result-panel').classList.remove('hidden');
+                document.getElementById('skudist-result-title').textContent =
+                    `📊 ${campaign.name}  (${DateUtil?.ymToThaiShort(campaign.startYM)} → ${DateUtil?.ymToThaiShort(campaign.endYM)})`;
+                UI.hideLoader();
+                setTimeout(() => {
+                    document.getElementById('skudist-result-panel')?.scrollIntoView({ behavior: 'smooth' });
+                }, 300);
+                return;
             }
 
             // ── สร้าง index: custCode → route จาก State (ยึดร้านค้าเป็นหลัก ไม่ใช่ sCode) ──
@@ -950,6 +1156,9 @@ const SkuDist = {
         const body = document.getElementById('skudist-result-body');
         if (!body || !SkuDist._result || !SkuDist._activeCampaign) return;
 
+        // 📋 โหมด "ระบุร้านเอง" — เรนเดอร์ตารางรายร้านแทนตารางรายสาย
+        if (SkuDist._result.__custom) return SkuDist._renderCustomResult();
+
         const filterGId = document.getElementById('skudist-group-filter')?.value || 'ALL';
         const groups = (SkuDist._activeCampaign.groups || [])
             .filter(g => filterGId === 'ALL' || g.id === filterGId);
@@ -1073,6 +1282,97 @@ const SkuDist = {
             </div>`;
     },
 
+    // ─── Render Result — โหมด "ระบุร้านเอง" (ตารางรายร้าน) ─────────────────
+    _renderCustomResult: () => {
+        const body = document.getElementById('skudist-result-body');
+        if (!body) return;
+        const filterGId = document.getElementById('skudist-group-filter')?.value || 'ALL';
+        const groups = (SkuDist._result.groups || [])
+            .filter(g => filterGId === 'ALL' || g.id === filterGId);
+        const stores = Object.entries(SkuDist._result.stores || {})
+            .map(([custCode, s]) => ({ custCode, ...s }))
+            .sort((a, b) => b.totalVol - a.totalVol); // ยอดมากไปน้อย
+
+        if (!stores.length) {
+            body.innerHTML = '<p class="text-center text-gray-400 text-xs py-6">ยังไม่มีร้านเข้าร่วม — แก้ไข Campaign แล้วอัปโหลดรายชื่อร้าน</p>';
+            return;
+        }
+
+        // ── Summary cards ──
+        const totalStores  = stores.length;
+        const boughtAny    = stores.filter(s => Object.values(s.groups).some(g => g.bought)).length;
+        const grandTotal   = stores.reduce((s, x) => s + x.totalVol, 0);
+        const summaryHtml = `
+            <div class="bg-white border border-gray-100 rounded-2xl p-4 shadow-sm">
+                <p class="text-xs font-bold text-gray-500 mb-2">📋 ร้านเข้าร่วม</p>
+                <p class="text-3xl font-black text-gray-900">${totalStores}</p>
+                <p class="text-xs text-gray-400 mt-1">ร้าน</p>
+            </div>
+            <div class="bg-white border border-gray-100 rounded-2xl p-4 shadow-sm">
+                <p class="text-xs font-bold text-gray-500 mb-2">✅ ร้านที่ซื้อสินค้าโฟกัส</p>
+                <p class="text-3xl font-black ${SkuDist._coverageColor(totalStores ? boughtAny/totalStores*100 : 0)}">${boughtAny}<span class="text-base text-gray-400">/${totalStores}</span></p>
+                <p class="text-xs text-gray-400 mt-1">${totalStores ? Math.round(boughtAny/totalStores*100) : 0}%</p>
+            </div>
+            <div class="bg-white border border-gray-100 rounded-2xl p-4 shadow-sm">
+                <p class="text-xs font-bold text-gray-500 mb-2">💰 ยอดขายรวม (สินค้าโฟกัส)</p>
+                <p class="text-2xl font-black text-emerald-600">฿${Math.round(grandTotal).toLocaleString()}</p>
+            </div>`;
+
+        // ── Table ──
+        const thead = `
+        <tr class="bg-gray-50">
+            <th class="px-3 py-2 text-left text-xs font-bold text-gray-500 sticky left-0 bg-gray-50">ร้าน</th>
+            ${groups.map(g => `
+                <th class="px-3 py-2 text-center text-xs font-bold text-pink-700 bg-pink-50" colspan="3">${g.name}</th>
+            `).join('')}
+            <th class="px-3 py-2 text-center text-xs font-bold text-gray-700 bg-gray-100">รวมทุกกลุ่ม</th>
+        </tr>
+        <tr class="bg-gray-50 border-b border-gray-200">
+            <th class="px-3 py-1 sticky left-0 bg-gray-50"></th>
+            ${groups.map(() => `
+                <th class="px-2 py-1 text-center text-[10px] font-bold text-gray-400">ซื้อหรือยัง</th>
+                <th class="px-2 py-1 text-center text-[10px] font-bold text-gray-400">ยอดขาย (฿)</th>
+                <th class="px-2 py-1 text-center text-[10px] font-bold text-gray-400">บิล</th>
+            `).join('')}
+            <th class="px-2 py-1 text-center text-[10px] font-bold text-gray-400">ยอดขาย (฿)</th>
+        </tr>`;
+
+        const tbody = stores.map(s => {
+            const rowCells = groups.map(g => {
+                const gd = s.groups[g.id] || {};
+                return `
+                <td class="px-2 py-2.5 text-center">
+                    ${gd.bought
+                        ? '<span class="text-emerald-600 font-black">✓ ซื้อแล้ว</span>'
+                        : '<span class="text-red-400 font-bold">✗ ยังไม่ซื้อ</span>'}
+                </td>
+                <td class="px-2 py-2.5 text-center text-xs font-bold text-gray-800">฿${Math.round(gd.vol||0).toLocaleString()}</td>
+                <td class="px-2 py-2.5 text-center text-xs text-gray-500">${gd.invCount||0}</td>`;
+            }).join('');
+            const anyBought = Object.values(s.groups).some(g => g.bought);
+            return `
+            <tr class="border-b border-gray-100 hover:bg-pink-50/30 transition ${!anyBought ? 'bg-red-50/20' : ''}">
+                <td class="px-3 py-2.5 sticky left-0 bg-white">
+                    <div class="font-bold text-xs text-gray-800">${s.name}</div>
+                    <div class="text-[10px] text-gray-400 font-mono">${s.custCode}</div>
+                </td>
+                ${rowCells}
+                <td class="px-3 py-2.5 text-center text-sm font-black text-emerald-600">฿${Math.round(s.totalVol).toLocaleString()}</td>
+            </tr>`;
+        }).join('');
+
+        body.innerHTML = `
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+                ${summaryHtml}
+            </div>
+            <div class="overflow-x-auto rounded-xl border border-gray-100">
+                <table class="w-full text-sm">
+                    <thead>${thead}</thead>
+                    <tbody>${tbody}</tbody>
+                </table>
+            </div>`;
+    },
+
     _coverageColor: (pct) => {
         if (pct >= 80) return 'text-emerald-600';
         if (pct >= 50) return 'text-amber-500';
@@ -1095,6 +1395,32 @@ const SkuDist = {
         if (!SkuDist._result || !SkuDist._activeCampaign) return UI.showErrorToast('ยังไม่มีผลคำนวณ');
         const campaign = SkuDist._activeCampaign;
         const groups   = campaign.groups || [];
+
+        // 📋 โหมด "ระบุร้านเอง" — export ตารางรายร้าน
+        if (SkuDist._result.__custom) {
+            const stores = Object.entries(SkuDist._result.stores || {})
+                .map(([custCode, s]) => ({ custCode, ...s }))
+                .sort((a, b) => b.totalVol - a.totalVol);
+            const rows = stores.map(s => {
+                const row = { 'รหัสร้าน': s.custCode, 'ชื่อร้าน': s.name };
+                groups.forEach(g => {
+                    const gd = s.groups[g.id] || {};
+                    row[`${g.name} — ซื้อหรือยัง`]   = gd.bought ? 'ซื้อแล้ว' : 'ยังไม่ซื้อ';
+                    row[`${g.name} — ยอดขาย (Net)`]  = Math.round(gd.vol || 0);
+                    row[`${g.name} — จำนวนบิล`]      = gd.invCount || 0;
+                });
+                row['ยอดขายรวมทุกกลุ่ม (Net)'] = Math.round(s.totalVol);
+                return row;
+            });
+            const ws = XLSX.utils.json_to_sheet(rows);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'ยอดขายรายร้าน');
+            const now = new Date();
+            XLSX.writeFile(wb, `Promo_${campaign.name.replace(/\s+/g,'_')}_${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}.xlsx`);
+            UI.showSaveToast('📥 Export เรียบร้อยครับ');
+            return;
+        }
+
         const routes   = Object.keys(SkuDist._result).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
 
         const rows = [];
