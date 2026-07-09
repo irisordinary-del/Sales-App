@@ -62,7 +62,7 @@ let State = {
 let map = null, mapMarkers = [], sortableList = null, markerClusterGroup = null;
 
 // ─── Tab config ───────────────────────────────────────────────────────────
-const VALID_TABS     = ['dashboard', 'stores', 'route'];
+const VALID_TABS     = ['dashboard', 'stores', 'route', 'activities'];
 const DEFAULT_TAB    = 'dashboard';
 const FORCE_DEFAULT_TAB = true;
 
@@ -127,7 +127,9 @@ const UI = {
     switchTab: (id) => {
         if (!VALID_TABS.includes(id)) id = DEFAULT_TAB;
 
-        document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+        // ✅ FIX: ปุ่ม bottom nav ใช้ class "bnav-item" ไม่ใช่ "nav-item"
+        // ของเดิม query ผิด class ทำให้ active state ค้าง ไม่หลุดตอนสลับ tab (หลายปุ่มสว่างพร้อมกัน)
+        document.querySelectorAll('.bnav-item').forEach(el => el.classList.remove('active'));
         const navEl = document.getElementById('nav-' + id);
         if (navEl) navEl.classList.add('active');
 
@@ -153,6 +155,10 @@ const UI = {
                     else { map.invalidateSize(); if (State.mapNeedsFit) MapCtrl.fitBounds(); }
                 }
             }, 200);
+        }
+
+        if (id === 'activities' && typeof ActivityCtrl !== 'undefined') {
+            ActivityCtrl.init();
         }
 
         // ✅ UX-FIX: Supervisor/ASM เข้า tab ร้านค้าได้เลย — แสดงร้านทั้งหมดทุกสาย
@@ -282,6 +288,9 @@ const App = {
                 const c = doc.data();
                 if (!c.iconUrl) continue;
                 if ((c.endYM || '') < nowYM.slice(0,7).replace('-','_')) continue;
+                // ✅ หน้าสายวิ่งโชว์เฉพาะ Campaign "สินค้ากระจาย" (ตามสาย) — โหมด "ระบุร้านเอง"
+                // ย้ายไปโชว์ในหน้า "กิจกรรม" แทนแล้ว กันซ้ำซ้อน
+                if (c.scopeMode === 'custom') continue;
 
                 const groups = c.groups || [];
                 const kws = groups.flatMap(g => (g.keywords || []).map(k => k.toLowerCase()));
@@ -324,32 +333,13 @@ const App = {
                         .map(r => String(r.custCode || '').trim())
                 );
 
-                // ✅ FIX: Campaign โหมด "ระบุร้านเอง" (เช่น ค่าเช่า Headboard เฉพาะร้าน)
-                // ต้องแสดง icon เฉพาะร้านที่อยู่ใน participantStores เท่านั้น
-                // ไม่งั้นร้านอื่นที่บังเอิญซื้อสินค้าตัวเดียวกัน (แต่ไม่ได้เข้าร่วมกิจกรรม) จะได้ icon ไปด้วย
-                let eligibleStores = boughtStores;
-                let pendingStores  = new Set(); // เข้าร่วมแล้วแต่ยังไม่ซื้อ — ใช้ mark แบบจางๆ ให้ sale รู้ว่าเป็นร้านเข้าร่วม
-                if (c.scopeMode === 'custom') {
-                    const participantSet = new Set(c.participantStores || []);
-                    eligibleStores = new Set([...boughtStores].filter(cc => participantSet.has(cc)));
-                    pendingStores  = new Set([...participantSet].filter(cc => !eligibleStores.has(cc)));
-                }
+                console.log(`[CampaignIcons] ${c.name}: ${boughtStores.size} ร้านที่ซื้อตลอด campaign (${startYM}→${endYM})`);
 
-                console.log(`[CampaignIcons] ${c.name}: ${eligibleStores.size} ร้านที่ซื้อตลอด campaign (${startYM}→${endYM})`);
-
-                // ใส่ icon เฉพาะร้านที่ซื้อแล้ว (และเข้าเงื่อนไข scope) — แสดงเต็มสี
-                eligibleStores.forEach(custCode => {
+                // ใส่ icon เฉพาะร้านที่ซื้อแล้ว
+                boughtStores.forEach(custCode => {
                     if (!icons[custCode]) icons[custCode] = [];
                     if (!icons[custCode].find(x => x.iconUrl === c.iconUrl)) {
                         icons[custCode].push({ iconUrl: c.iconUrl, name: c.name, bought: true });
-                    }
-                });
-
-                // ✅ ร้านที่เข้าร่วมแต่ยังไม่ซื้อ — ใส่ icon แบบจาง ๆ ให้ sale เห็นว่า "ร้านนี้เข้าร่วมกิจกรรม รอผลักดัน"
-                pendingStores.forEach(custCode => {
-                    if (!icons[custCode]) icons[custCode] = [];
-                    if (!icons[custCode].find(x => x.iconUrl === c.iconUrl)) {
-                        icons[custCode].push({ iconUrl: c.iconUrl, name: c.name + ' — เข้าร่วม (ยังไม่ซื้อ)', bought: false });
                     }
                 });
             }
@@ -836,19 +826,11 @@ const Processor = {
             const seq     = s.seqs?.[State.currentDay] || i + 1;
             const navLink = `https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}&travelmode=driving`;
 
-            // ✅ Campaign icons — แสดงข้าง KPI button
-            // เต็มสี = ซื้อแล้ว, จาง+เส้นประ = เข้าร่วมกิจกรรมแล้วแต่ยังไม่ซื้อ (โหมด "ระบุร้านเอง")
+            // ✅ Campaign icons — แสดงข้าง KPI button (เฉพาะ Campaign "สินค้ากระจาย" ตามสาย)
             const campIcons = (State.campaignIcons?.[s.id] || [])
-                .map(c => c.bought === false
-                    ? `<span title="${c.name}" style="position:relative;display:inline-block;width:22px;height:22px;">
-                        <img src="${c.iconUrl}" style="width:22px;height:22px;border-radius:6px;object-fit:cover;border:1.5px dashed #f59e0b;opacity:0.45;"
-                            onerror="this.style.display='none'">
-                        <span style="position:absolute;top:-3px;right:-3px;width:9px;height:9px;background:#f59e0b;border-radius:50%;border:1.5px solid #fff;"></span>
-                    </span>`
-                    : `<img src="${c.iconUrl}" title="${c.name}"
-                        style="width:22px;height:22px;border-radius:6px;object-fit:cover;border:1.5px solid #e5e7eb;box-shadow:0 1px 3px rgba(0,0,0,0.1);"
-                        onerror="this.style.display='none'">`)
-                .join('');
+                .map(c => `<img src="${c.iconUrl}" title="${c.name}"
+                    style="width:22px;height:22px;border-radius:6px;object-fit:cover;border:1.5px solid #e5e7eb;box-shadow:0 1px 3px rgba(0,0,0,0.1);"
+                    onerror="this.style.display='none'">`).join('');
 
             return `
             <div data-id="${s.id}" class="store-item bg-white p-2.5 rounded-xl border shadow-sm flex items-center gap-1.5 relative mb-2.5">
@@ -1723,6 +1705,191 @@ const SupervisorUI = {
         _writeRef.set({ stores: updated })
             .then(() => showSalesToast('✅ บันทึกลำดับเรียบร้อย'))
             .catch(e  => showSalesToast('❌ บันทึกไม่สำเร็จ: ' + e.message, true));
+    },
+};
+
+// ==========================================
+// 🎉 ActivityCtrl — กิจกรรมส่งเสริมการขาย (Campaign โหมด "ระบุร้านเอง")
+// แสดงเฉพาะ Campaign ที่ scopeMode === 'custom' — มีรายชื่อร้านเข้าร่วมเจาะจง
+// ==========================================
+const ActivityCtrl = {
+    _campaigns: [],
+    _loaded: false,
+    _activeCampaign: null,
+
+    init: async () => {
+        if (ActivityCtrl._loaded) { ActivityCtrl._renderList(); return; }
+        try {
+            const session   = Auth.getSession();
+            const centerId  = State.centerId || session?.centerId || '';
+            const centerDoc = centerId ? (centerId + '_main') : (session?.centerDoc || '');
+            if (!centerId && !centerDoc) return;
+
+            let snap = await db.collection('skuDistribution')
+                .where('centerId', '==', centerDoc).get();
+            if (snap.empty && centerId) {
+                snap = await db.collection('skuDistribution')
+                    .where('centerId', '==', centerId).get();
+            }
+
+            // ✅ FIX: ล็อคตาม sale คนนี้ — เอาเฉพาะร้านที่อยู่ใน State.allStores (สายของตัวเอง)
+            // ไม่ใช่ทั้งศูนย์ กัน sale เห็นร้านของสายอื่นที่ตัวเองไม่ได้ดูแล
+            const myStoreCodes = new Set((State.allStores || []).map(s => String(s.id)));
+
+            // ✅ เอาเฉพาะกิจกรรมที่ระบุรายชื่อร้าน (scopeMode === 'custom')
+            // และมีอย่างน้อย 1 ร้านที่อยู่ในสายของ sale คนนี้ — ไม่งั้นโชว์กิจกรรมที่ไม่เกี่ยวข้องเลย
+            ActivityCtrl._campaigns = snap.docs
+                .map(d => ({ id: d.id, ...d.data() }))
+                .filter(c => c.scopeMode === 'custom')
+                .map(c => ({
+                    ...c,
+                    // เก็บเฉพาะร้านที่อยู่ในสายของ sale คนนี้ไว้ใช้แสดงผล
+                    _myParticipants: (c.participantStores || []).filter(code => myStoreCodes.has(code)),
+                }))
+                .filter(c => c._myParticipants.length > 0)
+                .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+
+            ActivityCtrl._loaded = true;
+        } catch (e) {
+            console.warn('ActivityCtrl.init:', e);
+        }
+        ActivityCtrl._renderList();
+    },
+
+    _renderList: () => {
+        const el = document.getElementById('activity-list');
+        if (!el) return;
+        if (!ActivityCtrl._campaigns.length) {
+            el.innerHTML = `<div style="text-align:center;padding:40px 20px;">
+                <div style="font-size:32px;margin-bottom:8px;">📭</div>
+                <div style="font-size:12px;color:#9ca3af;font-weight:600;">ยังไม่มีกิจกรรมที่เกี่ยวข้องกับสายของคุณ</div>
+            </div>`;
+            return;
+        }
+        el.innerHTML = ActivityCtrl._campaigns.map(c => {
+            const startLbl = typeof DateUtil !== 'undefined' ? DateUtil.ymToThaiShort(c.startYM) : c.startYM;
+            const endLbl   = typeof DateUtil !== 'undefined' ? DateUtil.ymToThaiShort(c.endYM)   : c.endYM;
+            const count = (c._myParticipants || []).length; // ✅ นับเฉพาะร้านในสายตัวเอง
+            const iconHtml = c.iconUrl
+                ? `<img src="${c.iconUrl}" style="width:36px;height:36px;border-radius:9px;object-fit:cover;flex-shrink:0;" onerror="this.style.display='none'">`
+                : `<span style="font-size:26px;flex-shrink:0;">🎉</span>`;
+            return `
+            <div onclick="ActivityCtrl.openCampaign('${c.id}')"
+                class="bg-white p-3 rounded-xl border shadow-sm mb-2.5 flex items-center gap-3 cursor-pointer active:scale-[0.98] transition">
+                ${iconHtml}
+                <div class="flex-1 min-w-0">
+                    <div class="font-bold text-sm text-gray-800 truncate">${c.name}</div>
+                    <div style="font-size:11px;color:#9ca3af;margin-top:1px;">📅 ${startLbl} → ${endLbl}</div>
+                    <div style="font-size:11px;color:#4f46e5;font-weight:700;margin-top:2px;">📋 ${count} ร้าน (เฉพาะสายคุณ)</div>
+                </div>
+                <span style="color:#d1d5db;font-size:18px;">›</span>
+            </div>`;
+        }).join('');
+    },
+
+    openCampaign: async (id) => {
+        const c = ActivityCtrl._campaigns.find(x => x.id === id);
+        if (!c) return;
+        ActivityCtrl._activeCampaign = c;
+
+        document.getElementById('activity-list-view').classList.add('hidden');
+        document.getElementById('activity-detail-view').classList.remove('hidden');
+
+        const startLbl = typeof DateUtil !== 'undefined' ? DateUtil.ymToThaiShort(c.startYM) : c.startYM;
+        const endLbl   = typeof DateUtil !== 'undefined' ? DateUtil.ymToThaiShort(c.endYM)   : c.endYM;
+        const stores   = c._myParticipants || []; // ✅ เฉพาะร้านในสายตัวเอง
+        document.getElementById('activity-detail-header').innerHTML = `
+            <div style="font-size:15px;font-weight:900;color:#111827;">${c.name}</div>
+            <div style="font-size:11px;color:#9ca3af;margin-top:2px;">📅 ${startLbl} → ${endLbl} &nbsp;|&nbsp; 📋 ${stores.length} ร้าน (เฉพาะสายคุณ)</div>`;
+
+        const meta = c.participantMeta || {};
+        const list = stores
+            .map(code => ({ code, name: meta[code] || '' }))
+            .sort((a, b) => (a.name || a.code).localeCompare(b.name || b.code, 'th'));
+
+        // เรนเดอร์ก่อนพร้อม "กำลังเช็คยอด" — แล้วค่อย fill เครื่องหมายทีหลัง
+        ActivityCtrl._renderStoreList(list, null);
+
+        // ✅ เช็คยอดขายภายในระยะเวลากิจกรรม — ร้านไหนมียอดสินค้าโฟกัสแล้วขึ้นเครื่องหมาย ✓
+        try {
+            const boughtSet = await ActivityCtrl._checkPurchases(c);
+            ActivityCtrl._renderStoreList(list, boughtSet);
+        } catch (e) {
+            console.warn('ActivityCtrl._checkPurchases:', e);
+            ActivityCtrl._renderStoreList(list, new Set()); // เช็คไม่สำเร็จ — เคลียร์ loading state
+        }
+    },
+
+    // ─── เช็คว่าร้านไหนมียอดขายสินค้าโฟกัสภายในระยะเวลากิจกรรมบ้าง ──────────
+    _checkPurchases: async (c) => {
+        const getMonthRange = (startYM, endYM) => {
+            const months = [];
+            let [y, m] = startYM.split('_').map(Number);
+            const [ey, em] = endYM.split('_').map(Number);
+            while (y < ey || (y === ey && m <= em)) {
+                months.push(`${y}_${String(m).padStart(2,'0')}`);
+                m++; if (m > 12) { m = 1; y++; }
+            }
+            return months;
+        };
+
+        const kws = (c.groups || []).flatMap(g => (g.keywords || []).map(k => k.toLowerCase()));
+        if (!kws.length) return new Set();
+
+        const months = getMonthRange(c.startYM, c.endYM);
+        let allRows = [];
+        for (const ym of months) {
+            try {
+                let rows = [];
+                if (typeof SalesDashboard !== 'undefined' && SalesDashboard._loadChunks) {
+                    rows = await SalesDashboard._loadChunks(ym);
+                } else {
+                    const cs = await db.collection('sellout').doc(ym).collection('chunks').get();
+                    cs.forEach(d => rows = rows.concat(d.data().rows || []));
+                }
+                allRows = allRows.concat(rows);
+            } catch (e) { /* เดือนนี้ไม่มีข้อมูล ข้ามไป */ }
+        }
+
+        const participantSet = new Set(c._myParticipants || []);
+        return new Set(
+            allRows
+                .filter(r => participantSet.has(String(r.custCode || '').trim()))
+                .filter(r => kws.some(k =>
+                    (r.prodCode || '').toLowerCase().includes(k) ||
+                    (r.prodName || '').toLowerCase().includes(k)
+                ))
+                .map(r => String(r.custCode || '').trim())
+        );
+    },
+
+    // ─── Render รายชื่อร้าน — boughtSet เป็น null = กำลังเช็คยอดอยู่ ───────
+    _renderStoreList: (list, boughtSet) => {
+        const listEl = document.getElementById('activity-store-list');
+        if (!listEl) return;
+        listEl.innerHTML = list.length
+            ? list.map(s => {
+                const badge = boughtSet === null
+                    ? '<span style="font-size:10px;color:#9ca3af;">⏳ เช็คยอด...</span>'
+                    : boughtSet.has(s.code)
+                        ? '<span style="font-size:11px;font-weight:800;color:#10b981;display:flex;align-items:center;gap:3px;">✅ มียอดแล้ว</span>'
+                        : '<span style="font-size:11px;font-weight:700;color:#d1d5db;">— ยังไม่มียอด</span>';
+                return `
+                <div class="bg-white p-2.5 rounded-xl border shadow-sm mb-2 flex items-center gap-2.5">
+                    <span style="font-size:16px;flex-shrink:0;">🏪</span>
+                    <div class="flex-1 min-w-0">
+                        <div class="font-bold text-xs text-gray-800 truncate">${s.name || '(ไม่พบชื่อร้านในระบบ)'}</div>
+                        <div style="font-size:10px;color:#9ca3af;font-family:monospace;">${s.code}</div>
+                    </div>
+                    <div class="flex-shrink-0">${badge}</div>
+                </div>`;
+            }).join('')
+            : '<p style="text-align:center;color:#9ca3af;font-size:12px;padding:24px 0;">ไม่มีร้านเข้าร่วม</p>';
+    },
+
+    backToList: () => {
+        document.getElementById('activity-detail-view').classList.add('hidden');
+        document.getElementById('activity-list-view').classList.remove('hidden');
     },
 };
 
