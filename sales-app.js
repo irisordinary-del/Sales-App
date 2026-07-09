@@ -1756,10 +1756,21 @@ const ActivityCtrl = {
                     .where('centerId', '==', centerId).get();
             }
 
+            // ✅ FIX: ล็อคตาม sale คนนี้ — เอาเฉพาะร้านที่อยู่ใน State.allStores (สายของตัวเอง)
+            // ไม่ใช่ทั้งศูนย์ กัน sale เห็นร้านของสายอื่นที่ตัวเองไม่ได้ดูแล
+            const myStoreCodes = new Set((State.allStores || []).map(s => String(s.id)));
+
             // ✅ เอาเฉพาะกิจกรรมที่ระบุรายชื่อร้าน (scopeMode === 'custom')
+            // และมีอย่างน้อย 1 ร้านที่อยู่ในสายของ sale คนนี้ — ไม่งั้นโชว์กิจกรรมที่ไม่เกี่ยวข้องเลย
             ActivityCtrl._campaigns = snap.docs
                 .map(d => ({ id: d.id, ...d.data() }))
                 .filter(c => c.scopeMode === 'custom')
+                .map(c => ({
+                    ...c,
+                    // เก็บเฉพาะร้านที่อยู่ในสายของ sale คนนี้ไว้ใช้แสดงผล
+                    _myParticipants: (c.participantStores || []).filter(code => myStoreCodes.has(code)),
+                }))
+                .filter(c => c._myParticipants.length > 0)
                 .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
 
             ActivityCtrl._loaded = true;
@@ -1775,14 +1786,14 @@ const ActivityCtrl = {
         if (!ActivityCtrl._campaigns.length) {
             el.innerHTML = `<div style="text-align:center;padding:40px 20px;">
                 <div style="font-size:32px;margin-bottom:8px;">📭</div>
-                <div style="font-size:12px;color:#9ca3af;font-weight:600;">ยังไม่มีกิจกรรมที่ระบุรายชื่อร้าน</div>
+                <div style="font-size:12px;color:#9ca3af;font-weight:600;">ยังไม่มีกิจกรรมที่เกี่ยวข้องกับสายของคุณ</div>
             </div>`;
             return;
         }
         el.innerHTML = ActivityCtrl._campaigns.map(c => {
             const startLbl = typeof DateUtil !== 'undefined' ? DateUtil.ymToThaiShort(c.startYM) : c.startYM;
             const endLbl   = typeof DateUtil !== 'undefined' ? DateUtil.ymToThaiShort(c.endYM)   : c.endYM;
-            const count = (c.participantStores || []).length;
+            const count = (c._myParticipants || []).length; // ✅ นับเฉพาะร้านในสายตัวเอง
             const iconHtml = c.iconUrl
                 ? `<img src="${c.iconUrl}" style="width:36px;height:36px;border-radius:9px;object-fit:cover;flex-shrink:0;" onerror="this.style.display='none'">`
                 : `<span style="font-size:26px;flex-shrink:0;">🎉</span>`;
@@ -1793,7 +1804,7 @@ const ActivityCtrl = {
                 <div class="flex-1 min-w-0">
                     <div class="font-bold text-sm text-gray-800 truncate">${c.name}</div>
                     <div style="font-size:11px;color:#9ca3af;margin-top:1px;">📅 ${startLbl} → ${endLbl}</div>
-                    <div style="font-size:11px;color:#4f46e5;font-weight:700;margin-top:2px;">📋 ${count} ร้านเข้าร่วม</div>
+                    <div style="font-size:11px;color:#4f46e5;font-weight:700;margin-top:2px;">📋 ${count} ร้าน (เฉพาะสายคุณ)</div>
                 </div>
                 <span style="color:#d1d5db;font-size:18px;">›</span>
             </div>`;
@@ -1810,10 +1821,10 @@ const ActivityCtrl = {
 
         const startLbl = typeof DateUtil !== 'undefined' ? DateUtil.ymToThaiShort(c.startYM) : c.startYM;
         const endLbl   = typeof DateUtil !== 'undefined' ? DateUtil.ymToThaiShort(c.endYM)   : c.endYM;
-        const stores   = c.participantStores || [];
+        const stores   = c._myParticipants || []; // ✅ เฉพาะร้านในสายตัวเอง
         document.getElementById('activity-detail-header').innerHTML = `
             <div style="font-size:15px;font-weight:900;color:#111827;">${c.name}</div>
-            <div style="font-size:11px;color:#9ca3af;margin-top:2px;">📅 ${startLbl} → ${endLbl} &nbsp;|&nbsp; 📋 ${stores.length} ร้านเข้าร่วม</div>`;
+            <div style="font-size:11px;color:#9ca3af;margin-top:2px;">📅 ${startLbl} → ${endLbl} &nbsp;|&nbsp; 📋 ${stores.length} ร้าน (เฉพาะสายคุณ)</div>`;
 
         const meta = c.participantMeta || {};
         const list = stores
