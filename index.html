@@ -259,6 +259,10 @@
                         📅 ปฏิทิน
                     </button>
                     <span id="cal-mode-badge" class="hidden bg-gray-700 text-gray-200 px-2 py-1 rounded-lg text-[10px] font-bold whitespace-nowrap" title="โหมดปฏิทินของเดือนนี้"></span>
+                    <button onclick="HolidayException.open()"
+                        class="bg-amber-500 hover:bg-amber-400 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap" title="จัดการวันหยุด (เฉพาะโหมดตามวันในสัปดาห์)">
+                        📆 จัดการวันหยุด
+                    </button>
                     <button onclick="PlanUI.openCreatePlan()"
                         class="bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap" title="เพิ่มเดือนใหม่">
                         + เพิ่มเดือน
@@ -1083,7 +1087,7 @@
                 <!-- โหมด -->
                 <div>
                     <label class="block text-xs font-bold text-gray-500 uppercase mb-2">โหมดปฏิทิน</label>
-                    <div class="grid grid-cols-3 gap-2">
+                    <div class="grid grid-cols-2 gap-2">
                         <button id="cal-mode-cycle" onclick="CalendarAdmin.setMode('cycle')"
                             class="border-2 border-gray-200 bg-gray-50 rounded-xl p-3 text-center cursor-pointer transition">
                             <div class="text-xl mb-1">🔄</div>
@@ -1101,6 +1105,12 @@
                             <div class="text-xl mb-1">📌</div>
                             <div class="text-xs font-black text-gray-700">เลือกเองทีละวัน</div>
                             <div class="text-[10px] text-gray-500 mt-0.5">จับคู่วันที่กับ Day เอง</div>
+                        </button>
+                        <button id="cal-mode-weekday" onclick="CalendarAdmin.setMode('weekday')"
+                            class="border-2 border-gray-200 bg-gray-50 rounded-xl p-3 text-center cursor-pointer transition">
+                            <div class="text-xl mb-1">📆</div>
+                            <div class="text-xs font-black text-gray-700">ตามวันในสัปดาห์</div>
+                            <div class="text-[10px] text-gray-500 mt-0.5">Day 1 = จันทร์ ทุกสัปดาห์</div>
                         </button>
                     </div>
                     <!-- ✅ UX: ตัวอย่างผลลัพธ์ของโหมดที่เลือกอยู่ -->
@@ -1150,6 +1160,23 @@
                         </button>
                     </div>
                 </div>
+
+                <!-- Weekday settings (โหมดที่ 4) -->
+                <div id="cal-weekday-section" class="hidden space-y-3">
+                    <div class="bg-purple-50 border border-purple-100 rounded-xl p-3">
+                        <p class="text-xs text-purple-700 font-bold mb-2">กำหนด Day = วันในสัปดาห์ (ระบบขยายให้เองทุกสัปดาห์)</p>
+                        <div id="cal-weekday-rows" class="space-y-2"></div>
+                        <button onclick="CalendarAdmin.addWeekdayRow()"
+                            class="mt-2 w-full border border-dashed border-purple-300 rounded-lg py-2 text-xs font-bold text-purple-600 hover:bg-purple-50 transition">
+                            + เพิ่ม Day
+                        </button>
+                    </div>
+                    <div class="bg-amber-50 border border-amber-100 rounded-xl p-3">
+                        <p class="text-[11px] text-amber-700 leading-relaxed">
+                            💡 เมื่อมีวันหยุด/วันลา ให้ไปที่ปุ่ม "📆 จัดการวันหยุด" หน้าหลัก (นอก modal นี้) — ระบบจะแบ่งร้านของวันนั้นไปวันก่อนหน้า/ถัดไปให้อัตโนมัติ พร้อมให้ตรวจสอบบนแผนที่ก่อนยืนยัน
+                        </p>
+                    </div>
+                </div>
             </div>
 
             <div class="p-5 border-t flex gap-3 flex-shrink-0">
@@ -1169,6 +1196,7 @@
             _mode:      'date',   // default = วันที่จริง
             _holidays:  [],
             _fixedRows: [],
+            _weekdayRows: [],   // [{ day:'Day 1', weekday: 1, weekdayName:'จันทร์' }] — weekday: 0=อาทิตย์..6=เสาร์
             _targetRef: null,
             _ym:        '',
 
@@ -1195,7 +1223,8 @@
 
                 // โหลด config จาก Firestore
                 CalendarAdmin._holidays  = [];
-                CalendarAdmin._fixedRows = [];
+                CalendarAdmin._fixedRows   = [];
+                CalendarAdmin._weekdayRows = [];
                 try {
                     const snap = await CalendarAdmin._targetRef.get();
                     const cfg  = snap.exists ? (snap.data().calendarConfig || null) : null;
@@ -1211,6 +1240,11 @@
                             const mapping = cfg.mapping || {};
                             CalendarAdmin._fixedRows = Object.entries(mapping)
                                 .map(([d, day]) => ({ date: d, day }));
+                        } else if (cfg.mode === 'weekday') {
+                            const wmap = cfg.weekdayMap || {};
+                            CalendarAdmin._weekdayRows = Object.entries(wmap)
+                                .map(([day, wd]) => ({ day, weekday: wd }));
+                            if (!CalendarAdmin._weekdayRows.length) CalendarAdmin._weekdayRows = CalendarAdmin._defaultWeekdayRows();
                         }
                         // date mode ไม่ต้องโหลดอะไรเพิ่ม
                     } else {
@@ -1224,6 +1258,7 @@
                 }
                 CalendarAdmin._renderHolidayGrid();
                 CalendarAdmin._renderFixedRows();
+                CalendarAdmin._renderWeekdayRows();
                 CalendarAdmin._renderExample();
                 CalendarAdmin._renderPreview();
             },
@@ -1239,15 +1274,17 @@
                 const active   = 'border-2 border-indigo-500 bg-indigo-50 rounded-xl p-3 text-center cursor-pointer transition';
                 const inactive = 'border-2 border-gray-200 bg-gray-50 rounded-xl p-3 text-center cursor-pointer transition';
 
-                const cycleBtn = document.getElementById('cal-mode-cycle');
-                const dateBtn  = document.getElementById('cal-mode-date');
-                const fixedBtn = document.getElementById('cal-mode-fixed');
-                const cycleSec = document.getElementById('cal-cycle-section');
-                const fixedSec = document.getElementById('cal-fixed-section');
+                const cycleBtn   = document.getElementById('cal-mode-cycle');
+                const dateBtn    = document.getElementById('cal-mode-date');
+                const fixedBtn   = document.getElementById('cal-mode-fixed');
+                const weekdayBtn = document.getElementById('cal-mode-weekday');
+                const cycleSec   = document.getElementById('cal-cycle-section');
+                const fixedSec   = document.getElementById('cal-fixed-section');
+                const weekdaySec = document.getElementById('cal-weekday-section');
 
                 // reset
-                [cycleBtn, dateBtn, fixedBtn].forEach(b => { if (b) b.className = inactive; });
-                [cycleSec, fixedSec].forEach(s => { if (s) s.classList.add('hidden'); });
+                [cycleBtn, dateBtn, fixedBtn, weekdayBtn].forEach(b => { if (b) b.className = inactive; });
+                [cycleSec, fixedSec, weekdaySec].forEach(s => { if (s) s.classList.add('hidden'); });
 
                 if (mode === 'cycle') {
                     if (cycleBtn) cycleBtn.className = active;
@@ -1258,10 +1295,21 @@
                 } else if (mode === 'fixed') {
                     if (fixedBtn) fixedBtn.className = active;
                     if (fixedSec) fixedSec.classList.remove('hidden');
+                } else if (mode === 'weekday') {
+                    if (weekdayBtn) weekdayBtn.className = active;
+                    if (weekdaySec) weekdaySec.classList.remove('hidden');
+                    if (!CalendarAdmin._weekdayRows.length) CalendarAdmin._weekdayRows = CalendarAdmin._defaultWeekdayRows();
+                    CalendarAdmin._renderWeekdayRows();
                 }
 
                 CalendarAdmin._renderExample();
                 CalendarAdmin._renderPreview();
+            },
+
+            // ✅ ค่าเริ่มต้นสำหรับโหมด weekday — จันทร์-เสาร์ = Day 1-6 (ปรับได้ทีหลัง)
+            _defaultWeekdayRows: () => {
+                const names = ['อาทิตย์','จันทร์','อังคาร','พุธ','พฤหัสบดี','ศุกร์','เสาร์'];
+                return [1,2,3,4,5,6].map((wd, i) => ({ day: `Day ${i+1}`, weekday: wd, weekdayName: names[wd] }));
             },
 
             // ✅ UX: ตัวอย่างผลลัพธ์ 1 บรรทัดของแต่ละโหมด — ให้เห็นว่าโหมดนี้ทำอะไร โดยไม่ต้องเดา
@@ -1269,9 +1317,10 @@
                 const el = document.getElementById('cal-mode-example');
                 if (!el) return;
                 const examples = {
-                    cycle: '📌 ตัวอย่าง: กำหนด Day 1 เริ่มวันที่ 3 → วันที่ 3 = Day 1, วันที่ 4 = Day 2, ... (ข้ามวันหยุดที่เลือกไว้)',
-                    date:  '📌 ตัวอย่าง: 1 ก.ค. = Day 1, 2 ก.ค. = Day 2, 15 ก.ค. = Day 15 (ตรงกับเลขวันที่เป๊ะๆ)',
-                    fixed: '📌 ตัวอย่าง: เพิ่มแถวด้านล่าง เลือกวันที่ 5 = Day 2 ได้เอง ไม่ต้องเรียงตามลำดับ',
+                    cycle:   '📌 ตัวอย่าง: กำหนด Day 1 เริ่มวันที่ 3 → วันที่ 3 = Day 1, วันที่ 4 = Day 2, ... (ข้ามวันหยุดที่เลือกไว้)',
+                    date:    '📌 ตัวอย่าง: 1 ก.ค. = Day 1, 2 ก.ค. = Day 2, 15 ก.ค. = Day 15 (ตรงกับเลขวันที่เป๊ะๆ)',
+                    fixed:   '📌 ตัวอย่าง: เพิ่มแถวด้านล่าง เลือกวันที่ 5 = Day 2 ได้เอง ไม่ต้องเรียงตามลำดับ',
+                    weekday: '📌 ตัวอย่าง: Day 1 = จันทร์ → ทุกวันจันทร์ตลอดเดือนเป็น Day 1 อัตโนมัติ ไม่ต้องกรอกวันที่ซ้ำทุกเดือน',
                 };
                 el.textContent = examples[CalendarAdmin._mode] || '';
             },
@@ -1303,6 +1352,13 @@
                 if (mode === 'date') return `Day ${dateNum}`;
                 if (mode === 'fixed') {
                     const row = CalendarAdmin._fixedRows.find(r => String(r.date) === String(dateNum));
+                    return row ? row.day : null;
+                }
+                if (mode === 'weekday') {
+                    if (!CalendarAdmin._ym) return null;
+                    const [y, m] = CalendarAdmin._ym.split('_').map(Number);
+                    const wd  = new Date(y, m-1, dateNum).getDay(); // 0=อาทิตย์..6=เสาร์
+                    const row = CalendarAdmin._weekdayRows.find(r => r.weekday === wd);
                     return row ? row.day : null;
                 }
                 if (mode === 'cycle') {
@@ -1383,6 +1439,39 @@
                 }, 0);
             },
 
+            // ── weekday mode rows (โหมดที่ 4) ────────────────────────────────
+            addWeekdayRow: () => {
+                const n = CalendarAdmin._weekdayRows.length + 1;
+                CalendarAdmin._weekdayRows.push({ day: `Day ${n}`, weekday: 1 });
+                CalendarAdmin._renderWeekdayRows();
+                CalendarAdmin._renderPreview();
+            },
+
+            _renderWeekdayRows: () => {
+                const container = document.getElementById('cal-weekday-rows');
+                if (!container) return;
+                const weekdayNames = ['อาทิตย์','จันทร์','อังคาร','พุธ','พฤหัสบดี','ศุกร์','เสาร์'];
+                const weekdayOptions = weekdayNames.map((n,i) => `<option value="${i}">${n}</option>`).join('');
+                container.innerHTML = CalendarAdmin._weekdayRows.map((row, i) => `
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <input type="text" value="${row.day}"
+                            onchange="CalendarAdmin._weekdayRows[${i}].day=this.value;CalendarAdmin._renderPreview()"
+                            style="width:70px;border:1px solid #e5e7eb;border-radius:8px;padding:6px;font-size:12px;font-weight:700;text-align:center;outline:none;">
+                        <span style="font-size:12px;color:#6b7280;">=</span>
+                        <select onchange="CalendarAdmin._weekdayRows[${i}].weekday=parseInt(this.value);CalendarAdmin._renderPreview()"
+                            style="flex:1;border:1px solid #e5e7eb;border-radius:8px;padding:6px;font-size:12px;font-weight:700;outline:none;">
+                            ${weekdayOptions}
+                        </select>
+                        <button onclick="CalendarAdmin._weekdayRows.splice(${i},1);CalendarAdmin._renderWeekdayRows();CalendarAdmin._renderPreview()"
+                            style="color:#dc2626;border:none;background:none;cursor:pointer;font-size:16px;padding:2px;">✕</button>
+                    </div>`).join('');
+                setTimeout(() => {
+                    container.querySelectorAll('select').forEach((sel, i) => {
+                        sel.value = String(CalendarAdmin._weekdayRows[i]?.weekday ?? 1);
+                    });
+                }, 0);
+            },
+
             // ── บันทึก ──────────────────────────────────────────────────────
             save: async () => {
                 if (!CalendarAdmin._targetRef) {
@@ -1411,6 +1500,12 @@
                     };
                 } else if (CalendarAdmin._mode === 'date') {
                     cfg = { mode: 'date' };
+                } else if (CalendarAdmin._mode === 'weekday') {
+                    const weekdayMap = {};
+                    CalendarAdmin._weekdayRows.forEach(r => {
+                        if (r.day) weekdayMap[r.day] = r.weekday;
+                    });
+                    cfg = { mode: 'weekday', weekdayMap };
                 } else {
                     const mapping = {};
                     CalendarAdmin._fixedRows.forEach(r => {
@@ -1426,6 +1521,260 @@
                     console.log('✅ calendarConfig saved:', JSON.stringify(cfg));
                     if (typeof PlanUI !== 'undefined') PlanUI.updateBadge(); // ✅ อัปเดต badge ทันที
                 } catch(e) {
+                    UI.showErrorToast('❌ บันทึกไม่สำเร็จ: ' + e.message);
+                }
+            },
+        };
+    </script>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         📆 Holiday Exception Manager — โหมดที่ 4 (ตามวันในสัปดาห์)
+         เลือกวันหยุด → auto แบ่งครึ่งร้านตาม seq → ตรวจสอบ/ปรับด้วยแผนที่ → ยืนยัน
+         ═══════════════════════════════════════════════════════════════ -->
+    <div id="holiday-exception-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden" style="max-height:90dvh;display:flex;flex-direction:column;">
+            <div class="p-5 border-b flex justify-between items-center bg-gray-50 flex-shrink-0">
+                <div>
+                    <h2 class="text-base font-black text-gray-900">📆 จัดการวันหยุด</h2>
+                    <p class="text-xs text-gray-500 mt-0.5">ใช้ได้เฉพาะแผนที่ตั้งค่าโหมด "ตามวันในสัปดาห์" — ร้านของวันหยุดจะถูกแบ่งครึ่งไปวันก่อนหน้า/ถัดไปอัตโนมัติ</p>
+                </div>
+                <button onclick="HolidayException.close()" class="w-8 h-8 rounded-full border border-gray-200 text-gray-400 hover:bg-gray-100 font-bold flex-shrink-0">✕</button>
+            </div>
+
+            <div class="overflow-y-auto flex-1 p-5 space-y-4">
+                <div class="flex items-end gap-2">
+                    <div class="flex-1">
+                        <label class="block text-xs font-bold text-gray-500 uppercase mb-1.5">เลือกวันที่เป็นวันหยุด</label>
+                        <input type="date" id="he-date-input" class="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-300">
+                    </div>
+                    <button onclick="HolidayException.check()"
+                        class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-xl text-sm font-bold transition shadow-sm whitespace-nowrap">
+                        🔍 ตรวจสอบ
+                    </button>
+                </div>
+
+                <div id="he-result"></div>
+            </div>
+
+            <div class="p-5 border-t flex gap-3 flex-shrink-0">
+                <button onclick="HolidayException.close()"
+                    class="flex-1 border border-gray-200 rounded-xl py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-50 transition">ยกเลิก</button>
+                <button onclick="HolidayException.confirmAll()"
+                    class="flex-1 bg-amber-500 hover:bg-amber-600 text-white rounded-xl py-2.5 text-sm font-bold transition shadow-sm">✅ ยืนยันบันทึก</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ✅ ข้อ 5 (โหมดที่ 4): ระบบจัดการวันหยุด — เลือกวันที่ → auto แบ่งครึ่งร้านตาม seq เดิม
+        // → เด้งแผนที่ให้ตรวจสอบ/ปรับก่อนยืนยัน (คลิกจุดบนแผนที่เพื่อสลับกลุ่ม) → บันทึก exception
+        const HolidayException = {
+            _ym:       '',
+            _dateStr:  '',
+            _affected: {},   // { route: { day, prevDay, nextDay, prevDate, nextDate, stores, prevGroup:Set, nextGroup:Set } }
+            _maps:     {},   // route -> Leaflet map instance (มินิแผนที่แยกต่อสาย)
+
+            open: () => {
+                document.getElementById('holiday-exception-modal').classList.remove('hidden');
+                document.getElementById('he-result').innerHTML = '';
+                const dateInput = document.getElementById('he-date-input');
+                if (dateInput && !dateInput.value) {
+                    const now = new Date();
+                    dateInput.value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+                }
+                HolidayException._affected = {};
+            },
+
+            close: () => {
+                document.getElementById('holiday-exception-modal').classList.add('hidden');
+                // ✅ ทำลาย mini map ทุกอันกัน memory leak
+                Object.values(HolidayException._maps).forEach(m => { try { m.remove(); } catch(e) {} });
+                HolidayException._maps = {};
+            },
+
+            // ── หา Day label ก่อนหน้า/ถัดไปที่ "มีวิ่งจริง" ตาม weekdayMap (ข้าม weekday ที่ไม่ได้ตั้งค่า) ──
+            _findAdjacentDate: (baseDate, dir, daysByWeekday) => {
+                const dt = new Date(baseDate);
+                for (let i = 0; i < 7; i++) {
+                    dt.setDate(dt.getDate() + dir);
+                    if (daysByWeekday[dt.getDay()]) return dt;
+                }
+                return null;
+            },
+            _fmtDate: (dt) => `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`,
+
+            check: async () => {
+                const dateStr = document.getElementById('he-date-input')?.value;
+                if (!dateStr) return UI.showErrorToast('⚠️ กรุณาเลือกวันที่ก่อน');
+                HolidayException._dateStr = dateStr;
+
+                const [y, m, d] = dateStr.split('-').map(Number);
+                const ym = `${y}_${String(m).padStart(2,'0')}`;
+                HolidayException._ym = ym;
+
+                UI.showLoader('กำลังตรวจสอบ...', 'หาร้านที่ได้รับผลกระทบ');
+                try {
+                    const planSnap = await App.planRef(ym).get();
+                    if (!planSnap.exists) { UI.hideLoader(); return UI.showErrorToast('⚠️ ไม่พบแผนของเดือนนี้'); }
+                    const meta = planSnap.data();
+                    const cfg  = meta.calendarConfig;
+                    if (!cfg || cfg.mode !== 'weekday') {
+                        UI.hideLoader();
+                        return UI.showErrorToast('⚠️ ฟีเจอร์นี้ใช้ได้เฉพาะเดือนที่ตั้งค่าโหมด "ตามวันในสัปดาห์" เท่านั้น');
+                    }
+
+                    const wmap = cfg.weekdayMap || {};
+                    const daysByWeekday = {};
+                    Object.entries(wmap).forEach(([day, w]) => { daysByWeekday[w] = day; });
+
+                    const baseDate = new Date(y, m-1, d);
+                    const wd = baseDate.getDay();
+                    const dayLabel = daysByWeekday[wd];
+                    if (!dayLabel) { UI.hideLoader(); return UI.showErrorToast('⚠️ วันที่เลือกไม่ตรงกับ Day ไหนเลยตามที่ตั้งค่าไว้ (ไม่มีร้านวิ่งวันนี้อยู่แล้ว)'); }
+
+                    const prevDateObj = HolidayException._findAdjacentDate(baseDate, -1, daysByWeekday);
+                    const nextDateObj = HolidayException._findAdjacentDate(baseDate, 1, daysByWeekday);
+                    if (!prevDateObj || !nextDateObj) {
+                        UI.hideLoader();
+                        return UI.showErrorToast('⚠️ หาวันก่อนหน้า/ถัดไปไม่เจอ (ตั้งค่า weekday ไว้น้อยกว่า 2 วัน)');
+                    }
+                    const prevDayLabel = daysByWeekday[prevDateObj.getDay()];
+                    const nextDayLabel = daysByWeekday[nextDateObj.getDay()];
+
+                    const routeList = meta.routeList || [];
+                    const affected  = {};
+                    // ✅ PERF: โหลดทุกสายพร้อมกัน
+                    await Promise.all(routeList.map(async name => {
+                        try {
+                            const rd = await App.planRoutesCol(ym).doc(name).get();
+                            const stores = rd.exists ? (rd.data().stores || []) : [];
+                            const inDay  = stores.filter(s => s.days?.includes(dayLabel));
+                            if (!inDay.length) return;
+
+                            // ✅ เรียงตาม seq เดิมของร้านในวันนั้น → ตัดครึ่ง
+                            const sorted = [...inDay].sort((a,b) => (a.seqs?.[dayLabel]||999) - (b.seqs?.[dayLabel]||999));
+                            const half   = Math.ceil(sorted.length / 2);
+                            affected[name] = {
+                                day: dayLabel, prevDay: prevDayLabel, nextDay: nextDayLabel,
+                                prevDate: HolidayException._fmtDate(prevDateObj),
+                                nextDate: HolidayException._fmtDate(nextDateObj),
+                                stores: sorted,
+                                prevGroup: new Set(sorted.slice(0, half).map(s => s.id)),
+                                nextGroup: new Set(sorted.slice(half).map(s => s.id)),
+                            };
+                        } catch(e) { console.warn('HolidayException.check route', name, e); }
+                    }));
+
+                    HolidayException._affected = affected;
+                    UI.hideLoader();
+                    HolidayException._renderResult();
+                } catch(e) {
+                    UI.hideLoader();
+                    UI.showErrorToast('❌ ตรวจสอบไม่สำเร็จ: ' + e.message);
+                }
+            },
+
+            _renderResult: () => {
+                const el = document.getElementById('he-result');
+                if (!el) return;
+                const routes = Object.keys(HolidayException._affected);
+                if (!routes.length) {
+                    el.innerHTML = '<p class="text-center text-gray-400 text-xs py-8">📭 ไม่พบร้านที่ได้รับผลกระทบในวันที่เลือก</p>';
+                    return;
+                }
+                el.innerHTML = `
+                    <p class="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 mb-3">
+                        💡 คลิกจุดบนแผนที่เพื่อสลับร้านระหว่าง 2 กลุ่ม ถ้าเห็นว่าระบบแบ่งมาไม่เหมาะกับระยะทางจริง
+                    </p>
+                ` + routes.map(route => {
+                    const d = HolidayException._affected[route];
+                    return `
+                    <div class="border border-gray-200 rounded-2xl p-3 mb-3">
+                        <p class="text-xs font-black text-gray-800 mb-2">
+                            🚚 ${route} — ${d.day} ทั้งหมด ${d.stores.length} ร้าน
+                            <span class="text-gray-400 font-normal block mt-0.5">แบ่งไป ${d.prevDay} (${d.prevDate}) และ ${d.nextDay} (${d.nextDate})</span>
+                        </p>
+                        <div id="he-map-${route}" style="height:220px;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;" class="mb-2"></div>
+                        <div class="flex gap-4 text-[11px] font-bold">
+                            <span class="flex items-center gap-1.5"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#3b82f6;"></span> ไป ${d.prevDay}: <span id="he-count-prev-${route}">${d.prevGroup.size}</span> ร้าน</span>
+                            <span class="flex items-center gap-1.5"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#f97316;"></span> ไป ${d.nextDay}: <span id="he-count-next-${route}">${d.nextGroup.size}</span> ร้าน</span>
+                        </div>
+                    </div>`;
+                }).join('');
+
+                // สร้าง mini map ทีละสาย (ต้องรอ DOM render เสร็จก่อน)
+                setTimeout(() => routes.forEach(route => HolidayException._renderMiniMap(route)), 50);
+            },
+
+            _renderMiniMap: (route) => {
+                const data = HolidayException._affected[route];
+                const elId = `he-map-${route}`;
+                const el   = document.getElementById(elId);
+                if (!el || typeof L === 'undefined' || !data.stores.length) return;
+
+                const map = L.map(elId, { zoomControl: true, attributionControl: false })
+                    .setView([data.stores[0].lat, data.stores[0].lng], 13);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(map);
+                HolidayException._maps[route] = map;
+
+                data.stores.forEach(s => {
+                    const color = data.prevGroup.has(s.id) ? '#3b82f6' : '#f97316';
+                    const marker = L.circleMarker([s.lat, s.lng], {
+                        radius: 9, fillColor: color, fillOpacity: 0.9, color: '#fff', weight: 2,
+                    }).addTo(map);
+                    marker.bindTooltip(s.name, { direction: 'top' });
+                    // ✅ คลิกเพื่อสลับกลุ่ม (แทน drag — ใช้ pattern click-toggle แบบเดียวกับที่มีอยู่แล้วในระบบ)
+                    marker.on('click', () => {
+                        if (data.prevGroup.has(s.id)) { data.prevGroup.delete(s.id); data.nextGroup.add(s.id); }
+                        else { data.nextGroup.delete(s.id); data.prevGroup.add(s.id); }
+                        marker.setStyle({ fillColor: data.prevGroup.has(s.id) ? '#3b82f6' : '#f97316' });
+                        HolidayException._updateCounts(route);
+                    });
+                });
+
+                try {
+                    const bounds = L.latLngBounds(data.stores.map(s => [s.lat, s.lng]));
+                    map.fitBounds(bounds, { padding: [24, 24] });
+                } catch(e) { /* ร้านเดียวหรือพิกัดผิดปกติ ใช้ view เริ่มต้น */ }
+            },
+
+            _updateCounts: (route) => {
+                const data = HolidayException._affected[route];
+                const prevEl = document.getElementById(`he-count-prev-${route}`);
+                const nextEl = document.getElementById(`he-count-next-${route}`);
+                if (prevEl) prevEl.textContent = data.prevGroup.size;
+                if (nextEl) nextEl.textContent = data.nextGroup.size;
+            },
+
+            confirmAll: async () => {
+                const routes = Object.keys(HolidayException._affected);
+                if (!routes.length) return UI.showErrorToast('⚠️ ยังไม่มีข้อมูลให้บันทึก — กด "ตรวจสอบ" ก่อน');
+                if (!confirm(`ยืนยันบันทึกวันหยุด ${HolidayException._dateStr} สำหรับ ${routes.length} สาย?\nร้านจะถูกแบ่งไปวันก่อนหน้า/ถัดไปตามที่ตรวจสอบไว้`)) return;
+
+                UI.showLoader('กำลังบันทึก...', '');
+                try {
+                    const splits = {};
+                    let originalDay = '', prevDay = '', nextDay = '', prevDate = '', nextDate = '';
+                    routes.forEach(route => {
+                        const d = HolidayException._affected[route];
+                        splits[route] = { prevStores: [...d.prevGroup], nextStores: [...d.nextGroup] };
+                        originalDay = d.day; prevDay = d.prevDay; nextDay = d.nextDay;
+                        prevDate = d.prevDate; nextDate = d.nextDate;
+                    });
+                    const exceptionEntry = {
+                        originalDay, prevDay, nextDay, prevDate, nextDate, splits,
+                        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                    };
+                    // ✅ ใช้ merge:true — Firestore merge nested map แบบ recursive จึงไม่ทับ exceptions วันอื่นหรือ field อื่นของ calendarConfig
+                    await App.planRef(HolidayException._ym).set({
+                        calendarConfig: { exceptions: { [HolidayException._dateStr]: exceptionEntry } }
+                    }, { merge: true });
+
+                    UI.hideLoader();
+                    HolidayException.close();
+                    UI.showSaveToast(`✅ บันทึกวันหยุด ${HolidayException._dateStr} เรียบร้อย (${routes.length} สาย)`);
+                } catch(e) {
+                    UI.hideLoader();
                     UI.showErrorToast('❌ บันทึกไม่สำเร็จ: ' + e.message);
                 }
             },

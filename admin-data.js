@@ -767,9 +767,10 @@ const PlanUI = {
             App.planRef(ym).get().then(snap => {
                 const cfg = snap.exists ? (snap.data().calendarConfig || null) : null;
                 const labels = {
-                    cycle: '🔄 หมุนนับต่อเนื่อง',
-                    date:  '📅 วันที่ตรง Day',
-                    fixed: '📌 กำหนดเอง',
+                    cycle:   '🔄 หมุนนับต่อเนื่อง',
+                    date:    '📅 วันที่ตรง Day',
+                    fixed:   '📌 กำหนดเอง',
+                    weekday: '📆 ตามวันในสัปดาห์',
                 };
                 if (cfg && cfg.mode && labels[cfg.mode]) {
                     modeBadge.textContent = labels[cfg.mode];

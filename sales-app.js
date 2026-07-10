@@ -814,13 +814,16 @@ const Processor = {
     },
 
     routeList: () => {
-        const list = State.allStores
+        let list = State.allStores
             .filter(s => {
                 if (!s.days.includes(State.currentDay)) return false;
                 if (State._filterMarket) return trimMarketName(s.marketName) === State._filterMarket;
                 return true;
             })
             .sort((a, b) => (a.seqs?.[State.currentDay] || 999) - (b.seqs?.[State.currentDay] || 999));
+
+        // ✅ ข้อ 5 (โหมดที่ 4): ปรับ list ตาม exception วันหยุด ถ้าวันนี้ตรงกับวันที่มีการแบ่งร้านไว้
+        list = CalendarCtrl.applyExceptions(list, State.currentDay);
 
         const html = list.map((s, i) => {
             const seq     = s.seqs?.[State.currentDay] || i + 1;
@@ -851,7 +854,8 @@ const Processor = {
         const _markets = getDayMarkets(State.currentDay);
         const _dayNum  = State.currentDay ? State.currentDay.replace('Day ', '') : '';
         const _mkt     = _markets ? ' · ' + _markets.split(' · ')[0] : '';
-        document.getElementById('route-title').innerText = `Day ${_dayNum}${_mkt} (${list.length} ร้าน)`;
+        document.getElementById('route-title').innerText =
+            `Day ${_dayNum}${_mkt} (${list.length} ร้าน)` + (CalendarCtrl._lastExceptionApplied ? ' ⚠️ ปรับเนื่องจากวันหยุด' : '');
 
         if (sortableList) sortableList.destroy();
         sortableList = Sortable.create(c, {
@@ -1063,6 +1067,13 @@ const CalendarCtrl = {
             return (stores || State.allStores).some(s => s.days?.includes(label)) ? label : null;
         }
         if (cfg.mode === 'fixed') return cfg.mapping ? (cfg.mapping[String(dateNum)] || null) : null;
+        // ✅ โหมดที่ 4: ตามวันในสัปดาห์ — Day N = วันในสัปดาห์ที่กำหนดไว้ ขยายทุกสัปดาห์อัตโนมัติ
+        if (cfg.mode === 'weekday') {
+            const wmap = cfg.weekdayMap || {};
+            const wd   = new Date(year, month, dateNum).getDay(); // 0=อาทิตย์..6=เสาร์
+            const entry = Object.entries(wmap).find(([, w]) => w === wd);
+            return entry ? entry[0] : null;
+        }
         if (cfg.mode === 'cycle') {
             const startDate  = parseInt(cfg.startDay  || 1);
             const holidays   = cfg.holidays  || [];
@@ -1089,6 +1100,12 @@ const CalendarCtrl = {
             return State.allStores.some(s => s.days?.includes(label)) ? label : null;
         }
         if (cfg.mode === 'fixed') return cfg.mapping ? (cfg.mapping[String(dateNum)] || null) : null;
+        if (cfg.mode === 'weekday') {
+            const wmap = cfg.weekdayMap || {};
+            const wd   = new Date(CalendarCtrl._year, CalendarCtrl._month, dateNum).getDay();
+            const entry = Object.entries(wmap).find(([, w]) => w === wd);
+            return entry ? entry[0] : null;
+        }
         if (cfg.mode === 'cycle') {
             const startDate  = parseInt(cfg.startDay  || 1);
             const holidays   = cfg.holidays  || [];
@@ -1130,6 +1147,48 @@ const CalendarCtrl = {
             }
         }
         return null;
+    },
+
+    // ✅ ข้อ 5 (โหมดที่ 4): เช็ค exception วันหยุดของ "วันนี้" (calendar date จริง) แล้วปรับ list ร้านให้ตรง
+    // — วันหยุดเอง: เอาร้านที่ถูกแบ่งออกไปทั้งหมดออกจาก queue
+    // — วันที่รับร้านเพิ่ม (prevDate/nextDate): เพิ่มร้านกลุ่มที่ถูกโยกมาเข้า queue
+    applyExceptions: (baseList, dayLabel) => {
+        const cfg = State.calendarConfig;
+        CalendarCtrl._lastExceptionApplied = false;
+        if (!cfg || !cfg.exceptions) return baseList;
+
+        const now = new Date();
+        const todayStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+        const route = State.myRoute;
+        let list = [...baseList];
+
+        Object.entries(cfg.exceptions).forEach(([dateStr, ex]) => {
+            const split = ex.splits?.[route];
+            if (!split) return; // สายนี้ไม่ได้รับผลกระทบจาก exception นี้
+
+            // วันนี้คือวันหยุดเอง → ตัดร้านที่ถูกแบ่งออกทั้งหมดออกจาก queue ของ Day เดิม
+            if (dateStr === todayStr && dayLabel === ex.originalDay) {
+                const removeIds = new Set([...(split.prevStores || []), ...(split.nextStores || [])]);
+                list = list.filter(s => !removeIds.has(s.id));
+                CalendarCtrl._lastExceptionApplied = true;
+            }
+            // วันนี้คือวันก่อนหน้าที่รับร้านเพิ่ม → เติมร้านกลุ่ม prevStores เข้า queue
+            if (ex.prevDate === todayStr && dayLabel === ex.prevDay) {
+                const addIds = new Set(split.prevStores || []);
+                const toAdd  = State.allStores.filter(s => addIds.has(s.id) && !list.some(x => x.id === s.id));
+                list = list.concat(toAdd);
+                if (toAdd.length) CalendarCtrl._lastExceptionApplied = true;
+            }
+            // วันนี้คือวันถัดไปที่รับร้านเพิ่ม → เติมร้านกลุ่ม nextStores เข้า queue
+            if (ex.nextDate === todayStr && dayLabel === ex.nextDay) {
+                const addIds = new Set(split.nextStores || []);
+                const toAdd  = State.allStores.filter(s => addIds.has(s.id) && !list.some(x => x.id === s.id));
+                list = list.concat(toAdd);
+                if (toAdd.length) CalendarCtrl._lastExceptionApplied = true;
+            }
+        });
+
+        return list;
     },
 
     render: () => {
