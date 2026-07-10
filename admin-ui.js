@@ -19,6 +19,9 @@ const Nav = {
         if (page === 'skudist') {
             if (typeof SkuDist !== 'undefined') SkuDist.init();
         }
+        if (page === 'routeanalysis') {
+            if (typeof RouteAnalysis !== 'undefined') RouteAnalysis.init();
+        }
         if (page === 'planning') {
             setTimeout(() => { if (MapCtrl.map) MapCtrl.map.invalidateSize(); }, 200);
         }
@@ -44,6 +47,48 @@ const UI = {
     hideLoader: () => {
         const el = document.getElementById('loader');
         if (el) el.style.display = 'none';
+    },
+
+    // ✅ UX: Legend สีของแต่ละ Day — toggle เปิด/ปิด panel
+    toggleLegend: () => {
+        const panel = document.getElementById('dayLegendPanel');
+        const lasso = document.getElementById('lassoPanel');
+        if (!panel) return;
+        // ปิด lasso panel ถ้าเปิดค้างอยู่ กันซ้อนกัน
+        if (lasso && !lasso.classList.contains('hidden')) Lasso.cancel();
+        panel.classList.toggle('hidden');
+    },
+
+    // ✅ UX: แสดงเฉพาะวันที่มีร้านอยู่จริง (sums[d] > 0) ไม่โชว์ทั้ง 30 วันให้รก
+    _renderDayLegend: (sums) => {
+        const listEl = document.getElementById('dayLegendList');
+        if (!listEl) return;
+        const activeDays = Object.keys(DAY_COLORS).filter(d => sums[d] > 0);
+        listEl.innerHTML = activeDays.length
+            ? activeDays.map(d => `
+                <div class="flex items-center gap-2 text-xs">
+                    <span class="color-dot" style="background:${DAY_COLORS[d].hex};"></span>
+                    <span class="font-bold text-gray-700">${DAY_COLORS[d].name}</span>
+                    <span class="text-gray-400 ml-auto">${sums[d]} ร้าน</span>
+                </div>`).join('')
+            : '<p class="text-[11px] text-gray-400">ยังไม่มีร้านถูกจัดวัน</p>';
+    },
+
+    // ✅ UX: Undo banner — โผล่หลังการกระทำที่ลบข้อมูล ให้เวลา 8 วิ กดย้อนกลับได้
+    _undoTimer: null,
+    showUndoBanner: (msg) => {
+        const el = document.getElementById('undo-banner');
+        const msgEl = document.getElementById('undo-banner-msg');
+        if (!el || !msgEl) return;
+        msgEl.textContent = msg;
+        el.classList.remove('hidden');
+        clearTimeout(UI._undoTimer);
+        UI._undoTimer = setTimeout(() => UI.hideUndoBanner(), 8000);
+    },
+    hideUndoBanner: () => {
+        const el = document.getElementById('undo-banner');
+        if (el) el.classList.add('hidden');
+        App._undoSnapshot = null;
     },
 
     showSaveToast: (msg) => {
@@ -275,6 +320,15 @@ const UI = {
     },
 
     render: () => {
+        // ✅ UX: อัปเดตป้ายนับร้านที่เลือกอยู่ — ให้เห็นก่อนกด "จัดลงวัน" ไม่ต้องรอ error toast
+        const selCount = State.stores.filter(s => s.selected).length;
+        const badgeEl  = document.getElementById('selected-count-badge');
+        const numEl    = document.getElementById('selected-count-num');
+        if (badgeEl && numEl) {
+            numEl.textContent = selCount;
+            badgeEl.classList.toggle('hidden', selCount === 0);
+        }
+
         const sums = {};
         for (let i = 1; i <= 30; i++) sums[`Day ${i}`] = 0;
         let aCnt = 0;
@@ -295,6 +349,9 @@ const UI = {
                 .join('');
             if (cv) ds.value = cv;
         }
+
+        // ✅ UX: Legend สีของแต่ละ Day — โชว์เฉพาะวันที่มีร้านอยู่จริง ไม่โชว์ทั้ง 30 วันให้รก
+        UI._renderDayLegend(sums);
 
         const opts = Object.keys(DAY_COLORS)
             .map(d => `<option value="${d}">${DAY_COLORS[d].name}</option>`)
@@ -384,9 +441,24 @@ const UI = {
         const elUpload = document.getElementById('list-upload');
         const elUnassigned = document.getElementById('list-unassigned');
         const elAssigned = document.getElementById('list-assigned');
-        if (elUpload) elUpload.innerHTML = htmlP.join('');
-        if (elUnassigned) elUnassigned.innerHTML = htmlU.join('');
-        if (elAssigned) elAssigned.innerHTML = htmlA.join('');
+
+        // ✅ UX: Empty state พร้อมคำแนะนำ — เดิมถ้าไม่มีร้านจะเจอหน้าว่างเปล่า ไม่รู้ต้องทำอะไรต่อ
+        if (elUpload) {
+            elUpload.innerHTML = htmlP.length ? htmlP.join('')
+                : State.stores.length === 0
+                    ? '<p class="text-center text-xs text-gray-400 py-8">📂 สายนี้ยังไม่มีร้านค้า<br>อัปโหลดไฟล์แผนที่ด้านบนเพื่อเริ่มต้น</p>'
+                    : '<p class="text-center text-xs text-gray-400 py-8">🔍 ไม่พบร้านที่ตรงกับคำค้นหา</p>';
+        }
+        if (elUnassigned) {
+            elUnassigned.innerHTML = htmlU.length ? htmlU.join('')
+                : State.stores.length === 0
+                    ? '<p class="text-center text-xs text-gray-400 py-8">📂 ยังไม่มีร้านค้าในสายนี้<br>ไปที่แท็บ "1. ข้อมูล" เพื่ออัปโหลดไฟล์ก่อน</p>'
+                    : '<p class="text-center text-xs text-gray-400 py-8">🎉 จัดครบทุกร้านแล้ว ไม่มีร้านค้างจัดวัน</p>';
+        }
+        if (elAssigned) {
+            elAssigned.innerHTML = htmlA.length ? htmlA.join('')
+                : '<p class="text-center text-xs text-gray-400 py-8">📋 ยังไม่มีร้านที่จัดวันแล้ว<br>ไปที่แท็บ "2. จัดสาย" เพื่อเริ่มจัดร้านลงวัน</p>';
+        }
 
         // ✅ Section ร้านที่พัก (inactive)
         let elInactive = document.getElementById('list-inactive-section');
@@ -424,7 +496,7 @@ const UI = {
         if (elSummary) {
             elSummary.innerHTML = sumH.length
                 ? sumH.join('')
-                : '<p class="col-span-2 text-center text-xs text-gray-400 mt-4">ยังไม่จัดสาย</p>';
+                : '<p class="col-span-2 text-center text-xs text-gray-400 mt-4 py-8">📊 ยังไม่มีร้านที่จัดวัน<br>ไปที่แท็บ "2. จัดสาย" เพื่อเริ่มจัดร้านลงวัน</p>';
         }
 
         const activeStores = State.stores.filter(s => !s.inactive);

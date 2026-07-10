@@ -601,12 +601,50 @@ const App = {
     clearAllAssignments: () => {
         if (!confirm('🗑️ ยืนยันการเคลียร์การจัดสายทั้งหมด?')) return;
         if (!State.stores?.length) return UI.showErrorToast('⚠️ ไม่มีข้อมูลร้านค้า');
+        // ✅ UX: เก็บ snapshot ไว้ก่อนลบ เผื่อกดพลาด — undo ได้ภายใน 8 วิ
+        App._undoSnapshot = { route: State.localActiveRoute, stores: JSON.parse(JSON.stringify(State.stores)) };
         State.stores.forEach(s => { s.days = []; s.seqs = {}; s.selected = false; });
         MapCtrl?.clearRoad?.(true);
         MapCtrl?.clearAll?.();
         UI?.render?.();
         App?.saveDB?.();
-        UI.showSaveToast('✅ เคลียร์การจัดสายเสร็จ');
+        UI.showUndoBanner(`✅ เคลียร์การจัดสายเสร็จ (${App._undoSnapshot.stores.length} ร้าน)`);
+    },
+
+    // ✅ FIX: เดิมปุ่ม "ล้างสายนี้" ใน Tab 1 เรียกฟังก์ชันนี้ แต่ไม่เคยมีอยู่จริง (บั๊ก — กดแล้วไม่มีอะไรเกิดขึ้น)
+    // ลบร้านค้าทั้งหมดออกจากสายที่กำลังเลือกอยู่ (ต่างจาก clearAllAssignments ที่แค่ล้างวันที่จัด แต่ร้านยังอยู่)
+    clearStores: () => {
+        if (!State.stores?.length) return UI.showErrorToast('⚠️ สายนี้ไม่มีร้านค้าอยู่แล้ว');
+        if (!confirm(`🗑️ ยืนยันลบร้านค้าทั้งหมด (${State.stores.length} ร้าน) ออกจากสาย "${State.localActiveRoute}"?\nการกระทำนี้ลบร้านทิ้งทั้งหมด ไม่ใช่แค่ล้างวันที่จัด`)) return;
+        // ✅ UX: เก็บ snapshot ไว้ก่อนลบ เผื่อกดพลาด — undo ได้ภายใน 8 วิ
+        App._undoSnapshot = { route: State.localActiveRoute, stores: JSON.parse(JSON.stringify(State.stores)) };
+        State.stores = [];
+        if (State.db?.routes) State.db.routes[State.localActiveRoute] = [];
+        MapCtrl?.clearRoad?.(true);
+        MapCtrl?.clearAll?.();
+        UI?.render?.();
+        App?.saveDB?.();
+        UI.showUndoBanner(`✅ ลบร้านค้าออกจากสายนี้เรียบร้อย (${App._undoSnapshot.stores.length} ร้าน)`);
+    },
+
+    // ✅ UX: ย้อนกลับการลบล่าสุด (ใช้ได้ครั้งเดียว ภายใน 8 วิหลังลบ)
+    _undoSnapshot: null,
+    undo: () => {
+        const snap = App._undoSnapshot;
+        if (!snap) return;
+        // กันย้อนกลับผิดสาย ถ้า user สลับไปสายอื่นระหว่างนั้น
+        if (State.localActiveRoute !== snap.route) {
+            UI.showErrorToast('⚠️ สลับสายไปแล้ว ย้อนกลับไม่ได้');
+            UI.hideUndoBanner();
+            return;
+        }
+        State.stores = snap.stores;
+        if (State.db?.routes) State.db.routes[snap.route] = State.stores;
+        MapCtrl?.clearAll?.();
+        UI?.render?.();
+        App?.saveDB?.();
+        UI.hideUndoBanner();
+        UI.showSaveToast('↩️ ย้อนกลับเรียบร้อย');
     },
 
     handleMapUpload: (e) => {
@@ -722,6 +760,28 @@ const PlanUI = {
         if (badge) badge.textContent = ym ? `📅 ${App.ymToLabel(ym)}` : '📅 Plan';
         const sel = document.getElementById('plan-selector');
         if (sel && ym) sel.value = ym;
+
+        // ✅ UX: badge โหมดปฏิทิน — ไม่ต้องเปิด settings ก็รู้ว่าเดือนนี้ใช้โหมดไหน
+        const modeBadge = document.getElementById('cal-mode-badge');
+        if (modeBadge && ym) {
+            App.planRef(ym).get().then(snap => {
+                const cfg = snap.exists ? (snap.data().calendarConfig || null) : null;
+                const labels = {
+                    cycle: '🔄 หมุนนับต่อเนื่อง',
+                    date:  '📅 วันที่ตรง Day',
+                    fixed: '📌 กำหนดเอง',
+                };
+                if (cfg && cfg.mode && labels[cfg.mode]) {
+                    modeBadge.textContent = labels[cfg.mode];
+                    modeBadge.classList.remove('hidden');
+                } else {
+                    modeBadge.textContent = '⚠️ ยังไม่ตั้งค่า';
+                    modeBadge.classList.remove('hidden');
+                }
+            }).catch(() => modeBadge.classList.add('hidden'));
+        } else if (modeBadge) {
+            modeBadge.classList.add('hidden');
+        }
     },
 
     // เปิด modal เพิ่มเดือนใหม่

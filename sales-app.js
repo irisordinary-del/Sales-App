@@ -301,20 +301,20 @@ const App = {
                 const endYM   = c.endYM   || nowYM;
                 const months  = getMonthRange(startYM, endYM);
 
-                // รวม rows ทุกเดือน
-                let allRows = [];
-                for (const ym of months) {
+                // ✅ PERF: โหลดทุกเดือนพร้อมกัน (Promise.all) แทนทีละเดือน — เร็วขึ้นตามจำนวนเดือน
+                // ปลอดภัยเพราะ SalesDashboard._loadChunks มี cache + in-flight dedup อยู่แล้ว
+                const monthResults = await Promise.all(months.map(async ym => {
                     try {
-                        let rows = [];
                         if (typeof SalesDashboard !== 'undefined' && SalesDashboard._loadChunks) {
-                            rows = await SalesDashboard._loadChunks(ym);
-                        } else {
-                            const cs = await db.collection('sellout').doc(ym).collection('chunks').get();
-                            cs.forEach(d => rows = rows.concat(d.data().rows || []));
+                            return await SalesDashboard._loadChunks(ym);
                         }
-                        allRows = allRows.concat(rows);
-                    } catch(e) { /* เดือนนี้ไม่มีข้อมูล ข้ามไป */ }
-                }
+                        const cs = await db.collection('sellout').doc(ym).collection('chunks').get();
+                        let rows = [];
+                        cs.forEach(d => rows = rows.concat(d.data().rows || []));
+                        return rows;
+                    } catch (e) { return []; /* เดือนนี้ไม่มีข้อมูล ข้ามไป */ }
+                }));
+                const allRows = monthResults.flat();
 
                 if (!allRows.length) continue;
 
@@ -1837,19 +1837,20 @@ const ActivityCtrl = {
         if (!kws.length) return new Set();
 
         const months = getMonthRange(c.startYM, c.endYM);
-        let allRows = [];
-        for (const ym of months) {
+
+        // ✅ PERF: โหลดทุกเดือนพร้อมกัน แทนทีละเดือน
+        const monthResults = await Promise.all(months.map(async ym => {
             try {
-                let rows = [];
                 if (typeof SalesDashboard !== 'undefined' && SalesDashboard._loadChunks) {
-                    rows = await SalesDashboard._loadChunks(ym);
-                } else {
-                    const cs = await db.collection('sellout').doc(ym).collection('chunks').get();
-                    cs.forEach(d => rows = rows.concat(d.data().rows || []));
+                    return await SalesDashboard._loadChunks(ym);
                 }
-                allRows = allRows.concat(rows);
-            } catch (e) { /* เดือนนี้ไม่มีข้อมูล ข้ามไป */ }
-        }
+                const cs = await db.collection('sellout').doc(ym).collection('chunks').get();
+                let rows = [];
+                cs.forEach(d => rows = rows.concat(d.data().rows || []));
+                return rows;
+            } catch (e) { return []; /* เดือนนี้ไม่มีข้อมูล ข้ามไป */ }
+        }));
+        const allRows = monthResults.flat();
 
         const participantSet = new Set(c._myParticipants || []);
         return new Set(
