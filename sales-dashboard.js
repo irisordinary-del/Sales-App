@@ -33,6 +33,23 @@ const SalesDashboard = {
         console.warn('[SalesDashboard] _ymKeyMap ยังไม่พร้อมหลังรอ 5 วิ — ใช้ ym ตรงๆ แทน (อาจ query ผิด path)');
     },
 
+    // ✅ FIX (2026-07-11 v2): บังคับอ่านจากเซิร์ฟเวอร์เสมอสำหรับข้อมูลยอดขาย (สำคัญ/ต้องถูกต้อง)
+    // แทนที่จะปล่อยให้ Firestore SDK เลือก cache หรือเซิร์ฟเวอร์เอง — พฤติกรรม cache/persistence
+    // ต่างกันไปตามอุปกรณ์/เบราว์เซอร์ (โดยเฉพาะมือถือ) ทำให้บางเครื่องได้ข้อมูลค้าง/ว่างเปล่า
+    // ทั้งที่เซิร์ฟเวอร์มีข้อมูลจริงครบ — ถ้าเครื่องออฟไลน์จริง (throw 'unavailable') ค่อย fallback
+    // ไปใช้ cache เดิม (.get() เฉยๆ) กันแอปพังตอนไม่มีเน็ตจริงๆ
+    _getFresh: async (ref) => {
+        try {
+            return await ref.get({ source: 'server' });
+        } catch (e) {
+            if (e.code === 'unavailable') {
+                console.warn('[SalesDashboard] ออฟไลน์จริง — ใช้ cache แทน');
+                return await ref.get();
+            }
+            throw e;
+        }
+    },
+
     EXCLUDED_BRANDS: new Set(['อื่นๆ', 'กระเช้าของขวัญ']),
 
     _calcOutletMetrics: (rows) => {
@@ -141,7 +158,7 @@ const SalesDashboard = {
         for (let attempt = 0; attempt < 2; attempt++) {
             try {
                 snap = await Promise.race([
-                    db.collection('sellout').get(),
+                    SalesDashboard._getFresh(db.collection('sellout')),
                     new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 10000))
                 ]);
                 break;
@@ -272,7 +289,7 @@ const SalesDashboard = {
 
                 // ✅ ลอง key จาก _ymKeyMap ก่อน (อาจเป็น 402_2026_06)
                 const key  = SalesDashboard._ymKeyMap?.[ym] || ym;
-                const snap = await db.collection('sellout').doc(key).collection('chunks').get();
+                const snap = await SalesDashboard._getFresh(db.collection('sellout').doc(key).collection('chunks'));
 
                 let rows = [];
                 if (!snap.empty) {
@@ -283,7 +300,7 @@ const SalesDashboard = {
 
                 // ✅ ถ้า rows ว่าง และ key ต่างจาก ym → fallback ไป YYYY_MM format เก่า
                 if (rows.length === 0 && key !== ym) {
-                    const snap2 = await db.collection('sellout').doc(ym).collection('chunks').get();
+                    const snap2 = await SalesDashboard._getFresh(db.collection('sellout').doc(ym).collection('chunks'));
                     if (!snap2.empty) {
                         let rows2 = [];
                         snap2.docs
@@ -667,7 +684,7 @@ const SalesDashboard = {
         } else {
             try {
                 // ✅ PERF: ใช้ _loadChunks → share cache กับ dashboard ไม่ fetch Firestore ซ้ำ
-                const listSnap = await db.collection('sellout').get();
+                const listSnap = await SalesDashboard._getFresh(db.collection('sellout'));
                 const _cid2 = window.CENTER_ID || Auth.getSession()?.centerId || '';
                 const _pfx2 = _cid2 ? `${_cid2}_` : '';
                 const months = listSnap.docs
@@ -872,7 +889,7 @@ const SupervisorDashboard = {
         for (let attempt = 0; attempt < 2; attempt++) {
             try {
                 snap = await Promise.race([
-                    db.collection('sellout').get(),
+                    SalesDashboard._getFresh(db.collection('sellout')),
                     new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 10000))
                 ]);
                 break;
