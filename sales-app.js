@@ -699,6 +699,19 @@ function trimMarketName(raw) {
     return raw.replace(/^[A-Z0-9]+\s+D\d+\s+/i, '').trim();
 }
 
+// ✅ BUGFIX: DateUtil ถูกประกาศไว้ใน dashboard.js เท่านั้น ซึ่งไม่ถูกโหลดในหน้า Sales เลย
+// (sales.html โหลดแค่ sales-app.js, store-history.js, sales-dashboard.js, pwa-register.js)
+// ทำให้ typeof DateUtil !== 'undefined' เป็น false เสมอในหน้านี้ — เพิ่ม fallback formatter เบาๆ
+// ไว้ในไฟล์นี้เลย แทนที่จะพึ่งพา dashboard.js ข้ามหน้า
+function ymToThaiShortLocal(ym) {
+    if (!ym) return '';
+    const [y, m] = ym.split('_');
+    if (!y || !m) return ym;
+    try {
+        return new Date(+y, +m - 1, 1).toLocaleDateString('th-TH', { year: 'numeric', month: 'short' });
+    } catch(e) { return ym; }
+}
+
 function getDayMarketList(day, forMonth, forYear) {
     if (forMonth !== undefined && forYear !== undefined) {
         const loadedYM = State.activePlanYM || (() => {
@@ -798,17 +811,22 @@ const Processor = {
         }
         el.value = State.currentDay;
         // ✅ ข้อ 5: อัปเดต label display แทน dropdown
+        // ✅ BUGFIX: เดิม _mktNow ถูกประกาศเป็น const อยู่ข้างในบล็อก if (_labelEl...) ด้านล่าง
+        // แล้วมีโค้ดอีกจุดอ้างถึงตัวแปร "_stM" ที่ไม่เคยถูกประกาศไว้เลยในทั้งไฟล์ (typo/ของค้างจาก refactor)
+        // ผลคือ Processor.setupRoute() throw ReferenceError ทุกครั้งที่รัน (ตั้งแต่ตอนเปิดแอปครั้งแรก)
+        // ทำให้ Processor.routeList() ท้ายฟังก์ชันไม่ถูกเรียกเลย — สายวิ่ง/วันที่ไม่ขึ้นเลย
+        // node --check จับไม่ได้เพราะเป็น runtime error ไม่ใช่ syntax error — ต้องรันจริงในเบราว์เซอร์ถึงเจอ
+        const _mktNow = State.currentDay ? getDayMarkets(State.currentDay) : '';
         const _labelEl = document.getElementById('day-label-display');
         if (_labelEl && State.currentDay) {
             const _dayNum = State.currentDay.replace('Day ','');
-            const _mktNow = getDayMarkets(State.currentDay);
             _labelEl.textContent = _mktNow
                 ? `Day ${_dayNum} · ${_mktNow.split(' · ')[0]}`
                 : `Day ${_dayNum}`;
         }
         const _stEl = document.getElementById('stores-title');
-        if (_stEl) _stEl.textContent = _stM
-            ? 'Day ' + State.currentDay.replace('Day ','') + ' · ' + _stM
+        if (_stEl) _stEl.textContent = _mktNow
+            ? 'Day ' + State.currentDay.replace('Day ','') + ' · ' + _mktNow
             : 'รายชื่อร้านค้าทั้งหมด';
         Processor.routeList();
     },
@@ -1059,10 +1077,19 @@ const CalendarCtrl = {
     },
 
     getDayLabelForCfg: (dateNum, cfg, stores, year, month) => {
-        if (cfg?.mapping && Object.keys(cfg.mapping).length > 0) {
+        // ✅ BUGFIX: เดิมเช็ค cfg.mapping ก่อนเช็ค cfg.mode เสมอ — ทำให้ mapping เก่าที่ค้างอยู่
+        // ใน Firestore (จากตอนเคยตั้งโหมด "fixed" มาก่อน) มาบังทุกโหมดที่สลับมาทีหลัง
+        // (Firestore set({...}, {merge:true}) ไม่ลบ field ย่อยที่ไม่ได้ส่งไปใหม่)
+        // แก้โดยเช็ค cfg.mode ก่อนเสมอ ใช้ cfg.mapping แบบ legacy เฉพาะตอนไม่มี mode ระบุมาเลย
+        if (!cfg || (!cfg.mode && (!cfg.mapping || Object.keys(cfg.mapping).length === 0))) {
+            const label = `Day ${dateNum}`;
+            return (stores || State.allStores).some(s => s.days?.includes(label)) ? label : null;
+        }
+        if (!cfg.mode && cfg.mapping) {
+            // legacy config เก่าสุดที่ไม่มี field mode เลย (ก่อนระบบ mode ถูกสร้าง)
             return cfg.mapping[String(dateNum)] || null;
         }
-        if (!cfg || cfg.mode === 'date') {
+        if (cfg.mode === 'date') {
             const label = `Day ${dateNum}`;
             return (stores || State.allStores).some(s => s.days?.includes(label)) ? label : null;
         }
@@ -1146,7 +1173,30 @@ const CalendarCtrl = {
                 workDay++;
             }
         }
+        // ⚠️ โหมด weekday: 1 Day ตรงกับหลายวันที่ต่อเดือน (ทุกสัปดาห์) — ไม่มีคำตอบเดียวที่ถูกต้อง
+        // เตือนแบบเห็นชัดใน console แทนที่จะคืน null แบบเงียบๆ ถ้ามีจุดไหนเรียกใช้ฟังก์ชันนี้กับโหมดนี้
+        // ให้ใช้ CalendarCtrl.getDatesFromDayInMonth() แทน ซึ่งคืนค่าเป็น array ของทุกวันที่ตรงในเดือนนั้น
+        if (cfg.mode === 'weekday') {
+            console.warn('CalendarCtrl.getDateFromDay: โหมด weekday ไม่รองรับ (1 Day = หลายวันที่ต่อเดือน) — ใช้ getDatesFromDayInMonth() แทน');
+            return null;
+        }
         return null;
+    },
+
+    // ✅ สำหรับโหมด weekday โดยเฉพาะ — คืน array ของ "วันที่" ทั้งหมดในเดือนที่ตรงกับ Day label ที่ระบุ
+    // (เพราะ 1 Day ขยายทุกสัปดาห์ จึงตรงกับหลายวันที่ในเดือนเดียวกันได้)
+    getDatesFromDayInMonth: (dayLabel, year, month) => {
+        const cfg = State.calendarConfig;
+        if (!cfg || cfg.mode !== 'weekday') return [];
+        const wmap = cfg.weekdayMap || {};
+        const targetWd = wmap[dayLabel];
+        if (targetWd === undefined) return [];
+        const daysInMonth = new Date(year, month + 1, 0).getDate();
+        const dates = [];
+        for (let d = 1; d <= daysInMonth; d++) {
+            if (new Date(year, month, d).getDay() === targetWd) dates.push(d);
+        }
+        return dates;
     },
 
     // ✅ ข้อ 5 (โหมดที่ 4): เช็ค exception วันหยุดของ "วันนี้" (calendar date จริง) แล้วปรับ list ร้านให้ตรง
@@ -1826,8 +1876,8 @@ const ActivityCtrl = {
             return;
         }
         el.innerHTML = ActivityCtrl._campaigns.map(c => {
-            const startLbl = typeof DateUtil !== 'undefined' ? DateUtil.ymToThaiShort(c.startYM) : c.startYM;
-            const endLbl   = typeof DateUtil !== 'undefined' ? DateUtil.ymToThaiShort(c.endYM)   : c.endYM;
+            const startLbl = ymToThaiShortLocal(c.startYM) || c.startYM;
+            const endLbl   = ymToThaiShortLocal(c.endYM)   || c.endYM;
             const count = (c._myParticipants || []).length; // ✅ นับเฉพาะร้านในสายตัวเอง
             const iconHtml = c.iconUrl
                 ? `<img src="${c.iconUrl}" style="width:36px;height:36px;border-radius:9px;object-fit:cover;flex-shrink:0;" onerror="this.style.display='none'">`
@@ -1854,8 +1904,8 @@ const ActivityCtrl = {
         document.getElementById('activity-list-view').classList.add('hidden');
         document.getElementById('activity-detail-view').classList.remove('hidden');
 
-        const startLbl = typeof DateUtil !== 'undefined' ? DateUtil.ymToThaiShort(c.startYM) : c.startYM;
-        const endLbl   = typeof DateUtil !== 'undefined' ? DateUtil.ymToThaiShort(c.endYM)   : c.endYM;
+        const startLbl = ymToThaiShortLocal(c.startYM) || c.startYM;
+        const endLbl   = ymToThaiShortLocal(c.endYM)   || c.endYM;
         const stores   = c._myParticipants || []; // ✅ เฉพาะร้านในสายตัวเอง
         document.getElementById('activity-detail-header').innerHTML = `
             <div style="font-size:15px;font-weight:900;color:#111827;">${c.name}</div>

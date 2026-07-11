@@ -254,6 +254,14 @@
                     <select id="plan-selector" onchange="PlanUI.onSelect(this.value)"
                         class="bg-gray-700 border border-gray-600 text-white text-xs font-bold rounded-lg px-2 py-1.5 outline-none focus:ring-2 focus:ring-indigo-400 max-w-[140px]">
                     </select>
+                    <div id="plan-live-badge"
+                        style="font-size:10px;font-weight:800;padding:3px 8px;border-radius:6px;white-space:nowrap;">
+                    </div>
+                    <button id="plan-publish-btn" onclick="PlanUI.publishCurrent()"
+                        class="hidden bg-orange-500 hover:bg-orange-400 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap"
+                        title="ตั้งเดือนที่กำลังดูอยู่ให้เป็นเดือนที่ Sales เห็นจริง">
+                        📢 ตั้งเป็นเดือนที่ใช้งานจริง
+                    </button>
                     <button onclick="CalendarAdmin.open(App._currentPlanYM)"
                         class="bg-indigo-600 hover:bg-indigo-500 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap" title="ตั้งค่าปฏิทิน">
                         📅 ปฏิทิน
@@ -1501,10 +1509,28 @@
                 } else if (CalendarAdmin._mode === 'date') {
                     cfg = { mode: 'date' };
                 } else if (CalendarAdmin._mode === 'weekday') {
+                    // ✅ VALIDATION: กัน Day label ซ้ำ และกัน weekday เดียวกันถูกใช้ซ้ำหลาย Day
+                    // เดิมไม่มีการเช็คเลย — ถ้าพิมพ์ผิดจนชื่อ Day ซ้ำกัน แถวหลังจะทับแถวแรกแบบเงียบๆ
+                    const rows = CalendarAdmin._weekdayRows.filter(r => r.day);
+                    const dayNames  = rows.map(r => r.day.trim());
+                    const dupDay    = dayNames.find((d, i) => dayNames.indexOf(d) !== i);
+                    if (dupDay) {
+                        UI.showErrorToast(`⚠️ มี Day ชื่อ "${dupDay}" ซ้ำกันมากกว่า 1 แถว — แก้ให้แต่ละแถวชื่อไม่ซ้ำกันก่อน`);
+                        return;
+                    }
+                    const weekdayNamesTH = ['อาทิตย์','จันทร์','อังคาร','พุธ','พฤหัสบดี','ศุกร์','เสาร์'];
+                    const usedWeekdays   = rows.map(r => r.weekday);
+                    const dupWeekday     = usedWeekdays.find((w, i) => usedWeekdays.indexOf(w) !== i);
+                    if (dupWeekday !== undefined) {
+                        UI.showErrorToast(`⚠️ มีมากกว่า 1 Day ที่ตั้งเป็นวัน"${weekdayNamesTH[dupWeekday]}" ซ้ำกัน — แต่ละวันในสัปดาห์ตั้งได้แค่ 1 Day เท่านั้น`);
+                        return;
+                    }
+                    if (!rows.length) {
+                        UI.showErrorToast('⚠️ กรุณาเพิ่มอย่างน้อย 1 แถว');
+                        return;
+                    }
                     const weekdayMap = {};
-                    CalendarAdmin._weekdayRows.forEach(r => {
-                        if (r.day) weekdayMap[r.day] = r.weekday;
-                    });
+                    rows.forEach(r => { weekdayMap[r.day.trim()] = r.weekday; });
                     cfg = { mode: 'weekday', weekdayMap };
                 } else {
                     const mapping = {};
@@ -1514,7 +1540,15 @@
                     cfg = { mode: 'fixed', mapping };
                 }
                 try {
-                    await CalendarAdmin._targetRef.set({ calendarConfig: cfg, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true });
+                    // ✅ BUGFIX: ใช้ mergeFields แทน merge:true ธรรมดา
+                    // merge:true ปกติจะ "recursive merge" nested object — field เก่าใน calendarConfig
+                    // (เช่น mapping ที่เคยตั้งไว้ตอนโหมด "fixed") จะไม่ถูกลบเวลาสลับไปโหมดอื่น
+                    // ทำให้ getDayLabelForCfg() งงเพราะเจอ mapping เก่าปนอยู่ mergeFields ที่ระบุ path
+                    // ระดับ top field ("calendarConfig") จะ "แทนที่ทั้งก้อน" ไม่ merge ลึกลงไปข้างใน
+                    await CalendarAdmin._targetRef.set(
+                        { calendarConfig: cfg, updatedAt: firebase.firestore.FieldValue.serverTimestamp() },
+                        { mergeFields: ['calendarConfig', 'updatedAt'] }
+                    );
                     State.db.calendarConfig = cfg;
                     CalendarAdmin.close();
                     UI.showSaveToast('✅ บันทึกตั้งค่าปฏิทินเรียบร้อย');
@@ -1765,14 +1799,69 @@
                         originalDay, prevDay, nextDay, prevDate, nextDate, splits,
                         createdAt: firebase.firestore.FieldValue.serverTimestamp(),
                     };
-                    // ✅ ใช้ merge:true — Firestore merge nested map แบบ recursive จึงไม่ทับ exceptions วันอื่นหรือ field อื่นของ calendarConfig
-                    await App.planRef(HolidayException._ym).set({
-                        calendarConfig: { exceptions: { [HolidayException._dateStr]: exceptionEntry } }
-                    }, { merge: true });
+
+                    // ✅ BUGFIX: วันก่อนหน้า/ถัดไปอาจตกไปอยู่คนละเดือนกับวันหยุด (เช่น วันหยุดต้น/ปลายเดือน)
+                    // เดิมเขียน exception ไว้แค่ในเดือนของวันหยุดเดือนเดียว — พอถึงวันจริงที่อยู่คนละเดือน
+                    // แอปฝั่งเซลจะโหลด calendarConfig จากแผนของเดือนนั้น ซึ่งไม่มี exception นี้อยู่เลย
+                    // ทำให้ร้านที่ควรถูกเพิ่มเข้าคิววันนั้นหายไปแบบเงียบๆ ไม่มีใครไปวิ่งให้
+                    // แก้โดยเขียน exception entry เดียวกันซ้ำลงไปทุกเดือนที่เกี่ยวข้อง
+                    const ymOf = (dateStr) => { const [y, m] = dateStr.split('-'); return `${y}_${m}`; };
+                    const targetYMs = new Set([HolidayException._ym, ymOf(prevDate), ymOf(nextDate)]);
+
+                    const skipped = [];
+                    const writes  = [];
+                    for (const ym of targetYMs) {
+                        if (ym === HolidayException._ym) {
+                            // เดือนหลัก (เดือนของวันหยุดเอง) — เขียนเสมอ
+                            writes.push(App.planRef(ym).set({
+                                calendarConfig: { exceptions: { [HolidayException._dateStr]: exceptionEntry } }
+                            }, { merge: true }));
+                            continue;
+                        }
+                        // เดือนข้างเคียง — เช็คก่อนว่ามีแผนเดือนนั้นจริง ตั้งโหมด weekday ไว้เหมือนกัน
+                        // และตั้งชื่อ Day ตรงกับที่ใช้ในเดือนหลัก (กันกรณีสองเดือนตั้งชื่อ Day ไม่ตรงกัน
+                        // เช่น เดือนนี้ใช้ "Day 1" แต่เดือนหน้าใช้ "Day A" สำหรับวันจันทร์เหมือนกัน —
+                        // ถ้าไม่ตรง exception จะเขียนลงไปได้แต่ dayLabel จะไม่ match ตอนอ่านจริง ใช้งานไม่ได้อยู่ดี)
+                        try {
+                            const snap = await App.planRef(ym).get();
+                            if (!snap.exists) { skipped.push(`${ym.replace('_','/')} (ยังไม่มีแผนเดือนนี้)`); continue; }
+                            const otherCfg = snap.data().calendarConfig;
+                            if (!otherCfg || otherCfg.mode !== 'weekday') {
+                                skipped.push(`${ym.replace('_','/')} (ไม่ได้ตั้งโหมด "ตามวันในสัปดาห์" ไว้)`);
+                                continue;
+                            }
+                            const otherMap = otherCfg.weekdayMap || {};
+                            // เช็ค label ของทุกวันที่ตกอยู่ในเดือนนี้ (อาจเป็น prevDate, nextDate หรือทั้งคู่)
+                            const datesInThisYM = [
+                                { date: prevDate, label: prevDay },
+                                { date: nextDate, label: nextDay },
+                            ].filter(x => ymOf(x.date) === ym);
+                            const mismatch = datesInThisYM.find(x => {
+                                const [yy, mm, dd] = x.date.split('-').map(Number);
+                                const wd = new Date(yy, mm - 1, dd).getDay();
+                                return otherMap[x.label] !== wd;
+                            });
+                            if (mismatch) {
+                                skipped.push(`${ym.replace('_','/')} (ชื่อ Day "${mismatch.label}" ในเดือนนี้ไม่ตรงกับที่ใช้อยู่ — ตั้งค่าปฏิทินเดือนนี้ให้ตรงกันก่อน)`);
+                                continue;
+                            }
+                            writes.push(App.planRef(ym).set({
+                                calendarConfig: { exceptions: { [HolidayException._dateStr]: exceptionEntry } }
+                            }, { merge: true }));
+                        } catch(e) {
+                            skipped.push(`${ym.replace('_','/')} (เช็คไม่สำเร็จ: ${e.message})`);
+                        }
+                    }
+
+                    await Promise.all(writes);
 
                     UI.hideLoader();
                     HolidayException.close();
-                    UI.showSaveToast(`✅ บันทึกวันหยุด ${HolidayException._dateStr} เรียบร้อย (${routes.length} สาย)`);
+                    if (skipped.length) {
+                        UI.showErrorToast(`⚠️ บันทึกสำเร็จบางส่วน — ข้ามเดือน: ${skipped.join(', ')} กรุณาตรวจแผนเดือนดังกล่าวเอง ไม่งั้นร้านบางส่วนอาจไม่ถูกจัดคิวในวันที่เกี่ยวข้อง`);
+                    } else {
+                        UI.showSaveToast(`✅ บันทึกวันหยุด ${HolidayException._dateStr} เรียบร้อย (${routes.length} สาย, ${writes.length} เดือน)`);
+                    }
                 } catch(e) {
                     UI.hideLoader();
                     UI.showErrorToast('❌ บันทึกไม่สำเร็จ: ' + e.message);
