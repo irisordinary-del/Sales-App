@@ -18,11 +18,26 @@ const StoreHistory = {
     init: async () => {
         try {
             const snap = await db.collection('sellout').get();
-            // กรองเฉพาะ YYYY_MM ที่ถูกต้อง (2000-2099)
-            const months = snap.docs
-                .map(d => d.id)
-                .filter(ym => /^20\d{2}_(0[1-9]|1[0-2])$/.test(ym))
-                .sort().reverse();
+
+            // ✅ FIX (2026-07-12): เดิมกรองเฉพาะ id แบบ "YYYY_MM" เปล่าๆ เท่านั้น
+            // ไม่รองรับ centerId prefix (เช่น "402_2026_07") เลย — ตอนที่ยังมีเอกสารเก่า
+            // แบบไม่มี prefix ค้างอยู่ (chunks ว่างเปล่า) โค้ดเดิมยังพอมี ym ให้เลือกได้
+            // (แม้จะกดแล้วไม่มีข้อมูลจริง) แต่พอลบเอกสารเก่าที่ค้าง (เพราะ chunks เสีย) ออกไป
+            // แล้ว _months กลายเป็นค่าว่างถาวร เพราะไม่เคยมีเอกสารแบบไม่มี prefix ที่ถูกต้องเลย
+            // แก้ให้ใช้ logic เดียวกับ SalesDashboard._loadMonthList — รองรับทั้ง 2 รูปแบบ
+            const session  = Auth.getSession();
+            const centerId = (State?.centerId || session?.centerId || '').toUpperCase();
+            const ymSet = new Set();
+            snap.docs.forEach(d => {
+                const id = d.id;
+                if (centerId && id.startsWith(centerId + '_')) {
+                    const ym = id.slice(centerId.length + 1);
+                    if (/^20\d{2}_(0[1-9]|1[0-2])$/.test(ym)) ymSet.add(ym);
+                } else if (/^20\d{2}_(0[1-9]|1[0-2])$/.test(id)) {
+                    ymSet.add(id);
+                }
+            });
+            const months = [...ymSet].sort().reverse();
             StoreHistory._months = months;
 
             // populate month selector ใน store tab
