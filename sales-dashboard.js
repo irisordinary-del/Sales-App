@@ -18,6 +18,21 @@ const SalesDashboard = {
     _rowCache: {},       // { 'YYYY_MM': rows[] } cache ไม่ต้องโหลดซ้ำ
     _ready: false,
 
+    // ✅ FIX (2026-07-11): กัน race condition — ตอนโหลดหน้าแรก มีหลายจุด
+    // (App._loadCampaignIcons, StoreHistory, SupervisorDashboard) เรียก _loadChunks()
+    // พร้อมกับ _loadMonthList() ที่กำลังตั้งค่า _ymKeyMap อยู่ ถ้า _loadChunks ถูกเรียก
+    // ก่อน _ymKeyMap พร้อม จะ query ผิด path (ไม่มี centerId prefix) ได้ 0 แถว
+    // แล้ว "แคช 0 แถว" นั้นไว้ตลอด session ทำให้ข้อมูลไม่ขึ้นแม้ข้อมูลจริงมีอยู่ครบ
+    _ymKeyMapLoaded: false,
+    _waitForYmKeyMap: async () => {
+        if (SalesDashboard._ymKeyMapLoaded) return;
+        for (let i = 0; i < 50; i++) {           // รอสูงสุด 5 วิ (poll ทุก 100ms)
+            if (SalesDashboard._ymKeyMapLoaded) return;
+            await new Promise(r => setTimeout(r, 100));
+        }
+        console.warn('[SalesDashboard] _ymKeyMap ยังไม่พร้อมหลังรอ 5 วิ — ใช้ ym ตรงๆ แทน (อาจ query ผิด path)');
+    },
+
     EXCLUDED_BRANDS: new Set(['อื่นๆ', 'กระเช้าของขวัญ']),
 
     _calcOutletMetrics: (rows) => {
@@ -138,6 +153,7 @@ const SalesDashboard = {
 
         if (!snap) {
             // แสดง retry banner แทนหน้าว่าง
+            SalesDashboard._ymKeyMapLoaded = true; // ✅ FIX: ไม่ปล่อยให้ _loadChunks ค้างรอ 5 วิ
             SalesDashboard._showDataWarning('⚠️ โหลดข้อมูลไม่สำเร็จ กรุณาตรวจสอบอินเทอร์เน็ตแล้ว',
                 () => SalesDashboard._loadMonthList());
             return;
@@ -159,6 +175,7 @@ const SalesDashboard = {
                 }
             });
             SalesDashboard._ymKeyMap = ymMap;
+            SalesDashboard._ymKeyMapLoaded = true; // ✅ FIX: ปลด _loadChunks ที่รออยู่ให้ทำงานต่อด้วย key ที่ถูกต้อง
             const months = Object.keys(ymMap).sort().reverse();
 
             if (!sel) return;
@@ -186,6 +203,7 @@ const SalesDashboard = {
             }
         } catch (e) {
             console.warn('SalesDashboard._loadMonthList:', e);
+            SalesDashboard._ymKeyMapLoaded = true; // ✅ FIX: กันค้างรอถ้า error กลางทาง
             SalesDashboard._showEmpty();
         }
     },
@@ -248,6 +266,10 @@ const SalesDashboard = {
 
         SalesDashboard._chunkInflight[cacheKey] = (async () => {
             try {
+                // ✅ FIX: รอให้ _ymKeyMap พร้อมก่อนเสมอ กัน race condition ตอน initial load
+                // (ป้องกัน query ผิด path แล้วแคชค่า 0 แถวติดไปตลอด session)
+                await SalesDashboard._waitForYmKeyMap();
+
                 // ✅ ลอง key จาก _ymKeyMap ก่อน (อาจเป็น 402_2026_06)
                 const key  = SalesDashboard._ymKeyMap?.[ym] || ym;
                 const snap = await db.collection('sellout').doc(key).collection('chunks').get();
@@ -861,6 +883,7 @@ const SupervisorDashboard = {
         }
 
         if (!snap) {
+            SalesDashboard._ymKeyMapLoaded = true; // ✅ FIX: กันค้างรอถ้าโหลดไม่สำเร็จ
             if (typeof SalesDashboard._showDataWarning === 'function') {
                 SalesDashboard._showDataWarning('⚠️ โหลดข้อมูลไม่สำเร็จ กรุณาตรวจสอบอินเทอร์เน็ตแล้ว',
                     () => SupervisorDashboard._loadMonthList());
@@ -884,6 +907,7 @@ const SupervisorDashboard = {
                 }
             });
             SalesDashboard._ymKeyMap = ymMap; // share กับ _loadChunks
+            SalesDashboard._ymKeyMapLoaded = true; // ✅ FIX: ปลด _loadChunks ที่รออยู่
             const months = Object.keys(ymMap).sort().reverse();
 
             if (!sel) return;
@@ -906,7 +930,10 @@ const SupervisorDashboard = {
                     }, (i + 1) * 2500);
                 });
             }
-        } catch(e) { console.warn('SupervisorDashboard._loadMonthList:', e); }
+        } catch(e) {
+            console.warn('SupervisorDashboard._loadMonthList:', e);
+            SalesDashboard._ymKeyMapLoaded = true; // ✅ FIX: กันค้างรอถ้า error กลางทาง
+        }
     },
 
     onMonthChange: async (ym) => {
