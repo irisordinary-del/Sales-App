@@ -34,6 +34,15 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 
+// ✅ FIX (2026-07-12): เจอ error ซ้ำๆ ตลอด "WebChannelConnection RPC 'Listen' stream
+// transport errored" + 404 บน google.firestore.v1.Firestore/Listen ในทุกอุปกรณ์/เบราว์เซอร์
+// ที่ทดสอบ (desktop, mobile, InPrivate, ปกติ) — นี่คือปัญหาที่รู้จักกันดีของ Firestore SDK:
+// เครือข่าย/ไฟร์วอลล์/proxy บางที่บล็อกการเชื่อมต่อแบบ streaming (WebChannel/gRPC-over-HTTP2)
+// แต่ยอมให้ long-polling ผ่านได้ปกติ ทำให้ query ที่พึ่งพา cache/realtime listener ได้ข้อมูลว่าง
+// ทั้งที่เซิร์ฟเวอร์มีข้อมูลจริงครบ (แม้แต่ .get({source:'server'}) ก็ยัง throw 'unavailable')
+// บังคับใช้ long-polling แก้ปัญหานี้ที่ต้นตอ — คนละสาเหตุกับ cache/race condition ที่แก้ไปก่อนหน้า
+db.settings({ experimentalForceLongPolling: true });
+
 // Enable persistence — รองรับ offline และหลาย tab
 // ✅ FIX: InPrivate / browser ที่ block storage จะ throw error แต่ app ยังทำงานปกติ (online mode)
 db.enablePersistence({ synchronizeTabs: true }).catch(err => {
@@ -282,6 +291,7 @@ const App = {
             }
 
             const icons = {};
+            const isSup = App.isSupervisor();
             const username = session?.username?.toUpperCase() || '';
 
             for (const doc of snap.docs) {
@@ -318,8 +328,9 @@ const App = {
 
                 if (!allRows.length) continue;
 
-                // กรองเฉพาะ sCode ของ sales คนนี้
-                const myRows = username
+                // ✅ FIX: Supervisor/ASM username (เช่น "RS402") ไม่ใช่รูปแบบ sCode ในข้อมูล
+                // ถ้ากรองด้วย sCode === username จะได้ 0 แถวเสมอ — Supervisor ดูทั้งศูนย์แทน
+                const myRows = (username && !isSup)
                     ? allRows.filter(r => String(r.sCode || '').toUpperCase() === username)
                     : allRows;
 
@@ -526,6 +537,10 @@ const App = {
             });
         }
         if (typeof CalendarCtrl !== 'undefined') CalendarCtrl.init();
+
+        // ✅ FIX: เดิม Supervisor/ASM ไม่เคยเห็น campaign icon (โหมด "ตามสายวิ่ง") เลย
+        // เพราะ _loadCampaignIcons() ถูกเรียกแค่ใน start() (flow ของ Sales) เท่านั้น
+        App._loadCampaignIcons().catch(() => {});
 
         const searchEl = document.getElementById('search-input');
         if (searchEl) searchEl.oninput = (e) => {
@@ -1841,8 +1856,10 @@ const ActivityCtrl = {
                     .where('centerId', '==', centerId).get();
             }
 
-            // ✅ FIX: ล็อคตาม sale คนนี้ — เอาเฉพาะร้านที่อยู่ใน State.allStores (สายของตัวเอง)
-            // ไม่ใช่ทั้งศูนย์ กัน sale เห็นร้านของสายอื่นที่ตัวเองไม่ได้ดูแล
+            // ✅ ล็อคตามร้านที่ sale/supervisor มองเห็น — State.allStores คือ:
+            //   - Sales: เฉพาะร้านในสายตัวเอง
+            //   - Supervisor/ASM: ร้านทุกสายทั้งศูนย์ (ดู startSupervisor())
+            // กัน sale เห็นร้านของสายอื่นที่ตัวเองไม่ได้ดูแล
             const myStoreCodes = new Set((State.allStores || []).map(s => String(s.id)));
 
             // ✅ เอาเฉพาะกิจกรรมที่ระบุรายชื่อร้าน (scopeMode === 'custom')
@@ -1865,6 +1882,9 @@ const ActivityCtrl = {
         ActivityCtrl._renderList();
     },
 
+    // ✅ FIX: label ต้องบอกความจริงตาม role — Sales เห็นแค่สายตัวเอง, Supervisor/ASM เห็นทั้งศูนย์
+    _scopeLabel: () => App.isSupervisor() ? '(ทั้งศูนย์)' : '(เฉพาะสายคุณ)',
+
     _renderList: () => {
         const el = document.getElementById('activity-list');
         if (!el) return;
@@ -1875,10 +1895,11 @@ const ActivityCtrl = {
             </div>`;
             return;
         }
+        const scopeLabel = ActivityCtrl._scopeLabel();
         el.innerHTML = ActivityCtrl._campaigns.map(c => {
             const startLbl = ymToThaiShortLocal(c.startYM) || c.startYM;
             const endLbl   = ymToThaiShortLocal(c.endYM)   || c.endYM;
-            const count = (c._myParticipants || []).length; // ✅ นับเฉพาะร้านในสายตัวเอง
+            const count = (c._myParticipants || []).length; // ✅ นับเฉพาะร้านที่มองเห็นได้ตาม role
             const iconHtml = c.iconUrl
                 ? `<img src="${c.iconUrl}" style="width:36px;height:36px;border-radius:9px;object-fit:cover;flex-shrink:0;" onerror="this.style.display='none'">`
                 : `<span style="font-size:26px;flex-shrink:0;">🎉</span>`;
@@ -1889,7 +1910,7 @@ const ActivityCtrl = {
                 <div class="flex-1 min-w-0">
                     <div class="font-bold text-sm text-gray-800 truncate">${c.name}</div>
                     <div style="font-size:11px;color:#9ca3af;margin-top:1px;">📅 ${startLbl} → ${endLbl}</div>
-                    <div style="font-size:11px;color:#4f46e5;font-weight:700;margin-top:2px;">📋 ${count} ร้าน (เฉพาะสายคุณ)</div>
+                    <div style="font-size:11px;color:#4f46e5;font-weight:700;margin-top:2px;">📋 ${count} ร้าน ${scopeLabel}</div>
                 </div>
                 <span style="color:#d1d5db;font-size:18px;">›</span>
             </div>`;
@@ -1906,10 +1927,10 @@ const ActivityCtrl = {
 
         const startLbl = ymToThaiShortLocal(c.startYM) || c.startYM;
         const endLbl   = ymToThaiShortLocal(c.endYM)   || c.endYM;
-        const stores   = c._myParticipants || []; // ✅ เฉพาะร้านในสายตัวเอง
+        const stores   = c._myParticipants || []; // ✅ เฉพาะร้านที่มองเห็นได้ตาม role
         document.getElementById('activity-detail-header').innerHTML = `
             <div style="font-size:15px;font-weight:900;color:#111827;">${c.name}</div>
-            <div style="font-size:11px;color:#9ca3af;margin-top:2px;">📅 ${startLbl} → ${endLbl} &nbsp;|&nbsp; 📋 ${stores.length} ร้าน (เฉพาะสายคุณ)</div>`;
+            <div style="font-size:11px;color:#9ca3af;margin-top:2px;">📅 ${startLbl} → ${endLbl} &nbsp;|&nbsp; 📋 ${stores.length} ร้าน ${ActivityCtrl._scopeLabel()}</div>`;
 
         const meta = c.participantMeta || {};
         const list = stores

@@ -12,6 +12,12 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const cloudDB = firebase.firestore();
 
+// ✅ FIX (2026-07-12): กัน error "WebChannelConnection RPC 'Listen' stream transport
+// errored" ที่เจอฝั่ง sales.html — เครือข่ายบางแห่งบล็อกการเชื่อมต่อ streaming (WebChannel)
+// ของ Firestore แต่ยอมให้ long-polling ผ่าน ใส่ไว้ที่นี่ด้วยเพื่อความสม่ำเสมอ แม้ฝั่ง Admin
+// จะยังไม่เจออาการนี้ชัดเจนเท่าฝั่ง Sales ก็ตาม
+cloudDB.settings({ experimentalForceLongPolling: true });
+
 // Enable offline persistence — synchronizeTabs รองรับหลาย tab พร้อมกัน
 // window.firestoreReady เป็น Promise ที่ App.init() รอก่อนเริ่ม onSnapshot
 window.firestoreReady = cloudDB.enablePersistence({ synchronizeTabs: true })
