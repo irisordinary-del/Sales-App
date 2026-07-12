@@ -56,6 +56,29 @@ db.enablePersistence({ synchronizeTabs: true }).catch(err => {
     }
 });
 
+// ─── ErrorMsg — แปล error code ของ Firebase เป็นข้อความไทยที่ user เข้าใจได้ ──
+// (คัดลอกมาจาก app-config.js เพราะ sales.html ไม่ได้โหลดไฟล์นั้น)
+const ErrorMsg = {
+    _map: {
+        'permission-denied':    'ไม่มีสิทธิ์ทำรายการนี้ กรุณาติดต่อแอดมิน',
+        'unavailable':          'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ ตรวจสอบอินเทอร์เน็ตแล้วลองใหม่',
+        'deadline-exceeded':    'การเชื่อมต่อช้าเกินไป กรุณาลองใหม่อีกครั้ง',
+        'not-found':            'ไม่พบข้อมูลที่ต้องการ อาจถูกลบไปแล้ว',
+        'already-exists':       'มีข้อมูลนี้อยู่แล้วในระบบ',
+        'resource-exhausted':   'ระบบมีผู้ใช้งานพร้อมกันมาก กรุณาลองใหม่อีกสักครู่',
+        'cancelled':            'การทำรายการถูกยกเลิกกลางทาง กรุณาลองใหม่',
+        'unauthenticated':      'เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่',
+        'failed-precondition':  'ไม่สามารถทำรายการได้ในขณะนี้ (อาจมีการแก้ไขซ้อนกัน) กรุณาลองใหม่',
+        'invalid-argument':     'ข้อมูลที่กรอกไม่ถูกต้อง กรุณาตรวจสอบอีกครั้ง',
+    },
+    translate: (e) => {
+        if (!e) return 'เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ';
+        if (e.code && ErrorMsg._map[e.code]) return ErrorMsg._map[e.code];
+        console.warn('[ErrorMsg] ไม่รู้จัก error code:', e.code, '| message เดิม:', e.message);
+        return 'เกิดข้อผิดพลาดที่ไม่คาดคิด กรุณาลองใหม่ หรือติดต่อผู้ดูแลระบบถ้ายังไม่หาย';
+    },
+};
+
 let docMain  = db.collection('appData').doc('v1_main');
 const colSales = db.collection('v1_sales_chunks');
 
@@ -358,8 +381,8 @@ const App = {
             State.campaignIcons = icons;
             console.log(`[CampaignIcons] รวม ${Object.keys(icons).length} ร้านที่มี icon`);
             if (State.isLoaded) {
-                try { if (State.currentDay) Processor.routeList(); } catch(e) {}
-                try { Processor.stores(); } catch(e) {}
+                try { if (State.currentDay) Processor.routeList(); } catch(e) { console.warn('[App] re-render routeList หลังโหลด campaign icons ไม่สำเร็จ:', e); }
+                try { Processor.stores(); } catch(e) { console.warn('[App] re-render stores หลังโหลด campaign icons ไม่สำเร็จ:', e); }
             }
         } catch(e) {
             console.warn('_loadCampaignIcons:', e);
@@ -519,7 +542,7 @@ const App = {
             let merged = {};
             snap.forEach(doc => Object.assign(merged, doc.data()));
             State.sales = merged;
-        }).catch(()=>{});
+        }).catch((e) => console.warn('[App] startSupervisor: โหลด colSales ไม่สำเร็จ (KPI badge บนแผนที่อาจไม่ขึ้น):', e));
 
         LoadBar.done();
         document.getElementById('loader').style.display = 'none';
@@ -531,7 +554,7 @@ const App = {
         if (State.planList.length > 0) {
             Promise.all(State.planList
                 .filter(ym => ym !== _useYM)
-                .map(ym => App.loadPlanDataForSup(ym).catch(() => {}))
+                .map(ym => App.loadPlanDataForSup(ym).catch((e) => console.warn('[App] preload plan เดือน', ym, 'ไม่สำเร็จ:', e)))
             ).then(() => {
                 if (typeof CalendarCtrl !== 'undefined') CalendarCtrl.render();
             });
@@ -540,7 +563,7 @@ const App = {
 
         // ✅ FIX: เดิม Supervisor/ASM ไม่เคยเห็น campaign icon (โหมด "ตามสายวิ่ง") เลย
         // เพราะ _loadCampaignIcons() ถูกเรียกแค่ใน start() (flow ของ Sales) เท่านั้น
-        App._loadCampaignIcons().catch(() => {});
+        App._loadCampaignIcons().catch((e) => console.warn('[App] startSupervisor: โหลด campaign icons ไม่สำเร็จ:', e));
 
         const searchEl = document.getElementById('search-input');
         if (searchEl) searchEl.oninput = (e) => {
@@ -627,7 +650,7 @@ const App = {
                     if (typeof CalendarCtrl !== 'undefined') CalendarCtrl.init();
                     waitForLeaflet(() => MapCtrl.initAndDraw());
                     // ✅ โหลด campaign icons background
-                    App._loadCampaignIcons().catch(() => {});
+                    App._loadCampaignIcons().catch((e) => console.warn('[App] start: โหลด campaign icons ไม่สำเร็จ:', e));
                 }
             }
         };
@@ -669,7 +692,7 @@ const App = {
             const pd = _planResult.status === 'fulfilled' ? _planResult.value : null;
             State.calendarConfig = pd?.exists ? (pd.data().calendarConfig || null) : null;
             State.activePlanYM   = _useYM;
-        } catch(e) {}
+        } catch(e) { console.warn('[App] เกิด error ระหว่าง init (ไม่กระทบการทำงานหลัก):', e); }
 
         // process stores
         try {
@@ -1455,7 +1478,7 @@ const CalendarCtrl = {
         if (State.planCache[ym]?._ok) return;
         if (!State.planList.includes(ym)) return;
         const _loader = App.isSupervisor() ? App.loadPlanDataForSup : App.loadPlanData;
-        _loader(ym).then(() => CalendarCtrl.render()).catch(() => {});
+        _loader(ym).then(() => CalendarCtrl.render()).catch((e) => console.warn('[App] โหลดปฏิทินเดือน', ym, 'ไม่สำเร็จ:', e));
     },
 
     openPopup: () => {
@@ -1481,7 +1504,7 @@ const CalendarCtrl = {
         // โหลดเดือนอื่น background (non-blocking)
         if (State.planList?.length > 0) {
             const _loader = App.isSupervisor() ? App.loadPlanDataForSup : App.loadPlanData;
-            Promise.all(State.planList.map(ym => _loader(ym).catch(() => {})))
+            Promise.all(State.planList.map(ym => _loader(ym).catch((e) => console.warn('[App] preload เดือน', ym, 'ไม่สำเร็จ:', e))))
                 .then(() => CalendarCtrl.render());
         }
     },
@@ -1888,15 +1911,28 @@ const ActivityCtrl = {
     _renderList: () => {
         const el = document.getElementById('activity-list');
         if (!el) return;
+        const isSup = App.isSupervisor();
+
         if (!ActivityCtrl._campaigns.length) {
+            // ✅ FIX: ข้อความเดิม "สายของคุณ" ใช้ไม่ได้กับ Supervisor (ดูแลหลายสาย ไม่ใช่สายเดียว)
+            const emptyMsg = isSup
+                ? 'ยังไม่มีกิจกรรมที่เกี่ยวข้องกับศูนย์นี้'
+                : 'ยังไม่มีกิจกรรมที่เกี่ยวข้องกับสายของคุณ';
             el.innerHTML = `<div style="text-align:center;padding:40px 20px;">
                 <div style="font-size:32px;margin-bottom:8px;">📭</div>
-                <div style="font-size:12px;color:#9ca3af;font-weight:600;">ยังไม่มีกิจกรรมที่เกี่ยวข้องกับสายของคุณ</div>
+                <div style="font-size:12px;color:#9ca3af;font-weight:600;">${emptyMsg}</div>
             </div>`;
             return;
         }
         const scopeLabel = ActivityCtrl._scopeLabel();
-        el.innerHTML = ActivityCtrl._campaigns.map(c => {
+        // ✅ FIX: เพิ่มคำอธิบายกันเข้าใจผิดว่าหน้านี้ = แคมเปญทุกแบบ — จริงๆ เห็นเฉพาะ
+        // แคมเปญโหมด "ระบุร้านเอง" เท่านั้น (โหมด "ตามสายวิ่ง" ไปโชว์เป็น icon หน้าคิวงานแทน)
+        const hintBanner = isSup
+            ? `<div style="background:#eef2ff;border:1px solid #c7d2fe;border-radius:10px;padding:8px 12px;margin-bottom:10px;font-size:11px;color:#4338ca;">
+                ℹ️ หน้านี้แสดงเฉพาะแคมเปญโหมด "ระบุร้านเอง" ทั้งศูนย์ — แคมเปญโหมด "ตามสายวิ่ง" ดูที่ icon หน้าคิวงานของแต่ละสายแทน
+               </div>`
+            : '';
+        el.innerHTML = hintBanner + ActivityCtrl._campaigns.map(c => {
             const startLbl = ymToThaiShortLocal(c.startYM) || c.startYM;
             const endLbl   = ymToThaiShortLocal(c.endYM)   || c.endYM;
             const count = (c._myParticipants || []).length; // ✅ นับเฉพาะร้านที่มองเห็นได้ตาม role

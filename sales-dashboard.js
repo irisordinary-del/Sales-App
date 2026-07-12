@@ -315,9 +315,13 @@ const SalesDashboard = {
                 }
 
                 SalesDashboard._chunkCache[cacheKey] = rows;
+                SalesDashboard._chunkFetchFailed[ym] = false; // ✅ สำเร็จ — ล้างสถานะ error เดือนนี้
                 return rows;
             } catch (e) {
                 console.warn('SalesDashboard._loadChunks:', ym, e.message);
+                // ✅ FIX: แยก "โหลดไม่สำเร็จ" ออกจาก "โหลดสำเร็จแต่ไม่มีข้อมูล"
+                // ไม่แคชผลลัพธ์ตอน error (ให้ลองใหม่ครั้งหน้าได้ แทนที่จะค้าง [] ตลอด session)
+                SalesDashboard._chunkFetchFailed[ym] = true;
                 return [];
             } finally {
                 delete SalesDashboard._chunkInflight[cacheKey];
@@ -325,6 +329,10 @@ const SalesDashboard = {
         })();
         return SalesDashboard._chunkInflight[cacheKey];
     },
+
+    // ✅ FIX: เก็บสถานะ "โหลดพลาด" แยกต่างหากจาก "ไม่มีข้อมูลจริง" ต่อเดือน
+    // ให้ _showEmpty() เลือกข้อความที่ตรงสถานการณ์จริงแทนที่จะโชว์ "—" เหมือนกันหมด
+    _chunkFetchFailed: {},
 
     _showDataWarning: (fail, total) => {
         const warn = document.createElement('div');
@@ -596,11 +604,23 @@ const SalesDashboard = {
     _showEmpty: () => {
         const empty = document.getElementById('db-empty');
         if (empty) empty.style.display = 'block';
-        // Clear all KPIs
-        ['db-kpi-total','db-kpi-pct','db-kpi-shops','db-kpi-avgsku','db-kpi-avgvol-v','db-kpi-avgvol-c','db-kpi-inv'].forEach(id => SalesDashboard._setText(id, '—'));
+
+        // ✅ FIX: แยกข้อความ "ยังไม่มีข้อมูล" กับ "โหลดไม่สำเร็จ" ไม่ให้ user งงว่าต้องรอ
+        // หรือต้องกดลองใหม่ — เดิมทั้ง 2 กรณีโชว์ "—" เหมือนกันหมด แยกไม่ออก
+        const failed = SalesDashboard._chunkFetchFailed[SalesDashboard._ym];
+        const kpiVal = failed ? '⚠️' : '—';
+        ['db-kpi-total','db-kpi-pct','db-kpi-shops','db-kpi-avgsku','db-kpi-avgvol-v','db-kpi-avgvol-c','db-kpi-inv'].forEach(id => SalesDashboard._setText(id, kpiVal));
+
         ['db-cat-body'].forEach(id => {
             const el = document.getElementById(id);
-            if (el) el.innerHTML = '<div style="text-align:center;padding:12px;color:#9ca3af;font-size:12px;">ยังไม่มีข้อมูล</div>';
+            if (!el) return;
+            el.innerHTML = failed
+                ? `<div style="text-align:center;padding:16px 12px;">
+                    <div style="font-size:12px;color:#dc2626;font-weight:700;margin-bottom:8px;">⚠️ โหลดข้อมูลไม่สำเร็จ กรุณาลองใหม่</div>
+                    <button onclick="SalesDashboard.onMonthChange(SalesDashboard._ym)"
+                        style="background:#4f46e5;color:#fff;border:none;border-radius:8px;padding:6px 16px;font-size:12px;font-weight:700;cursor:pointer;">🔄 ลองใหม่</button>
+                   </div>`
+                : '<div style="text-align:center;padding:12px;color:#9ca3af;font-size:12px;">ยังไม่มีข้อมูลเดือนนี้</div>';
         });
         const bar = document.getElementById('db-target-bar');
         if (bar) bar.style.width = '0%';

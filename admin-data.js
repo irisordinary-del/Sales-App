@@ -404,7 +404,7 @@ const App = {
             PlanUI.refresh();
             UI.showSaveToast(`📢 ตั้ง ${App.ymToLabel(ym)} เป็นเดือนที่ใช้งานจริงแล้ว — Sales เห็นทันที`);
         } catch(e) {
-            UI.showErrorToast('❌ ตั้งค่าไม่สำเร็จ: ' + e.message);
+            UI.showErrorToast('❌ ตั้งค่าไม่สำเร็จ: ' + ErrorMsg.translate(e));
         }
     },
 

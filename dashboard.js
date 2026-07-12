@@ -586,7 +586,7 @@ const Dashboard = {
             Dashboard._targets = targets;
             Dashboard._closeTargetModal();
             Dashboard._render();
-        } catch (e) { Dashboard._toast('❌ บันทึกไม่สำเร็จ: ' + e.message, true); }
+        } catch (e) { Dashboard._toast('❌ บันทึกไม่สำเร็จ: ' + ErrorMsg.translate(e), true); }
     },
 
     // ─── Drill & Filter ───────────────────────────────────────────────────
@@ -1751,7 +1751,7 @@ const Dashboard = {
             Dashboard._render();
             UI.showSaveToast('✅ บันทึกแล้ว — ' + (codes.length ? codes.length + ' SKU' : 'ใช้ทุก SKU'));
         } catch(e) {
-            UI.showErrorToast('❌ บันทึกไม่สำเร็จ: ' + e.message);
+            UI.showErrorToast('❌ บันทึกไม่สำเร็จ: ' + ErrorMsg.translate(e));
         }
     },
 
@@ -1939,15 +1939,20 @@ const RouteAnalysis = {
             const cells = months.map((ym, i) => {
                 const d = results[i];
                 if (!d || !(route in d.salesByRoute)) {
-                    return `<td class="px-3 py-3 text-center text-xs text-gray-300">—</td>`;
+                    // ✅ ไม่มีแผนสายของเดือนนี้เลย — กู้คืนไม่ได้ (ไม่ใช่บั๊ก แค่ไม่มีข้อมูลย้อนหลัง)
+                    return `<td class="px-3 py-3 text-center text-xs text-gray-300" title="ไม่มีแผนจัดสายของเดือนนี้ในระบบ">—</td>`;
                 }
                 const sales = d.salesByRoute[route] || 0;
                 const storeCount = (d.routeStores[route] || []).length;
+                // ✅ FIX: แยกกรณี "มีแผนแต่ 0 ร้าน" (ผิดปกติ ควรเช็ค) ออกจาก "—" (ไม่มีแผนเลย)
+                // ด้วยสีเตือน + tooltip ให้แอดมินสังเกตเห็นง่ายว่าจุดนี้น่าจะมีปัญหา ไม่ใช่แค่ไม่มีข้อมูล
+                const isEmptyPlan = storeCount === 0;
                 return `
                 <td onclick="RouteAnalysis.openMonth('${ym}')"
-                    class="px-3 py-3 text-center cursor-pointer hover:bg-indigo-50 transition group">
-                    <div class="text-xs font-black text-gray-800 group-hover:text-indigo-700">฿${Math.round(sales).toLocaleString()}</div>
-                    <div class="text-[10px] text-gray-400 mt-0.5">🏪 ${storeCount} ร้าน</div>
+                    class="px-3 py-3 text-center cursor-pointer hover:bg-indigo-50 transition group"
+                    ${isEmptyPlan ? 'title="⚠️ มีแผนเดือนนี้ แต่ไม่มีร้านในสาย — น่าจะผิดปกติ ลองเช็คแผนสายเดือนนี้"' : ''}>
+                    <div class="text-xs font-black ${isEmptyPlan ? 'text-amber-600' : 'text-gray-800 group-hover:text-indigo-700'}">฿${Math.round(sales).toLocaleString()}</div>
+                    <div class="text-[10px] mt-0.5 ${isEmptyPlan ? 'text-amber-500 font-bold' : 'text-gray-400'}">${isEmptyPlan ? '⚠️ 0 ร้านในแผน' : '🏪 ' + storeCount + ' ร้าน'}</div>
                 </td>`;
             }).join('');
             return `

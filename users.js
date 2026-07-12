@@ -28,7 +28,7 @@ const UsersApp = {
             UsersApp.renderTable(UsersApp._allUsers);
             UsersApp.updateStats(UsersApp._allUsers);
         } catch (err) {
-            UsersApp.toast('❌ โหลดไม่สำเร็จ: ' + err.message, true);
+            UsersApp.toast('❌ โหลดไม่สำเร็จ: ' + ErrorMsg.translate(err), true);
         }
     },
 
@@ -188,7 +188,7 @@ const UsersApp = {
             UsersApp.updateStats(UsersApp._allUsers);
             UsersApp.closeModal();
         } catch (err) {
-            UsersApp.toast('❌ ' + err.message, true);
+            UsersApp.toast('❌ ' + ErrorMsg.translate(err), true);
         } finally {
             btn.disabled = false;
             btn.textContent = 'บันทึก';
@@ -203,7 +203,7 @@ const UsersApp = {
             UsersApp.renderTable(users);
             UsersApp.updateStats(users);
             UsersApp.toast(`🗑️ ลบ "${username}" เรียบร้อย`);
-        }).catch(err => UsersApp.toast('❌ ' + err.message, true));
+        }).catch(err => UsersApp.toast('❌ ' + ErrorMsg.translate(err), true));
     },
 
     // ─── Gen from Routes ─────────────────────────────────────────────────
@@ -244,7 +244,7 @@ const UsersApp = {
                     newOnes.map(r => `<span class="inline-block bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded font-mono text-xs mr-1 mb-1">${r}</span>`).join('');
             }
         } catch (err) {
-            UsersApp.toast('❌ ' + err.message, true);
+            UsersApp.toast('❌ ' + ErrorMsg.translate(err), true);
         }
     },
 
@@ -264,7 +264,7 @@ const UsersApp = {
             UsersApp.closeGenModal();
             UsersApp.toast(`✅ Gen เสร็จ! เพิ่ม ${result.added} user ใหม่ (รวม ${result.total} คน)`);
         } catch (err) {
-            UsersApp.toast('❌ ' + err.message, true);
+            UsersApp.toast('❌ ' + ErrorMsg.translate(err), true);
         }
     },
 

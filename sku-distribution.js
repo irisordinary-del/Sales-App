@@ -884,7 +884,7 @@ const SkuDist = {
             UI.showSaveToast('✅ บันทึก Campaign เรียบร้อย');
         } catch (e) {
             UI.hideLoader();
-            UI.showErrorToast('❌ บันทึกไม่สำเร็จ: ' + e.message);
+            UI.showErrorToast('❌ บันทึกไม่สำเร็จ: ' + ErrorMsg.translate(e));
         }
     },
 
@@ -901,7 +901,7 @@ const SkuDist = {
                 SkuDist._renderCampaignList();
                 UI.showSaveToast('🗑️ ลบ Campaign เรียบร้อย');
             } catch (e) {
-                UI.showErrorToast('❌ ลบไม่สำเร็จ: ' + e.message);
+                UI.showErrorToast('❌ ลบไม่สำเร็จ: ' + ErrorMsg.translate(e));
             }
         });
     },
@@ -1129,7 +1129,7 @@ const SkuDist = {
 
         } catch (e) {
             UI.hideLoader();
-            UI.showErrorToast('❌ คำนวณไม่สำเร็จ: ' + e.message);
+            UI.showErrorToast('❌ คำนวณไม่สำเร็จ: ' + ErrorMsg.translate(e));
             console.error('SkuDist.calc:', e);
         }
     },

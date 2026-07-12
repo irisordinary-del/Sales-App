@@ -144,3 +144,30 @@ const DateUtil = {
         return `${d.getFullYear()}_${String(d.getMonth()+1).padStart(2,'0')}`;
     },
 };
+
+// ─── ErrorMsg — แปล error code ของ Firebase เป็นข้อความไทยที่ user เข้าใจได้ ──
+// ใช้แทนการโชว์ e.message ดิบๆ (ภาษาอังกฤษ/technical) ตรงๆ ให้ user เห็น
+// ตัวอย่าง: UI.showErrorToast('บันทึกไม่สำเร็จ: ' + ErrorMsg.translate(e))
+const ErrorMsg = {
+    _map: {
+        'permission-denied':    'ไม่มีสิทธิ์ทำรายการนี้ กรุณาติดต่อแอดมิน',
+        'unavailable':          'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ ตรวจสอบอินเทอร์เน็ตแล้วลองใหม่',
+        'deadline-exceeded':    'การเชื่อมต่อช้าเกินไป กรุณาลองใหม่อีกครั้ง',
+        'not-found':            'ไม่พบข้อมูลที่ต้องการ อาจถูกลบไปแล้ว',
+        'already-exists':       'มีข้อมูลนี้อยู่แล้วในระบบ',
+        'resource-exhausted':   'ระบบมีผู้ใช้งานพร้อมกันมาก กรุณาลองใหม่อีกสักครู่',
+        'cancelled':            'การทำรายการถูกยกเลิกกลางทาง กรุณาลองใหม่',
+        'unauthenticated':      'เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่',
+        'failed-precondition':  'ไม่สามารถทำรายการได้ในขณะนี้ (อาจมีการแก้ไขซ้อนกัน) กรุณาลองใหม่',
+        'invalid-argument':     'ข้อมูลที่กรอกไม่ถูกต้อง กรุณาตรวจสอบอีกครั้ง',
+    },
+    // แปล error → ข้อความไทย พร้อม fallback ถ้าไม่รู้จัก code นี้
+    translate: (e) => {
+        if (!e) return 'เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ';
+        if (e.code && ErrorMsg._map[e.code]) return ErrorMsg._map[e.code];
+        // ไม่รู้จัก code นี้ — ไม่โชว์ raw message ภาษาอังกฤษให้ user งง
+        // แต่ log เก็บไว้ให้ dev เช็คทีหลังได้จาก console
+        console.warn('[ErrorMsg] ไม่รู้จัก error code:', e.code, '| message เดิม:', e.message);
+        return 'เกิดข้อผิดพลาดที่ไม่คาดคิด กรุณาลองใหม่ หรือติดต่อผู้ดูแลระบบถ้ายังไม่หาย';
+    },
+};

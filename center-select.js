@@ -76,40 +76,103 @@ const App = {
         window.location.href = 'index.html?center=' + id;
     },
 
+    // ✅ FIX (2026-07-12): เดิมใช้ prompt() ของเบราว์เซอร์ดิบๆ 2 รอบ — หน้าตาไม่ตรงกับ
+    // ดีไซน์แอป, ไม่มี validation feedback (พิมพ์รหัสศูนย์ผิดฟอร์แมตก็สร้างไปเลยเงียบๆ)
+    // เปลี่ยนเป็น modal ในธีมเดียวกับแอป พร้อมเช็ครูปแบบก่อนกดสร้างจริง
     addCenter: () => {
-        const id = prompt('รหัสศูนย์ใหม่ (เช่น 406):');
-        if (!id || !id.trim()) return;
-        const centerId = id.trim();
-        if (App.centers[centerId]) {
-            _csToast('⚠️ มีศูนย์นี้แล้วครับ', true);
+        const existing = document.getElementById('_cs-add-modal');
+        if (existing) existing.remove();
+
+        const modal = document.createElement('div');
+        modal.id = '_cs-add-modal';
+        modal.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,0.6);backdrop-filter:blur(4px);z-index:99998;display:flex;align-items:center;justify-content:center;padding:20px;';
+        modal.innerHTML = `
+            <div style="background:#1e293b;border:1px solid rgba(99,102,241,0.25);border-radius:20px;padding:28px;max-width:360px;width:100%;font-family:Prompt,sans-serif;">
+                <h3 style="font-size:16px;font-weight:800;color:#f8fafc;margin:0 0 4px;">➕ เพิ่มศูนย์ใหม่</h3>
+                <p style="font-size:12px;color:#64748b;margin:0 0 18px;">รหัสศูนย์ควรเป็นตัวเลข เช่น 406</p>
+
+                <label style="font-size:11px;font-weight:700;color:#94a3b8;display:block;margin-bottom:6px;">รหัสศูนย์ *</label>
+                <input id="_cs-add-id" type="text" placeholder="เช่น 406" maxlength="10"
+                    style="width:100%;box-sizing:border-box;padding:10px 14px;border-radius:10px;border:1px solid #334155;background:#0f172a;color:#e2e8f0;font-size:14px;font-weight:700;outline:none;margin-bottom:6px;">
+                <div id="_cs-add-id-err" style="font-size:11px;color:#f87171;min-height:16px;margin-bottom:10px;"></div>
+
+                <label style="font-size:11px;font-weight:700;color:#94a3b8;display:block;margin-bottom:6px;">ชื่อศูนย์</label>
+                <input id="_cs-add-name" type="text" placeholder="เช่น ศูนย์ 406"
+                    style="width:100%;box-sizing:border-box;padding:10px 14px;border-radius:10px;border:1px solid #334155;background:#0f172a;color:#e2e8f0;font-size:14px;font-weight:600;outline:none;margin-bottom:20px;">
+
+                <div style="display:flex;gap:10px;">
+                    <button id="_cs-add-cancel" style="flex:1;padding:10px;border-radius:10px;border:1px solid #334155;background:transparent;color:#94a3b8;font-weight:700;font-size:13px;cursor:pointer;">ยกเลิก</button>
+                    <button id="_cs-add-confirm" style="flex:1;padding:10px;border-radius:10px;border:none;background:#6366f1;color:#fff;font-weight:700;font-size:13px;cursor:pointer;">สร้างศูนย์</button>
+                </div>
+            </div>`;
+        document.body.appendChild(modal);
+
+        const idInput   = document.getElementById('_cs-add-id');
+        const nameInput = document.getElementById('_cs-add-name');
+        const errEl     = document.getElementById('_cs-add-id-err');
+        idInput.focus();
+
+        const close = () => modal.remove();
+        document.getElementById('_cs-add-cancel').onclick = close;
+        modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
+
+        document.getElementById('_cs-add-confirm').onclick = () => App._confirmAddCenter(idInput, nameInput, errEl, close);
+        [idInput, nameInput].forEach(inp => inp.addEventListener('keydown', e => {
+            if (e.key === 'Enter') App._confirmAddCenter(idInput, nameInput, errEl, close);
+            if (e.key === 'Escape') close();
+        }));
+    },
+
+    _confirmAddCenter: (idInput, nameInput, errEl, close) => {
+        const centerId = idInput.value.trim();
+
+        // ✅ Validation ที่ prompt() เดิมไม่มีเลย — กันพิมพ์ผิด/ช่องว่าง/อักขระแปลกๆ
+        if (!centerId) {
+            errEl.textContent = '⚠️ กรุณากรอกรหัสศูนย์';
             return;
         }
-        const name = prompt('ชื่อศูนย์ (เช่น ศูนย์ 406):', 'ศูนย์ ' + centerId);
-        if (name === null) return;
+        if (!/^[a-zA-Z0-9]+$/.test(centerId)) {
+            errEl.textContent = '⚠️ รหัสศูนย์ใช้ได้แค่ตัวอักษร/ตัวเลขเท่านั้น ห้ามมีช่องว่างหรืออักขระพิเศษ';
+            return;
+        }
+        if (App.centers[centerId]) {
+            errEl.textContent = '⚠️ มีศูนย์รหัสนี้อยู่แล้ว';
+            return;
+        }
+        errEl.textContent = '';
 
-        const docId = centerId + '_main';
+        const name   = nameInput.value.trim() || ('ศูนย์ ' + centerId);
+        const docId  = centerId + '_main';
 
-        // สร้าง document ใหม่สำหรับศูนย์นี้
+        const confirmBtn = document.getElementById('_cs-add-confirm');
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = 'กำลังสร้าง...';
+
         Promise.all([
-            // สร้าง metadata document ของศูนย์
             db.collection('appData').doc(docId).set({
                 routeList: [],
                 cycleDays: 24,
                 createdAt: firebase.firestore.FieldValue.serverTimestamp()
             }),
-            // อัปเดต __centers__ metadata
             CENTERS_DOC.set({
                 centers: {
                     ...App.centers,
-                    [centerId]: { name: name || ('ศูนย์ ' + centerId), docId, routeCount: 0 }
+                    [centerId]: { name, docId, routeCount: 0 }
                 }
             }, { merge: true })
         ])
         .then(() => {
+            close();
             _csToast('✅ สร้างศูนย์ ' + centerId + ' เรียบร้อยแล้วครับ');
             App.select(centerId); // ไปที่ศูนย์ใหม่เลย
         })
-        .catch(err => _csToast('❌ สร้างไม่สำเร็จ: ' + err.message, true));
+        .catch(err => {
+            confirmBtn.disabled = false;
+            confirmBtn.textContent = 'สร้างศูนย์';
+            // ✅ ใช้ ErrorMsg ถ้ามี (โหลดจาก app-config-init.js) ไม่งั้น fallback ข้อความทั่วไป
+            const msg = (typeof ErrorMsg !== 'undefined') ? ErrorMsg.translate(err) : 'กรุณาลองใหม่อีกครั้ง';
+            errEl.textContent = '❌ สร้างไม่สำเร็จ: ' + msg;
+        });
     },
 
     renderError: () => {
