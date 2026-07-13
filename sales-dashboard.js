@@ -100,7 +100,8 @@ const SalesDashboard = {
         if (lbl) {
             const _name = session.displayName || session.username;
             const _code = session.username.toUpperCase();
-            lbl.textContent = _name !== _code ? `${_name} · ${_code}` : _code;
+            lbl.dataset.base = _name !== _code ? `${_name} · ${_code}` : _code;
+            lbl.textContent = lbl.dataset.base;
         }
 
         // ดึง route จาก session หรือ State
@@ -251,6 +252,11 @@ const SalesDashboard = {
     // ─── เปลี่ยนเดือน ─────────────────────────────────────────────────────
     onMonthChange: async (ym) => {
         if (!ym) return;
+        SalesDashboard._viewMode = 'month';
+        SalesDashboard._updateViewToggleUI();
+        const sel = document.getElementById('db-month-sel');
+        if (sel) sel.disabled = false;
+
         SalesDashboard._ym = ym;
         SalesDashboard._rows = [];
         SalesDashboard._target = 0;
@@ -265,6 +271,85 @@ const SalesDashboard = {
         SalesDashboard._render();
         // ✅ FIX: ลบบรรทัดนี้ออก — _loadData เขียน _rowCache แล้ว การเขียนซ้ำที่นี่
         // จะ overwrite ด้วยค่าที่อาจผิด (ถ้า _rows ถูกแก้โดย concurrent call อื่น)
+    },
+
+    // ✅ FEATURE (2026-07-12): Toggle รายเดือน / รวมทุกเดือน — ในการ์ด KPI เดิม
+    // ไม่ต้องสร้างหน้าใหม่ เพราะ _render() ทำงานล้วนจาก _rows/_target อยู่แล้ว
+    // แค่เปลี่ยนวิธีเติมค่า 2 ตัวนี้ก่อนเรียก _render() ก็พอ
+    _viewMode: 'month', // 'month' | 'all'
+
+    setViewMode: async (mode) => {
+        if (mode === SalesDashboard._viewMode) return;
+        SalesDashboard._viewMode = mode;
+        SalesDashboard._updateViewToggleUI();
+        const sel = document.getElementById('db-month-sel');
+
+        if (mode === 'all') {
+            if (sel) sel.disabled = true;
+            await SalesDashboard._loadAllMonths();
+        } else {
+            if (sel) sel.disabled = false;
+            const ym = (SalesDashboard._ym && SalesDashboard._ym !== '__all__')
+                ? SalesDashboard._ym
+                : Object.keys(SalesDashboard._ymKeyMap || {}).sort().reverse()[0];
+            if (ym) await SalesDashboard.onMonthChange(ym);
+        }
+    },
+
+    _updateViewToggleUI: () => {
+        document.querySelectorAll('#db-view-toggle .db-view-btn').forEach(b => {
+            const active = b.dataset.mode === SalesDashboard._viewMode;
+            b.style.background = active ? '#4f46e5' : 'transparent';
+            b.style.color      = active ? '#fff' : '#6b7280';
+        });
+    },
+
+    _loadAllMonths: async () => {
+        SalesDashboard._ym = '__all__';
+        SalesDashboard._showSkeleton(document.getElementById('db-dashboard-wrap'));
+        await SalesDashboard._waitForYmKeyMap();
+
+        const months = Object.keys(SalesDashboard._ymKeyMap || {}).sort().reverse();
+        const lbl = document.getElementById('db-route-label');
+        if (lbl) lbl.dataset.suffix = months.length ? ` · รวม ${months.length} เดือน` : '';
+        if (lbl && lbl.dataset.base) lbl.textContent = lbl.dataset.base + (lbl.dataset.suffix || '');
+
+        if (!months.length) {
+            SalesDashboard._rows = [];
+            SalesDashboard._target = 0;
+            SalesDashboard._render();
+            return;
+        }
+
+        const u = SalesDashboard._username;
+        try {
+            // ยอดขาย: รวมทุกเดือนที่มี (กรองเฉพาะ sCode ของตัวเอง เหมือนโหมดรายเดือน)
+            const perMonthRows = await Promise.all(months.map(async (ym) => {
+                const allRows = await SalesDashboard._loadChunks(ym);
+                return u ? allRows.filter(r => String(r.sCode || '').toUpperCase() === u) : [];
+            }));
+            SalesDashboard._rows = perMonthRows.flat();
+
+            // Target: รวม target ของทุกเดือนที่ตั้งไว้ (เดือนไหนไม่มี target ก็บวก 0)
+            const targetDocs = await Promise.all(
+                months.map(ym => db.collection('targets').doc(ym).get().catch(() => null))
+            );
+            SalesDashboard._target = targetDocs.reduce((sum, doc) => {
+                if (!doc || !doc.exists) return sum;
+                const routes = doc.data().routes || {};
+                return sum + (routes[u] || 0);
+            }, 0);
+
+            // ✅ ถ้ามีเดือนไหนโหลดพลาดจริง (ไม่ใช่แค่ไม่มีข้อมูล) ให้ _showEmpty รู้ด้วย
+            SalesDashboard._chunkFetchFailed['__all__'] = months.some(ym => SalesDashboard._chunkFetchFailed[ym]);
+
+            SalesDashboard._render();
+        } catch (e) {
+            console.warn('SalesDashboard._loadAllMonths:', e);
+            SalesDashboard._chunkFetchFailed['__all__'] = true;
+            SalesDashboard._rows = [];
+            SalesDashboard._render();
+        }
     },
 
     // ─── Shared chunk cache + in-flight dedup ────────────────────────────
@@ -975,6 +1060,11 @@ const SupervisorDashboard = {
 
     onMonthChange: async (ym) => {
         if (!ym) return;
+        SupervisorDashboard._viewMode = 'month';
+        SupervisorDashboard._updateViewToggleUI();
+        const sel = document.getElementById('db-month-sel');
+        if (sel) sel.disabled = false;
+
         SupervisorDashboard._ym = ym;
         SupervisorDashboard._allRows = [];
         await Promise.all([
@@ -982,6 +1072,77 @@ const SupervisorDashboard = {
             SupervisorDashboard._loadTargets(ym),
         ]);
         SupervisorDashboard._render();
+    },
+
+    // ✅ FEATURE (2026-07-12): Toggle รายเดือน / รวมทุกเดือน (เหมือน SalesDashboard)
+    _viewMode: 'month', // 'month' | 'all'
+
+    setViewMode: async (mode) => {
+        if (mode === SupervisorDashboard._viewMode) return;
+        SupervisorDashboard._viewMode = mode;
+        SupervisorDashboard._updateViewToggleUI();
+        const sel = document.getElementById('db-month-sel');
+
+        if (mode === 'all') {
+            if (sel) sel.disabled = true;
+            await SupervisorDashboard._loadAllMonths();
+        } else {
+            if (sel) sel.disabled = false;
+            const ym = (SupervisorDashboard._ym && SupervisorDashboard._ym !== '__all__')
+                ? SupervisorDashboard._ym
+                : Object.keys(SalesDashboard._ymKeyMap || {}).sort().reverse()[0];
+            if (ym) await SupervisorDashboard.onMonthChange(ym);
+        }
+    },
+
+    _updateViewToggleUI: () => {
+        document.querySelectorAll('#db-view-toggle .db-view-btn').forEach(b => {
+            const active = b.dataset.mode === SupervisorDashboard._viewMode;
+            b.style.background = active ? '#4f46e5' : 'transparent';
+            b.style.color      = active ? '#fff' : '#6b7280';
+        });
+    },
+
+    _loadAllMonths: async () => {
+        SupervisorDashboard._ym = '__all__';
+        await SalesDashboard._waitForYmKeyMap();
+        const months = Object.keys(SalesDashboard._ymKeyMap || {}).sort().reverse();
+        const centerId = (typeof State !== 'undefined' ? State.centerId : null) || Auth.getSession()?.centerId || '';
+
+        if (!months.length) {
+            SupervisorDashboard._allRows = [];
+            SupervisorDashboard._targets = {};
+            SupervisorDashboard._render();
+            return;
+        }
+
+        try {
+            const perMonthRows = await Promise.all(months.map(async (ym) => {
+                const allRows = await SalesDashboard._loadChunks(ym);
+                return centerId ? allRows.filter(r => String(r.sCode||'').startsWith(centerId)) : allRows;
+            }));
+            SupervisorDashboard._allRows = perMonthRows.flat();
+
+            // Target: รวม target ต่อสายของทุกเดือน (สายไหนไม่มีบางเดือนก็บวกแค่ที่มี)
+            const targetDocs = await Promise.all(
+                months.map(ym => db.collection('targets').doc(ym).get().catch(() => null))
+            );
+            const mergedTargets = {};
+            targetDocs.forEach(doc => {
+                if (!doc || !doc.exists) return;
+                const routes = doc.data().routes || {};
+                Object.entries(routes).forEach(([route, val]) => {
+                    mergedTargets[route] = (mergedTargets[route] || 0) + (val || 0);
+                });
+            });
+            SupervisorDashboard._targets = mergedTargets;
+
+            SupervisorDashboard._render();
+        } catch (e) {
+            console.warn('SupervisorDashboard._loadAllMonths:', e);
+            SupervisorDashboard._allRows = [];
+            SupervisorDashboard._render();
+        }
     },
 
     _loadData: async (ym) => {

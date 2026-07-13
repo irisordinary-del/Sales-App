@@ -175,6 +175,16 @@
                 </select>
             </div>
 
+            <!-- ✅ Toggle: รายเดือน / รวมทุกเดือน -->
+            <div id="db-view-toggle" style="display:flex;gap:4px;background:#f3f4f6;border-radius:10px;padding:3px;margin-bottom:12px;flex-shrink:0;width:fit-content;">
+                <button class="db-view-btn" data-mode="month"
+                    onclick="(typeof App !== 'undefined' && App.isSupervisor() ? SupervisorDashboard : SalesDashboard).setViewMode('month')"
+                    style="padding:6px 14px;border-radius:8px;font-size:12px;font-weight:700;border:none;cursor:pointer;font-family:inherit;transition:all 0.15s;background:#4f46e5;color:#fff;">📅 รายเดือน</button>
+                <button class="db-view-btn" data-mode="all"
+                    onclick="(typeof App !== 'undefined' && App.isSupervisor() ? SupervisorDashboard : SalesDashboard).setViewMode('all')"
+                    style="padding:6px 14px;border-radius:8px;font-size:12px;font-weight:700;border:none;cursor:pointer;font-family:inherit;transition:all 0.15s;background:transparent;color:#6b7280;">📊 รวมทุกเดือน</button>
+            </div>
+
             <!-- KPI Cards (dynamic — sales-dashboard.js จะเพิ่ม V/C cards ตาม route) -->
             <div id="db-kpi-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;flex-shrink:0;margin-bottom:12px;">
                 <div class="db-card" style="border-left:4px solid #2563eb;">

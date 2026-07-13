@@ -160,6 +160,14 @@ const Dashboard = {
                 <option value="">-- เลือกเดือน --</option>
             </select>
 
+            <!-- ✅ Toggle: รายเดือน / รวมทุกเดือน -->
+            <div id="db-view-toggle" class="flex bg-gray-100 rounded-lg border border-gray-200 overflow-hidden">
+                <button class="db-view-btn px-3 py-1.5 text-xs font-bold transition bg-emerald-600 text-white" data-mode="month"
+                    onclick="Dashboard.setViewMode('month')">📅 รายเดือน</button>
+                <button class="db-view-btn px-3 py-1.5 text-xs font-bold transition text-gray-500 hover:text-gray-800" data-mode="all"
+                    onclick="Dashboard.setViewMode('all')">📊 รวมทุกเดือน</button>
+            </div>
+
             <!-- Amount mode toggle -->
             <div class="flex bg-gray-100 rounded-lg border border-gray-200 overflow-hidden">
                 <button id="db-btn-gross" onclick="Dashboard._setAmountMode('gross')"
@@ -340,6 +348,11 @@ const Dashboard = {
 
     _onMonthChange: async (ym) => {
         if (!ym) return;
+        Dashboard._viewMode = 'month';
+        Dashboard._updateViewToggleUI();
+        const sel = document.getElementById('db-month-select');
+        if (sel) sel.disabled = false;
+
         Dashboard._currentYM = ym;
         Dashboard._drillRoute = Dashboard._session.role === 'sales' ? Dashboard._session.username : null;
         Dashboard._drillCategory = null;
@@ -347,6 +360,93 @@ const Dashboard = {
         await Dashboard._loadMonth(ym);
         await Dashboard._loadTargets(ym);
         Dashboard._render();
+    },
+
+    // ✅ FEATURE (2026-07-12): Toggle รายเดือน / รวมทุกเดือน — ใช้การ์ด KPI เดิม
+    // _render() ทำงานล้วนจาก Dashboard._rows / Dashboard._targets อยู่แล้ว
+    // แค่เปลี่ยนวิธีเติมค่า 2 ตัวนี้ก่อนเรียก _render() ก็พอ เหมือน SalesDashboard/SupervisorDashboard
+    _viewMode: 'month', // 'month' | 'all'
+
+    setViewMode: async (mode) => {
+        if (mode === Dashboard._viewMode) return;
+        Dashboard._viewMode = mode;
+        Dashboard._updateViewToggleUI();
+        const sel = document.getElementById('db-month-select');
+
+        if (mode === 'all') {
+            if (sel) sel.disabled = true;
+            await Dashboard._loadAllMonths();
+        } else {
+            if (sel) sel.disabled = false;
+            const ym = (Dashboard._currentYM && Dashboard._currentYM !== '__all__')
+                ? Dashboard._currentYM
+                : (Dashboard._allMonths || [])[0];
+            if (ym) await Dashboard._onMonthChange(ym);
+        }
+    },
+
+    _updateViewToggleUI: () => {
+        document.querySelectorAll('#db-view-toggle .db-view-btn').forEach(b => {
+            const active = b.dataset.mode === Dashboard._viewMode;
+            b.classList.toggle('bg-emerald-600', active);
+            b.classList.toggle('text-white', active);
+            b.classList.toggle('text-gray-500', !active);
+        });
+    },
+
+    _loadAllMonths: async () => {
+        Dashboard._currentYM = '__all__';
+        Dashboard._drillRoute = Dashboard._session.role === 'sales' ? Dashboard._session.username : null;
+        Dashboard._drillCategory = null;
+        Dashboard._drillBrand = null;
+
+        const months = Dashboard._allMonths || [];
+        if (!months.length) {
+            Dashboard._rows = [];
+            Dashboard._targets = {};
+            Dashboard._render();
+            return;
+        }
+
+        Dashboard._showUploadBar('กำลังโหลดข้อมูลรวมทุกเดือน...', 10);
+        try {
+            const perMonthRows = await Promise.all(months.map(async (ym) => {
+                const key = (Dashboard._ymKeyMap && Dashboard._ymKeyMap[ym]) || ym;
+                try {
+                    const chunks = await cloudDB.collection('sellout').doc(key).collection('chunks').get();
+                    let rows = [];
+                    chunks.docs
+                        .sort((a,b) => (a.data().index||0)-(b.data().index||0))
+                        .forEach(doc => { if (doc.data().rows) rows = rows.concat(doc.data().rows); });
+                    return rows;
+                } catch (e) {
+                    console.warn('Dashboard._loadAllMonths: เดือน', ym, 'โหลดพลาด:', e);
+                    return [];
+                }
+            }));
+            Dashboard._rows = perMonthRows.flat();
+
+            // รวม target ทุกสายของทุกเดือน
+            const targetDocs = await Promise.all(
+                months.map(ym => cloudDB.collection('targets').doc(ym).get().catch(() => null))
+            );
+            const mergedTargets = {};
+            targetDocs.forEach(doc => {
+                if (!doc || !doc.exists) return;
+                const routes = doc.data().routes || {};
+                Object.entries(routes).forEach(([route, val]) => {
+                    mergedTargets[route] = (mergedTargets[route] || 0) + (val || 0);
+                });
+            });
+            Dashboard._targets = mergedTargets;
+
+            Dashboard._hideUploadBar();
+            Dashboard._render();
+        } catch (e) {
+            Dashboard._hideUploadBar();
+            console.error('Dashboard._loadAllMonths:', e);
+            Dashboard._toast('❌ โหลดข้อมูลรวมทุกเดือนไม่สำเร็จ: ' + ErrorMsg.translate(e), true);
+        }
     },
 
     // ─── Load month data from chunked Firestore ───────────────────────────
@@ -557,6 +657,11 @@ const Dashboard = {
     },
 
     _openTargetModal: () => {
+        // ✅ FIX: กันเปิด modal ตั้ง Target ตอนอยู่โหมด "รวมทุกเดือน" — Target ผูกกับเดือนเดียวเสมอ
+        if (!Dashboard._currentYM || Dashboard._currentYM === '__all__') {
+            Dashboard._toast('⚠️ กรุณาสลับไปโหมด "รายเดือน" แล้วเลือกเดือนที่ต้องการก่อนตั้ง Target', true);
+            return;
+        }
         const routes = Dashboard._getRoutes();
         const list = document.getElementById('db-target-list');
         if (!list) return;
@@ -574,6 +679,11 @@ const Dashboard = {
     _closeTargetModal: () => document.getElementById('db-target-modal').classList.add('hidden'),
 
     _saveTargets: async () => {
+        // ✅ FIX: Target ผูกกับเดือนใดเดือนหนึ่งเสมอ — กันบันทึกไปที่ '__all__' ตอนอยู่โหมดรวมทุกเดือน
+        if (!Dashboard._currentYM || Dashboard._currentYM === '__all__') {
+            Dashboard._toast('⚠️ กรุณาสลับไปโหมด "รายเดือน" แล้วเลือกเดือนที่ต้องการก่อนตั้ง Target', true);
+            return;
+        }
         const routes = Dashboard._getRoutes();
         const targets = {};
         routes.forEach(r => {
