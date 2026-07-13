@@ -884,7 +884,7 @@ const SkuDist = {
             UI.showSaveToast('✅ บันทึก Campaign เรียบร้อย');
         } catch (e) {
             UI.hideLoader();
-            UI.showErrorToast('❌ บันทึกไม่สำเร็จ: ' + e.message);
+            UI.showErrorToast('❌ บันทึกไม่สำเร็จ: ' + ErrorMsg.translate(e));
         }
     },
 
@@ -901,7 +901,7 @@ const SkuDist = {
                 SkuDist._renderCampaignList();
                 UI.showSaveToast('🗑️ ลบ Campaign เรียบร้อย');
             } catch (e) {
-                UI.showErrorToast('❌ ลบไม่สำเร็จ: ' + e.message);
+                UI.showErrorToast('❌ ลบไม่สำเร็จ: ' + ErrorMsg.translate(e));
             }
         });
     },
@@ -918,8 +918,8 @@ const SkuDist = {
             // โหลดทุกเดือนใน range
             const months = SkuDist._getYMRange(campaign.startYM, campaign.endYM);
             const cid = (window.CENTER_ID || '').toUpperCase();
-            let allRows = [];
-            for (const ym of months) {
+            // ✅ PERF: โหลดทุกเดือนพร้อมกัน แทนทีละเดือน
+            const monthResults = await Promise.all(months.map(async ym => {
                 // ✅ FIX: รองรับ 2 format ของ sellout doc — "{centerId}_{YYYY_MM}" (ใหม่) และ "{YYYY_MM}" (เก่า)
                 // ของเดิม query ด้วย ym ตรงๆ ทำให้เดือนที่เขียนแบบใหม่ (มี centerId prefix) หาไม่เจอเลย
                 const candidates = cid ? [`${cid}_${ym}`, ym] : [ym];
@@ -929,12 +929,15 @@ const SkuDist = {
                             .collection('chunks').get();
                         if (!chunks.empty) {
                             const sorted = chunks.docs.sort((a,b) => (a.data().index||0) - (b.data().index||0));
-                            sorted.forEach(doc => { allRows = allRows.concat(doc.data().rows || []); });
-                            break; // เจอแล้ว ไม่ต้องลอง candidate ถัดไป
+                            let rows = [];
+                            sorted.forEach(doc => { rows = rows.concat(doc.data().rows || []); });
+                            return rows; // เจอแล้ว ไม่ต้องลอง candidate ถัดไป
                         }
                     } catch (e) { /* ลอง candidate ถัดไป */ }
                 }
-            }
+                return [];
+            }));
+            let allRows = monthResults.flat();
 
             // ═══════════════════════════════════════════════════════════
             // 📋 โหมด "ระบุร้านเอง" — ขอบเขตร้านมาจาก participantStores
@@ -1126,7 +1129,7 @@ const SkuDist = {
 
         } catch (e) {
             UI.hideLoader();
-            UI.showErrorToast('❌ คำนวณไม่สำเร็จ: ' + e.message);
+            UI.showErrorToast('❌ คำนวณไม่สำเร็จ: ' + ErrorMsg.translate(e));
             console.error('SkuDist.calc:', e);
         }
     },

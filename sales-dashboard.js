@@ -18,6 +18,38 @@ const SalesDashboard = {
     _rowCache: {},       // { 'YYYY_MM': rows[] } cache ไม่ต้องโหลดซ้ำ
     _ready: false,
 
+    // ✅ FIX (2026-07-11): กัน race condition — ตอนโหลดหน้าแรก มีหลายจุด
+    // (App._loadCampaignIcons, StoreHistory, SupervisorDashboard) เรียก _loadChunks()
+    // พร้อมกับ _loadMonthList() ที่กำลังตั้งค่า _ymKeyMap อยู่ ถ้า _loadChunks ถูกเรียก
+    // ก่อน _ymKeyMap พร้อม จะ query ผิด path (ไม่มี centerId prefix) ได้ 0 แถว
+    // แล้ว "แคช 0 แถว" นั้นไว้ตลอด session ทำให้ข้อมูลไม่ขึ้นแม้ข้อมูลจริงมีอยู่ครบ
+    _ymKeyMapLoaded: false,
+    _waitForYmKeyMap: async () => {
+        if (SalesDashboard._ymKeyMapLoaded) return;
+        for (let i = 0; i < 50; i++) {           // รอสูงสุด 5 วิ (poll ทุก 100ms)
+            if (SalesDashboard._ymKeyMapLoaded) return;
+            await new Promise(r => setTimeout(r, 100));
+        }
+        console.warn('[SalesDashboard] _ymKeyMap ยังไม่พร้อมหลังรอ 5 วิ — ใช้ ym ตรงๆ แทน (อาจ query ผิด path)');
+    },
+
+    // ✅ FIX (2026-07-11 v2): บังคับอ่านจากเซิร์ฟเวอร์เสมอสำหรับข้อมูลยอดขาย (สำคัญ/ต้องถูกต้อง)
+    // แทนที่จะปล่อยให้ Firestore SDK เลือก cache หรือเซิร์ฟเวอร์เอง — พฤติกรรม cache/persistence
+    // ต่างกันไปตามอุปกรณ์/เบราว์เซอร์ (โดยเฉพาะมือถือ) ทำให้บางเครื่องได้ข้อมูลค้าง/ว่างเปล่า
+    // ทั้งที่เซิร์ฟเวอร์มีข้อมูลจริงครบ — ถ้าเครื่องออฟไลน์จริง (throw 'unavailable') ค่อย fallback
+    // ไปใช้ cache เดิม (.get() เฉยๆ) กันแอปพังตอนไม่มีเน็ตจริงๆ
+    _getFresh: async (ref) => {
+        try {
+            return await ref.get({ source: 'server' });
+        } catch (e) {
+            if (e.code === 'unavailable') {
+                console.warn('[SalesDashboard] ออฟไลน์จริง — ใช้ cache แทน');
+                return await ref.get();
+            }
+            throw e;
+        }
+    },
+
     EXCLUDED_BRANDS: new Set(['อื่นๆ', 'กระเช้าของขวัญ']),
 
     _calcOutletMetrics: (rows) => {
@@ -68,7 +100,8 @@ const SalesDashboard = {
         if (lbl) {
             const _name = session.displayName || session.username;
             const _code = session.username.toUpperCase();
-            lbl.textContent = _name !== _code ? `${_name} · ${_code}` : _code;
+            lbl.dataset.base = _name !== _code ? `${_name} · ${_code}` : _code;
+            lbl.textContent = lbl.dataset.base;
         }
 
         // ดึง route จาก session หรือ State
@@ -126,7 +159,7 @@ const SalesDashboard = {
         for (let attempt = 0; attempt < 2; attempt++) {
             try {
                 snap = await Promise.race([
-                    db.collection('sellout').get(),
+                    SalesDashboard._getFresh(db.collection('sellout')),
                     new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 10000))
                 ]);
                 break;
@@ -138,6 +171,7 @@ const SalesDashboard = {
 
         if (!snap) {
             // แสดง retry banner แทนหน้าว่าง
+            SalesDashboard._ymKeyMapLoaded = true; // ✅ FIX: ไม่ปล่อยให้ _loadChunks ค้างรอ 5 วิ
             SalesDashboard._showDataWarning('⚠️ โหลดข้อมูลไม่สำเร็จ กรุณาตรวจสอบอินเทอร์เน็ตแล้ว',
                 () => SalesDashboard._loadMonthList());
             return;
@@ -159,6 +193,7 @@ const SalesDashboard = {
                 }
             });
             SalesDashboard._ymKeyMap = ymMap;
+            SalesDashboard._ymKeyMapLoaded = true; // ✅ FIX: ปลด _loadChunks ที่รออยู่ให้ทำงานต่อด้วย key ที่ถูกต้อง
             const months = Object.keys(ymMap).sort().reverse();
 
             if (!sel) return;
@@ -186,6 +221,7 @@ const SalesDashboard = {
             }
         } catch (e) {
             console.warn('SalesDashboard._loadMonthList:', e);
+            SalesDashboard._ymKeyMapLoaded = true; // ✅ FIX: กันค้างรอถ้า error กลางทาง
             SalesDashboard._showEmpty();
         }
     },
@@ -216,6 +252,11 @@ const SalesDashboard = {
     // ─── เปลี่ยนเดือน ─────────────────────────────────────────────────────
     onMonthChange: async (ym) => {
         if (!ym) return;
+        SalesDashboard._viewMode = 'month';
+        SalesDashboard._updateViewToggleUI();
+        const sel = document.getElementById('db-month-sel');
+        if (sel) sel.disabled = false;
+
         SalesDashboard._ym = ym;
         SalesDashboard._rows = [];
         SalesDashboard._target = 0;
@@ -230,6 +271,85 @@ const SalesDashboard = {
         SalesDashboard._render();
         // ✅ FIX: ลบบรรทัดนี้ออก — _loadData เขียน _rowCache แล้ว การเขียนซ้ำที่นี่
         // จะ overwrite ด้วยค่าที่อาจผิด (ถ้า _rows ถูกแก้โดย concurrent call อื่น)
+    },
+
+    // ✅ FEATURE (2026-07-12): Toggle รายเดือน / รวมทุกเดือน — ในการ์ด KPI เดิม
+    // ไม่ต้องสร้างหน้าใหม่ เพราะ _render() ทำงานล้วนจาก _rows/_target อยู่แล้ว
+    // แค่เปลี่ยนวิธีเติมค่า 2 ตัวนี้ก่อนเรียก _render() ก็พอ
+    _viewMode: 'month', // 'month' | 'all'
+
+    setViewMode: async (mode) => {
+        if (mode === SalesDashboard._viewMode) return;
+        SalesDashboard._viewMode = mode;
+        SalesDashboard._updateViewToggleUI();
+        const sel = document.getElementById('db-month-sel');
+
+        if (mode === 'all') {
+            if (sel) sel.disabled = true;
+            await SalesDashboard._loadAllMonths();
+        } else {
+            if (sel) sel.disabled = false;
+            const ym = (SalesDashboard._ym && SalesDashboard._ym !== '__all__')
+                ? SalesDashboard._ym
+                : Object.keys(SalesDashboard._ymKeyMap || {}).sort().reverse()[0];
+            if (ym) await SalesDashboard.onMonthChange(ym);
+        }
+    },
+
+    _updateViewToggleUI: () => {
+        document.querySelectorAll('#db-view-toggle .db-view-btn').forEach(b => {
+            const active = b.dataset.mode === SalesDashboard._viewMode;
+            b.style.background = active ? '#4f46e5' : 'transparent';
+            b.style.color      = active ? '#fff' : '#6b7280';
+        });
+    },
+
+    _loadAllMonths: async () => {
+        SalesDashboard._ym = '__all__';
+        SalesDashboard._showSkeleton(document.getElementById('db-dashboard-wrap'));
+        await SalesDashboard._waitForYmKeyMap();
+
+        const months = Object.keys(SalesDashboard._ymKeyMap || {}).sort().reverse();
+        const lbl = document.getElementById('db-route-label');
+        if (lbl) lbl.dataset.suffix = months.length ? ` · รวม ${months.length} เดือน` : '';
+        if (lbl && lbl.dataset.base) lbl.textContent = lbl.dataset.base + (lbl.dataset.suffix || '');
+
+        if (!months.length) {
+            SalesDashboard._rows = [];
+            SalesDashboard._target = 0;
+            SalesDashboard._render();
+            return;
+        }
+
+        const u = SalesDashboard._username;
+        try {
+            // ยอดขาย: รวมทุกเดือนที่มี (กรองเฉพาะ sCode ของตัวเอง เหมือนโหมดรายเดือน)
+            const perMonthRows = await Promise.all(months.map(async (ym) => {
+                const allRows = await SalesDashboard._loadChunks(ym);
+                return u ? allRows.filter(r => String(r.sCode || '').toUpperCase() === u) : [];
+            }));
+            SalesDashboard._rows = perMonthRows.flat();
+
+            // Target: รวม target ของทุกเดือนที่ตั้งไว้ (เดือนไหนไม่มี target ก็บวก 0)
+            const targetDocs = await Promise.all(
+                months.map(ym => db.collection('targets').doc(ym).get().catch(() => null))
+            );
+            SalesDashboard._target = targetDocs.reduce((sum, doc) => {
+                if (!doc || !doc.exists) return sum;
+                const routes = doc.data().routes || {};
+                return sum + (routes[u] || 0);
+            }, 0);
+
+            // ✅ ถ้ามีเดือนไหนโหลดพลาดจริง (ไม่ใช่แค่ไม่มีข้อมูล) ให้ _showEmpty รู้ด้วย
+            SalesDashboard._chunkFetchFailed['__all__'] = months.some(ym => SalesDashboard._chunkFetchFailed[ym]);
+
+            SalesDashboard._render();
+        } catch (e) {
+            console.warn('SalesDashboard._loadAllMonths:', e);
+            SalesDashboard._chunkFetchFailed['__all__'] = true;
+            SalesDashboard._rows = [];
+            SalesDashboard._render();
+        }
     },
 
     // ─── Shared chunk cache + in-flight dedup ────────────────────────────
@@ -248,9 +368,13 @@ const SalesDashboard = {
 
         SalesDashboard._chunkInflight[cacheKey] = (async () => {
             try {
+                // ✅ FIX: รอให้ _ymKeyMap พร้อมก่อนเสมอ กัน race condition ตอน initial load
+                // (ป้องกัน query ผิด path แล้วแคชค่า 0 แถวติดไปตลอด session)
+                await SalesDashboard._waitForYmKeyMap();
+
                 // ✅ ลอง key จาก _ymKeyMap ก่อน (อาจเป็น 402_2026_06)
                 const key  = SalesDashboard._ymKeyMap?.[ym] || ym;
-                const snap = await db.collection('sellout').doc(key).collection('chunks').get();
+                const snap = await SalesDashboard._getFresh(db.collection('sellout').doc(key).collection('chunks'));
 
                 let rows = [];
                 if (!snap.empty) {
@@ -261,7 +385,7 @@ const SalesDashboard = {
 
                 // ✅ ถ้า rows ว่าง และ key ต่างจาก ym → fallback ไป YYYY_MM format เก่า
                 if (rows.length === 0 && key !== ym) {
-                    const snap2 = await db.collection('sellout').doc(ym).collection('chunks').get();
+                    const snap2 = await SalesDashboard._getFresh(db.collection('sellout').doc(ym).collection('chunks'));
                     if (!snap2.empty) {
                         let rows2 = [];
                         snap2.docs
@@ -276,9 +400,13 @@ const SalesDashboard = {
                 }
 
                 SalesDashboard._chunkCache[cacheKey] = rows;
+                SalesDashboard._chunkFetchFailed[ym] = false; // ✅ สำเร็จ — ล้างสถานะ error เดือนนี้
                 return rows;
             } catch (e) {
                 console.warn('SalesDashboard._loadChunks:', ym, e.message);
+                // ✅ FIX: แยก "โหลดไม่สำเร็จ" ออกจาก "โหลดสำเร็จแต่ไม่มีข้อมูล"
+                // ไม่แคชผลลัพธ์ตอน error (ให้ลองใหม่ครั้งหน้าได้ แทนที่จะค้าง [] ตลอด session)
+                SalesDashboard._chunkFetchFailed[ym] = true;
                 return [];
             } finally {
                 delete SalesDashboard._chunkInflight[cacheKey];
@@ -286,6 +414,10 @@ const SalesDashboard = {
         })();
         return SalesDashboard._chunkInflight[cacheKey];
     },
+
+    // ✅ FIX: เก็บสถานะ "โหลดพลาด" แยกต่างหากจาก "ไม่มีข้อมูลจริง" ต่อเดือน
+    // ให้ _showEmpty() เลือกข้อความที่ตรงสถานการณ์จริงแทนที่จะโชว์ "—" เหมือนกันหมด
+    _chunkFetchFailed: {},
 
     _showDataWarning: (fail, total) => {
         const warn = document.createElement('div');
@@ -557,11 +689,23 @@ const SalesDashboard = {
     _showEmpty: () => {
         const empty = document.getElementById('db-empty');
         if (empty) empty.style.display = 'block';
-        // Clear all KPIs
-        ['db-kpi-total','db-kpi-pct','db-kpi-shops','db-kpi-avgsku','db-kpi-avgvol-v','db-kpi-avgvol-c','db-kpi-inv'].forEach(id => SalesDashboard._setText(id, '—'));
+
+        // ✅ FIX: แยกข้อความ "ยังไม่มีข้อมูล" กับ "โหลดไม่สำเร็จ" ไม่ให้ user งงว่าต้องรอ
+        // หรือต้องกดลองใหม่ — เดิมทั้ง 2 กรณีโชว์ "—" เหมือนกันหมด แยกไม่ออก
+        const failed = SalesDashboard._chunkFetchFailed[SalesDashboard._ym];
+        const kpiVal = failed ? '⚠️' : '—';
+        ['db-kpi-total','db-kpi-pct','db-kpi-shops','db-kpi-avgsku','db-kpi-avgvol-v','db-kpi-avgvol-c','db-kpi-inv'].forEach(id => SalesDashboard._setText(id, kpiVal));
+
         ['db-cat-body'].forEach(id => {
             const el = document.getElementById(id);
-            if (el) el.innerHTML = '<div style="text-align:center;padding:12px;color:#9ca3af;font-size:12px;">ยังไม่มีข้อมูล</div>';
+            if (!el) return;
+            el.innerHTML = failed
+                ? `<div style="text-align:center;padding:16px 12px;">
+                    <div style="font-size:12px;color:#dc2626;font-weight:700;margin-bottom:8px;">⚠️ โหลดข้อมูลไม่สำเร็จ กรุณาลองใหม่</div>
+                    <button onclick="SalesDashboard.onMonthChange(SalesDashboard._ym)"
+                        style="background:#4f46e5;color:#fff;border:none;border-radius:8px;padding:6px 16px;font-size:12px;font-weight:700;cursor:pointer;">🔄 ลองใหม่</button>
+                   </div>`
+                : '<div style="text-align:center;padding:12px;color:#9ca3af;font-size:12px;">ยังไม่มีข้อมูลเดือนนี้</div>';
         });
         const bar = document.getElementById('db-target-bar');
         if (bar) bar.style.width = '0%';
@@ -645,7 +789,7 @@ const SalesDashboard = {
         } else {
             try {
                 // ✅ PERF: ใช้ _loadChunks → share cache กับ dashboard ไม่ fetch Firestore ซ้ำ
-                const listSnap = await db.collection('sellout').get();
+                const listSnap = await SalesDashboard._getFresh(db.collection('sellout'));
                 const _cid2 = window.CENTER_ID || Auth.getSession()?.centerId || '';
                 const _pfx2 = _cid2 ? `${_cid2}_` : '';
                 const months = listSnap.docs
@@ -850,7 +994,7 @@ const SupervisorDashboard = {
         for (let attempt = 0; attempt < 2; attempt++) {
             try {
                 snap = await Promise.race([
-                    db.collection('sellout').get(),
+                    SalesDashboard._getFresh(db.collection('sellout')),
                     new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 10000))
                 ]);
                 break;
@@ -861,6 +1005,7 @@ const SupervisorDashboard = {
         }
 
         if (!snap) {
+            SalesDashboard._ymKeyMapLoaded = true; // ✅ FIX: กันค้างรอถ้าโหลดไม่สำเร็จ
             if (typeof SalesDashboard._showDataWarning === 'function') {
                 SalesDashboard._showDataWarning('⚠️ โหลดข้อมูลไม่สำเร็จ กรุณาตรวจสอบอินเทอร์เน็ตแล้ว',
                     () => SupervisorDashboard._loadMonthList());
@@ -884,6 +1029,7 @@ const SupervisorDashboard = {
                 }
             });
             SalesDashboard._ymKeyMap = ymMap; // share กับ _loadChunks
+            SalesDashboard._ymKeyMapLoaded = true; // ✅ FIX: ปลด _loadChunks ที่รออยู่
             const months = Object.keys(ymMap).sort().reverse();
 
             if (!sel) return;
@@ -906,11 +1052,19 @@ const SupervisorDashboard = {
                     }, (i + 1) * 2500);
                 });
             }
-        } catch(e) { console.warn('SupervisorDashboard._loadMonthList:', e); }
+        } catch(e) {
+            console.warn('SupervisorDashboard._loadMonthList:', e);
+            SalesDashboard._ymKeyMapLoaded = true; // ✅ FIX: กันค้างรอถ้า error กลางทาง
+        }
     },
 
     onMonthChange: async (ym) => {
         if (!ym) return;
+        SupervisorDashboard._viewMode = 'month';
+        SupervisorDashboard._updateViewToggleUI();
+        const sel = document.getElementById('db-month-sel');
+        if (sel) sel.disabled = false;
+
         SupervisorDashboard._ym = ym;
         SupervisorDashboard._allRows = [];
         await Promise.all([
@@ -918,6 +1072,77 @@ const SupervisorDashboard = {
             SupervisorDashboard._loadTargets(ym),
         ]);
         SupervisorDashboard._render();
+    },
+
+    // ✅ FEATURE (2026-07-12): Toggle รายเดือน / รวมทุกเดือน (เหมือน SalesDashboard)
+    _viewMode: 'month', // 'month' | 'all'
+
+    setViewMode: async (mode) => {
+        if (mode === SupervisorDashboard._viewMode) return;
+        SupervisorDashboard._viewMode = mode;
+        SupervisorDashboard._updateViewToggleUI();
+        const sel = document.getElementById('db-month-sel');
+
+        if (mode === 'all') {
+            if (sel) sel.disabled = true;
+            await SupervisorDashboard._loadAllMonths();
+        } else {
+            if (sel) sel.disabled = false;
+            const ym = (SupervisorDashboard._ym && SupervisorDashboard._ym !== '__all__')
+                ? SupervisorDashboard._ym
+                : Object.keys(SalesDashboard._ymKeyMap || {}).sort().reverse()[0];
+            if (ym) await SupervisorDashboard.onMonthChange(ym);
+        }
+    },
+
+    _updateViewToggleUI: () => {
+        document.querySelectorAll('#db-view-toggle .db-view-btn').forEach(b => {
+            const active = b.dataset.mode === SupervisorDashboard._viewMode;
+            b.style.background = active ? '#4f46e5' : 'transparent';
+            b.style.color      = active ? '#fff' : '#6b7280';
+        });
+    },
+
+    _loadAllMonths: async () => {
+        SupervisorDashboard._ym = '__all__';
+        await SalesDashboard._waitForYmKeyMap();
+        const months = Object.keys(SalesDashboard._ymKeyMap || {}).sort().reverse();
+        const centerId = (typeof State !== 'undefined' ? State.centerId : null) || Auth.getSession()?.centerId || '';
+
+        if (!months.length) {
+            SupervisorDashboard._allRows = [];
+            SupervisorDashboard._targets = {};
+            SupervisorDashboard._render();
+            return;
+        }
+
+        try {
+            const perMonthRows = await Promise.all(months.map(async (ym) => {
+                const allRows = await SalesDashboard._loadChunks(ym);
+                return centerId ? allRows.filter(r => String(r.sCode||'').startsWith(centerId)) : allRows;
+            }));
+            SupervisorDashboard._allRows = perMonthRows.flat();
+
+            // Target: รวม target ต่อสายของทุกเดือน (สายไหนไม่มีบางเดือนก็บวกแค่ที่มี)
+            const targetDocs = await Promise.all(
+                months.map(ym => db.collection('targets').doc(ym).get().catch(() => null))
+            );
+            const mergedTargets = {};
+            targetDocs.forEach(doc => {
+                if (!doc || !doc.exists) return;
+                const routes = doc.data().routes || {};
+                Object.entries(routes).forEach(([route, val]) => {
+                    mergedTargets[route] = (mergedTargets[route] || 0) + (val || 0);
+                });
+            });
+            SupervisorDashboard._targets = mergedTargets;
+
+            SupervisorDashboard._render();
+        } catch (e) {
+            console.warn('SupervisorDashboard._loadAllMonths:', e);
+            SupervisorDashboard._allRows = [];
+            SupervisorDashboard._render();
+        }
     },
 
     _loadData: async (ym) => {

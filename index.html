@@ -106,6 +106,12 @@
 
     </div>
 
+    <!-- ✅ UX: Undo banner — เผื่อกดพลาดหลังผ่าน confirm dialog แล้ว -->
+    <div id="undo-banner" class="hidden fixed bottom-8 left-1/2 transform -translate-x-1/2 bg-gray-900 text-white pl-5 pr-2 py-2 rounded-full shadow-2xl z-[10000] text-sm font-bold flex items-center gap-3">
+        <span id="undo-banner-msg">ลบข้อมูลแล้ว</span>
+        <button onclick="App.undo()" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-1.5 rounded-full text-xs font-black transition">↩️ ย้อนกลับ</button>
+    </div>
+
 
 
     <!-- Sidebar — responsive (icon-only < md, full >= md) -->
@@ -131,6 +137,10 @@
             <button onclick="Nav.go('dashboard')" id="nav-dashboard" class="sidebar-menu active w-full flex items-center justify-center md:justify-start px-0 md:px-5 py-3 md:py-3.5 text-sm font-bold">
                 <span class="text-xl md:text-lg md:mr-3">📊</span>
                 <span class="hidden md:inline">Dashboard</span>
+            </button>
+            <button onclick="Nav.go('routeanalysis')" id="nav-routeanalysis" class="sidebar-menu w-full flex items-center justify-center md:justify-start px-0 md:px-5 py-3 md:py-3.5 text-sm font-bold">
+                <span class="text-xl md:text-lg md:mr-3">📈</span>
+                <span class="hidden md:inline">วิเคราะห์สายวิ่ง</span>
             </button>
             <button onclick="Nav.go('planning')" id="nav-planning" class="sidebar-menu w-full flex items-center justify-center md:justify-start px-0 md:px-5 py-3 md:py-3.5 text-sm font-bold">
                 <span class="text-xl md:text-lg md:mr-3">📍</span>
@@ -244,9 +254,22 @@
                     <select id="plan-selector" onchange="PlanUI.onSelect(this.value)"
                         class="bg-gray-700 border border-gray-600 text-white text-xs font-bold rounded-lg px-2 py-1.5 outline-none focus:ring-2 focus:ring-indigo-400 max-w-[140px]">
                     </select>
+                    <div id="plan-live-badge"
+                        style="font-size:10px;font-weight:800;padding:3px 8px;border-radius:6px;white-space:nowrap;">
+                    </div>
+                    <button id="plan-publish-btn" onclick="PlanUI.publishCurrent()"
+                        class="hidden bg-orange-500 hover:bg-orange-400 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap"
+                        title="ตั้งเดือนที่กำลังดูอยู่ให้เป็นเดือนที่ Sales เห็นจริง">
+                        📢 ตั้งเป็นเดือนที่ใช้งานจริง
+                    </button>
                     <button onclick="CalendarAdmin.open(App._currentPlanYM)"
                         class="bg-indigo-600 hover:bg-indigo-500 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap" title="ตั้งค่าปฏิทิน">
                         📅 ปฏิทิน
+                    </button>
+                    <span id="cal-mode-badge" class="hidden bg-gray-700 text-gray-200 px-2 py-1 rounded-lg text-[10px] font-bold whitespace-nowrap" title="โหมดปฏิทินของเดือนนี้"></span>
+                    <button onclick="HolidayException.open()"
+                        class="bg-amber-500 hover:bg-amber-400 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap" title="จัดการวันหยุด (เฉพาะโหมดตามวันในสัปดาห์)">
+                        📆 จัดการวันหยุด
                     </button>
                     <button onclick="PlanUI.openCreatePlan()"
                         class="bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap" title="เพิ่มเดือนใหม่">
@@ -318,8 +341,25 @@
 
                         </button>
 
+                        <button onclick="UI.toggleLegend()" id="legendToggleBtn" class="bg-white hover:bg-gray-50 text-gray-800 px-4 py-2.5 rounded-xl shadow-lg text-sm font-bold border border-gray-200">
+
+                            🎨 สีวัน
+
+                        </button>
+
                     </div>
 
+
+
+                    <!-- ✅ UX: Legend สีของแต่ละ Day — เดิมไม่มี ต้องเดาสีเอง -->
+
+                    <div id="dayLegendPanel" class="hidden absolute top-4 right-4 z-[400] bg-white p-3 rounded-2xl shadow-2xl border border-gray-200 flex flex-col gap-1.5 w-48 max-h-80 overflow-y-auto">
+
+                        <p class="text-xs font-bold text-gray-500 mb-1">🎨 สีของแต่ละวัน</p>
+
+                        <div id="dayLegendList" class="space-y-1"></div>
+
+                    </div>
 
 
                     <!-- Lasso Panel -->
@@ -351,7 +391,7 @@
 
                         <button onclick="UI.userSwitchTab('tab2')" id="btn-tab2" class="tab-btn flex-1 py-3 px-1">2. จัดสาย</button>
 
-                        <button onclick="UI.userSwitchTab('tab3')" id="btn-tab3" class="tab-btn flex-1 py-3 px-1">3. แก้ไข</button>
+                        <button onclick="UI.userSwitchTab('tab3')" id="btn-tab3" class="tab-btn flex-1 py-3 px-1">3. แก้วันที่จัด</button>
 
                         <button onclick="UI.userSwitchTab('tab4')" id="btn-tab4" class="tab-btn flex-1 py-3 px-1">4. สรุป</button>
 
@@ -389,7 +429,7 @@
 
                                     <button onclick="App.clearStores()" class="flex-1 bg-red-50 text-red-600 py-2 rounded-lg text-xs font-bold border border-red-100 hover:bg-red-100 transition">
 
-                                        🗑️ ล้างสายนี้
+                                        🗑️ ลบร้านทั้งหมด
 
                                     </button>
 
@@ -415,11 +455,21 @@
 
                         <div id="tab2" class="hidden space-y-4">
 
+                            <!-- ✅ UX: คำอธิบายวิธีจัดสาย 2 แบบ — เดิมไม่มีคำอธิบาย ทำให้ user งงว่าต้องเลือกร้านจากไหน -->
+
+                            <div class="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800 leading-relaxed">
+
+                                💡 <b>2 วิธีจัดสาย:</b> ① กด "AI Route Builder" ด้านล่างให้จัดอัตโนมัติทั้งหมด หรือ ② เลือกร้านเอง — <b>แตะร้านบนแผนที่</b> ทีละร้าน (หรือใช้เครื่องมือ Lasso มุมขวาบนแผนที่วาดเลือกทีเดียวหลายร้าน) แล้วค่อยเลือกวันด้านล่างนี้ กดปุ่ม "จัดลงวัน"
+
+                            </div>
+
                             <!-- AI Builder -->
 
                             <div class="bg-indigo-50 p-4 rounded-2xl border border-indigo-100 shadow-sm">
 
                                 <h3 class="font-black text-indigo-900 text-sm mb-3">🤖 AI Route Builder</h3>
+
+                                <p class="text-[11px] text-indigo-600 -mt-2 mb-3">จัดเฉพาะร้านที่ยังไม่ได้กำหนดวัน — ติ๊ก "ล็อคร้านที่จัดแล้ว" ด้านล่างถ้าไม่อยากให้ AI แตะร้านที่จัดไว้แล้ว</p>
 
                                 <div class="flex justify-between mb-2">
 
@@ -466,6 +516,10 @@
 
 
                             <!-- Assign Day -->
+
+                            <div id="selected-count-badge" class="hidden text-xs font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5 sticky top-0 z-10">
+                                📌 เลือกไว้ <span id="selected-count-num">0</span> ร้าน
+                            </div>
 
                             <div class="flex gap-2 sticky top-0 bg-gray-50/90 backdrop-blur-sm pb-2 pt-2 z-10 border-b">
 
@@ -643,6 +697,7 @@
         <!-- ===== PAGE: Dashboard ===== -->
         <div id="page-dashboard" class="app-page"></div>
         <div id="page-skudist" class="app-page hidden flex flex-col overflow-hidden" style="height:100%;"></div>
+        <div id="page-routeanalysis" class="app-page hidden flex flex-col overflow-hidden" style="height:100%;"></div>
         <div id="page-auditlog" class="app-page hidden flex flex-col overflow-hidden" style="height:100%;"></div>
 
     </div><!-- end main-wrap -->
@@ -1040,26 +1095,40 @@
                 <!-- โหมด -->
                 <div>
                     <label class="block text-xs font-bold text-gray-500 uppercase mb-2">โหมดปฏิทิน</label>
-                    <div class="grid grid-cols-3 gap-2">
+                    <div class="grid grid-cols-2 gap-2">
                         <button id="cal-mode-cycle" onclick="CalendarAdmin.setMode('cycle')"
                             class="border-2 border-gray-200 bg-gray-50 rounded-xl p-3 text-center cursor-pointer transition">
                             <div class="text-xl mb-1">🔄</div>
-                            <div class="text-xs font-black text-indigo-800">Cycle D1-24</div>
-                            <div class="text-[10px] text-indigo-600 mt-0.5">ต่อเนื่องนับวัน</div>
+                            <div class="text-xs font-black text-indigo-800">หมุนนับต่อเนื่อง</div>
+                            <div class="text-[10px] text-indigo-600 mt-0.5">ไม่อิงวันที่ปฏิทิน</div>
                         </button>
                         <button id="cal-mode-date" onclick="CalendarAdmin.setMode('date')"
                             class="border-2 border-indigo-500 bg-indigo-50 rounded-xl p-3 text-center cursor-pointer transition">
                             <div class="text-xl mb-1">📅</div>
-                            <div class="text-xs font-black text-gray-700">วันที่จริง</div>
-                            <div class="text-[10px] text-gray-500 mt-0.5">Day = วันที่ในเดือน</div>
+                            <div class="text-xs font-black text-gray-700">วันที่ = Day ตรงกัน</div>
+                            <div class="text-[10px] text-gray-500 mt-0.5">1 ก.ค. = Day 1 เสมอ</div>
                         </button>
                         <button id="cal-mode-fixed" onclick="CalendarAdmin.setMode('fixed')"
                             class="border-2 border-gray-200 bg-gray-50 rounded-xl p-3 text-center cursor-pointer transition">
                             <div class="text-xl mb-1">📌</div>
-                            <div class="text-xs font-black text-gray-700">กำหนดวันที่เอง</div>
-                            <div class="text-[10px] text-gray-500 mt-0.5">ระบุวันที่ = Day</div>
+                            <div class="text-xs font-black text-gray-700">เลือกเองทีละวัน</div>
+                            <div class="text-[10px] text-gray-500 mt-0.5">จับคู่วันที่กับ Day เอง</div>
+                        </button>
+                        <button id="cal-mode-weekday" onclick="CalendarAdmin.setMode('weekday')"
+                            class="border-2 border-gray-200 bg-gray-50 rounded-xl p-3 text-center cursor-pointer transition">
+                            <div class="text-xl mb-1">📆</div>
+                            <div class="text-xs font-black text-gray-700">ตามวันในสัปดาห์</div>
+                            <div class="text-[10px] text-gray-500 mt-0.5">Day 1 = จันทร์ ทุกสัปดาห์</div>
                         </button>
                     </div>
+                    <!-- ✅ UX: ตัวอย่างผลลัพธ์ของโหมดที่เลือกอยู่ -->
+                    <p id="cal-mode-example" class="text-[11px] text-gray-500 mt-2 bg-gray-50 border border-gray-100 rounded-lg px-3 py-2"></p>
+                </div>
+
+                <!-- ✅ UX: Live preview — เห็นผลลัพธ์จริงก่อนบันทึก -->
+                <div id="cal-live-preview" class="bg-emerald-50 border border-emerald-100 rounded-xl p-3">
+                    <p class="text-xs font-bold text-emerald-700 mb-1.5">👁️ ตัวอย่างผลลัพธ์ (7 วันแรก)</p>
+                    <div id="cal-preview-list" class="flex flex-wrap gap-1.5"></div>
                 </div>
 
                 <!-- Cycle settings -->
@@ -1067,17 +1136,17 @@
                     <div class="bg-indigo-50 border border-indigo-100 rounded-xl p-4 space-y-3">
                         <div class="flex items-center justify-between">
                             <label class="text-xs font-bold text-gray-700">Day 1 เริ่มวันที่:</label>
-                            <input type="number" id="cal-start-date" min="1" max="28" value="1"
+                            <input type="number" id="cal-start-date" min="1" max="28" value="1" oninput="CalendarAdmin._renderPreview()"
                                 class="w-16 border border-gray-200 rounded-lg px-2 py-1.5 text-sm font-bold text-center outline-none focus:ring-2 focus:ring-indigo-300">
                         </div>
                         <div class="flex items-center justify-between">
                             <label class="text-xs font-bold text-gray-700">Day เริ่มต้น (ที่วันที่นั้น):</label>
-                            <input type="number" id="cal-start-day-num" min="1" max="24" value="1"
+                            <input type="number" id="cal-start-day-num" min="1" max="24" value="1" oninput="CalendarAdmin._renderPreview()"
                                 class="w-16 border border-gray-200 rounded-lg px-2 py-1.5 text-sm font-bold text-center outline-none focus:ring-2 focus:ring-indigo-300">
                         </div>
                         <div class="flex items-center justify-between">
                             <label class="text-xs font-bold text-gray-700">จำนวนวัน Cycle:</label>
-                            <input type="number" id="cal-cycle-days" min="1" max="31" value="24"
+                            <input type="number" id="cal-cycle-days" min="1" max="31" value="24" oninput="CalendarAdmin._renderPreview()"
                                 class="w-16 border border-gray-200 rounded-lg px-2 py-1.5 text-sm font-bold text-center outline-none focus:ring-2 focus:ring-indigo-300">
                         </div>
                     </div>
@@ -1099,6 +1168,23 @@
                         </button>
                     </div>
                 </div>
+
+                <!-- Weekday settings (โหมดที่ 4) -->
+                <div id="cal-weekday-section" class="hidden space-y-3">
+                    <div class="bg-purple-50 border border-purple-100 rounded-xl p-3">
+                        <p class="text-xs text-purple-700 font-bold mb-2">กำหนด Day = วันในสัปดาห์ (ระบบขยายให้เองทุกสัปดาห์)</p>
+                        <div id="cal-weekday-rows" class="space-y-2"></div>
+                        <button onclick="CalendarAdmin.addWeekdayRow()"
+                            class="mt-2 w-full border border-dashed border-purple-300 rounded-lg py-2 text-xs font-bold text-purple-600 hover:bg-purple-50 transition">
+                            + เพิ่ม Day
+                        </button>
+                    </div>
+                    <div class="bg-amber-50 border border-amber-100 rounded-xl p-3">
+                        <p class="text-[11px] text-amber-700 leading-relaxed">
+                            💡 เมื่อมีวันหยุด/วันลา ให้ไปที่ปุ่ม "📆 จัดการวันหยุด" หน้าหลัก (นอก modal นี้) — ระบบจะแบ่งร้านของวันนั้นไปวันก่อนหน้า/ถัดไปให้อัตโนมัติ พร้อมให้ตรวจสอบบนแผนที่ก่อนยืนยัน
+                        </p>
+                    </div>
+                </div>
             </div>
 
             <div class="p-5 border-t flex gap-3 flex-shrink-0">
@@ -1118,7 +1204,9 @@
             _mode:      'date',   // default = วันที่จริง
             _holidays:  [],
             _fixedRows: [],
+            _weekdayRows: [],   // [{ day:'Day 1', weekday: 1, weekdayName:'จันทร์' }] — weekday: 0=อาทิตย์..6=เสาร์
             _targetRef: null,
+            _ym:        '',
 
             // ── เปิด modal ──────────────────────────────────────────────────
             open: async (ym) => {
@@ -1127,6 +1215,7 @@
 
                 // ✅ ระบบใหม่: ใช้ plans/{ym} โดยตรง
                 const _ym = ym || App._currentPlanYM || '';
+                CalendarAdmin._ym = _ym;
                 const lbl = document.getElementById('cal-modal-plan-label');
                 if (_ym) {
                     const [y, m] = _ym.split('_');
@@ -1137,13 +1226,18 @@
                     CalendarAdmin._targetRef = null;
                 }
 
+                // ✅ UX: จำโหมดเดิมไว้เช็คตอน save ว่ามีการเปลี่ยนโหมดกลางคันไหม (เตือนถ้าเปลี่ยน)
+                CalendarAdmin._originalMode = null;
+
                 // โหลด config จาก Firestore
                 CalendarAdmin._holidays  = [];
-                CalendarAdmin._fixedRows = [];
+                CalendarAdmin._fixedRows   = [];
+                CalendarAdmin._weekdayRows = [];
                 try {
                     const snap = await CalendarAdmin._targetRef.get();
                     const cfg  = snap.exists ? (snap.data().calendarConfig || null) : null;
                     if (cfg && cfg.mode) {
+                        CalendarAdmin._originalMode = cfg.mode; // ✅ มี config เดิมอยู่แล้ว
                         CalendarAdmin.setMode(cfg.mode);
                         if (cfg.mode === 'cycle') {
                             document.getElementById('cal-start-date').value    = cfg.startDay    || 1;
@@ -1154,10 +1248,17 @@
                             const mapping = cfg.mapping || {};
                             CalendarAdmin._fixedRows = Object.entries(mapping)
                                 .map(([d, day]) => ({ date: d, day }));
+                        } else if (cfg.mode === 'weekday') {
+                            const wmap = cfg.weekdayMap || {};
+                            CalendarAdmin._weekdayRows = Object.entries(wmap)
+                                .map(([day, wd]) => ({ day, weekday: wd }));
+                            if (!CalendarAdmin._weekdayRows.length) CalendarAdmin._weekdayRows = CalendarAdmin._defaultWeekdayRows();
                         }
                         // date mode ไม่ต้องโหลดอะไรเพิ่ม
                     } else {
-                        CalendarAdmin.setMode('date'); // default
+                        // ✅ UX: ศูนย์ใหม่ยังไม่เคยตั้งค่า — ไม่ default เงียบๆ ให้เตือนเลือกเองก่อน
+                        CalendarAdmin.setMode('date');
+                        UI.showErrorToast('⚠️ ศูนย์นี้ยังไม่เคยตั้งค่าปฏิทิน กรุณาเลือกโหมดที่ถูกต้องก่อนบันทึก');
                     }
                 } catch(e) {
                     console.warn('CalendarAdmin.open:', e);
@@ -1165,6 +1266,9 @@
                 }
                 CalendarAdmin._renderHolidayGrid();
                 CalendarAdmin._renderFixedRows();
+                CalendarAdmin._renderWeekdayRows();
+                CalendarAdmin._renderExample();
+                CalendarAdmin._renderPreview();
             },
 
             // ── ปิด modal ───────────────────────────────────────────────────
@@ -1178,15 +1282,17 @@
                 const active   = 'border-2 border-indigo-500 bg-indigo-50 rounded-xl p-3 text-center cursor-pointer transition';
                 const inactive = 'border-2 border-gray-200 bg-gray-50 rounded-xl p-3 text-center cursor-pointer transition';
 
-                const cycleBtn = document.getElementById('cal-mode-cycle');
-                const dateBtn  = document.getElementById('cal-mode-date');
-                const fixedBtn = document.getElementById('cal-mode-fixed');
-                const cycleSec = document.getElementById('cal-cycle-section');
-                const fixedSec = document.getElementById('cal-fixed-section');
+                const cycleBtn   = document.getElementById('cal-mode-cycle');
+                const dateBtn    = document.getElementById('cal-mode-date');
+                const fixedBtn   = document.getElementById('cal-mode-fixed');
+                const weekdayBtn = document.getElementById('cal-mode-weekday');
+                const cycleSec   = document.getElementById('cal-cycle-section');
+                const fixedSec   = document.getElementById('cal-fixed-section');
+                const weekdaySec = document.getElementById('cal-weekday-section');
 
                 // reset
-                [cycleBtn, dateBtn, fixedBtn].forEach(b => { if (b) b.className = inactive; });
-                [cycleSec, fixedSec].forEach(s => { if (s) s.classList.add('hidden'); });
+                [cycleBtn, dateBtn, fixedBtn, weekdayBtn].forEach(b => { if (b) b.className = inactive; });
+                [cycleSec, fixedSec, weekdaySec].forEach(s => { if (s) s.classList.add('hidden'); });
 
                 if (mode === 'cycle') {
                     if (cycleBtn) cycleBtn.className = active;
@@ -1197,7 +1303,90 @@
                 } else if (mode === 'fixed') {
                     if (fixedBtn) fixedBtn.className = active;
                     if (fixedSec) fixedSec.classList.remove('hidden');
+                } else if (mode === 'weekday') {
+                    if (weekdayBtn) weekdayBtn.className = active;
+                    if (weekdaySec) weekdaySec.classList.remove('hidden');
+                    if (!CalendarAdmin._weekdayRows.length) CalendarAdmin._weekdayRows = CalendarAdmin._defaultWeekdayRows();
+                    CalendarAdmin._renderWeekdayRows();
                 }
+
+                CalendarAdmin._renderExample();
+                CalendarAdmin._renderPreview();
+            },
+
+            // ✅ ค่าเริ่มต้นสำหรับโหมด weekday — จันทร์-เสาร์ = Day 1-6 (ปรับได้ทีหลัง)
+            _defaultWeekdayRows: () => {
+                const names = ['อาทิตย์','จันทร์','อังคาร','พุธ','พฤหัสบดี','ศุกร์','เสาร์'];
+                return [1,2,3,4,5,6].map((wd, i) => ({ day: `Day ${i+1}`, weekday: wd, weekdayName: names[wd] }));
+            },
+
+            // ✅ UX: ตัวอย่างผลลัพธ์ 1 บรรทัดของแต่ละโหมด — ให้เห็นว่าโหมดนี้ทำอะไร โดยไม่ต้องเดา
+            _renderExample: () => {
+                const el = document.getElementById('cal-mode-example');
+                if (!el) return;
+                const examples = {
+                    cycle:   '📌 ตัวอย่าง: กำหนด Day 1 เริ่มวันที่ 3 → วันที่ 3 = Day 1, วันที่ 4 = Day 2, ... (ข้ามวันหยุดที่เลือกไว้)',
+                    date:    '📌 ตัวอย่าง: 1 ก.ค. = Day 1, 2 ก.ค. = Day 2, 15 ก.ค. = Day 15 (ตรงกับเลขวันที่เป๊ะๆ)',
+                    fixed:   '📌 ตัวอย่าง: เพิ่มแถวด้านล่าง เลือกวันที่ 5 = Day 2 ได้เอง ไม่ต้องเรียงตามลำดับ',
+                    weekday: '📌 ตัวอย่าง: Day 1 = จันทร์ → ทุกวันจันทร์ตลอดเดือนเป็น Day 1 อัตโนมัติ ไม่ต้องกรอกวันที่ซ้ำทุกเดือน',
+                };
+                el.textContent = examples[CalendarAdmin._mode] || '';
+            },
+
+            // ✅ UX: Live preview — คำนวณ Day ของ 7 วันแรกของเดือนนี้ตามค่าที่ตั้งอยู่ตอนนี้ (ก่อนกดบันทึก)
+            _renderPreview: () => {
+                const el = document.getElementById('cal-preview-list');
+                if (!el || !CalendarAdmin._ym) return;
+                const [y, m] = CalendarAdmin._ym.split('_').map(Number);
+                const daysInMonth = new Date(y, m, 0).getDate();
+                const n = Math.min(7, daysInMonth);
+
+                const chips = [];
+                for (let d = 1; d <= n; d++) {
+                    const label = CalendarAdmin._computeDayLabel(d);
+                    const dateStr = `${String(d).padStart(2,'0')}/${String(m).padStart(2,'0')}`;
+                    chips.push(`
+                        <div style="background:#fff;border:1px solid #d1fae5;border-radius:8px;padding:4px 8px;text-align:center;min-width:52px;">
+                            <div style="font-size:9px;color:#6b7280;font-weight:700;">${dateStr}</div>
+                            <div style="font-size:11px;font-weight:900;color:${label ? '#059669' : '#d1d5db'};">${label || '—'}</div>
+                        </div>`);
+                }
+                el.innerHTML = chips.join('');
+            },
+
+            // ✅ ใช้ algorithm เดียวกับ CalendarCtrl.getDayLabelForCfg ใน sales-app.js (ต้องตรงกันเป๊ะ ไม่งั้น preview จะโกหก)
+            _computeDayLabel: (dateNum) => {
+                const mode = CalendarAdmin._mode;
+                if (mode === 'date') return `Day ${dateNum}`;
+                if (mode === 'fixed') {
+                    const row = CalendarAdmin._fixedRows.find(r => String(r.date) === String(dateNum));
+                    return row ? row.day : null;
+                }
+                if (mode === 'weekday') {
+                    if (!CalendarAdmin._ym) return null;
+                    const [y, m] = CalendarAdmin._ym.split('_').map(Number);
+                    const wd  = new Date(y, m-1, dateNum).getDay(); // 0=อาทิตย์..6=เสาร์
+                    const row = CalendarAdmin._weekdayRows.find(r => r.weekday === wd);
+                    return row ? row.day : null;
+                }
+                if (mode === 'cycle') {
+                    const startDate  = parseInt(document.getElementById('cal-start-date')?.value)    || 1;
+                    const startNum   = parseInt(document.getElementById('cal-start-day-num')?.value) || 1;
+                    const cycleDays  = parseInt(document.getElementById('cal-cycle-days')?.value)     || 24;
+                    const holidays   = CalendarAdmin._holidays || [];
+                    if (dateNum < startDate) return null;
+                    let dayCounter = startNum, workdays = 0;
+                    for (let d = startDate; d <= dateNum; d++) {
+                        if (holidays.includes(d)) continue;
+                        workdays++;
+                        if (d === dateNum) {
+                            const dayNum = dayCounter + workdays - 1;
+                            if (dayNum > cycleDays) return null;
+                            return 'Day ' + dayNum;
+                        }
+                    }
+                }
+                return null;
             },
 
             // ── วันหยุด (cycle mode) ────────────────────────────────────────
@@ -1222,12 +1411,14 @@
                 if (idx >= 0) CalendarAdmin._holidays.splice(idx, 1);
                 else CalendarAdmin._holidays.push(d);
                 CalendarAdmin._renderHolidayGrid();
+                CalendarAdmin._renderPreview();
             },
 
             // ── fixed mode rows ─────────────────────────────────────────────
             addFixedRow: () => {
                 CalendarAdmin._fixedRows.push({ date: '', day: 'Day 1' });
                 CalendarAdmin._renderFixedRows();
+                CalendarAdmin._renderPreview();
             },
 
             _renderFixedRows: () => {
@@ -1239,14 +1430,14 @@
                     <div style="display:flex;align-items:center;gap:8px;">
                         <span style="font-size:12px;color:#6b7280;white-space:nowrap;">วันที่</span>
                         <input type="number" min="1" max="31" value="${row.date}"
-                            onchange="CalendarAdmin._fixedRows[${i}].date=this.value"
+                            onchange="CalendarAdmin._fixedRows[${i}].date=this.value;CalendarAdmin._renderPreview()"
                             style="width:52px;border:1px solid #e5e7eb;border-radius:8px;padding:6px;font-size:12px;font-weight:700;text-align:center;outline:none;">
                         <span style="font-size:12px;color:#6b7280;">=</span>
-                        <select onchange="CalendarAdmin._fixedRows[${i}].day=this.value"
+                        <select onchange="CalendarAdmin._fixedRows[${i}].day=this.value;CalendarAdmin._renderPreview()"
                             style="flex:1;border:1px solid #e5e7eb;border-radius:8px;padding:6px;font-size:12px;font-weight:700;outline:none;">
                             ${dayOptions}
                         </select>
-                        <button onclick="CalendarAdmin._fixedRows.splice(${i},1);CalendarAdmin._renderFixedRows()"
+                        <button onclick="CalendarAdmin._fixedRows.splice(${i},1);CalendarAdmin._renderFixedRows();CalendarAdmin._renderPreview()"
                             style="color:#dc2626;border:none;background:none;cursor:pointer;font-size:16px;padding:2px;">✕</button>
                     </div>`).join('');
                 setTimeout(() => {
@@ -1256,11 +1447,55 @@
                 }, 0);
             },
 
+            // ── weekday mode rows (โหมดที่ 4) ────────────────────────────────
+            addWeekdayRow: () => {
+                const n = CalendarAdmin._weekdayRows.length + 1;
+                CalendarAdmin._weekdayRows.push({ day: `Day ${n}`, weekday: 1 });
+                CalendarAdmin._renderWeekdayRows();
+                CalendarAdmin._renderPreview();
+            },
+
+            _renderWeekdayRows: () => {
+                const container = document.getElementById('cal-weekday-rows');
+                if (!container) return;
+                const weekdayNames = ['อาทิตย์','จันทร์','อังคาร','พุธ','พฤหัสบดี','ศุกร์','เสาร์'];
+                const weekdayOptions = weekdayNames.map((n,i) => `<option value="${i}">${n}</option>`).join('');
+                container.innerHTML = CalendarAdmin._weekdayRows.map((row, i) => `
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <input type="text" value="${row.day}"
+                            onchange="CalendarAdmin._weekdayRows[${i}].day=this.value;CalendarAdmin._renderPreview()"
+                            style="width:70px;border:1px solid #e5e7eb;border-radius:8px;padding:6px;font-size:12px;font-weight:700;text-align:center;outline:none;">
+                        <span style="font-size:12px;color:#6b7280;">=</span>
+                        <select onchange="CalendarAdmin._weekdayRows[${i}].weekday=parseInt(this.value);CalendarAdmin._renderPreview()"
+                            style="flex:1;border:1px solid #e5e7eb;border-radius:8px;padding:6px;font-size:12px;font-weight:700;outline:none;">
+                            ${weekdayOptions}
+                        </select>
+                        <button onclick="CalendarAdmin._weekdayRows.splice(${i},1);CalendarAdmin._renderWeekdayRows();CalendarAdmin._renderPreview()"
+                            style="color:#dc2626;border:none;background:none;cursor:pointer;font-size:16px;padding:2px;">✕</button>
+                    </div>`).join('');
+                setTimeout(() => {
+                    container.querySelectorAll('select').forEach((sel, i) => {
+                        sel.value = String(CalendarAdmin._weekdayRows[i]?.weekday ?? 1);
+                    });
+                }, 0);
+            },
+
             // ── บันทึก ──────────────────────────────────────────────────────
             save: async () => {
                 if (!CalendarAdmin._targetRef) {
                     UI.showErrorToast('❌ ไม่พบ Plan target');
                     return;
+                }
+                // ✅ UX: เตือนแรงๆ ถ้าจะเปลี่ยนโหมดของ plan ที่เคยตั้งค่าโหมดอื่นไว้แล้ว
+                // เพราะ "Day X" จะมีความหมายเปลี่ยนไปทันที กระทบรายงานที่เทียบ Day ข้ามเดือน
+                if (CalendarAdmin._originalMode && CalendarAdmin._originalMode !== CalendarAdmin._mode) {
+                    const ok = confirm(
+                        `⚠️ กำลังเปลี่ยนโหมดปฏิทินจาก "${CalendarAdmin._originalMode}" เป็น "${CalendarAdmin._mode}"\n\n` +
+                        `การเปลี่ยนโหมดจะทำให้ "Day X" ของเดือนนี้มีความหมายไม่เหมือนเดือนก่อนหน้า ` +
+                        `อาจกระทบรายงานที่เทียบ Day ข้ามเดือน (เช่น วิเคราะห์สายวิ่ง)\n\n` +
+                        `ยืนยันจะเปลี่ยนโหมดจริงหรือไม่?`
+                    );
+                    if (!ok) return;
                 }
                 let cfg;
                 if (CalendarAdmin._mode === 'cycle') {
@@ -1273,6 +1508,46 @@
                     };
                 } else if (CalendarAdmin._mode === 'date') {
                     cfg = { mode: 'date' };
+                } else if (CalendarAdmin._mode === 'weekday') {
+                    // ✅ VALIDATION: กัน Day label ซ้ำ และกัน weekday เดียวกันถูกใช้ซ้ำหลาย Day
+                    // เดิมไม่มีการเช็คเลย — ถ้าพิมพ์ผิดจนชื่อ Day ซ้ำกัน แถวหลังจะทับแถวแรกแบบเงียบๆ
+                    const rows = CalendarAdmin._weekdayRows.filter(r => r.day);
+                    const dayNames  = rows.map(r => r.day.trim());
+                    const dupDay    = dayNames.find((d, i) => dayNames.indexOf(d) !== i);
+                    if (dupDay) {
+                        UI.showErrorToast(`⚠️ มี Day ชื่อ "${dupDay}" ซ้ำกันมากกว่า 1 แถว — แก้ให้แต่ละแถวชื่อไม่ซ้ำกันก่อน`);
+                        return;
+                    }
+                    const weekdayNamesTH = ['อาทิตย์','จันทร์','อังคาร','พุธ','พฤหัสบดี','ศุกร์','เสาร์'];
+                    const usedWeekdays   = rows.map(r => r.weekday);
+                    const dupWeekday     = usedWeekdays.find((w, i) => usedWeekdays.indexOf(w) !== i);
+                    if (dupWeekday !== undefined) {
+                        UI.showErrorToast(`⚠️ มีมากกว่า 1 Day ที่ตั้งเป็นวัน"${weekdayNamesTH[dupWeekday]}" ซ้ำกัน — แต่ละวันในสัปดาห์ตั้งได้แค่ 1 Day เท่านั้น`);
+                        return;
+                    }
+                    if (!rows.length) {
+                        UI.showErrorToast('⚠️ กรุณาเพิ่มอย่างน้อย 1 แถว');
+                        return;
+                    }
+                    const weekdayMap = {};
+                    rows.forEach(r => { weekdayMap[r.day.trim()] = r.weekday; });
+
+                    // ✅ FIX: เพิ่มขั้นยืนยันสรุปผลกระทบก่อนบันทึกจริง — เดิมมีแค่ preview 7 วันแรก
+                    // เล็กๆ ในหน้าตั้งค่า ทำให้แอดมินอาจไม่ทันสังเกตว่า "ร้าน/ตลาดชุดเดิมจะถูกจัดคิว
+                    // ซ้ำทุกสัปดาห์" จนกว่าจะไปเห็นผลจริงบนปฏิทิน (เป็นพฤติกรรมที่ตั้งใจออกแบบไว้
+                    // แต่ควรให้ยืนยันชัดๆ ก่อนกดบันทึก กันตั้งค่าผิดโดยไม่รู้ตัว)
+                    const summaryLines = rows
+                        .map(r => `• Day "${r.day.trim()}" = ทุกวัน${weekdayNamesTH[r.weekday]} → ร้าน/ตลาดชุดเดิมซ้ำทุกสัปดาห์ตลอดเดือน`)
+                        .join('\n');
+                    const okWeekday = confirm(
+                        `📆 ยืนยันตั้งค่าโหมด "ตามวันในสัปดาห์"\n\n${summaryLines}\n\n` +
+                        `ร้านที่จัดไว้ใน Day นั้นจะถูกจัดคิวให้ sale ไปซ้ำวันเดิมทุกสัปดาห์ตลอดเดือน ` +
+                        `(ถ้าต้องการหมุนเวียนไปคนละร้าน/ตลาดในแต่ละสัปดาห์ โหมดนี้ยังไม่รองรับ — ใช้ "เลือกเองที่ละวัน" แทน)\n\n` +
+                        `ยืนยันบันทึกหรือไม่?`
+                    );
+                    if (!okWeekday) return;
+
+                    cfg = { mode: 'weekday', weekdayMap };
                 } else {
                     const mapping = {};
                     CalendarAdmin._fixedRows.forEach(r => {
@@ -1281,12 +1556,330 @@
                     cfg = { mode: 'fixed', mapping };
                 }
                 try {
-                    await CalendarAdmin._targetRef.set({ calendarConfig: cfg, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true });
+                    // ✅ BUGFIX: ใช้ mergeFields แทน merge:true ธรรมดา
+                    // merge:true ปกติจะ "recursive merge" nested object — field เก่าใน calendarConfig
+                    // (เช่น mapping ที่เคยตั้งไว้ตอนโหมด "fixed") จะไม่ถูกลบเวลาสลับไปโหมดอื่น
+                    // ทำให้ getDayLabelForCfg() งงเพราะเจอ mapping เก่าปนอยู่ mergeFields ที่ระบุ path
+                    // ระดับ top field ("calendarConfig") จะ "แทนที่ทั้งก้อน" ไม่ merge ลึกลงไปข้างใน
+                    await CalendarAdmin._targetRef.set(
+                        { calendarConfig: cfg, updatedAt: firebase.firestore.FieldValue.serverTimestamp() },
+                        { mergeFields: ['calendarConfig', 'updatedAt'] }
+                    );
                     State.db.calendarConfig = cfg;
                     CalendarAdmin.close();
                     UI.showSaveToast('✅ บันทึกตั้งค่าปฏิทินเรียบร้อย');
                     console.log('✅ calendarConfig saved:', JSON.stringify(cfg));
+                    if (typeof PlanUI !== 'undefined') PlanUI.updateBadge(); // ✅ อัปเดต badge ทันที
                 } catch(e) {
+                    UI.showErrorToast('❌ บันทึกไม่สำเร็จ: ' + e.message);
+                }
+            },
+        };
+    </script>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         📆 Holiday Exception Manager — โหมดที่ 4 (ตามวันในสัปดาห์)
+         เลือกวันหยุด → auto แบ่งครึ่งร้านตาม seq → ตรวจสอบ/ปรับด้วยแผนที่ → ยืนยัน
+         ═══════════════════════════════════════════════════════════════ -->
+    <div id="holiday-exception-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden" style="max-height:90dvh;display:flex;flex-direction:column;">
+            <div class="p-5 border-b flex justify-between items-center bg-gray-50 flex-shrink-0">
+                <div>
+                    <h2 class="text-base font-black text-gray-900">📆 จัดการวันหยุด</h2>
+                    <p class="text-xs text-gray-500 mt-0.5">ใช้ได้เฉพาะแผนที่ตั้งค่าโหมด "ตามวันในสัปดาห์" — ร้านของวันหยุดจะถูกแบ่งครึ่งไปวันก่อนหน้า/ถัดไปอัตโนมัติ</p>
+                </div>
+                <button onclick="HolidayException.close()" class="w-8 h-8 rounded-full border border-gray-200 text-gray-400 hover:bg-gray-100 font-bold flex-shrink-0">✕</button>
+            </div>
+
+            <div class="overflow-y-auto flex-1 p-5 space-y-4">
+                <div class="flex items-end gap-2">
+                    <div class="flex-1">
+                        <label class="block text-xs font-bold text-gray-500 uppercase mb-1.5">เลือกวันที่เป็นวันหยุด</label>
+                        <input type="date" id="he-date-input" class="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-300">
+                    </div>
+                    <button onclick="HolidayException.check()"
+                        class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-xl text-sm font-bold transition shadow-sm whitespace-nowrap">
+                        🔍 ตรวจสอบ
+                    </button>
+                </div>
+
+                <div id="he-result"></div>
+            </div>
+
+            <div class="p-5 border-t flex gap-3 flex-shrink-0">
+                <button onclick="HolidayException.close()"
+                    class="flex-1 border border-gray-200 rounded-xl py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-50 transition">ยกเลิก</button>
+                <button onclick="HolidayException.confirmAll()"
+                    class="flex-1 bg-amber-500 hover:bg-amber-600 text-white rounded-xl py-2.5 text-sm font-bold transition shadow-sm">✅ ยืนยันบันทึก</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ✅ ข้อ 5 (โหมดที่ 4): ระบบจัดการวันหยุด — เลือกวันที่ → auto แบ่งครึ่งร้านตาม seq เดิม
+        // → เด้งแผนที่ให้ตรวจสอบ/ปรับก่อนยืนยัน (คลิกจุดบนแผนที่เพื่อสลับกลุ่ม) → บันทึก exception
+        const HolidayException = {
+            _ym:       '',
+            _dateStr:  '',
+            _affected: {},   // { route: { day, prevDay, nextDay, prevDate, nextDate, stores, prevGroup:Set, nextGroup:Set } }
+            _maps:     {},   // route -> Leaflet map instance (มินิแผนที่แยกต่อสาย)
+
+            open: () => {
+                document.getElementById('holiday-exception-modal').classList.remove('hidden');
+                document.getElementById('he-result').innerHTML = '';
+                const dateInput = document.getElementById('he-date-input');
+                if (dateInput && !dateInput.value) {
+                    const now = new Date();
+                    dateInput.value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+                }
+                HolidayException._affected = {};
+            },
+
+            close: () => {
+                document.getElementById('holiday-exception-modal').classList.add('hidden');
+                // ✅ ทำลาย mini map ทุกอันกัน memory leak
+                Object.values(HolidayException._maps).forEach(m => { try { m.remove(); } catch(e) {} });
+                HolidayException._maps = {};
+            },
+
+            // ── หา Day label ก่อนหน้า/ถัดไปที่ "มีวิ่งจริง" ตาม weekdayMap (ข้าม weekday ที่ไม่ได้ตั้งค่า) ──
+            _findAdjacentDate: (baseDate, dir, daysByWeekday) => {
+                const dt = new Date(baseDate);
+                for (let i = 0; i < 7; i++) {
+                    dt.setDate(dt.getDate() + dir);
+                    if (daysByWeekday[dt.getDay()]) return dt;
+                }
+                return null;
+            },
+            _fmtDate: (dt) => `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`,
+
+            check: async () => {
+                const dateStr = document.getElementById('he-date-input')?.value;
+                if (!dateStr) return UI.showErrorToast('⚠️ กรุณาเลือกวันที่ก่อน');
+                HolidayException._dateStr = dateStr;
+
+                const [y, m, d] = dateStr.split('-').map(Number);
+                const ym = `${y}_${String(m).padStart(2,'0')}`;
+                HolidayException._ym = ym;
+
+                UI.showLoader('กำลังตรวจสอบ...', 'หาร้านที่ได้รับผลกระทบ');
+                try {
+                    const planSnap = await App.planRef(ym).get();
+                    if (!planSnap.exists) { UI.hideLoader(); return UI.showErrorToast('⚠️ ไม่พบแผนของเดือนนี้'); }
+                    const meta = planSnap.data();
+                    const cfg  = meta.calendarConfig;
+                    if (!cfg || cfg.mode !== 'weekday') {
+                        UI.hideLoader();
+                        return UI.showErrorToast('⚠️ ฟีเจอร์นี้ใช้ได้เฉพาะเดือนที่ตั้งค่าโหมด "ตามวันในสัปดาห์" เท่านั้น');
+                    }
+
+                    const wmap = cfg.weekdayMap || {};
+                    const daysByWeekday = {};
+                    Object.entries(wmap).forEach(([day, w]) => { daysByWeekday[w] = day; });
+
+                    const baseDate = new Date(y, m-1, d);
+                    const wd = baseDate.getDay();
+                    const dayLabel = daysByWeekday[wd];
+                    if (!dayLabel) { UI.hideLoader(); return UI.showErrorToast('⚠️ วันที่เลือกไม่ตรงกับ Day ไหนเลยตามที่ตั้งค่าไว้ (ไม่มีร้านวิ่งวันนี้อยู่แล้ว)'); }
+
+                    const prevDateObj = HolidayException._findAdjacentDate(baseDate, -1, daysByWeekday);
+                    const nextDateObj = HolidayException._findAdjacentDate(baseDate, 1, daysByWeekday);
+                    if (!prevDateObj || !nextDateObj) {
+                        UI.hideLoader();
+                        return UI.showErrorToast('⚠️ หาวันก่อนหน้า/ถัดไปไม่เจอ (ตั้งค่า weekday ไว้น้อยกว่า 2 วัน)');
+                    }
+                    const prevDayLabel = daysByWeekday[prevDateObj.getDay()];
+                    const nextDayLabel = daysByWeekday[nextDateObj.getDay()];
+
+                    const routeList = meta.routeList || [];
+                    const affected  = {};
+                    // ✅ PERF: โหลดทุกสายพร้อมกัน
+                    await Promise.all(routeList.map(async name => {
+                        try {
+                            const rd = await App.planRoutesCol(ym).doc(name).get();
+                            const stores = rd.exists ? (rd.data().stores || []) : [];
+                            const inDay  = stores.filter(s => s.days?.includes(dayLabel));
+                            if (!inDay.length) return;
+
+                            // ✅ เรียงตาม seq เดิมของร้านในวันนั้น → ตัดครึ่ง
+                            const sorted = [...inDay].sort((a,b) => (a.seqs?.[dayLabel]||999) - (b.seqs?.[dayLabel]||999));
+                            const half   = Math.ceil(sorted.length / 2);
+                            affected[name] = {
+                                day: dayLabel, prevDay: prevDayLabel, nextDay: nextDayLabel,
+                                prevDate: HolidayException._fmtDate(prevDateObj),
+                                nextDate: HolidayException._fmtDate(nextDateObj),
+                                stores: sorted,
+                                prevGroup: new Set(sorted.slice(0, half).map(s => s.id)),
+                                nextGroup: new Set(sorted.slice(half).map(s => s.id)),
+                            };
+                        } catch(e) { console.warn('HolidayException.check route', name, e); }
+                    }));
+
+                    HolidayException._affected = affected;
+                    UI.hideLoader();
+                    HolidayException._renderResult();
+                } catch(e) {
+                    UI.hideLoader();
+                    UI.showErrorToast('❌ ตรวจสอบไม่สำเร็จ: ' + e.message);
+                }
+            },
+
+            _renderResult: () => {
+                const el = document.getElementById('he-result');
+                if (!el) return;
+                const routes = Object.keys(HolidayException._affected);
+                if (!routes.length) {
+                    el.innerHTML = '<p class="text-center text-gray-400 text-xs py-8">📭 ไม่พบร้านที่ได้รับผลกระทบในวันที่เลือก</p>';
+                    return;
+                }
+                el.innerHTML = `
+                    <p class="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 mb-3">
+                        💡 คลิกจุดบนแผนที่เพื่อสลับร้านระหว่าง 2 กลุ่ม ถ้าเห็นว่าระบบแบ่งมาไม่เหมาะกับระยะทางจริง
+                    </p>
+                ` + routes.map(route => {
+                    const d = HolidayException._affected[route];
+                    return `
+                    <div class="border border-gray-200 rounded-2xl p-3 mb-3">
+                        <p class="text-xs font-black text-gray-800 mb-2">
+                            🚚 ${route} — ${d.day} ทั้งหมด ${d.stores.length} ร้าน
+                            <span class="text-gray-400 font-normal block mt-0.5">แบ่งไป ${d.prevDay} (${d.prevDate}) และ ${d.nextDay} (${d.nextDate})</span>
+                        </p>
+                        <div id="he-map-${route}" style="height:220px;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;" class="mb-2"></div>
+                        <div class="flex gap-4 text-[11px] font-bold">
+                            <span class="flex items-center gap-1.5"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#3b82f6;"></span> ไป ${d.prevDay}: <span id="he-count-prev-${route}">${d.prevGroup.size}</span> ร้าน</span>
+                            <span class="flex items-center gap-1.5"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#f97316;"></span> ไป ${d.nextDay}: <span id="he-count-next-${route}">${d.nextGroup.size}</span> ร้าน</span>
+                        </div>
+                    </div>`;
+                }).join('');
+
+                // สร้าง mini map ทีละสาย (ต้องรอ DOM render เสร็จก่อน)
+                setTimeout(() => routes.forEach(route => HolidayException._renderMiniMap(route)), 50);
+            },
+
+            _renderMiniMap: (route) => {
+                const data = HolidayException._affected[route];
+                const elId = `he-map-${route}`;
+                const el   = document.getElementById(elId);
+                if (!el || typeof L === 'undefined' || !data.stores.length) return;
+
+                const map = L.map(elId, { zoomControl: true, attributionControl: false })
+                    .setView([data.stores[0].lat, data.stores[0].lng], 13);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(map);
+                HolidayException._maps[route] = map;
+
+                data.stores.forEach(s => {
+                    const color = data.prevGroup.has(s.id) ? '#3b82f6' : '#f97316';
+                    const marker = L.circleMarker([s.lat, s.lng], {
+                        radius: 9, fillColor: color, fillOpacity: 0.9, color: '#fff', weight: 2,
+                    }).addTo(map);
+                    marker.bindTooltip(s.name, { direction: 'top' });
+                    // ✅ คลิกเพื่อสลับกลุ่ม (แทน drag — ใช้ pattern click-toggle แบบเดียวกับที่มีอยู่แล้วในระบบ)
+                    marker.on('click', () => {
+                        if (data.prevGroup.has(s.id)) { data.prevGroup.delete(s.id); data.nextGroup.add(s.id); }
+                        else { data.nextGroup.delete(s.id); data.prevGroup.add(s.id); }
+                        marker.setStyle({ fillColor: data.prevGroup.has(s.id) ? '#3b82f6' : '#f97316' });
+                        HolidayException._updateCounts(route);
+                    });
+                });
+
+                try {
+                    const bounds = L.latLngBounds(data.stores.map(s => [s.lat, s.lng]));
+                    map.fitBounds(bounds, { padding: [24, 24] });
+                } catch(e) { /* ร้านเดียวหรือพิกัดผิดปกติ ใช้ view เริ่มต้น */ }
+            },
+
+            _updateCounts: (route) => {
+                const data = HolidayException._affected[route];
+                const prevEl = document.getElementById(`he-count-prev-${route}`);
+                const nextEl = document.getElementById(`he-count-next-${route}`);
+                if (prevEl) prevEl.textContent = data.prevGroup.size;
+                if (nextEl) nextEl.textContent = data.nextGroup.size;
+            },
+
+            confirmAll: async () => {
+                const routes = Object.keys(HolidayException._affected);
+                if (!routes.length) return UI.showErrorToast('⚠️ ยังไม่มีข้อมูลให้บันทึก — กด "ตรวจสอบ" ก่อน');
+                if (!confirm(`ยืนยันบันทึกวันหยุด ${HolidayException._dateStr} สำหรับ ${routes.length} สาย?\nร้านจะถูกแบ่งไปวันก่อนหน้า/ถัดไปตามที่ตรวจสอบไว้`)) return;
+
+                UI.showLoader('กำลังบันทึก...', '');
+                try {
+                    const splits = {};
+                    let originalDay = '', prevDay = '', nextDay = '', prevDate = '', nextDate = '';
+                    routes.forEach(route => {
+                        const d = HolidayException._affected[route];
+                        splits[route] = { prevStores: [...d.prevGroup], nextStores: [...d.nextGroup] };
+                        originalDay = d.day; prevDay = d.prevDay; nextDay = d.nextDay;
+                        prevDate = d.prevDate; nextDate = d.nextDate;
+                    });
+                    const exceptionEntry = {
+                        originalDay, prevDay, nextDay, prevDate, nextDate, splits,
+                        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                    };
+
+                    // ✅ BUGFIX: วันก่อนหน้า/ถัดไปอาจตกไปอยู่คนละเดือนกับวันหยุด (เช่น วันหยุดต้น/ปลายเดือน)
+                    // เดิมเขียน exception ไว้แค่ในเดือนของวันหยุดเดือนเดียว — พอถึงวันจริงที่อยู่คนละเดือน
+                    // แอปฝั่งเซลจะโหลด calendarConfig จากแผนของเดือนนั้น ซึ่งไม่มี exception นี้อยู่เลย
+                    // ทำให้ร้านที่ควรถูกเพิ่มเข้าคิววันนั้นหายไปแบบเงียบๆ ไม่มีใครไปวิ่งให้
+                    // แก้โดยเขียน exception entry เดียวกันซ้ำลงไปทุกเดือนที่เกี่ยวข้อง
+                    const ymOf = (dateStr) => { const [y, m] = dateStr.split('-'); return `${y}_${m}`; };
+                    const targetYMs = new Set([HolidayException._ym, ymOf(prevDate), ymOf(nextDate)]);
+
+                    const skipped = [];
+                    const writes  = [];
+                    for (const ym of targetYMs) {
+                        if (ym === HolidayException._ym) {
+                            // เดือนหลัก (เดือนของวันหยุดเอง) — เขียนเสมอ
+                            writes.push(App.planRef(ym).set({
+                                calendarConfig: { exceptions: { [HolidayException._dateStr]: exceptionEntry } }
+                            }, { merge: true }));
+                            continue;
+                        }
+                        // เดือนข้างเคียง — เช็คก่อนว่ามีแผนเดือนนั้นจริง ตั้งโหมด weekday ไว้เหมือนกัน
+                        // และตั้งชื่อ Day ตรงกับที่ใช้ในเดือนหลัก (กันกรณีสองเดือนตั้งชื่อ Day ไม่ตรงกัน
+                        // เช่น เดือนนี้ใช้ "Day 1" แต่เดือนหน้าใช้ "Day A" สำหรับวันจันทร์เหมือนกัน —
+                        // ถ้าไม่ตรง exception จะเขียนลงไปได้แต่ dayLabel จะไม่ match ตอนอ่านจริง ใช้งานไม่ได้อยู่ดี)
+                        try {
+                            const snap = await App.planRef(ym).get();
+                            if (!snap.exists) { skipped.push(`${ym.replace('_','/')} (ยังไม่มีแผนเดือนนี้)`); continue; }
+                            const otherCfg = snap.data().calendarConfig;
+                            if (!otherCfg || otherCfg.mode !== 'weekday') {
+                                skipped.push(`${ym.replace('_','/')} (ไม่ได้ตั้งโหมด "ตามวันในสัปดาห์" ไว้)`);
+                                continue;
+                            }
+                            const otherMap = otherCfg.weekdayMap || {};
+                            // เช็ค label ของทุกวันที่ตกอยู่ในเดือนนี้ (อาจเป็น prevDate, nextDate หรือทั้งคู่)
+                            const datesInThisYM = [
+                                { date: prevDate, label: prevDay },
+                                { date: nextDate, label: nextDay },
+                            ].filter(x => ymOf(x.date) === ym);
+                            const mismatch = datesInThisYM.find(x => {
+                                const [yy, mm, dd] = x.date.split('-').map(Number);
+                                const wd = new Date(yy, mm - 1, dd).getDay();
+                                return otherMap[x.label] !== wd;
+                            });
+                            if (mismatch) {
+                                skipped.push(`${ym.replace('_','/')} (ชื่อ Day "${mismatch.label}" ในเดือนนี้ไม่ตรงกับที่ใช้อยู่ — ตั้งค่าปฏิทินเดือนนี้ให้ตรงกันก่อน)`);
+                                continue;
+                            }
+                            writes.push(App.planRef(ym).set({
+                                calendarConfig: { exceptions: { [HolidayException._dateStr]: exceptionEntry } }
+                            }, { merge: true }));
+                        } catch(e) {
+                            skipped.push(`${ym.replace('_','/')} (เช็คไม่สำเร็จ: ${e.message})`);
+                        }
+                    }
+
+                    await Promise.all(writes);
+
+                    UI.hideLoader();
+                    HolidayException.close();
+                    if (skipped.length) {
+                        UI.showErrorToast(`⚠️ บันทึกสำเร็จบางส่วน — ข้ามเดือน: ${skipped.join(', ')} กรุณาตรวจแผนเดือนดังกล่าวเอง ไม่งั้นร้านบางส่วนอาจไม่ถูกจัดคิวในวันที่เกี่ยวข้อง`);
+                    } else {
+                        UI.showSaveToast(`✅ บันทึกวันหยุด ${HolidayException._dateStr} เรียบร้อย (${routes.length} สาย, ${writes.length} เดือน)`);
+                    }
+                } catch(e) {
+                    UI.hideLoader();
                     UI.showErrorToast('❌ บันทึกไม่สำเร็จ: ' + e.message);
                 }
             },

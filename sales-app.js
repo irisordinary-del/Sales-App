@@ -34,6 +34,15 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 
+// ✅ FIX (2026-07-12): เจอ error ซ้ำๆ ตลอด "WebChannelConnection RPC 'Listen' stream
+// transport errored" + 404 บน google.firestore.v1.Firestore/Listen ในทุกอุปกรณ์/เบราว์เซอร์
+// ที่ทดสอบ (desktop, mobile, InPrivate, ปกติ) — นี่คือปัญหาที่รู้จักกันดีของ Firestore SDK:
+// เครือข่าย/ไฟร์วอลล์/proxy บางที่บล็อกการเชื่อมต่อแบบ streaming (WebChannel/gRPC-over-HTTP2)
+// แต่ยอมให้ long-polling ผ่านได้ปกติ ทำให้ query ที่พึ่งพา cache/realtime listener ได้ข้อมูลว่าง
+// ทั้งที่เซิร์ฟเวอร์มีข้อมูลจริงครบ (แม้แต่ .get({source:'server'}) ก็ยัง throw 'unavailable')
+// บังคับใช้ long-polling แก้ปัญหานี้ที่ต้นตอ — คนละสาเหตุกับ cache/race condition ที่แก้ไปก่อนหน้า
+db.settings({ experimentalForceLongPolling: true });
+
 // Enable persistence — รองรับ offline และหลาย tab
 // ✅ FIX: InPrivate / browser ที่ block storage จะ throw error แต่ app ยังทำงานปกติ (online mode)
 db.enablePersistence({ synchronizeTabs: true }).catch(err => {
@@ -46,6 +55,29 @@ db.enablePersistence({ synchronizeTabs: true }).catch(err => {
         console.warn('[DB] Persistence unavailable (private/restricted mode), running online only');
     }
 });
+
+// ─── ErrorMsg — แปล error code ของ Firebase เป็นข้อความไทยที่ user เข้าใจได้ ──
+// (คัดลอกมาจาก app-config.js เพราะ sales.html ไม่ได้โหลดไฟล์นั้น)
+const ErrorMsg = {
+    _map: {
+        'permission-denied':    'ไม่มีสิทธิ์ทำรายการนี้ กรุณาติดต่อแอดมิน',
+        'unavailable':          'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ ตรวจสอบอินเทอร์เน็ตแล้วลองใหม่',
+        'deadline-exceeded':    'การเชื่อมต่อช้าเกินไป กรุณาลองใหม่อีกครั้ง',
+        'not-found':            'ไม่พบข้อมูลที่ต้องการ อาจถูกลบไปแล้ว',
+        'already-exists':       'มีข้อมูลนี้อยู่แล้วในระบบ',
+        'resource-exhausted':   'ระบบมีผู้ใช้งานพร้อมกันมาก กรุณาลองใหม่อีกสักครู่',
+        'cancelled':            'การทำรายการถูกยกเลิกกลางทาง กรุณาลองใหม่',
+        'unauthenticated':      'เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่',
+        'failed-precondition':  'ไม่สามารถทำรายการได้ในขณะนี้ (อาจมีการแก้ไขซ้อนกัน) กรุณาลองใหม่',
+        'invalid-argument':     'ข้อมูลที่กรอกไม่ถูกต้อง กรุณาตรวจสอบอีกครั้ง',
+    },
+    translate: (e) => {
+        if (!e) return 'เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ';
+        if (e.code && ErrorMsg._map[e.code]) return ErrorMsg._map[e.code];
+        console.warn('[ErrorMsg] ไม่รู้จัก error code:', e.code, '| message เดิม:', e.message);
+        return 'เกิดข้อผิดพลาดที่ไม่คาดคิด กรุณาลองใหม่ หรือติดต่อผู้ดูแลระบบถ้ายังไม่หาย';
+    },
+};
 
 let docMain  = db.collection('appData').doc('v1_main');
 const colSales = db.collection('v1_sales_chunks');
@@ -282,6 +314,7 @@ const App = {
             }
 
             const icons = {};
+            const isSup = App.isSupervisor();
             const username = session?.username?.toUpperCase() || '';
 
             for (const doc of snap.docs) {
@@ -301,25 +334,26 @@ const App = {
                 const endYM   = c.endYM   || nowYM;
                 const months  = getMonthRange(startYM, endYM);
 
-                // รวม rows ทุกเดือน
-                let allRows = [];
-                for (const ym of months) {
+                // ✅ PERF: โหลดทุกเดือนพร้อมกัน (Promise.all) แทนทีละเดือน — เร็วขึ้นตามจำนวนเดือน
+                // ปลอดภัยเพราะ SalesDashboard._loadChunks มี cache + in-flight dedup อยู่แล้ว
+                const monthResults = await Promise.all(months.map(async ym => {
                     try {
-                        let rows = [];
                         if (typeof SalesDashboard !== 'undefined' && SalesDashboard._loadChunks) {
-                            rows = await SalesDashboard._loadChunks(ym);
-                        } else {
-                            const cs = await db.collection('sellout').doc(ym).collection('chunks').get();
-                            cs.forEach(d => rows = rows.concat(d.data().rows || []));
+                            return await SalesDashboard._loadChunks(ym);
                         }
-                        allRows = allRows.concat(rows);
-                    } catch(e) { /* เดือนนี้ไม่มีข้อมูล ข้ามไป */ }
-                }
+                        const cs = await db.collection('sellout').doc(ym).collection('chunks').get();
+                        let rows = [];
+                        cs.forEach(d => rows = rows.concat(d.data().rows || []));
+                        return rows;
+                    } catch (e) { return []; /* เดือนนี้ไม่มีข้อมูล ข้ามไป */ }
+                }));
+                const allRows = monthResults.flat();
 
                 if (!allRows.length) continue;
 
-                // กรองเฉพาะ sCode ของ sales คนนี้
-                const myRows = username
+                // ✅ FIX: Supervisor/ASM username (เช่น "RS402") ไม่ใช่รูปแบบ sCode ในข้อมูล
+                // ถ้ากรองด้วย sCode === username จะได้ 0 แถวเสมอ — Supervisor ดูทั้งศูนย์แทน
+                const myRows = (username && !isSup)
                     ? allRows.filter(r => String(r.sCode || '').toUpperCase() === username)
                     : allRows;
 
@@ -347,8 +381,8 @@ const App = {
             State.campaignIcons = icons;
             console.log(`[CampaignIcons] รวม ${Object.keys(icons).length} ร้านที่มี icon`);
             if (State.isLoaded) {
-                try { if (State.currentDay) Processor.routeList(); } catch(e) {}
-                try { Processor.stores(); } catch(e) {}
+                try { if (State.currentDay) Processor.routeList(); } catch(e) { console.warn('[App] re-render routeList หลังโหลด campaign icons ไม่สำเร็จ:', e); }
+                try { Processor.stores(); } catch(e) { console.warn('[App] re-render stores หลังโหลด campaign icons ไม่สำเร็จ:', e); }
             }
         } catch(e) {
             console.warn('_loadCampaignIcons:', e);
@@ -508,7 +542,7 @@ const App = {
             let merged = {};
             snap.forEach(doc => Object.assign(merged, doc.data()));
             State.sales = merged;
-        }).catch(()=>{});
+        }).catch((e) => console.warn('[App] startSupervisor: โหลด colSales ไม่สำเร็จ (KPI badge บนแผนที่อาจไม่ขึ้น):', e));
 
         LoadBar.done();
         document.getElementById('loader').style.display = 'none';
@@ -520,12 +554,16 @@ const App = {
         if (State.planList.length > 0) {
             Promise.all(State.planList
                 .filter(ym => ym !== _useYM)
-                .map(ym => App.loadPlanDataForSup(ym).catch(() => {}))
+                .map(ym => App.loadPlanDataForSup(ym).catch((e) => console.warn('[App] preload plan เดือน', ym, 'ไม่สำเร็จ:', e)))
             ).then(() => {
                 if (typeof CalendarCtrl !== 'undefined') CalendarCtrl.render();
             });
         }
         if (typeof CalendarCtrl !== 'undefined') CalendarCtrl.init();
+
+        // ✅ FIX: เดิม Supervisor/ASM ไม่เคยเห็น campaign icon (โหมด "ตามสายวิ่ง") เลย
+        // เพราะ _loadCampaignIcons() ถูกเรียกแค่ใน start() (flow ของ Sales) เท่านั้น
+        App._loadCampaignIcons().catch((e) => console.warn('[App] startSupervisor: โหลด campaign icons ไม่สำเร็จ:', e));
 
         const searchEl = document.getElementById('search-input');
         if (searchEl) searchEl.oninput = (e) => {
@@ -612,7 +650,7 @@ const App = {
                     if (typeof CalendarCtrl !== 'undefined') CalendarCtrl.init();
                     waitForLeaflet(() => MapCtrl.initAndDraw());
                     // ✅ โหลด campaign icons background
-                    App._loadCampaignIcons().catch(() => {});
+                    App._loadCampaignIcons().catch((e) => console.warn('[App] start: โหลด campaign icons ไม่สำเร็จ:', e));
                 }
             }
         };
@@ -654,7 +692,7 @@ const App = {
             const pd = _planResult.status === 'fulfilled' ? _planResult.value : null;
             State.calendarConfig = pd?.exists ? (pd.data().calendarConfig || null) : null;
             State.activePlanYM   = _useYM;
-        } catch(e) {}
+        } catch(e) { console.warn('[App] เกิด error ระหว่าง init (ไม่กระทบการทำงานหลัก):', e); }
 
         // process stores
         try {
@@ -697,6 +735,19 @@ const App = {
 function trimMarketName(raw) {
     if (!raw) return '';
     return raw.replace(/^[A-Z0-9]+\s+D\d+\s+/i, '').trim();
+}
+
+// ✅ BUGFIX: DateUtil ถูกประกาศไว้ใน dashboard.js เท่านั้น ซึ่งไม่ถูกโหลดในหน้า Sales เลย
+// (sales.html โหลดแค่ sales-app.js, store-history.js, sales-dashboard.js, pwa-register.js)
+// ทำให้ typeof DateUtil !== 'undefined' เป็น false เสมอในหน้านี้ — เพิ่ม fallback formatter เบาๆ
+// ไว้ในไฟล์นี้เลย แทนที่จะพึ่งพา dashboard.js ข้ามหน้า
+function ymToThaiShortLocal(ym) {
+    if (!ym) return '';
+    const [y, m] = ym.split('_');
+    if (!y || !m) return ym;
+    try {
+        return new Date(+y, +m - 1, 1).toLocaleDateString('th-TH', { year: 'numeric', month: 'short' });
+    } catch(e) { return ym; }
 }
 
 function getDayMarketList(day, forMonth, forYear) {
@@ -798,29 +849,37 @@ const Processor = {
         }
         el.value = State.currentDay;
         // ✅ ข้อ 5: อัปเดต label display แทน dropdown
+        // ✅ BUGFIX: เดิม _mktNow ถูกประกาศเป็น const อยู่ข้างในบล็อก if (_labelEl...) ด้านล่าง
+        // แล้วมีโค้ดอีกจุดอ้างถึงตัวแปร "_stM" ที่ไม่เคยถูกประกาศไว้เลยในทั้งไฟล์ (typo/ของค้างจาก refactor)
+        // ผลคือ Processor.setupRoute() throw ReferenceError ทุกครั้งที่รัน (ตั้งแต่ตอนเปิดแอปครั้งแรก)
+        // ทำให้ Processor.routeList() ท้ายฟังก์ชันไม่ถูกเรียกเลย — สายวิ่ง/วันที่ไม่ขึ้นเลย
+        // node --check จับไม่ได้เพราะเป็น runtime error ไม่ใช่ syntax error — ต้องรันจริงในเบราว์เซอร์ถึงเจอ
+        const _mktNow = State.currentDay ? getDayMarkets(State.currentDay) : '';
         const _labelEl = document.getElementById('day-label-display');
         if (_labelEl && State.currentDay) {
             const _dayNum = State.currentDay.replace('Day ','');
-            const _mktNow = getDayMarkets(State.currentDay);
             _labelEl.textContent = _mktNow
                 ? `Day ${_dayNum} · ${_mktNow.split(' · ')[0]}`
                 : `Day ${_dayNum}`;
         }
         const _stEl = document.getElementById('stores-title');
-        if (_stEl) _stEl.textContent = _stM
-            ? 'Day ' + State.currentDay.replace('Day ','') + ' · ' + _stM
+        if (_stEl) _stEl.textContent = _mktNow
+            ? 'Day ' + State.currentDay.replace('Day ','') + ' · ' + _mktNow
             : 'รายชื่อร้านค้าทั้งหมด';
         Processor.routeList();
     },
 
     routeList: () => {
-        const list = State.allStores
+        let list = State.allStores
             .filter(s => {
                 if (!s.days.includes(State.currentDay)) return false;
                 if (State._filterMarket) return trimMarketName(s.marketName) === State._filterMarket;
                 return true;
             })
             .sort((a, b) => (a.seqs?.[State.currentDay] || 999) - (b.seqs?.[State.currentDay] || 999));
+
+        // ✅ ข้อ 5 (โหมดที่ 4): ปรับ list ตาม exception วันหยุด ถ้าวันนี้ตรงกับวันที่มีการแบ่งร้านไว้
+        list = CalendarCtrl.applyExceptions(list, State.currentDay);
 
         const html = list.map((s, i) => {
             const seq     = s.seqs?.[State.currentDay] || i + 1;
@@ -851,7 +910,8 @@ const Processor = {
         const _markets = getDayMarkets(State.currentDay);
         const _dayNum  = State.currentDay ? State.currentDay.replace('Day ', '') : '';
         const _mkt     = _markets ? ' · ' + _markets.split(' · ')[0] : '';
-        document.getElementById('route-title').innerText = `Day ${_dayNum}${_mkt} (${list.length} ร้าน)`;
+        document.getElementById('route-title').innerText =
+            `Day ${_dayNum}${_mkt} (${list.length} ร้าน)` + (CalendarCtrl._lastExceptionApplied ? ' ⚠️ ปรับเนื่องจากวันหยุด' : '');
 
         if (sortableList) sortableList.destroy();
         sortableList = Sortable.create(c, {
@@ -1055,14 +1115,30 @@ const CalendarCtrl = {
     },
 
     getDayLabelForCfg: (dateNum, cfg, stores, year, month) => {
-        if (cfg?.mapping && Object.keys(cfg.mapping).length > 0) {
+        // ✅ BUGFIX: เดิมเช็ค cfg.mapping ก่อนเช็ค cfg.mode เสมอ — ทำให้ mapping เก่าที่ค้างอยู่
+        // ใน Firestore (จากตอนเคยตั้งโหมด "fixed" มาก่อน) มาบังทุกโหมดที่สลับมาทีหลัง
+        // (Firestore set({...}, {merge:true}) ไม่ลบ field ย่อยที่ไม่ได้ส่งไปใหม่)
+        // แก้โดยเช็ค cfg.mode ก่อนเสมอ ใช้ cfg.mapping แบบ legacy เฉพาะตอนไม่มี mode ระบุมาเลย
+        if (!cfg || (!cfg.mode && (!cfg.mapping || Object.keys(cfg.mapping).length === 0))) {
+            const label = `Day ${dateNum}`;
+            return (stores || State.allStores).some(s => s.days?.includes(label)) ? label : null;
+        }
+        if (!cfg.mode && cfg.mapping) {
+            // legacy config เก่าสุดที่ไม่มี field mode เลย (ก่อนระบบ mode ถูกสร้าง)
             return cfg.mapping[String(dateNum)] || null;
         }
-        if (!cfg || cfg.mode === 'date') {
+        if (cfg.mode === 'date') {
             const label = `Day ${dateNum}`;
             return (stores || State.allStores).some(s => s.days?.includes(label)) ? label : null;
         }
         if (cfg.mode === 'fixed') return cfg.mapping ? (cfg.mapping[String(dateNum)] || null) : null;
+        // ✅ โหมดที่ 4: ตามวันในสัปดาห์ — Day N = วันในสัปดาห์ที่กำหนดไว้ ขยายทุกสัปดาห์อัตโนมัติ
+        if (cfg.mode === 'weekday') {
+            const wmap = cfg.weekdayMap || {};
+            const wd   = new Date(year, month, dateNum).getDay(); // 0=อาทิตย์..6=เสาร์
+            const entry = Object.entries(wmap).find(([, w]) => w === wd);
+            return entry ? entry[0] : null;
+        }
         if (cfg.mode === 'cycle') {
             const startDate  = parseInt(cfg.startDay  || 1);
             const holidays   = cfg.holidays  || [];
@@ -1089,6 +1165,12 @@ const CalendarCtrl = {
             return State.allStores.some(s => s.days?.includes(label)) ? label : null;
         }
         if (cfg.mode === 'fixed') return cfg.mapping ? (cfg.mapping[String(dateNum)] || null) : null;
+        if (cfg.mode === 'weekday') {
+            const wmap = cfg.weekdayMap || {};
+            const wd   = new Date(CalendarCtrl._year, CalendarCtrl._month, dateNum).getDay();
+            const entry = Object.entries(wmap).find(([, w]) => w === wd);
+            return entry ? entry[0] : null;
+        }
         if (cfg.mode === 'cycle') {
             const startDate  = parseInt(cfg.startDay  || 1);
             const holidays   = cfg.holidays  || [];
@@ -1129,7 +1211,72 @@ const CalendarCtrl = {
                 workDay++;
             }
         }
+        // ⚠️ โหมด weekday: 1 Day ตรงกับหลายวันที่ต่อเดือน (ทุกสัปดาห์) — ไม่มีคำตอบเดียวที่ถูกต้อง
+        // เตือนแบบเห็นชัดใน console แทนที่จะคืน null แบบเงียบๆ ถ้ามีจุดไหนเรียกใช้ฟังก์ชันนี้กับโหมดนี้
+        // ให้ใช้ CalendarCtrl.getDatesFromDayInMonth() แทน ซึ่งคืนค่าเป็น array ของทุกวันที่ตรงในเดือนนั้น
+        if (cfg.mode === 'weekday') {
+            console.warn('CalendarCtrl.getDateFromDay: โหมด weekday ไม่รองรับ (1 Day = หลายวันที่ต่อเดือน) — ใช้ getDatesFromDayInMonth() แทน');
+            return null;
+        }
         return null;
+    },
+
+    // ✅ สำหรับโหมด weekday โดยเฉพาะ — คืน array ของ "วันที่" ทั้งหมดในเดือนที่ตรงกับ Day label ที่ระบุ
+    // (เพราะ 1 Day ขยายทุกสัปดาห์ จึงตรงกับหลายวันที่ในเดือนเดียวกันได้)
+    getDatesFromDayInMonth: (dayLabel, year, month) => {
+        const cfg = State.calendarConfig;
+        if (!cfg || cfg.mode !== 'weekday') return [];
+        const wmap = cfg.weekdayMap || {};
+        const targetWd = wmap[dayLabel];
+        if (targetWd === undefined) return [];
+        const daysInMonth = new Date(year, month + 1, 0).getDate();
+        const dates = [];
+        for (let d = 1; d <= daysInMonth; d++) {
+            if (new Date(year, month, d).getDay() === targetWd) dates.push(d);
+        }
+        return dates;
+    },
+
+    // ✅ ข้อ 5 (โหมดที่ 4): เช็ค exception วันหยุดของ "วันนี้" (calendar date จริง) แล้วปรับ list ร้านให้ตรง
+    // — วันหยุดเอง: เอาร้านที่ถูกแบ่งออกไปทั้งหมดออกจาก queue
+    // — วันที่รับร้านเพิ่ม (prevDate/nextDate): เพิ่มร้านกลุ่มที่ถูกโยกมาเข้า queue
+    applyExceptions: (baseList, dayLabel) => {
+        const cfg = State.calendarConfig;
+        CalendarCtrl._lastExceptionApplied = false;
+        if (!cfg || !cfg.exceptions) return baseList;
+
+        const now = new Date();
+        const todayStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+        const route = State.myRoute;
+        let list = [...baseList];
+
+        Object.entries(cfg.exceptions).forEach(([dateStr, ex]) => {
+            const split = ex.splits?.[route];
+            if (!split) return; // สายนี้ไม่ได้รับผลกระทบจาก exception นี้
+
+            // วันนี้คือวันหยุดเอง → ตัดร้านที่ถูกแบ่งออกทั้งหมดออกจาก queue ของ Day เดิม
+            if (dateStr === todayStr && dayLabel === ex.originalDay) {
+                const removeIds = new Set([...(split.prevStores || []), ...(split.nextStores || [])]);
+                list = list.filter(s => !removeIds.has(s.id));
+                CalendarCtrl._lastExceptionApplied = true;
+            }
+            // วันนี้คือวันก่อนหน้าที่รับร้านเพิ่ม → เติมร้านกลุ่ม prevStores เข้า queue
+            if (ex.prevDate === todayStr && dayLabel === ex.prevDay) {
+                const addIds = new Set(split.prevStores || []);
+                const toAdd  = State.allStores.filter(s => addIds.has(s.id) && !list.some(x => x.id === s.id));
+                list = list.concat(toAdd);
+                if (toAdd.length) CalendarCtrl._lastExceptionApplied = true;
+            }
+            // วันนี้คือวันถัดไปที่รับร้านเพิ่ม → เติมร้านกลุ่ม nextStores เข้า queue
+            if (ex.nextDate === todayStr && dayLabel === ex.nextDay) {
+                const addIds = new Set(split.nextStores || []);
+                const toAdd  = State.allStores.filter(s => addIds.has(s.id) && !list.some(x => x.id === s.id));
+                list = list.concat(toAdd);
+                if (toAdd.length) CalendarCtrl._lastExceptionApplied = true;
+            }
+        });
+
+        return list;
     },
 
     render: () => {
@@ -1331,7 +1478,7 @@ const CalendarCtrl = {
         if (State.planCache[ym]?._ok) return;
         if (!State.planList.includes(ym)) return;
         const _loader = App.isSupervisor() ? App.loadPlanDataForSup : App.loadPlanData;
-        _loader(ym).then(() => CalendarCtrl.render()).catch(() => {});
+        _loader(ym).then(() => CalendarCtrl.render()).catch((e) => console.warn('[App] โหลดปฏิทินเดือน', ym, 'ไม่สำเร็จ:', e));
     },
 
     openPopup: () => {
@@ -1357,7 +1504,7 @@ const CalendarCtrl = {
         // โหลดเดือนอื่น background (non-blocking)
         if (State.planList?.length > 0) {
             const _loader = App.isSupervisor() ? App.loadPlanDataForSup : App.loadPlanData;
-            Promise.all(State.planList.map(ym => _loader(ym).catch(() => {})))
+            Promise.all(State.planList.map(ym => _loader(ym).catch((e) => console.warn('[App] preload เดือน', ym, 'ไม่สำเร็จ:', e))))
                 .then(() => CalendarCtrl.render());
         }
     },
@@ -1732,8 +1879,10 @@ const ActivityCtrl = {
                     .where('centerId', '==', centerId).get();
             }
 
-            // ✅ FIX: ล็อคตาม sale คนนี้ — เอาเฉพาะร้านที่อยู่ใน State.allStores (สายของตัวเอง)
-            // ไม่ใช่ทั้งศูนย์ กัน sale เห็นร้านของสายอื่นที่ตัวเองไม่ได้ดูแล
+            // ✅ ล็อคตามร้านที่ sale/supervisor มองเห็น — State.allStores คือ:
+            //   - Sales: เฉพาะร้านในสายตัวเอง
+            //   - Supervisor/ASM: ร้านทุกสายทั้งศูนย์ (ดู startSupervisor())
+            // กัน sale เห็นร้านของสายอื่นที่ตัวเองไม่ได้ดูแล
             const myStoreCodes = new Set((State.allStores || []).map(s => String(s.id)));
 
             // ✅ เอาเฉพาะกิจกรรมที่ระบุรายชื่อร้าน (scopeMode === 'custom')
@@ -1756,20 +1905,37 @@ const ActivityCtrl = {
         ActivityCtrl._renderList();
     },
 
+    // ✅ FIX: label ต้องบอกความจริงตาม role — Sales เห็นแค่สายตัวเอง, Supervisor/ASM เห็นทั้งศูนย์
+    _scopeLabel: () => App.isSupervisor() ? '(ทั้งศูนย์)' : '(เฉพาะสายคุณ)',
+
     _renderList: () => {
         const el = document.getElementById('activity-list');
         if (!el) return;
+        const isSup = App.isSupervisor();
+
         if (!ActivityCtrl._campaigns.length) {
+            // ✅ FIX: ข้อความเดิม "สายของคุณ" ใช้ไม่ได้กับ Supervisor (ดูแลหลายสาย ไม่ใช่สายเดียว)
+            const emptyMsg = isSup
+                ? 'ยังไม่มีกิจกรรมที่เกี่ยวข้องกับศูนย์นี้'
+                : 'ยังไม่มีกิจกรรมที่เกี่ยวข้องกับสายของคุณ';
             el.innerHTML = `<div style="text-align:center;padding:40px 20px;">
                 <div style="font-size:32px;margin-bottom:8px;">📭</div>
-                <div style="font-size:12px;color:#9ca3af;font-weight:600;">ยังไม่มีกิจกรรมที่เกี่ยวข้องกับสายของคุณ</div>
+                <div style="font-size:12px;color:#9ca3af;font-weight:600;">${emptyMsg}</div>
             </div>`;
             return;
         }
-        el.innerHTML = ActivityCtrl._campaigns.map(c => {
-            const startLbl = typeof DateUtil !== 'undefined' ? DateUtil.ymToThaiShort(c.startYM) : c.startYM;
-            const endLbl   = typeof DateUtil !== 'undefined' ? DateUtil.ymToThaiShort(c.endYM)   : c.endYM;
-            const count = (c._myParticipants || []).length; // ✅ นับเฉพาะร้านในสายตัวเอง
+        const scopeLabel = ActivityCtrl._scopeLabel();
+        // ✅ FIX: เพิ่มคำอธิบายกันเข้าใจผิดว่าหน้านี้ = แคมเปญทุกแบบ — จริงๆ เห็นเฉพาะ
+        // แคมเปญโหมด "ระบุร้านเอง" เท่านั้น (โหมด "ตามสายวิ่ง" ไปโชว์เป็น icon หน้าคิวงานแทน)
+        const hintBanner = isSup
+            ? `<div style="background:#eef2ff;border:1px solid #c7d2fe;border-radius:10px;padding:8px 12px;margin-bottom:10px;font-size:11px;color:#4338ca;">
+                ℹ️ หน้านี้แสดงเฉพาะแคมเปญโหมด "ระบุร้านเอง" ทั้งศูนย์ — แคมเปญโหมด "ตามสายวิ่ง" ดูที่ icon หน้าคิวงานของแต่ละสายแทน
+               </div>`
+            : '';
+        el.innerHTML = hintBanner + ActivityCtrl._campaigns.map(c => {
+            const startLbl = ymToThaiShortLocal(c.startYM) || c.startYM;
+            const endLbl   = ymToThaiShortLocal(c.endYM)   || c.endYM;
+            const count = (c._myParticipants || []).length; // ✅ นับเฉพาะร้านที่มองเห็นได้ตาม role
             const iconHtml = c.iconUrl
                 ? `<img src="${c.iconUrl}" style="width:36px;height:36px;border-radius:9px;object-fit:cover;flex-shrink:0;" onerror="this.style.display='none'">`
                 : `<span style="font-size:26px;flex-shrink:0;">🎉</span>`;
@@ -1780,7 +1946,7 @@ const ActivityCtrl = {
                 <div class="flex-1 min-w-0">
                     <div class="font-bold text-sm text-gray-800 truncate">${c.name}</div>
                     <div style="font-size:11px;color:#9ca3af;margin-top:1px;">📅 ${startLbl} → ${endLbl}</div>
-                    <div style="font-size:11px;color:#4f46e5;font-weight:700;margin-top:2px;">📋 ${count} ร้าน (เฉพาะสายคุณ)</div>
+                    <div style="font-size:11px;color:#4f46e5;font-weight:700;margin-top:2px;">📋 ${count} ร้าน ${scopeLabel}</div>
                 </div>
                 <span style="color:#d1d5db;font-size:18px;">›</span>
             </div>`;
@@ -1795,12 +1961,12 @@ const ActivityCtrl = {
         document.getElementById('activity-list-view').classList.add('hidden');
         document.getElementById('activity-detail-view').classList.remove('hidden');
 
-        const startLbl = typeof DateUtil !== 'undefined' ? DateUtil.ymToThaiShort(c.startYM) : c.startYM;
-        const endLbl   = typeof DateUtil !== 'undefined' ? DateUtil.ymToThaiShort(c.endYM)   : c.endYM;
-        const stores   = c._myParticipants || []; // ✅ เฉพาะร้านในสายตัวเอง
+        const startLbl = ymToThaiShortLocal(c.startYM) || c.startYM;
+        const endLbl   = ymToThaiShortLocal(c.endYM)   || c.endYM;
+        const stores   = c._myParticipants || []; // ✅ เฉพาะร้านที่มองเห็นได้ตาม role
         document.getElementById('activity-detail-header').innerHTML = `
             <div style="font-size:15px;font-weight:900;color:#111827;">${c.name}</div>
-            <div style="font-size:11px;color:#9ca3af;margin-top:2px;">📅 ${startLbl} → ${endLbl} &nbsp;|&nbsp; 📋 ${stores.length} ร้าน (เฉพาะสายคุณ)</div>`;
+            <div style="font-size:11px;color:#9ca3af;margin-top:2px;">📅 ${startLbl} → ${endLbl} &nbsp;|&nbsp; 📋 ${stores.length} ร้าน ${ActivityCtrl._scopeLabel()}</div>`;
 
         const meta = c.participantMeta || {};
         const list = stores
@@ -1837,19 +2003,20 @@ const ActivityCtrl = {
         if (!kws.length) return new Set();
 
         const months = getMonthRange(c.startYM, c.endYM);
-        let allRows = [];
-        for (const ym of months) {
+
+        // ✅ PERF: โหลดทุกเดือนพร้อมกัน แทนทีละเดือน
+        const monthResults = await Promise.all(months.map(async ym => {
             try {
-                let rows = [];
                 if (typeof SalesDashboard !== 'undefined' && SalesDashboard._loadChunks) {
-                    rows = await SalesDashboard._loadChunks(ym);
-                } else {
-                    const cs = await db.collection('sellout').doc(ym).collection('chunks').get();
-                    cs.forEach(d => rows = rows.concat(d.data().rows || []));
+                    return await SalesDashboard._loadChunks(ym);
                 }
-                allRows = allRows.concat(rows);
-            } catch (e) { /* เดือนนี้ไม่มีข้อมูล ข้ามไป */ }
-        }
+                const cs = await db.collection('sellout').doc(ym).collection('chunks').get();
+                let rows = [];
+                cs.forEach(d => rows = rows.concat(d.data().rows || []));
+                return rows;
+            } catch (e) { return []; /* เดือนนี้ไม่มีข้อมูล ข้ามไป */ }
+        }));
+        const allRows = monthResults.flat();
 
         const participantSet = new Set(c._myParticipants || []);
         return new Set(

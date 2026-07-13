@@ -80,7 +80,8 @@ const App = {
     planRoutesCol:(ym) => App.plansCol().doc(ym).collection('routes'),
 
     // ─── State ───────────────────────────────────────────────────────────
-    _currentPlanYM:  '',   // YYYY_MM ที่กำลังดูอยู่
+    _currentPlanYM:  '',   // YYYY_MM ที่แอดมิน "กำลังดู/แก้ไข" อยู่ (local view เท่านั้น)
+    _livePlanYM:     '',   // ✅ YYYY_MM ที่ "Live" จริงให้ Sales เห็น (มาจาก centerDoc.currentPlanYM)
     _snapshotUnsub:  null,
     _fileListenersReady: false,
 
@@ -307,6 +308,8 @@ const App = {
 
             State.db.planList      = planList;
             State.db.currentPlanYM = currentPlanYM;
+            // ✅ เดือนที่ "Live" จริงให้ Sales เห็น — แยกจาก App._currentPlanYM ซึ่งเป็นแค่เดือนที่แอดมินกำลังดูอยู่
+            App._livePlanYM = currentPlanYM;
 
             App.log(`📋 planList: [${planList.join(', ')}], current: ${currentPlanYM}`);
 
@@ -371,13 +374,38 @@ const App = {
         UI.render();
     },
 
-    // ─── Switch plan ─────────────────────────────────────────────────────
+    // ─── Switch plan (แค่ "ดู/แก้ไข" ฝั่งแอดมิน — ไม่กระทบ Sales) ──────────
     switchPlan: async (ym) => {
         if (App._currentPlanYM === ym) return;
         State.localActiveRoute = localStorage.getItem(`last_route_${ym}`) || '';
         await App._loadPlan(ym);
-        // บันทึก currentPlanYM ลง centerDoc ให้ Sales เห็นตาม
-        await App.dbRef.set({ currentPlanYM: ym }, { merge: true });
+        // ✅ BUGFIX: เดิมเขียน currentPlanYM ลง centerDoc ทันทีทุกครั้งที่แอดมินสลับดูเดือน
+        // ทำให้ Sales ทุกคนเห็นเดือนเปลี่ยนตามไปด้วยทั้งที่แอดมินแค่ "ดู" ไม่ได้ตั้งใจให้ live
+        // ตอนนี้แยกออกมา — ต้องกดปุ่ม "ตั้งเป็นเดือนที่ใช้งานจริง" (App.publishPlan) เท่านั้นถึงจะมีผลกับ Sales
+        PlanUI.refresh();
+    },
+
+    // ─── Publish plan ให้ Sales เห็นจริง (ต้องกดยืนยันชัดเจน) ──────────────
+    publishPlan: async (ym) => {
+        if (!ym) return;
+        if (ym === App._livePlanYM) {
+            UI.showErrorToast('ℹ️ เดือนนี้ Live อยู่แล้ว');
+            return;
+        }
+        if (!confirm(
+            `⚠️ ยืนยันตั้ง "${App.ymToLabel(ym)}" เป็นเดือนที่ใช้งานจริง?\n\n` +
+            `Sales ทุกคนในศูนย์นี้จะเห็นปฏิทิน/สายวิ่งของเดือนนี้ทันที ` +
+            `(เดือนที่ Live อยู่ตอนนี้คือ ${App.ymToLabel(App._livePlanYM)})`
+        )) return;
+
+        try {
+            await App.dbRef.set({ currentPlanYM: ym }, { merge: true });
+            App._livePlanYM = ym;
+            PlanUI.refresh();
+            UI.showSaveToast(`📢 ตั้ง ${App.ymToLabel(ym)} เป็นเดือนที่ใช้งานจริงแล้ว — Sales เห็นทันที`);
+        } catch(e) {
+            UI.showErrorToast('❌ ตั้งค่าไม่สำเร็จ: ' + ErrorMsg.translate(e));
+        }
     },
 
     // ─── Create new plan ─────────────────────────────────────────────────
@@ -424,10 +452,10 @@ const App = {
 
             State.db.planList = planList;
             UI.hideLoader();
-            UI.showSaveToast(`✅ สร้าง Plan ${App.ymToLabel(ym)} เรียบร้อย`);
+            UI.showSaveToast(`✅ สร้าง Plan ${App.ymToLabel(ym)} เรียบร้อย (ยังไม่ live — Sales ยังไม่เห็น จนกว่าจะกด "ตั้งเป็นเดือนที่ใช้งานจริง")`);
             PlanUI.refresh();
 
-            // switch ไปที่ plan ใหม่
+            // switch ไปที่ plan ใหม่ (แค่มุมมองแอดมิน — ไม่กระทบ Sales จนกว่าจะ publish)
             await App.switchPlan(ym);
 
         } catch(err) {
@@ -451,13 +479,24 @@ const App = {
                 const curDoc  = await App.dbRef.get();
                 const curData = curDoc.exists ? curDoc.data() : {};
                 const planList = (curData.planList || []).filter(p => p !== ym).sort().reverse();
-                const newCurrentYM = planList[0] || App.currentYM();
-                await App.dbRef.set({ planList, currentPlanYM: newCurrentYM }, { merge: true });
 
-                UI.showSaveToast(`🗑️ ลบ Plan ${App.ymToLabel(ym)} เรียบร้อย`);
+                // ✅ BUGFIX: เดิมเขียนทับ currentPlanYM (เดือน live ของ Sales) ทุกครั้งที่ลบ plan
+                // ไม่ว่าจะลบเดือนที่ live อยู่จริงหรือแค่ลบ draft เดือนอื่นที่ไม่เกี่ยวกับ Sales เลย
+                // ตอนนี้เช็คก่อน — เขียนทับเฉพาะกรณีลบเดือนที่ live อยู่จริงเท่านั้น
+                const isDeletingLive = App._livePlanYM === ym;
+                if (isDeletingLive) {
+                    const newLiveYM = planList[0] || App.currentYM();
+                    await App.dbRef.set({ planList, currentPlanYM: newLiveYM }, { merge: true });
+                    App._livePlanYM = newLiveYM;
+                    UI.showSaveToast(`🗑️ ลบ Plan ${App.ymToLabel(ym)} เรียบร้อย (เดือนนี้เคย Live อยู่ — เปลี่ยน Live เป็น ${App.ymToLabel(newLiveYM)} อัตโนมัติ)`);
+                } else {
+                    await App.dbRef.set({ planList }, { merge: true });
+                    UI.showSaveToast(`🗑️ ลบ Plan ${App.ymToLabel(ym)} เรียบร้อย`);
+                }
 
                 if (App._currentPlanYM === ym) {
-                    await App._loadPlan(newCurrentYM);
+                    const fallbackYM = planList[0] || App.currentYM();
+                    await App._loadPlan(fallbackYM);
                 }
                 PlanUI.refresh();
             } catch(err) {
@@ -579,7 +618,12 @@ const App = {
         const ym = App._currentPlanYM;
         if (!ym) return;
         try {
-            await App.planRef(ym).set({ calendarConfig: cfg, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true });
+            // ✅ BUGFIX: mergeFields แทน merge:true — กัน field เก่าจากโหมดก่อนหน้า (เช่น mapping)
+            // ค้างอยู่ใน Firestore แล้วไปบัง getDayLabelForCfg() ตอนสลับโหมด (ดู index.html CalendarAdmin.save)
+            await App.planRef(ym).set(
+                { calendarConfig: cfg, updatedAt: firebase.firestore.FieldValue.serverTimestamp() },
+                { mergeFields: ['calendarConfig', 'updatedAt'] }
+            );
             State.db.calendarConfig = cfg;
             UI.showSaveToast('📅 บันทึกปฏิทินเรียบร้อย');
         } catch(err) {
@@ -601,12 +645,50 @@ const App = {
     clearAllAssignments: () => {
         if (!confirm('🗑️ ยืนยันการเคลียร์การจัดสายทั้งหมด?')) return;
         if (!State.stores?.length) return UI.showErrorToast('⚠️ ไม่มีข้อมูลร้านค้า');
+        // ✅ UX: เก็บ snapshot ไว้ก่อนลบ เผื่อกดพลาด — undo ได้ภายใน 8 วิ
+        App._undoSnapshot = { route: State.localActiveRoute, stores: JSON.parse(JSON.stringify(State.stores)) };
         State.stores.forEach(s => { s.days = []; s.seqs = {}; s.selected = false; });
         MapCtrl?.clearRoad?.(true);
         MapCtrl?.clearAll?.();
         UI?.render?.();
         App?.saveDB?.();
-        UI.showSaveToast('✅ เคลียร์การจัดสายเสร็จ');
+        UI.showUndoBanner(`✅ เคลียร์การจัดสายเสร็จ (${App._undoSnapshot.stores.length} ร้าน)`);
+    },
+
+    // ✅ FIX: เดิมปุ่ม "ล้างสายนี้" ใน Tab 1 เรียกฟังก์ชันนี้ แต่ไม่เคยมีอยู่จริง (บั๊ก — กดแล้วไม่มีอะไรเกิดขึ้น)
+    // ลบร้านค้าทั้งหมดออกจากสายที่กำลังเลือกอยู่ (ต่างจาก clearAllAssignments ที่แค่ล้างวันที่จัด แต่ร้านยังอยู่)
+    clearStores: () => {
+        if (!State.stores?.length) return UI.showErrorToast('⚠️ สายนี้ไม่มีร้านค้าอยู่แล้ว');
+        if (!confirm(`🗑️ ยืนยันลบร้านค้าทั้งหมด (${State.stores.length} ร้าน) ออกจากสาย "${State.localActiveRoute}"?\nการกระทำนี้ลบร้านทิ้งทั้งหมด ไม่ใช่แค่ล้างวันที่จัด`)) return;
+        // ✅ UX: เก็บ snapshot ไว้ก่อนลบ เผื่อกดพลาด — undo ได้ภายใน 8 วิ
+        App._undoSnapshot = { route: State.localActiveRoute, stores: JSON.parse(JSON.stringify(State.stores)) };
+        State.stores = [];
+        if (State.db?.routes) State.db.routes[State.localActiveRoute] = [];
+        MapCtrl?.clearRoad?.(true);
+        MapCtrl?.clearAll?.();
+        UI?.render?.();
+        App?.saveDB?.();
+        UI.showUndoBanner(`✅ ลบร้านค้าออกจากสายนี้เรียบร้อย (${App._undoSnapshot.stores.length} ร้าน)`);
+    },
+
+    // ✅ UX: ย้อนกลับการลบล่าสุด (ใช้ได้ครั้งเดียว ภายใน 8 วิหลังลบ)
+    _undoSnapshot: null,
+    undo: () => {
+        const snap = App._undoSnapshot;
+        if (!snap) return;
+        // กันย้อนกลับผิดสาย ถ้า user สลับไปสายอื่นระหว่างนั้น
+        if (State.localActiveRoute !== snap.route) {
+            UI.showErrorToast('⚠️ สลับสายไปแล้ว ย้อนกลับไม่ได้');
+            UI.hideUndoBanner();
+            return;
+        }
+        State.stores = snap.stores;
+        if (State.db?.routes) State.db.routes[snap.route] = State.stores;
+        MapCtrl?.clearAll?.();
+        UI?.render?.();
+        App?.saveDB?.();
+        UI.hideUndoBanner();
+        UI.showSaveToast('↩️ ย้อนกลับเรียบร้อย');
     },
 
     handleMapUpload: (e) => {
@@ -716,12 +798,55 @@ const PlanUI = {
         await App.switchPlan(ym);
     },
 
+    // ✅ ปุ่ม "ตั้งเป็นเดือนที่ใช้งานจริง" — publish เดือนที่กำลังดูอยู่ให้ Sales เห็น
+    publishCurrent: async () => {
+        await App.publishPlan(App._currentPlanYM);
+    },
+
     updateBadge: () => {
         const ym    = App._currentPlanYM;
         const badge = document.getElementById('plan-mode-badge');
         if (badge) badge.textContent = ym ? `📅 ${App.ymToLabel(ym)}` : '📅 Plan';
         const sel = document.getElementById('plan-selector');
         if (sel && ym) sel.value = ym;
+
+        // ✅ ตัวบอกสถานะ live — เดือนที่แอดมินกำลังดูอยู่ ใช่เดือนที่ Sales เห็นจริงไหม
+        const liveBadge  = document.getElementById('plan-live-badge');
+        const publishBtn = document.getElementById('plan-publish-btn');
+        const isLive = ym && ym === App._livePlanYM;
+        if (liveBadge) {
+            if (isLive) {
+                liveBadge.textContent = '🟢 LIVE';
+                liveBadge.style.background = '#059669'; liveBadge.style.color = '#fff';
+            } else {
+                liveBadge.textContent = `⚪ กำลังดู (Live จริง: ${App.ymToLabel(App._livePlanYM || '')})`;
+                liveBadge.style.background = '#e5e7eb'; liveBadge.style.color = '#4b5563';
+            }
+        }
+        if (publishBtn) publishBtn.classList.toggle('hidden', isLive);
+
+        // ✅ UX: badge โหมดปฏิทิน — ไม่ต้องเปิด settings ก็รู้ว่าเดือนนี้ใช้โหมดไหน
+        const modeBadge = document.getElementById('cal-mode-badge');
+        if (modeBadge && ym) {
+            App.planRef(ym).get().then(snap => {
+                const cfg = snap.exists ? (snap.data().calendarConfig || null) : null;
+                const labels = {
+                    cycle:   '🔄 หมุนนับต่อเนื่อง',
+                    date:    '📅 วันที่ตรง Day',
+                    fixed:   '📌 กำหนดเอง',
+                    weekday: '📆 ตามวันในสัปดาห์',
+                };
+                if (cfg && cfg.mode && labels[cfg.mode]) {
+                    modeBadge.textContent = labels[cfg.mode];
+                    modeBadge.classList.remove('hidden');
+                } else {
+                    modeBadge.textContent = '⚠️ ยังไม่ตั้งค่า';
+                    modeBadge.classList.remove('hidden');
+                }
+            }).catch(() => modeBadge.classList.add('hidden'));
+        } else if (modeBadge) {
+            modeBadge.classList.add('hidden');
+        }
     },
 
     // เปิด modal เพิ่มเดือนใหม่
