@@ -331,8 +331,17 @@ const SalesDashboard = {
             SalesDashboard._rows = perMonthRows.flat();
 
             // Target: รวม target ของทุกเดือนที่ตั้งไว้ (เดือนไหนไม่มี target ก็บวก 0)
+            // ✅ FIX (2026-07-13): เดิม targets/{ym} ไม่มี centerId prefix เลย เป็นเอกสารเดียว
+            // ใช้ร่วมกันทุกศูนย์ ศูนย์ไหน save ทีหลังจะทับของศูนย์อื่นทิ้งหมด แก้ให้ใช้ centerId
+            // prefix เดียวกับที่ Admin เขียนไว้ (dashboard.js) พร้อม fallback อ่านของเก่า
+            const cid = (State.centerId || Auth.getSession()?.centerId || '').toUpperCase();
             const targetDocs = await Promise.all(
-                months.map(ym => db.collection('targets').doc(ym).get().catch(() => null))
+                months.map(async (ym) => {
+                    const key = cid ? `${cid}_${ym}` : ym;
+                    let d = await db.collection('targets').doc(key).get().catch(() => null);
+                    if ((!d || !d.exists) && cid) d = await db.collection('targets').doc(ym).get().catch(() => null);
+                    return d;
+                })
             );
             SalesDashboard._target = targetDocs.reduce((sum, doc) => {
                 if (!doc || !doc.exists) return sum;
@@ -466,8 +475,12 @@ const SalesDashboard = {
     // ─── โหลด Target ──────────────────────────────────────────────────────
     _loadTarget: async (ym) => {
         try {
-            const doc = await db.collection('targets').doc(ym).get();
-            if (!doc.exists) return;
+            // ✅ FIX: centerId prefix เดียวกับที่ Admin เขียน กันข้อมูลชนกันข้ามศูนย์
+            const cid = (State.centerId || Auth.getSession()?.centerId || '').toUpperCase();
+            const key = cid ? `${cid}_${ym}` : ym;
+            let doc = await db.collection('targets').doc(key).get();
+            if (!doc.exists && cid) doc = await db.collection('targets').doc(ym).get();
+            if (!doc.exists) { SalesDashboard._target = 0; return; }
             const routes = doc.data().routes || {};
             SalesDashboard._target = routes[SalesDashboard._username] || 0;
         } catch (e) {
@@ -1124,8 +1137,14 @@ const SupervisorDashboard = {
             SupervisorDashboard._allRows = perMonthRows.flat();
 
             // Target: รวม target ต่อสายของทุกเดือน (สายไหนไม่มีบางเดือนก็บวกแค่ที่มี)
+            // ✅ FIX: centerId prefix เดียวกับที่ Admin เขียน กันข้อมูลชนกันข้ามศูนย์
             const targetDocs = await Promise.all(
-                months.map(ym => db.collection('targets').doc(ym).get().catch(() => null))
+                months.map(async (ym) => {
+                    const key = centerId ? `${centerId}_${ym}` : ym;
+                    let d = await db.collection('targets').doc(key).get().catch(() => null);
+                    if ((!d || !d.exists) && centerId) d = await db.collection('targets').doc(ym).get().catch(() => null);
+                    return d;
+                })
             );
             const mergedTargets = {};
             targetDocs.forEach(doc => {
@@ -1168,7 +1187,11 @@ const SupervisorDashboard = {
 
     _loadTargets: async (ym) => {
         try {
-            const doc = await db.collection('targets').doc(ym).get();
+            // ✅ FIX: centerId prefix เดียวกับที่ Admin เขียน กันข้อมูลชนกันข้ามศูนย์
+            const cid = (State.centerId || Auth.getSession()?.centerId || '').toUpperCase();
+            const key = cid ? `${cid}_${ym}` : ym;
+            let doc = await db.collection('targets').doc(key).get();
+            if (!doc.exists && cid) doc = await db.collection('targets').doc(ym).get();
             SupervisorDashboard._targets = doc.exists ? (doc.data().routes || {}) : {};
         } catch(e) { SupervisorDashboard._targets = {}; }
     },
