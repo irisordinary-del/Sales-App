@@ -331,8 +331,17 @@ const SalesDashboard = {
             SalesDashboard._rows = perMonthRows.flat();
 
             // Target: รวม target ของทุกเดือนที่ตั้งไว้ (เดือนไหนไม่มี target ก็บวก 0)
+            // ✅ FIX (2026-07-13): เดิม targets/{ym} ไม่มี centerId prefix เลย เป็นเอกสารเดียว
+            // ใช้ร่วมกันทุกศูนย์ ศูนย์ไหน save ทีหลังจะทับของศูนย์อื่นทิ้งหมด แก้ให้ใช้ centerId
+            // prefix เดียวกับที่ Admin เขียนไว้ (dashboard.js) พร้อม fallback อ่านของเก่า
+            const cid = (State.centerId || Auth.getSession()?.centerId || '').toUpperCase();
             const targetDocs = await Promise.all(
-                months.map(ym => db.collection('targets').doc(ym).get().catch(() => null))
+                months.map(async (ym) => {
+                    const key = cid ? `${cid}_${ym}` : ym;
+                    let d = await db.collection('targets').doc(key).get().catch(() => null);
+                    if ((!d || !d.exists) && cid) d = await db.collection('targets').doc(ym).get().catch(() => null);
+                    return d;
+                })
             );
             SalesDashboard._target = targetDocs.reduce((sum, doc) => {
                 if (!doc || !doc.exists) return sum;
@@ -419,12 +428,41 @@ const SalesDashboard = {
     // ให้ _showEmpty() เลือกข้อความที่ตรงสถานการณ์จริงแทนที่จะโชว์ "—" เหมือนกันหมด
     _chunkFetchFailed: {},
 
-    _showDataWarning: (fail, total) => {
+    // ✅ FIX (bug scan): เดิมนิยามเป็น (fail, total) แต่ที่เรียกจริง 2 จุดส่ง
+    // (ข้อความ, callback) ทำให้ banner โชว์ข้อความเพี้ยน "...ไม่ครบ: [object]/() =>{}... chunks"
+    // และปุ่มลองใหม่ไม่เคยทำงาน แก้ให้รับ (message, onRetry) ตรงกับที่เรียกจริง
+    // และยังรองรับกรณีเรียกด้วยตัวเลข (fail, total) แบบเดิมด้วย เผื่อมีที่อื่นเรียก
+    _showDataWarning: (arg1, arg2) => {
+        let message, onRetry = null;
+        if (typeof arg1 === 'number') {
+            message = `⚠️ โหลดข้อมูลไม่ครบ: ${arg1}/${arg2} chunks`;
+        } else {
+            message = arg1 || '⚠️ โหลดข้อมูลไม่สำเร็จ';
+            if (typeof arg2 === 'function') onRetry = arg2;
+        }
+
+        // กันซ้อนหลายอัน
+        document.getElementById('_sd-data-warning')?.remove();
+
         const warn = document.createElement('div');
-        warn.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#f59e0b;color:#fff;padding:8px 16px;font-size:12px;font-weight:700;z-index:99999;text-align:center;';
-        warn.textContent = `⚠️ โหลดข้อมูลไม่ครบ: ${fail}/${total} chunks`;
+        warn.id = '_sd-data-warning';
+        warn.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#f59e0b;color:#fff;padding:8px 16px;font-size:12px;font-weight:700;z-index:99999;text-align:center;display:flex;align-items:center;justify-content:center;gap:12px;';
+
+        const span = document.createElement('span');
+        span.textContent = message;
+        warn.appendChild(span);
+
+        if (onRetry) {
+            const btn = document.createElement('button');
+            btn.textContent = '🔄 ลองใหม่';
+            btn.style.cssText = 'background:#fff;color:#b45309;border:none;border-radius:6px;padding:3px 12px;font-size:11px;font-weight:800;cursor:pointer;font-family:inherit;';
+            btn.onclick = () => { warn.remove(); onRetry(); };
+            warn.appendChild(btn);
+        }
+
         document.body.appendChild(warn);
-        setTimeout(() => warn.remove(), 5000);
+        // ถ้ามีปุ่มลองใหม่ ไม่ต้อง auto-hide (ให้ user กดเอง) ถ้าเป็นแค่แจ้งเตือน ให้หายเองใน 5 วิ
+        if (!onRetry) setTimeout(() => warn.remove(), 5000);
     },
 
     // ─── Online/Offline listener ─────────────────────────────────────────
@@ -466,8 +504,12 @@ const SalesDashboard = {
     // ─── โหลด Target ──────────────────────────────────────────────────────
     _loadTarget: async (ym) => {
         try {
-            const doc = await db.collection('targets').doc(ym).get();
-            if (!doc.exists) return;
+            // ✅ FIX: centerId prefix เดียวกับที่ Admin เขียน กันข้อมูลชนกันข้ามศูนย์
+            const cid = (State.centerId || Auth.getSession()?.centerId || '').toUpperCase();
+            const key = cid ? `${cid}_${ym}` : ym;
+            let doc = await db.collection('targets').doc(key).get();
+            if (!doc.exists && cid) doc = await db.collection('targets').doc(ym).get();
+            if (!doc.exists) { SalesDashboard._target = 0; return; }
             const routes = doc.data().routes || {};
             SalesDashboard._target = routes[SalesDashboard._username] || 0;
         } catch (e) {
@@ -1124,8 +1166,14 @@ const SupervisorDashboard = {
             SupervisorDashboard._allRows = perMonthRows.flat();
 
             // Target: รวม target ต่อสายของทุกเดือน (สายไหนไม่มีบางเดือนก็บวกแค่ที่มี)
+            // ✅ FIX: centerId prefix เดียวกับที่ Admin เขียน กันข้อมูลชนกันข้ามศูนย์
             const targetDocs = await Promise.all(
-                months.map(ym => db.collection('targets').doc(ym).get().catch(() => null))
+                months.map(async (ym) => {
+                    const key = centerId ? `${centerId}_${ym}` : ym;
+                    let d = await db.collection('targets').doc(key).get().catch(() => null);
+                    if ((!d || !d.exists) && centerId) d = await db.collection('targets').doc(ym).get().catch(() => null);
+                    return d;
+                })
             );
             const mergedTargets = {};
             targetDocs.forEach(doc => {
@@ -1168,7 +1216,11 @@ const SupervisorDashboard = {
 
     _loadTargets: async (ym) => {
         try {
-            const doc = await db.collection('targets').doc(ym).get();
+            // ✅ FIX: centerId prefix เดียวกับที่ Admin เขียน กันข้อมูลชนกันข้ามศูนย์
+            const cid = (State.centerId || Auth.getSession()?.centerId || '').toUpperCase();
+            const key = cid ? `${cid}_${ym}` : ym;
+            let doc = await db.collection('targets').doc(key).get();
+            if (!doc.exists && cid) doc = await db.collection('targets').doc(ym).get();
             SupervisorDashboard._targets = doc.exists ? (doc.data().routes || {}) : {};
         } catch(e) { SupervisorDashboard._targets = {}; }
     },

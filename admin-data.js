@@ -709,9 +709,12 @@ const App = {
                     else if (h.includes('lat') || h.includes('ละติจูด'))                         latCol = i;
                     else if (h.includes('lng') || h.includes('lon') || h.includes('ลองจิจูด'))   lngCol = i;
                     else if (h.includes('freq') || h.includes('ความถี่'))                        freqCol = i;
+                    // ✅ FIX (bug scan): exact 'route'/'สายวิ่ง' → salesCodeCol ก่อน dayCol (substring)
+                    // เดิม column ชื่อ "สายวิ่ง" ถูก dayCol ดักไปก่อน จับรหัสสายไม่ได้เลย
+                    else if (h === 'route' || h === 'สายวิ่ง')                                    salesCodeCol = i;
                     else if (h.includes('day') || h.includes('สายวิ่ง'))                         dayCol = i;
                     else if (h.includes('คิว') || h.includes('seq'))                              seqCol = i;
-                    else if (h.includes('salescode') || h.includes('รหัสเซลล์') || h === 'sales') salesCodeCol = i;
+                    else if ((h.includes('salescode') || h.includes('รหัสเซลล์') || h === 'sales') && salesCodeCol === -1) salesCodeCol = i;
                     else if (h.includes('ประเภท') || h.includes('type'))                         shopTypeCol = i;
                     else if (h.includes('sold to city') || h.includes('ตำบล'))                   subDistrictCol = i;
                     else if (h.includes('sold to state') || h.includes('อำเภอ'))                 districtCol = i;

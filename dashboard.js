@@ -427,8 +427,15 @@ const Dashboard = {
             Dashboard._rows = perMonthRows.flat();
 
             // รวม target ทุกสายของทุกเดือน
+            // ✅ FIX: ใช้ centerId prefix เดียวกับ _loadTargets กันอ่านข้อมูลข้ามศูนย์ผิด
+            const cid2 = (window.CENTER_ID || '').toUpperCase();
             const targetDocs = await Promise.all(
-                months.map(ym => cloudDB.collection('targets').doc(ym).get().catch(() => null))
+                months.map(async (ym) => {
+                    const key = cid2 ? `${cid2}_${ym}` : ym;
+                    let d = await cloudDB.collection('targets').doc(key).get().catch(() => null);
+                    if ((!d || !d.exists) && cid2) d = await cloudDB.collection('targets').doc(ym).get().catch(() => null);
+                    return d;
+                })
             );
             const mergedTargets = {};
             targetDocs.forEach(doc => {
@@ -650,8 +657,17 @@ const Dashboard = {
         // ─── Targets ──────────────────────────────────────────────────────────
     _loadTargets: async (ym) => {
         try {
-            const key = ym;
-            const doc = await cloudDB.collection('targets').doc(key).get();
+            // ✅ FIX (2026-07-13): เดิม key = ym เฉยๆ ไม่มี centerId เลย — targets/2026_07
+            // เป็นเอกสารเดียวใช้ร่วมกันทุกศูนย์ ทำให้ศูนย์ไหนบันทึกทีหลัง .set() แบบไม่มี
+            // merge ไปทับ routes ของศูนย์อื่นทิ้งหมดทั้งเดือน ตอนนี้แยกด้วย centerId prefix
+            // เหมือน sellout (เช่น "402_2026_07") กันชนกันข้ามศูนย์
+            const cid = (window.CENTER_ID || '').toUpperCase();
+            const key = cid ? `${cid}_${ym}` : ym;
+            let doc = await cloudDB.collection('targets').doc(key).get();
+            if (!doc.exists && cid) {
+                // fallback อ่านของเก่าที่เคยเขียนแบบไม่มี prefix (ข้อมูลเก่าก่อนแก้บั๊กนี้)
+                doc = await cloudDB.collection('targets').doc(ym).get();
+            }
             Dashboard._targets = doc.exists ? (doc.data().routes || {}) : {};
         } catch (e) { Dashboard._targets = {}; }
     },
@@ -691,8 +707,10 @@ const Dashboard = {
             if (val > 0) targets[r] = val;
         });
         try {
-            const key = Dashboard._currentYM;
-            await cloudDB.collection('targets').doc(key).set({ routes: targets, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+            // ✅ FIX: ใช้ centerId prefix เดียวกับตอนอ่าน กันเขียนทับข้าม pattern เก่า/ใหม่กัน
+            const cid = (window.CENTER_ID || '').toUpperCase();
+            const key = cid ? `${cid}_${Dashboard._currentYM}` : Dashboard._currentYM;
+            await cloudDB.collection('targets').doc(key).set({ routes: targets, centerId: cid, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
             Dashboard._targets = targets;
             Dashboard._closeTargetModal();
             Dashboard._render();
