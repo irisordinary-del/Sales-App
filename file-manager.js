@@ -362,11 +362,14 @@ const FileManager = {
                     else if (h.includes('lat') || h.includes('ละติจูด'))                             latCol = i;
                     else if (h.includes('lng') || h.includes('lon') || h.includes('ลองจิจูด'))       lngCol = i;
                     else if (h.includes('freq') || h.includes('ความถี่') || h.includes('f2'))        freqCol = i;
+                    // ✅ FIX (bug scan): ย้ายการเช็ค exact 'สายวิ่ง'/'route' มาก่อน dayCol
+                    // เดิม dayCol เช็ค h.includes('สายวิ่ง') ดักไปก่อน ทำให้ column ชื่อ "สายวิ่ง"
+                    // ไม่เคยเข้า salesCodeCol เลย (จับสายผิด) — ตอนนี้ exact match ชนะ substring
+                    else if (h === 'route' || h === 'สายวิ่ง')                                       salesCodeCol = i;
                     else if (h.includes('สายวิ่ง') || h.includes('day'))                             dayCol = i;
                     else if (h.includes('คิว') || h.includes('seq') || h.includes('ลำดับ') || h.includes('order')) seqCol = i;
-                    else if (h === 'route' || h === 'สายวิ่ง')                                           salesCodeCol = i;
                     else if ((h.includes('salescode') || h.includes('รหัสเซลล์') || h === 'sales') && salesCodeCol === -1) salesCodeCol = i;
-                    else if (h.includes('sales'))                                                     salesCodeCol = i;
+                    else if (h.includes('sales') && salesCodeCol === -1)                             salesCodeCol = i;
                     else if (h.includes('ประเภท') || h.includes('type') || h.includes('shoptype'))  shopTypeCol = i;
                     else if (h.includes('sold to city') || h.includes('subdistrict') || h.includes('ตำบล'))     subDistrictCol = i;
                     else if (h.includes('sold to state') || h.includes('district') || h.includes('อำเภอ'))      districtCol = i;

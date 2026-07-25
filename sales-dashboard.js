@@ -428,12 +428,41 @@ const SalesDashboard = {
     // ให้ _showEmpty() เลือกข้อความที่ตรงสถานการณ์จริงแทนที่จะโชว์ "—" เหมือนกันหมด
     _chunkFetchFailed: {},
 
-    _showDataWarning: (fail, total) => {
+    // ✅ FIX (bug scan): เดิมนิยามเป็น (fail, total) แต่ที่เรียกจริง 2 จุดส่ง
+    // (ข้อความ, callback) ทำให้ banner โชว์ข้อความเพี้ยน "...ไม่ครบ: [object]/() =>{}... chunks"
+    // และปุ่มลองใหม่ไม่เคยทำงาน แก้ให้รับ (message, onRetry) ตรงกับที่เรียกจริง
+    // และยังรองรับกรณีเรียกด้วยตัวเลข (fail, total) แบบเดิมด้วย เผื่อมีที่อื่นเรียก
+    _showDataWarning: (arg1, arg2) => {
+        let message, onRetry = null;
+        if (typeof arg1 === 'number') {
+            message = `⚠️ โหลดข้อมูลไม่ครบ: ${arg1}/${arg2} chunks`;
+        } else {
+            message = arg1 || '⚠️ โหลดข้อมูลไม่สำเร็จ';
+            if (typeof arg2 === 'function') onRetry = arg2;
+        }
+
+        // กันซ้อนหลายอัน
+        document.getElementById('_sd-data-warning')?.remove();
+
         const warn = document.createElement('div');
-        warn.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#f59e0b;color:#fff;padding:8px 16px;font-size:12px;font-weight:700;z-index:99999;text-align:center;';
-        warn.textContent = `⚠️ โหลดข้อมูลไม่ครบ: ${fail}/${total} chunks`;
+        warn.id = '_sd-data-warning';
+        warn.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#f59e0b;color:#fff;padding:8px 16px;font-size:12px;font-weight:700;z-index:99999;text-align:center;display:flex;align-items:center;justify-content:center;gap:12px;';
+
+        const span = document.createElement('span');
+        span.textContent = message;
+        warn.appendChild(span);
+
+        if (onRetry) {
+            const btn = document.createElement('button');
+            btn.textContent = '🔄 ลองใหม่';
+            btn.style.cssText = 'background:#fff;color:#b45309;border:none;border-radius:6px;padding:3px 12px;font-size:11px;font-weight:800;cursor:pointer;font-family:inherit;';
+            btn.onclick = () => { warn.remove(); onRetry(); };
+            warn.appendChild(btn);
+        }
+
         document.body.appendChild(warn);
-        setTimeout(() => warn.remove(), 5000);
+        // ถ้ามีปุ่มลองใหม่ ไม่ต้อง auto-hide (ให้ user กดเอง) ถ้าเป็นแค่แจ้งเตือน ให้หายเองใน 5 วิ
+        if (!onRetry) setTimeout(() => warn.remove(), 5000);
     },
 
     // ─── Online/Offline listener ─────────────────────────────────────────
