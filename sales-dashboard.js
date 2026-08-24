@@ -1385,6 +1385,7 @@ const SupervisorDashboard = {
                     </div>
                     <div style="font-size:15px;font-weight:900;color:#dc2626;">${fmt(totalCCN)}</div>
                 </div>` : ''}
+                ${SupervisorDashboard._renderVSummaryBoxes(cInvoiced, confBills, 'purple')}
                 ${SupervisorDashboard._renderRouteBreakdown(cInvoiced, '#7c3aed')}
             </div>
 
@@ -1396,7 +1397,7 @@ const SupervisorDashboard = {
                     <span style="font-size:13px;font-weight:900;color:#2563eb;">🚐 Van (V-routes)</span>
                     <span style="font-size:14px;font-weight:900;color:#2563eb;">${fmt(totalV)}</span>
                 </div>
-                ${SupervisorDashboard._renderVSummaryBoxes(vInvoiced, invCountV)}
+                ${SupervisorDashboard._renderVSummaryBoxes(vInvoiced, invCountV, 'blue')}
                 ${SupervisorDashboard._renderRouteBreakdown(vInvoiced, '#2563eb', true)}
             </div>`;
         }
@@ -1465,11 +1466,17 @@ const SupervisorDashboard = {
         modal.style.display = 'flex';
     },
 
-    // ─── กล่องสรุป ASO / VPO / SKU รวมทุกสาย V ─────────────────────────
-    _renderVSummaryBoxes: (vInvoiced, invCountV) => {
+    // ─── กล่องสรุป ASO / VPO / SKU รวมทุกสาย (ใช้ร่วมกันทั้ง V และ C) ────
+    // theme: เปลี่ยนสีกล่องให้ตรงกับ section ที่เรียกใช้ (blue = Van, purple = Credit)
+    _SUMMARY_THEMES: {
+        blue:   { bg: '#eff6ff', border: '#bfdbfe', label: '#1d4ed8', num: '#1e40af', sub: '#93c5fd' },
+        purple: { bg: '#f5f3ff', border: '#ddd6fe', label: '#7c3aed', num: '#5b21b6', sub: '#c4b5fd' },
+    },
+    _renderVSummaryBoxes: (rows, invCount, themeName = 'blue') => {
         const EXCL = SupervisorDashboard.EXCLUDED_BRANDS;
+        const t = SupervisorDashboard._SUMMARY_THEMES[themeName] || SupervisorDashboard._SUMMARY_THEMES.blue;
         const byOutlet = {};
-        vInvoiced.forEach(r => {
+        rows.forEach(r => {
             if (EXCL.has(r.brandDesc)) return;
             const cust = String(r.custCode || '').trim();
             if (!cust) return;
@@ -1488,20 +1495,20 @@ const SupervisorDashboard = {
             : '—';
         return `
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px;">
-            <div style="background:#eff6ff;border-radius:12px;padding:10px 8px;border:1px solid #bfdbfe;text-align:center;">
-                <div style="font-size:9px;font-weight:700;color:#1d4ed8;margin-bottom:3px;">🏪 ASO</div>
-                <div style="font-size:18px;font-weight:900;color:#1e40af;">${aso.toLocaleString()}</div>
-                <div style="font-size:9px;color:#93c5fd;margin-top:1px;">ร้านที่มียอด</div>
+            <div style="background:${t.bg};border-radius:12px;padding:10px 8px;border:1px solid ${t.border};text-align:center;">
+                <div style="font-size:9px;font-weight:700;color:${t.label};margin-bottom:3px;">🏪 ASO</div>
+                <div style="font-size:18px;font-weight:900;color:${t.num};">${aso.toLocaleString()}</div>
+                <div style="font-size:9px;color:${t.sub};margin-top:1px;">ร้านที่มียอด</div>
             </div>
-            <div style="background:#eff6ff;border-radius:12px;padding:10px 8px;border:1px solid #bfdbfe;text-align:center;">
-                <div style="font-size:9px;font-weight:700;color:#1d4ed8;margin-bottom:3px;">💰 VPO</div>
-                <div style="font-size:18px;font-weight:900;color:#1e40af;">${vpo}</div>
-                <div style="font-size:9px;color:#93c5fd;margin-top:1px;">ยอด/ร้าน</div>
+            <div style="background:${t.bg};border-radius:12px;padding:10px 8px;border:1px solid ${t.border};text-align:center;">
+                <div style="font-size:9px;font-weight:700;color:${t.label};margin-bottom:3px;">💰 VPO</div>
+                <div style="font-size:18px;font-weight:900;color:${t.num};">${vpo}</div>
+                <div style="font-size:9px;color:${t.sub};margin-top:1px;">ยอด/ร้าน</div>
             </div>
-            <div style="background:#eff6ff;border-radius:12px;padding:10px 8px;border:1px solid #bfdbfe;text-align:center;">
-                <div style="font-size:9px;font-weight:700;color:#1d4ed8;margin-bottom:3px;">📦 SKU</div>
-                <div style="font-size:18px;font-weight:900;color:#1e40af;">${avgSku}</div>
-                <div style="font-size:9px;color:#93c5fd;margin-top:1px;">เฉลี่ย/ร้าน</div>
+            <div style="background:${t.bg};border-radius:12px;padding:10px 8px;border:1px solid ${t.border};text-align:center;">
+                <div style="font-size:9px;font-weight:700;color:${t.label};margin-bottom:3px;">📦 SKU</div>
+                <div style="font-size:18px;font-weight:900;color:${t.num};">${avgSku}</div>
+                <div style="font-size:9px;color:${t.sub};margin-top:1px;">เฉลี่ย/ร้าน</div>
             </div>
         </div>`;
     },
