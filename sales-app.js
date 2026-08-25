@@ -1448,8 +1448,103 @@ const CalendarCtrl = {
                 const cnt = _activeStores.filter(s => s.days?.includes(dayLabel) && trimMarketName(s.marketName) === mkt).length;
                 return `<button onclick="CalendarCtrl.navigateToDay('${dayLabel}','${mkt.replace(/'/g,"\\'")}')\" style="width:100%;padding:12px 16px;border-radius:14px;border:1.5px solid #e5e7eb;background:#f9fafb;display:flex;justify-content:space-between;align-items:center;cursor:pointer;font-family:inherit;"><span style="font-size:14px;font-weight:700;color:#111827;">🏪 ${mkt}</span><span style="font-size:12px;font-weight:800;color:#6b7280;background:#e5e7eb;padding:3px 12px;border-radius:20px;">${cnt} ร้าน</span></button>`;
             }).join('')}</div>` : '<div style="text-align:center;color:#9ca3af;font-size:13px;padding:16px 0;">ไม่มีข้อมูลตลาด</div>'}
+            <div style="display:flex;align-items:baseline;justify-content:space-between;margin:18px 4px 10px;">
+                <div style="font-size:13px;font-weight:900;color:#111827;">📈 ยอดขายรายเดือน</div>
+                <div style="font-size:10px;color:#9ca3af;font-weight:700;">ร้านค้าชุดเดียวกับวันนี้ · ${storeCount} ร้าน</div>
+            </div>
+            <div id="cal-month-summary">
+                <div style="text-align:center;color:#9ca3af;font-size:12px;padding:20px 0;">⏳ กำลังโหลด...</div>
+            </div>
         </div>`;
         requestAnimationFrame(() => { body.style.transform = 'translateY(0)'; });
+
+        // ✅ โหลดสรุปยอดขายรายเดือนแบบ async แยกจากส่วนอื่น — ไม่บล็อกการเปิด sheet
+        // ขอบเขต: เฉพาะ "ชุดร้านค้าของวันนี้" เท่านั้น (ไม่ใช่ทั้งสาย/ทั้งเดือน)
+        const dayStoreIds = new Set(
+            _activeStores.filter(s => s.days?.includes(dayLabel)).map(s => String(s.id).trim())
+        );
+        CalendarCtrl._renderMonthSummary(dayStoreIds);
+    },
+
+    // ─── สี badge/แถบ ASO ตามเปอร์เซ็นต์ความครอบคลุม ──────────────────────
+    _asoColors: (pct) => {
+        if (pct >= 80) return { text: '#059669', bg: '#d1fae5', bar: '#10b981' };
+        if (pct >= 50) return { text: '#d97706', bg: '#fef3c7', bar: '#f59e0b' };
+        return { text: '#dc2626', bg: '#fee2e2', bar: '#ef4444' };
+    },
+
+    // ─── สรุปยอดขายรายเดือนของ "ชุดร้านค้าวันนี้" (ต่อจากส่วนเลือกตลาด) ────────
+    _renderMonthSummary: async (dayStoreIds) => {
+        const routeCode = (App.isSupervisor() && SupervisorUI._selectedRoute)
+            ? SupervisorUI._selectedRoute
+            : State.myRoute;
+
+        const container = () => document.getElementById('cal-month-summary');
+        const showMsg = (icon, text) => {
+            if (container()) container().innerHTML = `<div style="text-align:center;color:#9ca3af;font-size:12px;padding:20px 0;">${icon} ${text}</div>`;
+        };
+
+        if (App.isSupervisor() && !SupervisorUI._selectedRoute) {
+            showMsg('🚚', 'เลือกสายก่อนเพื่อดูสรุปยอดขาย');
+            return;
+        }
+        if (!routeCode || !dayStoreIds.size || typeof SalesDashboard === 'undefined') {
+            showMsg('—', 'ไม่พบข้อมูลสาย');
+            return;
+        }
+
+        try {
+            await SalesDashboard._waitForYmKeyMap();
+            const months = Object.keys(SalesDashboard._ymKeyMap || {}).sort().reverse().slice(0, 3);
+            if (!container()) return; // ผู้ใช้ปิด sheet ไปแล้วระหว่างรอ
+
+            if (!months.length) { showMsg('📭', 'ไม่มีข้อมูลยอดขาย'); return; }
+
+            const results = await Promise.all(
+                months.map(ym => SalesDashboard.calcRouteMonthSummary(routeCode, ym, dayStoreIds))
+            );
+            if (!container()) return;
+
+            const fmtB = n => Math.round(n).toLocaleString('th-TH');
+            const cards = months.map((ym, i) => {
+                const r = results[i];
+                if (!r) return ''; // เดือนที่ไม่มียอด — ซ่อนการ์ดทิ้ง
+                const [y, m] = ym.split('_');
+                const label = new Date(+y, +m - 1, 1).toLocaleDateString('th-TH', { year: 'numeric', month: 'long' });
+                const c = CalendarCtrl._asoColors(r.asoPct);
+                return `
+                <div style="background:#fff;border:1px solid #eef0f3;border-radius:16px;padding:14px 16px;margin-bottom:10px;box-shadow:0 1px 2px rgba(17,24,39,0.04);">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                        <span style="font-size:13px;font-weight:900;color:#111827;">${label}</span>
+                        <span style="font-size:11px;font-weight:800;padding:3px 10px;border-radius:20px;background:${c.bg};color:${c.text};">ASO ${r.asoPct}%</span>
+                    </div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                        <div style="background:#f9fafb;border-radius:10px;padding:9px 11px;">
+                            <div style="font-size:9px;color:#9ca3af;font-weight:800;margin-bottom:3px;">💰 ยอดขาย</div>
+                            <div style="font-size:15px;font-weight:900;color:#111827;">${fmtB(r.vol)}</div>
+                        </div>
+                        <div style="background:#f9fafb;border-radius:10px;padding:9px 11px;">
+                            <div style="font-size:9px;color:#9ca3af;font-weight:800;margin-bottom:3px;">📊 VPO</div>
+                            <div style="font-size:15px;font-weight:900;color:#111827;">${fmtB(r.vpo)}</div>
+                        </div>
+                        <div style="background:#f9fafb;border-radius:10px;padding:9px 11px;">
+                            <div style="font-size:9px;color:#9ca3af;font-weight:800;margin-bottom:3px;">🏪 ASO</div>
+                            <div style="font-size:15px;font-weight:900;color:#111827;">${r.aso}<span style="font-size:11px;font-weight:700;color:#9ca3af;">/${r.totalStores}</span></div>
+                            <div style="background:#e5e7eb;border-radius:99px;height:4px;margin-top:6px;overflow:hidden;"><div style="background:${c.bar};height:4px;width:${r.asoPct}%;border-radius:99px;"></div></div>
+                        </div>
+                        <div style="background:#f9fafb;border-radius:10px;padding:9px 11px;">
+                            <div style="font-size:9px;color:#9ca3af;font-weight:800;margin-bottom:3px;">📦 SKU</div>
+                            <div style="font-size:15px;font-weight:900;color:#111827;">${r.sku}</div>
+                        </div>
+                    </div>
+                </div>`;
+            }).join('');
+
+            container().innerHTML = cards || '<div style="text-align:center;color:#9ca3af;font-size:12px;padding:20px 0;">📭 ไม่มีข้อมูลยอดขาย</div>';
+        } catch (e) {
+            console.warn('CalendarCtrl._renderMonthSummary:', e);
+            showMsg('⚠️', 'โหลดข้อมูลไม่สำเร็จ');
+        }
     },
 
     closeDaySheet: () => {
