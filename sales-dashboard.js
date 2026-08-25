@@ -522,15 +522,18 @@ const SalesDashboard = {
 
     _amt: (r) => SalesDashboard._mode === 'gross' ? (r.gross || 0) : (r.net || 0),
 
-    // ─── สรุปยอดขายเดือนเดียวของสายที่ระบุ (ใช้ร่วมกับ CalendarCtrl ในหน้าปฏิทิน) ──
-    // routeCode: รหัสสาย (username), ym: 'YYYY_MM', totalStores: จำนวนร้านทั้งหมดในสาย (ตัวส่วนของ ASO)
-    // คืนค่า null ถ้าเดือนนั้นไม่มียอดขายของสายนี้เลย (ให้ผู้เรียกซ่อนการ์ดทิ้งได้)
-    calcRouteMonthSummary: async (routeCode, ym, totalStores) => {
+    // ─── สรุปยอดขายเดือนเดียวของ "ชุดร้านค้าวันนี้" (สายวิ่งของวันนั้นๆ) ────────
+    // routeCode: รหัสสาย (username), ym: 'YYYY_MM'
+    // dayStoreIds: Set ของรหัสร้าน (custCode) เฉพาะร้านที่วิ่งในวันนั้น — ตัวส่วนของ ASO
+    // คืนค่า null ถ้าเดือนนั้นไม่มียอดขายของชุดร้านนี้เลย (ให้ผู้เรียกซ่อนการ์ดทิ้งได้)
+    calcRouteMonthSummary: async (routeCode, ym, dayStoreIds) => {
         const u = String(routeCode || '').toUpperCase();
-        if (!u) return null;
+        const totalStores = dayStoreIds ? dayStoreIds.size : 0;
+        if (!u || !totalStores) return null;
         await SalesDashboard._waitForYmKeyMap();
         const allRows = await SalesDashboard._loadChunks(ym);
         const rows = allRows.filter(r => String(r.sCode || '').toUpperCase() === u
+            && dayStoreIds.has(String(r.custCode || '').trim())
             && !SalesDashboard.EXCLUDED_BRANDS.has(r.brandDesc));
         if (!rows.length) return null;
 
@@ -549,7 +552,7 @@ const SalesDashboard = {
         const vol = outlets.reduce((s, o) => s + o.vol, 0);
         const vpo = Math.round(vol / aso);
         const sku = (outlets.reduce((s, o) => s + o.skus.size, 0) / aso).toFixed(1);
-        const asoPct = totalStores > 0 ? Math.round((aso / totalStores) * 100) : 0;
+        const asoPct = Math.round((aso / totalStores) * 100);
 
         return { vol, vpo, aso, totalStores, asoPct, sku };
     },
