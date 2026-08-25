@@ -1448,8 +1448,67 @@ const CalendarCtrl = {
                 const cnt = _activeStores.filter(s => s.days?.includes(dayLabel) && trimMarketName(s.marketName) === mkt).length;
                 return `<button onclick="CalendarCtrl.navigateToDay('${dayLabel}','${mkt.replace(/'/g,"\\'")}')\" style="width:100%;padding:12px 16px;border-radius:14px;border:1.5px solid #e5e7eb;background:#f9fafb;display:flex;justify-content:space-between;align-items:center;cursor:pointer;font-family:inherit;"><span style="font-size:14px;font-weight:700;color:#111827;">🏪 ${mkt}</span><span style="font-size:12px;font-weight:800;color:#6b7280;background:#e5e7eb;padding:3px 12px;border-radius:20px;">${cnt} ร้าน</span></button>`;
             }).join('')}</div>` : '<div style="text-align:center;color:#9ca3af;font-size:13px;padding:16px 0;">ไม่มีข้อมูลตลาด</div>'}
+            <div style="font-size:11px;font-weight:800;color:#6b7280;margin:16px 4px 8px;">📈 ยอดขายรายเดือน (สายนี้)</div>
+            <div id="cal-month-summary">
+                <div style="text-align:center;color:#9ca3af;font-size:12px;padding:14px 0;">⏳ กำลังโหลด...</div>
+            </div>
         </div>`;
         requestAnimationFrame(() => { body.style.transform = 'translateY(0)'; });
+
+        // ✅ โหลดสรุปยอดขายรายเดือนแบบ async แยกจากส่วนอื่น — ไม่บล็อกการเปิด sheet
+        CalendarCtrl._renderMonthSummary(_activeStores.length);
+    },
+
+    // ─── สรุปยอดขายรายเดือนของสายนี้ (ต่อจาก "เลือกตลาด" ใน day sheet) ────────
+    _renderMonthSummary: async (totalStores) => {
+        const routeCode = (App.isSupervisor() && SupervisorUI._selectedRoute)
+            ? SupervisorUI._selectedRoute
+            : State.myRoute;
+
+        const container = () => document.getElementById('cal-month-summary');
+        if (!routeCode || typeof SalesDashboard === 'undefined') {
+            if (container()) container().innerHTML = '<div style="text-align:center;color:#9ca3af;font-size:12px;padding:14px 0;">ไม่พบข้อมูลสาย</div>';
+            return;
+        }
+
+        try {
+            await SalesDashboard._waitForYmKeyMap();
+            const months = Object.keys(SalesDashboard._ymKeyMap || {}).sort().reverse().slice(0, 3);
+            if (!container()) return; // ผู้ใช้ปิด sheet ไปแล้วระหว่างรอ
+
+            if (!months.length) {
+                container().innerHTML = '<div style="text-align:center;color:#9ca3af;font-size:12px;padding:14px 0;">ไม่มีข้อมูลยอดขาย</div>';
+                return;
+            }
+
+            const results = await Promise.all(
+                months.map(ym => SalesDashboard.calcRouteMonthSummary(routeCode, ym, totalStores))
+            );
+            if (!container()) return;
+
+            const fmtB = n => Math.round(n).toLocaleString('th-TH');
+            const cards = months.map((ym, i) => {
+                const r = results[i];
+                if (!r) return ''; // เดือนที่ไม่มียอด — ซ่อนการ์ดทิ้ง
+                const [y, m] = ym.split('_');
+                const label = new Date(+y, +m - 1, 1).toLocaleDateString('th-TH', { year: 'numeric', month: 'long' });
+                return `
+                <div style="background:#f9fafb;border:1px solid #f3f4f6;border-radius:14px;padding:12px 14px;margin-bottom:8px;">
+                    <div style="font-size:12px;font-weight:800;color:#111827;margin-bottom:8px;">${label}</div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                        <div><div style="font-size:9px;color:#9ca3af;font-weight:700;">ยอดขาย</div><div style="font-size:14px;font-weight:900;color:#111827;">${fmtB(r.vol)}</div></div>
+                        <div><div style="font-size:9px;color:#9ca3af;font-weight:700;">VPO</div><div style="font-size:14px;font-weight:900;color:#111827;">${fmtB(r.vpo)}</div></div>
+                        <div><div style="font-size:9px;color:#9ca3af;font-weight:700;">ASO</div><div style="font-size:14px;font-weight:900;color:#111827;">${r.aso}/${r.totalStores} <span style="font-size:11px;font-weight:700;color:#6b7280;">(${r.asoPct}%)</span></div></div>
+                        <div><div style="font-size:9px;color:#9ca3af;font-weight:700;">SKU</div><div style="font-size:14px;font-weight:900;color:#111827;">${r.sku}</div></div>
+                    </div>
+                </div>`;
+            }).join('');
+
+            container().innerHTML = cards || '<div style="text-align:center;color:#9ca3af;font-size:12px;padding:14px 0;">ไม่มีข้อมูลยอดขาย</div>';
+        } catch (e) {
+            console.warn('CalendarCtrl._renderMonthSummary:', e);
+            if (container()) container().innerHTML = '<div style="text-align:center;color:#9ca3af;font-size:12px;padding:14px 0;">⚠️ โหลดข้อมูลไม่สำเร็จ</div>';
+        }
     },
 
     closeDaySheet: () => {
