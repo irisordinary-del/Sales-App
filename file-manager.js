@@ -353,7 +353,7 @@ const FileManager = {
                 let idCol=-1, nameCol=-1, latCol=-1, lngCol=-1, freqCol=-1,
                     dayCol=-1, seqCol=-1, salesCodeCol=-1, shopTypeCol=-1,
                     subDistrictCol=-1, districtCol=-1, provinceCol=-1,
-                    marketNameCol=-1, cyCol=-1;
+                    marketNameCol=-1, cyCol=-1, cycleNameCol=-1;
 
                 for (let i = 0; i < headers.length; i++) {
                     const h = String(headers[i]).toLowerCase();
@@ -366,6 +366,9 @@ const FileManager = {
                     // เดิม dayCol เช็ค h.includes('สายวิ่ง') ดักไปก่อน ทำให้ column ชื่อ "สายวิ่ง"
                     // ไม่เคยเข้า salesCodeCol เลย (จับสายผิด) — ตอนนี้ exact match ชนะ substring
                     else if (h === 'route' || h === 'สายวิ่ง')                                       salesCodeCol = i;
+                    // ✅ NEW: "Cycle Name" — ลำดับตลาดที่ตั้งใจให้ชัดเจนกว่าคอลัมน์ Day (เช่น 1 = D01)
+                    // เช็คก่อน dayCol เพราะไม่มีคำว่า day/สายวิ่ง มาชนกัน แยกกันเด็ดขาดโดยธรรมชาติ
+                    else if (h.includes('cycle'))                                                    cycleNameCol = i;
                     else if (h.includes('สายวิ่ง') || h.includes('day'))                             dayCol = i;
                     else if (h.includes('คิว') || h.includes('seq') || h.includes('ลำดับ') || h.includes('order')) seqCol = i;
                     else if ((h.includes('salescode') || h.includes('รหัสเซลล์') || h === 'sales') && salesCodeCol === -1) salesCodeCol = i;
@@ -381,6 +384,24 @@ const FileManager = {
                 if (salesCodeCol === -1) {
                     UI.hideLoader();
                     return UI.showErrorToast('⚠️ ไม่พบ column "Sales Code" ในไฟล์ กรุณาตรวจสอบ header');
+                }
+
+                // ✅ NEW: ไม่มีคอลัมน์ "Cycle Name" — ต้องหยุดถามยืนยันก่อน เพราะการเรียงจาก
+                // คอลัมน์ Day แทนเป็นแค่การเดา (Day อาจไม่ใช่ลำดับตลาดที่ตั้งใจจริงเสมอไป)
+                if (cycleNameCol === -1) {
+                    UI.hideLoader();
+                    const proceed = await new Promise(resolve => {
+                        UI.showConfirm(
+                            '⚠️ ไม่พบคอลัมน์ "Cycle Name" ในไฟล์นี้\n\n' +
+                            'ระบบจะเรียงลำดับ D01, D02, ... จากคอลัมน์ Day ที่มีอยู่แทน (เรียงจากน้อยไปมาก) ' +
+                            'ซึ่งอาจไม่ตรงกับลำดับตลาดที่ตั้งใจจริงเสมอไป\n\n' +
+                            'ต้องการนำเข้าต่อโดยใช้วิธีนี้หรือไม่?',
+                            () => resolve(true),
+                            () => resolve(false)
+                        );
+                    });
+                    if (!proceed) return;
+                    UI.showLoader('📦 กำลังนำเข้าข้อมูล...', 'รอสักครู่');
                 }
 
                 // ─── Parse + จัดกลุ่มตาม salesCode ──────────────────────
@@ -404,7 +425,14 @@ const FileManager = {
                     const freq   = (freqCol !== -1 && String(row[freqCol]||'').toUpperCase().includes('2')) ? 2 : 1;
                     const rawDay = (dayCol !== -1 && row[dayCol]) ? String(row[dayCol]).trim() : '';
                     const dayNum = rawDay ? parseInt(rawDay.replace(/[^0-9]/g, '')) : NaN;
-                    const aDay   = !isNaN(dayNum) ? 'Day ' + dayNum : '';
+                    // ✅ NEW: ถ้าไฟล์มีคอลัมน์ "Cycle Name" ให้ใช้ค่านี้เป็นตัวกำหนดลำดับ D0N แทน
+                    // (เช่น 1 = D01) แม่นยำกว่าคอลัมน์ Day เพราะตั้งใจให้เป็นลำดับตลาดโดยตรง
+                    // ถ้าไฟล์ไม่มีคอลัมน์นี้เลย ใช้ dayNum เดิมไปก่อน แล้วจะ normalize เรียงลำดับ
+                    // ใหม่เป็น D01, D02, ... ทีหลัง (ดูบล็อกหลัง loop นี้)
+                    const rawCycle = (cycleNameCol !== -1 && row[cycleNameCol]) ? String(row[cycleNameCol]).trim() : '';
+                    const cycleNum = rawCycle ? parseInt(rawCycle.replace(/[^0-9]/g, '')) : NaN;
+                    const seqNum   = (cycleNameCol !== -1 && !isNaN(cycleNum)) ? cycleNum : dayNum;
+                    const aDay   = !isNaN(seqNum) ? 'Day ' + seqNum : '';
                     const aSeq   = (seqCol !== -1 && row[seqCol]) ? parseInt(String(row[seqCol]).replace(/[^0-9]/g,'')) : NaN;
 
                     if (byRoute[routeKey][idStr]) {
@@ -426,7 +454,7 @@ const FileManager = {
                             province:    provinceCol !== -1   ? String(row[provinceCol]||'').trim()   : '',
                             marketName:  marketNameCol !== -1  ? String(row[marketNameCol]||'').trim()  : '',
                             cy:          cyCol !== -1          ? String(row[cyCol]||'').trim()          : '',
-                            dayOriginal: rawDay,
+                            dayOriginal: cycleNameCol !== -1 ? rawCycle : rawDay,
                         };
                         if (aDay) { store.days.push(aDay); if (!isNaN(aSeq)) store.seqs[aDay] = aSeq; }
                         byRoute[routeKey][idStr] = store;
@@ -437,6 +465,37 @@ const FileManager = {
                 if (routeKeys.length === 0) {
                     UI.hideLoader();
                     return UI.showErrorToast('⚠️ ไม่พบข้อมูลในไฟล์');
+                }
+
+                // ✅ NEW: ไฟล์ไม่มีคอลัมน์ "Cycle Name" เลย — เรียงเลข Day ที่มีจริงในแต่ละสาย
+                // จากน้อยไปมาก แล้วแทนที่เป็นลำดับต่อเนื่อง D01, D02, D03... (อุดช่องว่าง เช่น
+                // มีแค่ Day 1, 5, 10 ในไฟล์ → กลายเป็น D01, D02, D03 ตามลำดับ) ทำแยกต่อสาย เพราะ
+                // แต่ละสายมี cycle ของตัวเอง ไม่เกี่ยวกัน
+                if (cycleNameCol === -1) {
+                    routeKeys.forEach(routeKey => {
+                        const stores = Object.values(byRoute[routeKey]);
+                        const usedNums = new Set();
+                        stores.forEach(s => s.days.forEach(d => {
+                            const n = parseInt(String(d).replace('Day ', ''));
+                            if (!isNaN(n)) usedNums.add(n);
+                        }));
+                        const sorted  = Array.from(usedNums).sort((a, b) => a - b);
+                        const rankMap = {};
+                        sorted.forEach((n, idx) => { rankMap[n] = idx + 1; });
+
+                        stores.forEach(s => {
+                            const newDays = [];
+                            const newSeqs = {};
+                            s.days.forEach(d => {
+                                const n = parseInt(String(d).replace('Day ', ''));
+                                const newLabel = (!isNaN(n) && rankMap[n]) ? ('Day ' + rankMap[n]) : d;
+                                if (!newDays.includes(newLabel)) newDays.push(newLabel);
+                                if (s.seqs[d] !== undefined) newSeqs[newLabel] = s.seqs[d];
+                            });
+                            s.days = newDays;
+                            s.seqs = newSeqs;
+                        });
+                    });
                 }
 
                 // ─── Merge เข้า State.db.routes ──────────────────────────

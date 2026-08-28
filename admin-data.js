@@ -727,14 +727,14 @@ const App = {
     handleMapUpload: (e) => {
         const file = e.target.files[0]; if (!file) return;
         const reader = new FileReader();
-        reader.onload = (ev) => {
+        reader.onload = async (ev) => {
             try {
                 const data     = new Uint8Array(ev.target.result);
                 const workbook = XLSX.read(data, { type: 'array' });
                 const json     = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1, defval: '' });
                 if (json.length < 2) return UI.showErrorToast('ไฟล์ว่างเปล่า');
                 const headers = json[0];
-                let idCol=-1, nameCol=-1, latCol=-1, lngCol=-1, freqCol=-1, dayCol=-1, seqCol=-1, salesCodeCol=-1, shopTypeCol=-1, subDistrictCol=-1, districtCol=-1, provinceCol=-1, marketNameCol=-1, cyCol=-1;
+                let idCol=-1, nameCol=-1, latCol=-1, lngCol=-1, freqCol=-1, dayCol=-1, seqCol=-1, salesCodeCol=-1, shopTypeCol=-1, subDistrictCol=-1, districtCol=-1, provinceCol=-1, marketNameCol=-1, cyCol=-1, cycleNameCol=-1;
                 for (let i = 0; i < headers.length; i++) {
                     const h = String(headers[i]).toLowerCase();
                     if      (h.includes('รหัส') && !h.includes('เซลล์'))                         idCol = i;
@@ -745,6 +745,8 @@ const App = {
                     // ✅ FIX (bug scan): exact 'route'/'สายวิ่ง' → salesCodeCol ก่อน dayCol (substring)
                     // เดิม column ชื่อ "สายวิ่ง" ถูก dayCol ดักไปก่อน จับรหัสสายไม่ได้เลย
                     else if (h === 'route' || h === 'สายวิ่ง')                                    salesCodeCol = i;
+                    // ✅ NEW: "Cycle Name" — ลำดับตลาดที่ตั้งใจให้ชัดเจนกว่าคอลัมน์ Day (เช่น 1 = D01)
+                    else if (h.includes('cycle'))                                                 cycleNameCol = i;
                     else if (h.includes('day') || h.includes('สายวิ่ง'))                         dayCol = i;
                     else if (h.includes('คิว') || h.includes('seq'))                              seqCol = i;
                     else if ((h.includes('salescode') || h.includes('รหัสเซลล์') || h === 'sales') && salesCodeCol === -1) salesCodeCol = i;
@@ -757,6 +759,23 @@ const App = {
                 }
                 if (latCol === -1 || lngCol === -1 || idCol === -1)
                     return UI.showErrorToast('ไม่พบคอลัมน์ รหัส / Lat / Lng ในไฟล์ครับ');
+
+                // ✅ NEW: ไม่มีคอลัมน์ "Cycle Name" — หยุดถามยืนยันก่อน (การเรียงจากคอลัมน์ Day
+                // แทนเป็นแค่การเดา อาจไม่ตรงกับลำดับตลาดที่ตั้งใจจริงเสมอไป)
+                if (cycleNameCol === -1) {
+                    const proceed = await new Promise(resolve => {
+                        UI.showConfirm(
+                            '⚠️ ไม่พบคอลัมน์ "Cycle Name" ในไฟล์นี้\n\n' +
+                            'ระบบจะเรียงลำดับ D01, D02, ... จากคอลัมน์ Day ที่มีอยู่แทน (เรียงจากน้อยไปมาก) ' +
+                            'ซึ่งอาจไม่ตรงกับลำดับตลาดที่ตั้งใจจริงเสมอไป\n\n' +
+                            'ต้องการนำเข้าต่อโดยใช้วิธีนี้หรือไม่?',
+                            () => resolve(true),
+                            () => resolve(false)
+                        );
+                    });
+                    if (!proceed) return;
+                }
+
                 const storeMap = {};
                 for (let i = 1; i < json.length; i++) {
                     const row = json[i];
@@ -769,7 +788,11 @@ const App = {
                     const freq = (freqCol !== -1 && String(row[freqCol]||'').trim().toUpperCase().includes('2')) ? 2 : 1;
                     const rawDay = (dayCol !== -1 && row[dayCol]) ? String(row[dayCol]).trim() : '';
                     const dayNum = rawDay ? parseInt(rawDay.replace(/[^0-9]/g,'')) : NaN;
-                    const assignedDay = !isNaN(dayNum) ? 'Day ' + dayNum : '';
+                    // ✅ NEW: ถ้ามีคอลัมน์ "Cycle Name" ใช้ค่านี้กำหนดลำดับ D0N แทน dayNum เดิม
+                    const rawCycle = (cycleNameCol !== -1 && row[cycleNameCol]) ? String(row[cycleNameCol]).trim() : '';
+                    const cycleNum = rawCycle ? parseInt(rawCycle.replace(/[^0-9]/g,'')) : NaN;
+                    const seqNum   = (cycleNameCol !== -1 && !isNaN(cycleNum)) ? cycleNum : dayNum;
+                    const assignedDay = !isNaN(seqNum) ? 'Day ' + seqNum : '';
                     const assignedSeq = (seqCol !== -1 && row[seqCol]) ? parseInt(String(row[seqCol]).replace(/[^0-9]/g,'')) : NaN;
                     if (storeMap[idStr]) {
                         if (assignedDay && !storeMap[idStr].days.includes(assignedDay)) {
@@ -786,7 +809,7 @@ const App = {
                             province: provinceCol !== -1 ? String(row[provinceCol]||'').trim() : '',
                             marketName: marketNameCol !== -1 ? String(row[marketNameCol]||'').trim() : '',
                             cy: cyCol !== -1 ? String(row[cyCol]||'').trim() : '',
-                            dayOriginal: rawDay,
+                            dayOriginal: cycleNameCol !== -1 ? rawCycle : rawDay,
                         };
                         if (assignedDay) { s.days.push(assignedDay); if (!isNaN(assignedSeq)) s.seqs[assignedDay] = assignedSeq; }
                         storeMap[idStr] = s;
@@ -794,6 +817,34 @@ const App = {
                 }
                 const finalArray = Object.values(storeMap);
                 if (finalArray.length === 0) return UI.showErrorToast('ไม่พบพิกัด (Lat, Lng) ในไฟล์ครับ');
+
+                // ✅ NEW: ไฟล์ไม่มีคอลัมน์ "Cycle Name" เลย — เรียงเลข Day ที่มีจริงจากน้อยไปมาก
+                // แล้วแทนที่เป็นลำดับต่อเนื่อง D01, D02, D03... (อุดช่องว่าง) หน้านี้อัปโหลดทีละสาย
+                // อยู่แล้ว เลยทำรวมทั้งก้อนได้เลย ไม่ต้องแยกตามสายแบบ bulkImport
+                if (cycleNameCol === -1) {
+                    const usedNums = new Set();
+                    finalArray.forEach(s => s.days.forEach(d => {
+                        const n = parseInt(String(d).replace('Day ', ''));
+                        if (!isNaN(n)) usedNums.add(n);
+                    }));
+                    const sorted  = Array.from(usedNums).sort((a, b) => a - b);
+                    const rankMap = {};
+                    sorted.forEach((n, idx) => { rankMap[n] = idx + 1; });
+
+                    finalArray.forEach(s => {
+                        const newDays = [];
+                        const newSeqs = {};
+                        s.days.forEach(d => {
+                            const n = parseInt(String(d).replace('Day ', ''));
+                            const newLabel = (!isNaN(n) && rankMap[n]) ? ('Day ' + rankMap[n]) : d;
+                            if (!newDays.includes(newLabel)) newDays.push(newLabel);
+                            if (s.seqs[d] !== undefined) newSeqs[newLabel] = s.seqs[d];
+                        });
+                        s.days = newDays;
+                        s.seqs = newSeqs;
+                    });
+                }
+
                 MapCtrl.clearAll();
                 State.stores = finalArray;
                 App.sync(); App.saveDB(); MapCtrl.fitToStores();
