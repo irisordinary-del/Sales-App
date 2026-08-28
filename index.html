@@ -973,6 +973,7 @@
                         </div>
                     </div>
                     ${_session.role === 'admin' ? '<a href="users.html" class="block w-full text-center text-[11px] text-indigo-400 hover:text-indigo-200 font-bold transition py-1 bg-slate-800 rounded-lg">👥 จัดการ Users</a>' : ''}
+                    ${(_session.role === 'admin' || _session.role === 'supervisor') ? `<a href="tasks.html${window.CENTER_ID ? '?center=' + window.CENTER_ID : ''}" class="block w-full text-center text-[11px] text-amber-400 hover:text-amber-200 font-bold transition py-1 bg-slate-800 rounded-lg mt-1">📌 งานที่ต้องส่ง</a>` : ''}
                 `;
             }
             // Center label ถ้ามี

@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <link rel="icon" href="/icons/icon-192.png" type="image/png">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>งานที่ต้องส่ง — Route Planner</title>
+    <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore-compat.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="app-config-init.js"></script>
+    <script src="auth.js"></script>
+    <!-- PWA -->
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#6366f1">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="RoutePlan">
+    <link rel="apple-touch-icon" href="/icons/icon-192.png">
+    <style>
+        body { font-family: 'Prompt', sans-serif; }
+        .scope-center { background:#dbeafe; color:#1e40af; }
+        .scope-routes { background:#fef3c7; color:#92400e; }
+        .badge-active   { background:#d1fae5; color:#065f46; }
+        .badge-inactive { background:#fee2e2; color:#991b1b; }
+        .route-chip { background:#f3f4f6; color:#374151; font-size:11px; font-weight:700; padding:2px 8px; border-radius:8px; }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+    <!-- Toast -->
+    <div id="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 translate-y-24 opacity-0 bg-gray-900 text-white px-5 py-2.5 rounded-full shadow-2xl transition-all duration-300 z-[9999] text-sm font-bold pointer-events-none">
+        <span id="toast-msg"></span>
+    </div>
+
+    <!-- Header -->
+    <header class="bg-slate-900 text-white px-6 py-4 flex items-center justify-between shadow-lg border-b border-slate-700 sticky top-0 z-50">
+        <div class="flex items-center gap-4">
+            <a href="index.html" class="text-slate-400 hover:text-white transition text-sm font-bold flex items-center gap-1.5">
+                ← กลับ Admin
+            </a>
+            <div class="w-px h-5 bg-slate-700"></div>
+            <h1 class="text-lg font-black text-amber-400">📌 งานที่ต้องส่ง</h1>
+        </div>
+        <div class="flex items-center gap-3">
+            <span id="session-info" class="text-xs text-slate-400 font-medium hidden sm:block"></span>
+            <button onclick="Auth.logout()" class="text-xs text-slate-400 hover:text-red-400 font-bold transition">ออกจากระบบ</button>
+        </div>
+    </header>
+
+    <!-- Main -->
+    <main class="max-w-4xl mx-auto p-6">
+
+        <!-- Toolbar -->
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 mb-4 flex flex-wrap gap-3 items-center">
+            <div id="center-select-wrap" class="flex-1 min-w-[180px]">
+                <select id="center-select" onchange="TasksApp.onCenterChange(this.value)"
+                    class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2 text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-300">
+                </select>
+            </div>
+            <button onclick="TasksApp.openCreate()"
+                class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-sm font-bold transition shadow-sm flex items-center gap-1.5">
+                ＋ เพิ่มงาน
+            </button>
+            <button onclick="TasksApp.load()"
+                class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-xl text-sm font-bold transition flex items-center gap-1.5">
+                🔄 รีเฟรช
+            </button>
+        </div>
+
+        <p class="text-xs text-gray-400 mb-3 px-1">คลิกที่วันในปฏิทินเพื่อดู/เพิ่มงานของวันนั้น — งานที่ตั้งไว้จะไปแสดงเป็นเตือนในหน้าปฏิทินฝั่ง Sales (อ่านอย่างเดียว ไม่ต้องกดยืนยันการส่ง)</p>
+
+        <!-- Calendar -->
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
+            <div class="flex items-center justify-between mb-4">
+                <button onclick="TasksApp.prevMonth()" class="w-9 h-9 rounded-xl border border-gray-200 bg-gray-50 hover:bg-gray-100 text-gray-600 font-black transition">‹</button>
+                <div id="cal-month-label" class="text-base font-black text-gray-800"></div>
+                <button onclick="TasksApp.nextMonth()" class="w-9 h-9 rounded-xl border border-gray-200 bg-gray-50 hover:bg-gray-100 text-gray-600 font-black transition">›</button>
+            </div>
+            <div class="grid grid-cols-7 gap-1 mb-1.5 text-center text-[11px] font-bold text-gray-400">
+                <div>อา</div><div>จ</div><div>อ</div><div>พ</div><div>พฤ</div><div>ศ</div><div>ส</div>
+            </div>
+            <div id="task-calendar-grid" class="grid grid-cols-7 gap-1.5"></div>
+            <div class="flex items-center gap-4 mt-4 pt-3 border-t border-gray-50 text-[11px] text-gray-400 font-semibold">
+                <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-[4px]" style="background:#fffbeb;border:1.5px solid #fcd34d;"></span> มีงาน (เปิดใช้งาน)</div>
+                <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-[4px]" style="background:#f9fafb;border:1.5px solid #e5e7eb;"></span> มีงาน (ปิดใช้งาน)</div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Modal: Day Detail -->
+    <div id="day-modal" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-[998] flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-sm">
+            <div class="p-5 border-b flex justify-between items-center">
+                <h2 id="day-modal-title" class="text-base font-black text-gray-800">วันที่</h2>
+                <button onclick="TasksApp.closeDayModal()" class="w-8 h-8 rounded-full border border-gray-200 text-gray-400 hover:bg-gray-100 font-bold transition shrink-0">✕</button>
+            </div>
+            <div class="p-5">
+                <div id="day-task-list" class="flex flex-col gap-2 mb-4 max-h-[45vh] overflow-y-auto"></div>
+                <button onclick="TasksApp.openCreateForDay()"
+                    class="w-full bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl py-2.5 text-sm font-bold transition shadow-sm">
+                    ＋ เพิ่มงานวันนี้
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Create / Edit Task -->
+    <div id="task-modal" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-[999] flex items-center justify-center p-4 overflow-y-auto">
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-md my-8">
+            <div class="p-5 border-b flex justify-between items-center">
+                <h2 id="modal-title" class="text-lg font-black text-gray-800">เพิ่มงาน</h2>
+                <button onclick="TasksApp.closeModal()" class="w-8 h-8 rounded-full border border-gray-200 text-gray-400 hover:bg-gray-100 font-bold transition">✕</button>
+            </div>
+            <div class="p-5 space-y-4">
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1.5">ชื่องาน *</label>
+                    <input id="f-title" type="text" placeholder="เช่น ส่งรายงาน KPI ประจำเดือน"
+                        class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-300">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1.5">รายละเอียด (ไม่บังคับ)</label>
+                    <textarea id="f-desc" rows="2" placeholder="รายละเอียดเพิ่มเติม..."
+                        class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-300 resize-none"></textarea>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1.5">ขอบเขต</label>
+                    <div class="flex gap-2 mb-2">
+                        <button type="button" id="scope-btn-center" onclick="TasksApp.setScope('center')"
+                            class="flex-1 py-2 rounded-xl text-sm font-bold border transition">🏢 ทั้งศูนย์</button>
+                        <button type="button" id="scope-btn-routes" onclick="TasksApp.setScope('routes')"
+                            class="flex-1 py-2 rounded-xl text-sm font-bold border transition">🚚 เจาะจงสาย</button>
+                    </div>
+                    <div id="routes-picker" class="hidden bg-gray-50 border border-gray-200 rounded-xl p-3 max-h-36 overflow-y-auto">
+                        <div id="routes-checklist" class="grid grid-cols-3 gap-2 text-xs"></div>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1.5">รูปแบบวันที่</label>
+                    <div class="flex gap-2 mb-2">
+                        <button type="button" id="date-btn-once" onclick="TasksApp.setDateType('once')"
+                            class="flex-1 py-2 rounded-xl text-sm font-bold border transition">📅 ครั้งเดียว</button>
+                        <button type="button" id="date-btn-monthly" onclick="TasksApp.setDateType('monthly')"
+                            class="flex-1 py-2 rounded-xl text-sm font-bold border transition">🔁 ซ้ำทุกเดือน</button>
+                    </div>
+                    <input id="f-date-once" type="date"
+                        class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-300">
+                    <div id="f-date-monthly-wrap" class="hidden flex items-center gap-2">
+                        <span class="text-sm font-bold text-gray-600">ทุกวันที่</span>
+                        <input id="f-date-monthly" type="number" min="1" max="31" placeholder="15"
+                            class="w-24 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-bold text-center outline-none focus:ring-2 focus:ring-indigo-300">
+                        <span class="text-sm font-bold text-gray-600">ของทุกเดือน</span>
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-3 pt-1">
+                    <input type="checkbox" id="f-active" checked class="w-4 h-4 text-indigo-600 rounded">
+                    <label for="f-active" class="text-sm font-bold text-gray-700">เปิดใช้งาน (แสดงในปฏิทิน Sales)</label>
+                </div>
+            </div>
+            <div class="p-5 border-t flex gap-3">
+                <button onclick="TasksApp.closeModal()" class="flex-1 border border-gray-200 rounded-xl py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-50 transition">ยกเลิก</button>
+                <button onclick="TasksApp.save()" id="btn-save" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl py-2.5 text-sm font-bold transition shadow-sm">บันทึก</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="tasks.js"></script>
+    <script src="pwa-register.js"></script>
+</body>
+</html>

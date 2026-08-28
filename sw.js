@@ -22,7 +22,7 @@ const STATIC_ASSETS = [
     '/index.html',
     '/center-select.html',
     '/users.html',
-    // Styles
+    '/tasks.html',
     '/admin-style.css',
     '/sales-style.css',
     // Scripts
@@ -38,6 +38,7 @@ const STATIC_ASSETS = [
     '/sku-distribution.js',
     '/store-history.js',
     '/users.js',
+    '/tasks.js',
     '/sales-app.js',
     '/sales-dashboard.js',
     '/pwa-register.js',

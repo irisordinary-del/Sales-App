@@ -1094,6 +1094,60 @@ const GPS = {
 };
 
 // ─── CalendarCtrl ─────────────────────────────────────────────────────────
+// ==========================================
+// 📌 TaskCtrl — "งานที่ต้องส่ง" ที่ Admin ตั้งไว้ (อ่านอย่างเดียวฝั่ง Sales)
+// ==========================================
+const TaskCtrl = {
+    _tasks: null,   // cache: array ของ task ที่ active ทั้งหมดในศูนย์นี้
+    _loading: null, // promise กันโหลดซ้ำซ้อนถ้าเรียกพร้อมกันหลายจุด
+
+    // โหลดครั้งเดียวตอนเปิดปฏิทิน แล้ว cache ไว้ใช้ทั้ง grid + day sheet
+    loadAll: async () => {
+        if (TaskCtrl._tasks) return TaskCtrl._tasks;
+        if (TaskCtrl._loading) return TaskCtrl._loading;
+
+        TaskCtrl._loading = (async () => {
+            try {
+                if (!State.centerId) { TaskCtrl._tasks = []; return TaskCtrl._tasks; }
+                const snap = await db.collection('appData').doc(State.centerId + '_main')
+                    .collection('tasks').where('active', '==', true).get();
+                TaskCtrl._tasks = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+            } catch (e) {
+                console.warn('TaskCtrl.loadAll:', e.message);
+                TaskCtrl._tasks = [];
+            }
+            return TaskCtrl._tasks;
+        })();
+        return TaskCtrl._loading;
+    },
+
+    // ─── หา route ที่ "กำลังดูอยู่" สำหรับเช็คว่างานแบบเจาะจงสายตรงไหม ─────
+    // คืน null ถ้าเป็น supervisor มุมมองรวมทุกสาย (ยังไม่เลือกสาย) — งาน scope 'routes' จะไม่ match ในกรณีนี้
+    _activeRouteCode: () => {
+        if (App.isSupervisor() && SupervisorUI._selectedRoute) return SupervisorUI._selectedRoute;
+        if (App.isSupervisor()) return null;
+        return State.myRoute || null;
+    },
+
+    // คืน array ของงานที่ตรงกับวันที่ (Date object) + สายที่กำลังดูอยู่
+    getForDate: (dateObj) => {
+        if (!TaskCtrl._tasks || !TaskCtrl._tasks.length) return [];
+        const routeCode = TaskCtrl._activeRouteCode();
+        const dayOfMonth = dateObj.getDate();
+        const isoDate = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}-${String(dayOfMonth).padStart(2, '0')}`;
+
+        return TaskCtrl._tasks.filter(t => {
+            const dateMatch = t.dateType === 'monthly' ? t.dayOfMonth === dayOfMonth : t.date === isoDate;
+            if (!dateMatch) return false;
+            if (t.scope === 'routes') {
+                if (!routeCode) return false; // มุมมองรวมทุกสาย — งานเจาะจงสายไม่ชัดเจนว่านับสายไหน เลยไม่โชว์
+                return (t.routes || []).map(r => r.toUpperCase()).includes(routeCode.toUpperCase());
+            }
+            return true; // scope 'center' — ทุกสายเห็นเหมือนกัน
+        });
+    },
+};
+
 const CalendarCtrl = {
     _year: null, _month: null,
 
@@ -1362,6 +1416,11 @@ const CalendarCtrl = {
             const isSameAsDate = true; // ไม่แสดงเลข Day badge
             const clickHandler = dayLabel ? `CalendarCtrl.goToDay('${dayLabel}')` : '';
 
+            // 📌 งานที่ต้องส่ง — เช็คตามวันที่ปฏิทินจริง ไม่ขึ้นกับว่าสายวิ่งวันนั้นหรือไม่
+            const tasksForDay = TaskCtrl.getForDate(new Date(year, month, d));
+            const taskLabel   = tasksForDay.length > 1 ? `มีงาน ${tasksForDay.length} อย่าง` : (tasksForDay[0]?.title || '');
+            const taskLine    = taskLabel ? `<div style="font-size:8.5px;font-weight:800;line-height:1.3;padding:1px 3px;width:100%;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;border-radius:4px;background:${isToday?'rgba(255,255,255,0.22)':'#fffbeb'};color:${isToday?'#fff':'#b45309'};">📌 ${taskLabel}</div>` : '';
+
             html += `
             <div onclick="${clickHandler}" ${isToday ? 'id="cal-today-cell"' : ''}
                 style="border-radius:10px;border:1px solid ${borderColor};background:${bgColor};
@@ -1374,6 +1433,7 @@ const CalendarCtrl = {
                 ${hasRoute ? `<div style="width:5px;height:5px;border-radius:50%;background:${isToday?'#fff':'#2563eb'};flex-shrink:0;"></div>` : hasPlanNotLoaded ? `<div style="width:5px;height:5px;border-radius:50%;background:#d1d5db;flex-shrink:0;"></div>` : ''}
                 ${mktLabel ? `<div style="font-size:9px;color:${isToday?'rgba(255,255,255,0.92)':'#1d4ed8'};font-weight:700;line-height:1.3;padding:0 2px;width:100%;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;word-break:break-all;">${mktLabel}${mktMore?`<span style="font-size:8px;color:${isToday?'rgba(255,255,255,0.65)':'#93c5fd'}"> ${mktMore}</span>`:''}</div>` : ''}
                 ` : (isHoliday ? `<div style="font-size:9px;color:#dc2626;font-weight:700;">หยุด</div>` : '')}
+                ${taskLine}
             </div>`;
         }
         container.innerHTML = html;
@@ -1410,6 +1470,7 @@ const CalendarCtrl = {
             const _pk = State.planList.find(p => p === _calYM);
             if (_pk) await App.switchToPlan(_pk);
         }
+        await TaskCtrl.loadAll(); // เบามาก แคชไว้แล้วส่วนใหญ่ — เผื่อกรณีเปิด day sheet เร็วกว่าโหลดเสร็จ
         const _sy = CalendarCtrl._year, _sm = CalendarCtrl._month;
 
         // ✅ FIX-SUP: Supervisor ที่เลือกสายแล้ว → ใช้เฉพาะร้านในสายนั้น
@@ -1428,7 +1489,20 @@ const CalendarCtrl = {
         })();
         const storeCount = _activeStores.filter(s => s.days?.includes(dayLabel)).length;
         const dayNum     = parseInt(dayLabel.replace('Day ',''));
-        const dateStr    = new Date(_sy, _sm, dayNum).toLocaleDateString('th-TH', {weekday:'long',day:'numeric',month:'long'});
+        const sheetDate  = new Date(_sy, _sm, dayNum);
+        const dateStr    = sheetDate.toLocaleDateString('th-TH', {weekday:'long',day:'numeric',month:'long'});
+        const dayTasks   = TaskCtrl.getForDate(sheetDate);
+        const taskSection = dayTasks.length ? `
+        <div style="margin:0 20px 14px;background:#fffbeb;border:1px solid #fde68a;border-radius:14px;padding:12px 14px;">
+            <div style="font-size:12px;font-weight:900;color:#92400e;margin-bottom:6px;">📌 งานที่ต้องส่งวันนี้</div>
+            <div style="display:flex;flex-direction:column;gap:6px;">
+                ${dayTasks.map(t => `
+                <div>
+                    <div style="font-size:13px;font-weight:800;color:#78350f;line-height:1.3;">• ${t.title}</div>
+                    ${t.desc ? `<div style="font-size:11px;color:#92400e;margin-left:12px;margin-top:1px;line-height:1.3;">${t.desc}</div>` : ''}
+                </div>`).join('')}
+            </div>
+        </div>` : '';
 
         let sheet = document.getElementById('cal-day-sheet');
         if (!sheet) {
@@ -1442,6 +1516,7 @@ const CalendarCtrl = {
         body.innerHTML = `<div style="display:flex;justify-content:center;padding:10px 0 6px;"><div style="width:40px;height:4px;border-radius:2px;background:#e5e7eb;"></div></div>
         <div style="padding:4px 20px 14px;"><div style="font-size:11px;color:#6b7280;font-weight:600;">${dateStr}</div><div style="font-size:18px;font-weight:900;color:#111827;margin-top:2px;">${storeCount} ร้านค้า</div></div>
         <div style="height:1px;background:#f3f4f6;margin:0 20px 12px;"></div>
+        ${taskSection}
         <div style="padding:0 16px;">
             <button onclick="CalendarCtrl.navigateToDay('${dayLabel}','')" style="width:100%;padding:13px;border-radius:14px;border:none;background:#2563eb;color:#fff;font-size:15px;font-weight:800;cursor:pointer;margin-bottom:12px;">📋 ดูคิวงานทั้งหมด ${storeCount} ร้าน</button>
             ${mkts.length > 0 ? `<div style="font-size:11px;font-weight:800;color:#6b7280;margin-bottom:8px;padding:0 4px;">เลือกตลาด</div><div style="display:flex;flex-direction:column;gap:8px;">${mkts.map(mkt => {
@@ -1602,6 +1677,8 @@ const CalendarCtrl = {
             Promise.all(State.planList.map(ym => _loader(ym).catch((e) => console.warn('[App] preload เดือน', ym, 'ไม่สำเร็จ:', e))))
                 .then(() => CalendarCtrl.render());
         }
+        // โหลด "งานที่ต้องส่ง" background — โหลดครั้งเดียว cache ไว้ แล้ว re-render กริดให้ขึ้นบรรทัด 📌
+        TaskCtrl.loadAll().then(() => CalendarCtrl.render());
     },
 
     closePopup: (e) => {
