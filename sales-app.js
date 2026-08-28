@@ -1422,20 +1422,20 @@ const CalendarCtrl = {
             // 📌 งานที่ต้องส่ง — เช็คตามวันที่ปฏิทินจริง ไม่ขึ้นกับว่าสายวิ่งวันนั้นหรือไม่
             const tasksForDay = TaskCtrl.getForDate(new Date(year, month, d));
             const taskLabel   = tasksForDay.length > 1 ? `มีงาน ${tasksForDay.length} อย่าง` : (tasksForDay[0]?.title || '');
-            const taskLine    = taskLabel ? `<div style="font-size:8.5px;font-weight:800;line-height:1.3;padding:1px 3px;width:100%;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;border-radius:4px;background:${isToday?'rgba(255,255,255,0.22)':'#fffbeb'};color:${isToday?'#fff':'#b45309'};">📌 ${taskLabel}</div>` : '';
+            const taskLine    = taskLabel ? `<div style="font-size:8.5px;font-weight:800;line-height:1.3;padding:1px 3px;width:100%;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;border-radius:4px;background:${isToday?'rgba(255,255,255,0.22)':'#fffbeb'};color:${isToday?'#fff':'#b45309'};flex-shrink:0;">📌 ${taskLabel}</div>` : '';
 
             html += `
             <div onclick="${clickHandler}" ${isToday ? 'id="cal-today-cell"' : ''}
                 style="border-radius:10px;border:1px solid ${borderColor};background:${bgColor};
                        padding:4px 3px;text-align:center;cursor:${dayLabel ? 'pointer' : 'default'};
-                       min-height:68px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;
+                       height:80px;overflow:hidden;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;
                        gap:2px;transition:background 0.1s;-webkit-tap-highlight-color:rgba(0,0,0,0.08);">
-                <div style="font-size:13px;font-weight:${isToday?'900':'700'};color:${textColor};line-height:1.3;">${d}</div>
+                <div style="font-size:13px;font-weight:${isToday?'900':'700'};color:${textColor};line-height:1.3;flex-shrink:0;">${d}</div>
                 ${dayLabel ? `
-                ${!isSameAsDate ? `<div style="font-size:9px;font-weight:800;padding:1px 5px;border-radius:5px;background:${isToday?'rgba(255,255,255,0.25)':'#ede9fe'};color:${isToday?'#fff':'#5b21b6'};white-space:nowrap;">${dayLabel.replace('Day ','')}</div>` : ''}
+                ${!isSameAsDate ? `<div style="font-size:9px;font-weight:800;padding:1px 5px;border-radius:5px;background:${isToday?'rgba(255,255,255,0.25)':'#ede9fe'};color:${isToday?'#fff':'#5b21b6'};white-space:nowrap;flex-shrink:0;">${dayLabel.replace('Day ','')}</div>` : ''}
                 ${hasRoute ? `<div style="width:5px;height:5px;border-radius:50%;background:${isToday?'#fff':'#2563eb'};flex-shrink:0;"></div>` : hasPlanNotLoaded ? `<div style="width:5px;height:5px;border-radius:50%;background:#d1d5db;flex-shrink:0;"></div>` : ''}
-                ${mktLabel ? `<div style="font-size:9px;color:${isToday?'rgba(255,255,255,0.92)':'#1d4ed8'};font-weight:700;line-height:1.3;padding:0 2px;width:100%;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;word-break:normal;overflow-wrap:break-word;">${mktLabel}${mktMore?`<span style="font-size:8px;color:${isToday?'rgba(255,255,255,0.65)':'#93c5fd'}"> ${mktMore}</span>`:''}</div>` : ''}
-                ` : (isHoliday ? `<div style="font-size:9px;color:#dc2626;font-weight:700;">หยุด</div>` : '')}
+                ${mktLabel ? `<div style="font-size:9px;color:${isToday?'rgba(255,255,255,0.92)':'#1d4ed8'};font-weight:700;line-height:1.3;padding:0 2px;width:100%;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;word-break:normal;overflow-wrap:break-word;flex-shrink:0;">${mktLabel}${mktMore?`<span style="font-size:8px;color:${isToday?'rgba(255,255,255,0.65)':'#93c5fd'}"> ${mktMore}</span>`:''}</div>` : ''}
+                ` : (isHoliday ? `<div style="font-size:9px;color:#dc2626;font-weight:700;flex-shrink:0;">หยุด</div>` : '')}
                 ${taskLine}
             </div>`;
         }
