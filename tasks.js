@@ -124,16 +124,19 @@ const TasksApp = {
             else if (hasTask)       { cellBg = '#f9fafb'; cellBorder = '#e5e7eb'; }
             if (isToday) cellBorder = '#6366f1';
 
-            const tagText = !hasTask ? '' : (dayTasks.length > 1 ? `📌 ${dayTasks.length} งาน` : `📌 ${dayTasks[0].title}`);
-            const tagColor = hasActiveTask ? '#92400e' : '#9ca3af';
+            // ✅ แสดงทุกงานเป็นรายบรรทัด แทนการยุบรวมเป็น "N งาน"
+            const taskLines = dayTasks.map(t => `
+                <div title="${t.title}" style="font-size:9px;font-weight:800;line-height:1.35;color:${t.active ? '#92400e' : '#9ca3af'};
+                            white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:100%;">📌 ${t.title}</div>
+            `).join('');
 
             html += `
             <div onclick="TasksApp.openDay('${iso}')"
                 style="min-height:66px;border-radius:10px;border:1.5px solid ${cellBorder};background:${cellBg};
-                       padding:5px 4px;cursor:pointer;display:flex;flex-direction:column;gap:3px;transition:transform .1s,box-shadow .1s;"
+                       padding:5px 4px;cursor:pointer;display:flex;flex-direction:column;gap:2px;transition:transform .1s,box-shadow .1s;"
                 onmouseover="this.style.boxShadow='0 2px 6px rgba(0,0,0,0.08)'" onmouseout="this.style.boxShadow='none'">
                 <div style="font-size:12px;font-weight:${isToday ? '900' : '700'};color:${isToday ? '#4338ca' : '#111827'};">${d}${isToday ? ' •' : ''}</div>
-                ${tagText ? `<div style="font-size:9px;font-weight:800;line-height:1.25;color:${tagColor};overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;word-break:break-word;">${tagText}</div>` : ''}
+                ${taskLines}
             </div>`;
         }
         grid.innerHTML = html;
