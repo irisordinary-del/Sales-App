@@ -1249,7 +1249,23 @@ const CalendarCtrl = {
 
     getDateFromDay: (dayLabel) => {
         const cfg = State.calendarConfig;
-        if (!cfg) return null;
+        const targetNum = parseInt(String(dayLabel || '').replace('Day ', ''));
+
+        // ✅ FIX: เดิมฟังก์ชันนี้ไม่มี branch สำหรับโหมด date/default/legacy เลย (คืน null เสมอ
+        // ทั้งที่เป็นกรณีที่ง่ายที่สุด — Day N ตรงกับวันที่ N ของเดือนตรงๆ) ทำให้ผู้เรียกต้อง
+        // เขียน logic เดาเองแยกต่างหาก (แล้วดันไปใช้แบบเดาผิดกับโหมดอื่นด้วย) แก้ให้ mirror
+        // การไล่เงื่อนไขแบบเดียวกับ getDayLabelForCfg() เป๊ะ เพื่อให้ไป-กลับ (label↔date) สอดคล้องกันเสมอ
+        if (!cfg || (!cfg.mode && (!cfg.mapping || Object.keys(cfg.mapping).length === 0))) {
+            return isNaN(targetNum) ? null : targetNum;
+        }
+        if (!cfg.mode && cfg.mapping) {
+            // legacy config เก่าสุดที่ไม่มี field mode เลย (ก่อนระบบ mode ถูกสร้าง) — lookup แบบเดียวกับ fixed
+            const entry = Object.entries(cfg.mapping).find(([, v]) => v === dayLabel);
+            return entry ? parseInt(entry[0]) : null;
+        }
+        if (cfg.mode === 'date') {
+            return isNaN(targetNum) ? null : targetNum;
+        }
         if (cfg.mode === 'fixed') {
             if (!cfg.mapping) return null;
             const entry = Object.entries(cfg.mapping).find(([, v]) => v === dayLabel);
@@ -1259,7 +1275,6 @@ const CalendarCtrl = {
             const startDate   = parseInt(cfg.startDay   || 1);
             const holidays    = cfg.holidays || [];
             const startDayNum = parseInt(cfg.startDayNum || 1);
-            const targetNum   = parseInt(dayLabel.replace('Day ', ''));
             const daysInMonth = new Date(CalendarCtrl._year, CalendarCtrl._month + 1, 0).getDate();
             let workDay = startDayNum;
             for (let d = startDate; d <= daysInMonth; d++) {
@@ -1267,6 +1282,7 @@ const CalendarCtrl = {
                 if (workDay === targetNum) return d;
                 workDay++;
             }
+            return null;
         }
         // ⚠️ โหมด weekday: 1 Day ตรงกับหลายวันที่ต่อเดือน (ทุกสัปดาห์) — ไม่มีคำตอบเดียวที่ถูกต้อง
         // เตือนแบบเห็นชัดใน console แทนที่จะคืน null แบบเงียบๆ ถ้ามีจุดไหนเรียกใช้ฟังก์ชันนี้กับโหมดนี้
@@ -1417,7 +1433,9 @@ const CalendarCtrl = {
             const mktMore  = mktsInCell.length > 1 ? '+' + (mktsInCell.length - 1) : '';
             const dayNum      = dayLabel ? parseInt(dayLabel.replace('Day ','')) : null;
             const isSameAsDate = true; // ไม่แสดงเลข Day badge
-            const clickHandler = dayLabel ? `CalendarCtrl.goToDay('${dayLabel}')` : '';
+            // ✅ FIX: ส่ง year/month/d ที่คลิกจริงไปด้วยเสมอ แทนการให้ showDaySheet เดาวันที่คืนจาก dayLabel เอง
+            // (จำเป็นมากในโหมด weekday ที่ 1 dayLabel ตรงกับหลายวันที่ในเดือนเดียวกัน)
+            const clickHandler = dayLabel ? `CalendarCtrl.goToDay('${dayLabel}', ${year}, ${month}, ${d})` : '';
 
             // 📌 งานที่ต้องส่ง — เช็คตามวันที่ปฏิทินจริง ไม่ขึ้นกับว่าสายวิ่งวันนั้นหรือไม่
             const tasksForDay = TaskCtrl.getForDate(new Date(year, month, d));
@@ -1442,7 +1460,7 @@ const CalendarCtrl = {
         container.innerHTML = html;
     },
 
-    goToDay: (dayLabel) => { CalendarCtrl.showDaySheet(dayLabel); },
+    goToDay: (dayLabel, year, month, day) => { CalendarCtrl.showDaySheet(dayLabel, year, month, day); },
 
     navigateToDay: async (dayLabel, market) => {
         CalendarCtrl.closePopup();
@@ -1467,7 +1485,7 @@ const CalendarCtrl = {
         showSalesToast('📅 ' + (market || (mkts[0] || dayLabel)));
     },
 
-    showDaySheet: async (dayLabel) => {
+    showDaySheet: async (dayLabel, clickYear, clickMonth, clickDay) => {
         const _calYM = `${CalendarCtrl._year}_${String(CalendarCtrl._month+1).padStart(2,'0')}`;
         if (_calYM !== (State.activePlanYM || '')) {
             const _pk = State.planList.find(p => p === _calYM);
@@ -1491,8 +1509,23 @@ const CalendarCtrl = {
             return Array.from(names).filter(Boolean).sort();
         })();
         const storeCount = _activeStores.filter(s => s.days?.includes(dayLabel)).length;
-        const dayNum     = parseInt(dayLabel.replace('Day ',''));
-        const sheetDate  = new Date(_sy, _sm, dayNum);
+
+        // ✅ FIX: ใช้วันที่ที่คลิกจริงถ้ามีส่งมา (แม่นยำทุกโหมดปฏิทิน รวมถึง weekday ที่ 1 dayLabel
+        // ตรงกับหลายวันที่ในเดือนเดียวกัน) — ก่อนหน้านี้เดาวันที่จากตัวเลขใน dayLabel ตรงๆ ซึ่งผิด
+        // ทันทีที่ไม่ใช่โหมด date/default (ดู CalendarCtrl.getDateFromDay)
+        // เผื่อกรณีถูกเรียกโดยไม่มี context วันที่ (ไม่ควรเกิดจาก UI ปกติ) ให้ fallback ไปที่ getDateFromDay()
+        let sheetDate;
+        if (Number.isInteger(clickDay)) {
+            sheetDate = new Date(clickYear, clickMonth, clickDay);
+        } else {
+            const _resolvedDay = CalendarCtrl.getDateFromDay(dayLabel);
+            if (_resolvedDay) {
+                sheetDate = new Date(_sy, _sm, _resolvedDay);
+            } else {
+                console.warn('CalendarCtrl.showDaySheet: ไม่ทราบวันที่แน่ชัดของ', dayLabel, '(โหมด weekday ต้องส่ง clickDay มาด้วยเสมอ) — ใช้วันที่ 1 ของเดือนแทนชั่วคราว');
+                sheetDate = new Date(_sy, _sm, 1);
+            }
+        }
         const dateStr    = sheetDate.toLocaleDateString('th-TH', {weekday:'long',day:'numeric',month:'long'});
         const dayTasks   = TaskCtrl.getForDate(sheetDate);
         const taskSection = dayTasks.length ? `
