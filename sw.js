@@ -39,6 +39,8 @@ const STATIC_ASSETS = [
     '/store-history.js',
     '/users.js',
     '/tasks.js',
+    '/admin-theme.js',
+    '/admin-nav.js',
     '/sales-app.js',
     '/sales-dashboard.js',
     '/pwa-register.js',
