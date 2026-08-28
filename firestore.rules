@@ -145,6 +145,19 @@ service cloud.firestore {
                        && request.resource.data.stores.size() <= 250;
         }
       }
+
+      // ─── tasks/{taskId} — "งานที่ต้องส่ง" ตั้งโดย Admin/Supervisor, Sales อ่านอย่างเดียว ──
+      match /tasks/{taskId} {
+        allow read: if true;
+        allow delete: if true;
+        allow write: if request.resource.data.keys().hasAll(['title','scope','dateType','active'])
+                     && request.resource.data.title is string
+                     && request.resource.data.scope in ['center','routes']
+                     && request.resource.data.dateType in ['once','monthly']
+                     && request.resource.data.active is bool
+                     && (!request.resource.data.keys().hasAll(['routes'])    || request.resource.data.routes is list)
+                     && (!request.resource.data.keys().hasAll(['dayOfMonth']) || request.resource.data.dayOfMonth is number);
+      }
     }
 
     // ==========================================
