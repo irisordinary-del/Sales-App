@@ -1173,17 +1173,20 @@ const CalendarCtrl = {
         // ใน Firestore (จากตอนเคยตั้งโหมด "fixed" มาก่อน) มาบังทุกโหมดที่สลับมาทีหลัง
         // (Firestore set({...}, {merge:true}) ไม่ลบ field ย่อยที่ไม่ได้ส่งไปใหม่)
         // แก้โดยเช็ค cfg.mode ก่อนเสมอ ใช้ cfg.mapping แบบ legacy เฉพาะตอนไม่มี mode ระบุมาเลย
+        //
+        // ✅ FIX: เดิม return label เฉพาะตอนที่มีร้านผูกกับวันนั้นจริง ("stores.some(...)")
+        // ทำให้วันที่ไม่มีร้าน/ตลาดเลย (dayLabel = null) กดเข้าไปดู day sheet ไม่ได้เลย
+        // ที่ถูกต้องคือ "Day N" ควรมีอยู่เสมอตามโครงสร้างปฏิทิน ไม่ขึ้นกับว่าวันนั้นมีร้านหรือไม่
+        // (การมีร้านหรือไม่ ใช้ตัดสินแค่ "hasRoute" / จุดสีน้ำเงินเท่านั้น ไม่ควรใช้ตัดสินว่าคลิกได้ไหม)
         if (!cfg || (!cfg.mode && (!cfg.mapping || Object.keys(cfg.mapping).length === 0))) {
-            const label = `Day ${dateNum}`;
-            return (stores || State.allStores).some(s => s.days?.includes(label)) ? label : null;
+            return `Day ${dateNum}`;
         }
         if (!cfg.mode && cfg.mapping) {
             // legacy config เก่าสุดที่ไม่มี field mode เลย (ก่อนระบบ mode ถูกสร้าง)
             return cfg.mapping[String(dateNum)] || null;
         }
         if (cfg.mode === 'date') {
-            const label = `Day ${dateNum}`;
-            return (stores || State.allStores).some(s => s.days?.includes(label)) ? label : null;
+            return `Day ${dateNum}`;
         }
         if (cfg.mode === 'fixed') return cfg.mapping ? (cfg.mapping[String(dateNum)] || null) : null;
         // ✅ โหมดที่ 4: ตามวันในสัปดาห์ — Day N = วันในสัปดาห์ที่กำหนดไว้ ขยายทุกสัปดาห์อัตโนมัติ
@@ -1431,7 +1434,7 @@ const CalendarCtrl = {
                 ${dayLabel ? `
                 ${!isSameAsDate ? `<div style="font-size:9px;font-weight:800;padding:1px 5px;border-radius:5px;background:${isToday?'rgba(255,255,255,0.25)':'#ede9fe'};color:${isToday?'#fff':'#5b21b6'};white-space:nowrap;">${dayLabel.replace('Day ','')}</div>` : ''}
                 ${hasRoute ? `<div style="width:5px;height:5px;border-radius:50%;background:${isToday?'#fff':'#2563eb'};flex-shrink:0;"></div>` : hasPlanNotLoaded ? `<div style="width:5px;height:5px;border-radius:50%;background:#d1d5db;flex-shrink:0;"></div>` : ''}
-                ${mktLabel ? `<div style="font-size:9px;color:${isToday?'rgba(255,255,255,0.92)':'#1d4ed8'};font-weight:700;line-height:1.3;padding:0 2px;width:100%;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;word-break:break-all;">${mktLabel}${mktMore?`<span style="font-size:8px;color:${isToday?'rgba(255,255,255,0.65)':'#93c5fd'}"> ${mktMore}</span>`:''}</div>` : ''}
+                ${mktLabel ? `<div style="font-size:9px;color:${isToday?'rgba(255,255,255,0.92)':'#1d4ed8'};font-weight:700;line-height:1.3;padding:0 2px;width:100%;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;word-break:normal;overflow-wrap:break-word;">${mktLabel}${mktMore?`<span style="font-size:8px;color:${isToday?'rgba(255,255,255,0.65)':'#93c5fd'}"> ${mktMore}</span>`:''}</div>` : ''}
                 ` : (isHoliday ? `<div style="font-size:9px;color:#dc2626;font-weight:700;">หยุด</div>` : '')}
                 ${taskLine}
             </div>`;
