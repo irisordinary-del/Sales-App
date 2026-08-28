@@ -1109,6 +1109,16 @@
             </div>
 
             <div class="overflow-y-auto flex-1 p-5 space-y-4">
+                <!-- ✅ ตั้งค่าเฉพาะสาย — default คือทั้งศูนย์ เลือกสายเพื่อ override เฉพาะสายนั้น -->
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-2">ตั้งค่าสำหรับ</label>
+                    <select id="cal-target-select" onchange="CalendarAdmin.onTargetChange(this.value)"
+                        class="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-300">
+                        <option value="">🏢 ทั้งศูนย์ (default)</option>
+                    </select>
+                    <p id="cal-target-hint" class="text-[10px] text-gray-400 mt-1"></p>
+                </div>
+
                 <!-- โหมด -->
                 <div>
                     <label class="block text-xs font-bold text-gray-500 uppercase mb-2">โหมดปฏิทิน</label>
@@ -1142,22 +1152,50 @@
                     <p id="cal-mode-example" class="text-[11px] text-gray-500 mt-2 bg-gray-50 border border-gray-100 rounded-lg px-3 py-2"></p>
                 </div>
 
-                <!-- ✅ UX: Live preview — เห็นผลลัพธ์จริงก่อนบันทึก -->
+                <!-- ✅ UX: Live preview — เห็นปฏิทินเต็มเดือนจริงก่อนบันทึก (ทุกโหมด) -->
                 <div id="cal-live-preview" class="bg-emerald-50 border border-emerald-100 rounded-xl p-3">
-                    <p class="text-xs font-bold text-emerald-700 mb-1.5">👁️ ตัวอย่างผลลัพธ์ (7 วันแรก)</p>
-                    <div id="cal-preview-list" class="flex flex-wrap gap-1.5"></div>
+                    <p class="text-xs font-bold text-emerald-700 mb-2">👁️ ตัวอย่างปฏิทินทั้งเดือน</p>
+                    <div class="grid grid-cols-7 gap-1 mb-1 text-center text-[10px] font-bold text-emerald-600/70">
+                        <div>อา</div><div>จ</div><div>อ</div><div>พ</div><div>พฤ</div><div>ศ</div><div>ส</div>
+                    </div>
+                    <div id="cal-preview-list" class="grid grid-cols-7 gap-1"></div>
                 </div>
 
                 <!-- Cycle settings -->
                 <div id="cal-cycle-section" class="space-y-3">
                     <div class="bg-indigo-50 border border-indigo-100 rounded-xl p-4 space-y-3">
-                        <div class="flex items-center justify-between">
-                            <label class="text-xs font-bold text-gray-700">Day 1 เริ่มวันที่:</label>
-                            <input type="number" id="cal-start-date" min="1" max="28" value="1" oninput="CalendarAdmin._renderPreview()"
-                                class="w-16 border border-gray-200 rounded-lg px-2 py-1.5 text-sm font-bold text-center outline-none focus:ring-2 focus:ring-indigo-300">
+                        <div>
+                            <label class="block text-xs font-bold text-gray-700 mb-1.5">จุดเริ่มนับ (Day 1 เริ่มที่ไหน):</label>
+                            <div class="grid grid-cols-3 gap-1.5 mb-2">
+                                <button id="cal-anchor-date" onclick="CalendarAdmin.setAnchorType('date')"
+                                    class="rounded-lg py-2 px-1 text-[10px] font-bold transition leading-tight">📅 วันที่ตายตัว</button>
+                                <button id="cal-anchor-weekday-once" onclick="CalendarAdmin.setAnchorType('weekday-once')"
+                                    class="rounded-lg py-2 px-1 text-[10px] font-bold transition leading-tight">🔂 วันในสัปดาห์<br>(จบเมื่อครบรอบ)</button>
+                                <button id="cal-anchor-weekday-rolling" onclick="CalendarAdmin.setAnchorType('weekday-rolling')"
+                                    class="rounded-lg py-2 px-1 text-[10px] font-bold transition leading-tight">🔁 วันในสัปดาห์<br>(วนซ้ำ)</button>
+                            </div>
+                            <div id="cal-anchor-date-wrap" class="flex items-center justify-between">
+                                <span class="text-xs font-bold text-gray-700">เริ่มวันที่:</span>
+                                <input type="number" id="cal-start-date" min="1" max="28" value="1" oninput="CalendarAdmin._renderPreview()"
+                                    class="w-16 border border-gray-200 rounded-lg px-2 py-1.5 text-sm font-bold text-center outline-none focus:ring-2 focus:ring-indigo-300">
+                            </div>
+                            <div id="cal-anchor-weekday-wrap" class="hidden items-center justify-between">
+                                <span class="text-xs font-bold text-gray-700">เริ่มที่วัน:</span>
+                                <select id="cal-anchor-weekday" onchange="CalendarAdmin._renderPreview()"
+                                    class="border border-gray-200 rounded-lg px-2 py-1.5 text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-300">
+                                    <option value="0">อาทิตย์</option>
+                                    <option value="1" selected>จันทร์</option>
+                                    <option value="2">อังคาร</option>
+                                    <option value="3">พุธ</option>
+                                    <option value="4">พฤหัสบดี</option>
+                                    <option value="5">ศุกร์</option>
+                                    <option value="6">เสาร์</option>
+                                </select>
+                            </div>
+                            <p id="cal-anchor-hint" class="text-[10px] text-indigo-500 mt-1.5"></p>
                         </div>
                         <div class="flex items-center justify-between">
-                            <label class="text-xs font-bold text-gray-700">Day เริ่มต้น (ที่วันที่นั้น):</label>
+                            <label class="text-xs font-bold text-gray-700">Day เริ่มต้น (ที่วันเริ่ม):</label>
                             <input type="number" id="cal-start-day-num" min="1" max="24" value="1" oninput="CalendarAdmin._renderPreview()"
                                 class="w-16 border border-gray-200 rounded-lg px-2 py-1.5 text-sm font-bold text-center outline-none focus:ring-2 focus:ring-indigo-300">
                         </div>
@@ -1168,9 +1206,13 @@
                         </div>
                     </div>
                     <div>
-                        <label class="block text-xs font-bold text-gray-700 mb-2">วันหยุด (กดเลือกวันที่):</label>
+                        <label class="block text-xs font-bold text-gray-700 mb-2">วันหยุดประจำสัปดาห์ (ซ้ำทุกเดือนอัตโนมัติ ไม่ต้องมาร์คใหม่ทุกเดือน):</label>
+                        <div id="cal-weekly-holiday-grid" class="grid grid-cols-7 gap-1"></div>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-gray-700 mb-2">วันหยุดเฉพาะกิจของเดือนนี้ (กดเลือกวันที่):</label>
                         <div id="cal-holiday-grid" class="grid grid-cols-7 gap-1"></div>
-                        <p class="text-[10px] text-gray-400 mt-1">วันที่เลือกจะข้าม cycle</p>
+                        <p class="text-[10px] text-gray-400 mt-1">วันที่เลือกใช้เฉพาะเดือนนี้เท่านั้น — copy ไปเดือนหน้าจะไม่ติดไปด้วย (ต่างจากวันหยุดประจำสัปดาห์ด้านบน)</p>
                     </div>
                 </div>
 
@@ -1205,6 +1247,8 @@
             </div>
 
             <div class="p-5 border-t flex gap-3 flex-shrink-0">
+                <button id="cal-remove-override-btn" onclick="CalendarAdmin.removeOverride()"
+                    class="hidden px-4 rounded-xl py-2.5 text-xs font-bold text-red-600 border border-red-200 hover:bg-red-50 transition">🗑️ ลบ override</button>
                 <button onclick="CalendarAdmin.close()"
                     class="flex-1 border border-gray-200 rounded-xl py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-50 transition">ยกเลิก</button>
                 <button onclick="CalendarAdmin.save()"
@@ -1220,9 +1264,14 @@
         const CalendarAdmin = {
             _mode:      'date',   // default = วันที่จริง
             _holidays:  [],
+            _weeklyHolidays: [], // ✅ วันหยุดประจำสัปดาห์ (0=อาทิตย์..6=เสาร์) — ซ้ำทุกเดือนอัตโนมัติ ไม่ผูกกับเดือนใดเดือนหนึ่ง
+            _anchorType: 'date', // ✅ 'date' | 'weekday-once' | 'weekday-rolling' — จุดเริ่มนับของโหมด cycle
+            _anchorWeekday: 1,   // ใช้เมื่อ _anchorType เป็น weekday-*
             _fixedRows: [],
             _weekdayRows: [],   // [{ day:'Day 1', weekday: 1, weekdayName:'จันทร์' }] — weekday: 0=อาทิตย์..6=เสาร์
             _targetRef: null,
+            _targetRoute: '',   // ✅ '' = ตั้งค่า default ของทั้งศูนย์ | 'V01' ฯลฯ = override เฉพาะสายนั้น
+            _hasOverride: false,
             _ym:        '',
 
             // ── เปิด modal ──────────────────────────────────────────────────
@@ -1243,49 +1292,117 @@
                     CalendarAdmin._targetRef = null;
                 }
 
-                // ✅ UX: จำโหมดเดิมไว้เช็คตอน save ว่ามีการเปลี่ยนโหมดกลางคันไหม (เตือนถ้าเปลี่ยน)
-                CalendarAdmin._originalMode = null;
+                // ✅ ตั้งค่าเฉพาะสาย: reset กลับไปที่ "ทั้งศูนย์" ทุกครั้งที่เปิด modal ใหม่
+                CalendarAdmin._targetRoute = '';
+                const sel = document.getElementById('cal-target-select');
+                if (sel) {
+                    const routes = (State.db.routeList || []).slice().sort((a,b) => a.localeCompare(b, 'th', {numeric:true}));
+                    sel.innerHTML = '<option value="">🏢 ทั้งศูนย์ (default)</option>' +
+                        routes.map(r => `<option value="${r}">🚚 ${r}</option>`).join('');
+                    sel.value = '';
+                }
 
-                // โหลด config จาก Firestore
-                CalendarAdmin._holidays  = [];
-                CalendarAdmin._fixedRows   = [];
-                CalendarAdmin._weekdayRows = [];
+                await CalendarAdmin._loadConfig();
+            },
+
+            // ── สลับเป้าหมาย (ทั้งศูนย์ / เฉพาะสาย) ────────────────────────────
+            onTargetChange: async (routeName) => {
+                CalendarAdmin._targetRoute = routeName || '';
+                await CalendarAdmin._loadConfig();
+            },
+
+            // ── โหลด config ตามเป้าหมายปัจจุบัน (ทั้งศูนย์ หรือเฉพาะสาย) ─────────
+            _loadConfig: async () => {
+                CalendarAdmin._originalMode   = null;
+                CalendarAdmin._holidays       = [];
+                CalendarAdmin._weeklyHolidays = [];
+                CalendarAdmin._fixedRows      = [];
+                CalendarAdmin._weekdayRows    = [];
+                CalendarAdmin._anchorType     = 'date';
+                CalendarAdmin._anchorWeekday  = 1;
+                CalendarAdmin._hasOverride    = false;
+
+                let cfg = null;
                 try {
-                    const snap = await CalendarAdmin._targetRef.get();
-                    const cfg  = snap.exists ? (snap.data().calendarConfig || null) : null;
-                    if (cfg && cfg.mode) {
-                        CalendarAdmin._originalMode = cfg.mode; // ✅ มี config เดิมอยู่แล้ว
-                        CalendarAdmin.setMode(cfg.mode);
-                        if (cfg.mode === 'cycle') {
-                            document.getElementById('cal-start-date').value    = cfg.startDay    || 1;
-                            document.getElementById('cal-start-day-num').value = cfg.startDayNum || 1;
-                            document.getElementById('cal-cycle-days').value    = cfg.cycleDays   || 24;
-                            CalendarAdmin._holidays = cfg.holidays || [];
-                        } else if (cfg.mode === 'fixed') {
-                            const mapping = cfg.mapping || {};
-                            CalendarAdmin._fixedRows = Object.entries(mapping)
-                                .map(([d, day]) => ({ date: d, day }));
-                        } else if (cfg.mode === 'weekday') {
-                            const wmap = cfg.weekdayMap || {};
-                            CalendarAdmin._weekdayRows = Object.entries(wmap)
-                                .map(([day, wd]) => ({ day, weekday: wd }));
-                            if (!CalendarAdmin._weekdayRows.length) CalendarAdmin._weekdayRows = CalendarAdmin._defaultWeekdayRows();
+                    if (CalendarAdmin._targetRoute) {
+                        const rd = await App.planRoutesCol(CalendarAdmin._ym).doc(CalendarAdmin._targetRoute).get();
+                        const override = rd.exists ? (rd.data().calendarOverride || null) : null;
+                        CalendarAdmin._hasOverride = !!override;
+                        if (override) {
+                            cfg = override;
+                        } else {
+                            // ยังไม่มี override — โหลดค่า default ของศูนย์มาเป็นจุดเริ่มให้แก้ต่อได้เลย
+                            const snap = await CalendarAdmin._targetRef.get();
+                            cfg = snap.exists ? (snap.data().calendarConfig || null) : null;
                         }
-                        // date mode ไม่ต้องโหลดอะไรเพิ่ม
                     } else {
-                        // ✅ UX: ศูนย์ใหม่ยังไม่เคยตั้งค่า — ไม่ default เงียบๆ ให้เตือนเลือกเองก่อน
-                        CalendarAdmin.setMode('date');
-                        UI.showErrorToast('⚠️ ศูนย์นี้ยังไม่เคยตั้งค่าปฏิทิน กรุณาเลือกโหมดที่ถูกต้องก่อนบันทึก');
+                        const snap = await CalendarAdmin._targetRef.get();
+                        cfg = snap.exists ? (snap.data().calendarConfig || null) : null;
                     }
                 } catch(e) {
-                    console.warn('CalendarAdmin.open:', e);
-                    CalendarAdmin.setMode('date');
+                    console.warn('CalendarAdmin._loadConfig:', e);
                 }
+
+                if (cfg && cfg.mode) {
+                    CalendarAdmin._originalMode = cfg.mode;
+                    CalendarAdmin.setMode(cfg.mode);
+                    if (cfg.mode === 'cycle') {
+                        CalendarAdmin._anchorType    = cfg.anchorType || 'date';
+                        CalendarAdmin._anchorWeekday = (cfg.anchorWeekday !== undefined) ? cfg.anchorWeekday : 1;
+                        document.getElementById('cal-start-date').value     = cfg.startDay    || 1;
+                        document.getElementById('cal-anchor-weekday').value = CalendarAdmin._anchorWeekday;
+                        document.getElementById('cal-start-day-num').value  = cfg.startDayNum || 1;
+                        document.getElementById('cal-cycle-days').value     = cfg.cycleDays   || 24;
+                        CalendarAdmin._holidays       = cfg.holidays       || [];
+                        CalendarAdmin._weeklyHolidays = cfg.weeklyHolidays || [];
+                        CalendarAdmin.setAnchorType(CalendarAdmin._anchorType);
+                    } else if (cfg.mode === 'fixed') {
+                        const mapping = cfg.mapping || {};
+                        CalendarAdmin._fixedRows = Object.entries(mapping)
+                            .map(([d, day]) => ({ date: d, day }));
+                    } else if (cfg.mode === 'weekday') {
+                        const wmap = cfg.weekdayMap || {};
+                        CalendarAdmin._weekdayRows = Object.entries(wmap)
+                            .map(([day, wd]) => ({ day, weekday: wd }));
+                        if (!CalendarAdmin._weekdayRows.length) CalendarAdmin._weekdayRows = CalendarAdmin._defaultWeekdayRows();
+                    }
+                    // date mode ไม่ต้องโหลดอะไรเพิ่ม
+                } else {
+                    // ✅ UX: ศูนย์ใหม่ยังไม่เคยตั้งค่า — ไม่ default เงียบๆ ให้เตือนเลือกเองก่อน
+                    CalendarAdmin.setMode('date');
+                    if (!CalendarAdmin._targetRoute) {
+                        UI.showErrorToast('⚠️ ศูนย์นี้ยังไม่เคยตั้งค่าปฏิทิน กรุณาเลือกโหมดที่ถูกต้องก่อนบันทึก');
+                    }
+                }
+
+                // ปุ่ม "ลบ override" โชว์เฉพาะตอนเลือกสายที่มี override จริงอยู่แล้วเท่านั้น
+                const removeBtn = document.getElementById('cal-remove-override-btn');
+                if (removeBtn) removeBtn.classList.toggle('hidden', !CalendarAdmin._hasOverride);
+
+                const hint = document.getElementById('cal-target-hint');
+                if (hint) {
+                    hint.textContent = !CalendarAdmin._targetRoute
+                        ? 'ค่านี้จะใช้กับทุกสายในศูนย์ ยกเว้นสายที่ตั้ง override ไว้เฉพาะ'
+                        : (CalendarAdmin._hasOverride
+                            ? `สาย ${CalendarAdmin._targetRoute} มีการตั้งค่าเฉพาะอยู่แล้ว — แก้ไขด้านล่างแล้วบันทึกทับได้เลย`
+                            : `สาย ${CalendarAdmin._targetRoute} ยังไม่มี override — ตอนนี้ใช้ default ของศูนย์อยู่ (แก้ด้านล่างแล้วบันทึกเพื่อสร้าง override ใหม่)`);
+                }
+
                 CalendarAdmin._renderHolidayGrid();
+                CalendarAdmin._renderWeeklyHolidayGrid();
                 CalendarAdmin._renderFixedRows();
                 CalendarAdmin._renderWeekdayRows();
                 CalendarAdmin._renderExample();
                 CalendarAdmin._renderPreview();
+            },
+
+            // ── ลบ override ของสายที่เลือกอยู่ กลับไปใช้ default ของศูนย์ ─────────
+            removeOverride: async () => {
+                if (!CalendarAdmin._targetRoute) return;
+                const ok = confirm(`ลบการตั้งค่าเฉพาะของสาย ${CalendarAdmin._targetRoute} แล้วกลับไปใช้ default ของศูนย์?`);
+                if (!ok) return;
+                await App.saveRouteCalendarOverride(CalendarAdmin._targetRoute, null);
+                await CalendarAdmin._loadConfig();
             },
 
             // ── ปิด modal ───────────────────────────────────────────────────
@@ -1331,6 +1448,33 @@
                 CalendarAdmin._renderPreview();
             },
 
+            // ── เลือก anchor type ของโหมด cycle (จุดเริ่มนับ Day 1) ──────────────
+            setAnchorType: (type) => {
+                CalendarAdmin._anchorType = type;
+                const active   = 'rounded-lg py-2 px-1 text-[10px] font-bold transition leading-tight border-2 border-indigo-500 bg-indigo-100 text-indigo-800';
+                const inactive = 'rounded-lg py-2 px-1 text-[10px] font-bold transition leading-tight border border-gray-200 bg-white text-gray-600';
+                ['date', 'weekday-once', 'weekday-rolling'].forEach(t => {
+                    const btn = document.getElementById('cal-anchor-' + t);
+                    if (btn) btn.className = (t === type) ? active : inactive;
+                });
+                const dateWrap    = document.getElementById('cal-anchor-date-wrap');
+                const weekdayWrap = document.getElementById('cal-anchor-weekday-wrap');
+                if (dateWrap)    dateWrap.classList.toggle('hidden', type !== 'date');
+                if (weekdayWrap) {
+                    weekdayWrap.classList.toggle('hidden', type === 'date');
+                    weekdayWrap.classList.toggle('flex', type !== 'date');
+                }
+                const hint = document.getElementById('cal-anchor-hint');
+                if (hint) {
+                    hint.textContent = type === 'weekday-once'
+                        ? '📌 Day 1 = วันในสัปดาห์ที่เลือก สัปดาห์แรกของเดือน ไล่ยาวจนครบ Cycle แล้วจบ (ไม่วนซ้ำ)'
+                        : type === 'weekday-rolling'
+                        ? '📌 Day 1 = วันในสัปดาห์ที่เลือก สัปดาห์แรกของเดือน ไล่ยาวจนครบ Cycle แล้ววนกลับ Day 1 ใหม่ วิ่งต่อจนหมดเดือน'
+                        : '📌 Day 1 เริ่มที่เลขวันที่ตายตัวทุกเดือน (ถ้าอยากให้ Day 1 ตรงกับวันในสัปดาห์เดิมทุกเดือน ใช้ 2 ตัวเลือกด้านซ้าย/ขวาแทน)';
+                }
+                CalendarAdmin._renderPreview();
+            },
+
             // ✅ ค่าเริ่มต้นสำหรับโหมด weekday — จันทร์-เสาร์ = Day 1-6 (ปรับได้ทีหลัง)
             _defaultWeekdayRows: () => {
                 const names = ['อาทิตย์','จันทร์','อังคาร','พุธ','พฤหัสบดี','ศุกร์','เสาร์'];
@@ -1350,25 +1494,39 @@
                 el.textContent = examples[CalendarAdmin._mode] || '';
             },
 
-            // ✅ UX: Live preview — คำนวณ Day ของ 7 วันแรกของเดือนนี้ตามค่าที่ตั้งอยู่ตอนนี้ (ก่อนกดบันทึก)
+            // ✅ UX: Live preview — ปฏิทินเต็มเดือนจริง (ไม่ใช่แค่ 7 วันแรก) ให้เห็นภาพรวมทั้งเดือนทุกโหมด
             _renderPreview: () => {
                 const el = document.getElementById('cal-preview-list');
                 if (!el || !CalendarAdmin._ym) return;
                 const [y, m] = CalendarAdmin._ym.split('_').map(Number);
                 const daysInMonth = new Date(y, m, 0).getDate();
-                const n = Math.min(7, daysInMonth);
+                const firstDow    = new Date(y, m - 1, 1).getDay();
+                const now         = new Date();
+                const isCurMonth  = (now.getFullYear() === y && now.getMonth() === m - 1);
 
-                const chips = [];
-                for (let d = 1; d <= n; d++) {
-                    const label = CalendarAdmin._computeDayLabel(d);
-                    const dateStr = `${String(d).padStart(2,'0')}/${String(m).padStart(2,'0')}`;
-                    chips.push(`
-                        <div style="background:#fff;border:1px solid #d1fae5;border-radius:8px;padding:4px 8px;text-align:center;min-width:52px;">
-                            <div style="font-size:9px;color:#6b7280;font-weight:700;">${dateStr}</div>
-                            <div style="font-size:11px;font-weight:900;color:${label ? '#059669' : '#d1d5db'};">${label || '—'}</div>
-                        </div>`);
+                let html = '';
+                for (let i = 0; i < firstDow; i++) html += '<div></div>';
+
+                for (let d = 1; d <= daysInMonth; d++) {
+                    const label    = CalendarAdmin._computeDayLabel(d);
+                    const isToday  = isCurMonth && now.getDate() === d;
+                    const isHol    = CalendarAdmin._mode === 'cycle' && (
+                        (CalendarAdmin._holidays || []).includes(d) ||
+                        (CalendarAdmin._weeklyHolidays || []).includes(new Date(y, m - 1, d).getDay())
+                    );
+
+                    let bg = '#fff', border = '#d1fae5', textColor = label ? '#059669' : '#d1d5db';
+                    if (isHol)          { bg = '#fee2e2'; border = '#fecaca'; textColor = '#dc2626'; }
+                    else if (!label)    { bg = '#f9fafb'; border = '#e5e7eb'; }
+                    if (isToday)        { border = '#6366f1'; }
+
+                    html += `
+                    <div style="background:${bg};border:1.5px solid ${border};border-radius:8px;padding:4px 2px;text-align:center;min-height:40px;display:flex;flex-direction:column;justify-content:center;gap:1px;">
+                        <div style="font-size:9px;font-weight:${isToday ? '900' : '700'};color:${isToday ? '#4338ca' : '#6b7280'};">${d}</div>
+                        <div style="font-size:9px;font-weight:900;color:${textColor};">${isHol ? 'หยุด' : (label ? label.replace('Day ','D') : '—')}</div>
+                    </div>`;
                 }
-                el.innerHTML = chips.join('');
+                el.innerHTML = html;
             },
 
             // ✅ ใช้ algorithm เดียวกับ CalendarCtrl.getDayLabelForCfg ใน sales-app.js (ต้องตรงกันเป๊ะ ไม่งั้น preview จะโกหก)
@@ -1387,23 +1545,71 @@
                     return row ? row.day : null;
                 }
                 if (mode === 'cycle') {
-                    const startDate  = parseInt(document.getElementById('cal-start-date')?.value)    || 1;
+                    if (!CalendarAdmin._ym) return null;
+                    const [y, m]     = CalendarAdmin._ym.split('_').map(Number); // m = 1-indexed
+                    const anchorType = CalendarAdmin._anchorType || 'date';
                     const startNum   = parseInt(document.getElementById('cal-start-day-num')?.value) || 1;
                     const cycleDays  = parseInt(document.getElementById('cal-cycle-days')?.value)     || 24;
-                    const holidays   = CalendarAdmin._holidays || [];
+                    const holidays       = CalendarAdmin._holidays       || [];
+                    const weeklyHolidays = CalendarAdmin._weeklyHolidays || [];
+                    const isHol = (d) => holidays.includes(d) || weeklyHolidays.includes(new Date(y, m-1, d).getDay());
+
+                    // ✅ จุดเริ่มนับ — แบบเดิม (เลขวันที่ตายตัว) หรือแบบใหม่ (วันในสัปดาห์แรกของเดือน)
+                    let startDate;
+                    if (anchorType === 'weekday-once' || anchorType === 'weekday-rolling') {
+                        const anchorWd = parseInt(document.getElementById('cal-anchor-weekday')?.value);
+                        const daysInMonth = new Date(y, m, 0).getDate();
+                        startDate = null;
+                        for (let d = 1; d <= daysInMonth; d++) {
+                            if (new Date(y, m-1, d).getDay() === anchorWd) { startDate = d; break; }
+                        }
+                        if (startDate === null) return null;
+                    } else {
+                        startDate = parseInt(document.getElementById('cal-start-date')?.value) || 1;
+                    }
+
                     if (dateNum < startDate) return null;
                     let dayCounter = startNum, workdays = 0;
                     for (let d = startDate; d <= dateNum; d++) {
-                        if (holidays.includes(d)) continue;
+                        if (isHol(d)) continue;
                         workdays++;
                         if (d === dateNum) {
-                            const dayNum = dayCounter + workdays - 1;
-                            if (dayNum > cycleDays) return null;
+                            let dayNum = dayCounter + workdays - 1;
+                            if (dayNum > cycleDays) {
+                                // ✅ weekday-rolling: วนกลับ Day 1 เมื่อครบรอบ — แบบอื่นจบเมื่อครบรอบ
+                                if (anchorType === 'weekday-rolling') {
+                                    dayNum = ((dayNum - startNum) % cycleDays) + startNum;
+                                } else {
+                                    return null;
+                                }
+                            }
                             return 'Day ' + dayNum;
                         }
                     }
                 }
                 return null;
+            },
+
+            // ── วันหยุดประจำสัปดาห์ (cycle mode) ─────────────────────────────
+            _renderWeeklyHolidayGrid: () => {
+                const grid = document.getElementById('cal-weekly-holiday-grid');
+                if (!grid) return;
+                const names = ['อา','จ','อ','พ','พฤ','ศ','ส'];
+                grid.innerHTML = names.map((n, wd) => {
+                    const isOn = (CalendarAdmin._weeklyHolidays || []).includes(wd);
+                    return `<button onclick="CalendarAdmin.toggleWeeklyHoliday(${wd})" id="wkhol-${wd}"
+                        style="border-radius:6px;border:1px solid ${isOn ? '#fecaca' : '#e5e7eb'};
+                               background:${isOn ? '#fee2e2' : '#f9fafb'};
+                               color:${isOn ? '#dc2626' : '#374151'};
+                               font-size:11px;font-weight:700;padding:4px 2px;cursor:pointer;">${n}</button>`;
+                }).join('');
+            },
+            toggleWeeklyHoliday: (wd) => {
+                const idx = CalendarAdmin._weeklyHolidays.indexOf(wd);
+                if (idx >= 0) CalendarAdmin._weeklyHolidays.splice(idx, 1);
+                else CalendarAdmin._weeklyHolidays.push(wd);
+                CalendarAdmin._renderWeeklyHolidayGrid();
+                CalendarAdmin._renderPreview();
             },
 
             // ── วันหยุด (cycle mode) ────────────────────────────────────────
@@ -1518,10 +1724,13 @@
                 if (CalendarAdmin._mode === 'cycle') {
                     cfg = {
                         mode:        'cycle',
+                        anchorType:  CalendarAdmin._anchorType || 'date',
                         startDay:    parseInt(document.getElementById('cal-start-date').value)    || 1,
+                        anchorWeekday: parseInt(document.getElementById('cal-anchor-weekday').value),
                         startDayNum: parseInt(document.getElementById('cal-start-day-num').value) || 1,
                         cycleDays:   parseInt(document.getElementById('cal-cycle-days').value)    || 24,
-                        holidays:    [...CalendarAdmin._holidays].sort((a,b) => a-b),
+                        holidays:       [...CalendarAdmin._holidays].sort((a,b) => a-b),
+                        weeklyHolidays: [...CalendarAdmin._weeklyHolidays].sort((a,b) => a-b),
                     };
                 } else if (CalendarAdmin._mode === 'date') {
                     cfg = { mode: 'date' };
@@ -1573,19 +1782,26 @@
                     cfg = { mode: 'fixed', mapping };
                 }
                 try {
-                    // ✅ BUGFIX: ใช้ mergeFields แทน merge:true ธรรมดา
-                    // merge:true ปกติจะ "recursive merge" nested object — field เก่าใน calendarConfig
-                    // (เช่น mapping ที่เคยตั้งไว้ตอนโหมด "fixed") จะไม่ถูกลบเวลาสลับไปโหมดอื่น
-                    // ทำให้ getDayLabelForCfg() งงเพราะเจอ mapping เก่าปนอยู่ mergeFields ที่ระบุ path
-                    // ระดับ top field ("calendarConfig") จะ "แทนที่ทั้งก้อน" ไม่ merge ลึกลงไปข้างใน
-                    await CalendarAdmin._targetRef.set(
-                        { calendarConfig: cfg, updatedAt: firebase.firestore.FieldValue.serverTimestamp() },
-                        { mergeFields: ['calendarConfig', 'updatedAt'] }
-                    );
-                    State.db.calendarConfig = cfg;
-                    CalendarAdmin.close();
-                    UI.showSaveToast('✅ บันทึกตั้งค่าปฏิทินเรียบร้อย');
-                    console.log('✅ calendarConfig saved:', JSON.stringify(cfg));
+                    if (CalendarAdmin._targetRoute) {
+                        // ✅ ตั้งค่าเฉพาะสาย — บันทึกเป็น override ของสายนั้น ไม่แตะ default ของศูนย์
+                        // (saveRouteCalendarOverride แสดง toast ความสำเร็จของตัวเองอยู่แล้ว ไม่ต้องซ้ำ)
+                        await App.saveRouteCalendarOverride(CalendarAdmin._targetRoute, cfg);
+                        CalendarAdmin.close();
+                    } else {
+                        // ✅ BUGFIX: ใช้ mergeFields แทน merge:true ธรรมดา
+                        // merge:true ปกติจะ "recursive merge" nested object — field เก่าใน calendarConfig
+                        // (เช่น mapping ที่เคยตั้งไว้ตอนโหมด "fixed") จะไม่ถูกลบเวลาสลับไปโหมดอื่น
+                        // ทำให้ getDayLabelForCfg() งงเพราะเจอ mapping เก่าปนอยู่ mergeFields ที่ระบุ path
+                        // ระดับ top field ("calendarConfig") จะ "แทนที่ทั้งก้อน" ไม่ merge ลึกลงไปข้างใน
+                        await CalendarAdmin._targetRef.set(
+                            { calendarConfig: cfg, updatedAt: firebase.firestore.FieldValue.serverTimestamp() },
+                            { mergeFields: ['calendarConfig', 'updatedAt'] }
+                        );
+                        State.db.calendarConfig = cfg;
+                        CalendarAdmin.close();
+                        UI.showSaveToast('✅ บันทึกตั้งค่าปฏิทินเรียบร้อย');
+                    }
+                    console.log('✅ calendarConfig saved:', JSON.stringify(cfg), '| target:', CalendarAdmin._targetRoute || '(ทั้งศูนย์)');
                     if (typeof PlanUI !== 'undefined') PlanUI.updateBadge(); // ✅ อัปเดต badge ทันที
                 } catch(e) {
                     UI.showErrorToast('❌ บันทึกไม่สำเร็จ: ' + e.message);

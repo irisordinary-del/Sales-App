@@ -426,21 +426,36 @@ const App = {
             const srcMeta = srcData?.exists ? srcData.data() : {};
             const copyRouteList = srcMeta.routeList || State.db.routeList || [];
 
+            // ✅ FIX: วันหยุด "เฉพาะกิจ" (เลขวันที่ เช่น วันหยุดนักขัตฤกษ์ 12 ส.ค.) ผูกกับเดือนต้นทาง
+            // เท่านั้น ห้าม copy ข้ามเดือนตรงๆ (วันที่ 12 เดือนหน้าอาจไม่ใช่วันหยุดเลย) ส่วน
+            // "วันหยุดประจำสัปดาห์" (เช่น อาทิตย์หยุดทุกสัปดาห์) เป็นกติกาที่ไม่ขึ้นกับเดือน copy ได้ปกติ
+            // เช่นเดียวกับ anchorType/anchorWeekday ของแบบวิ่งอิงวันในสัปดาห์ — คำนวณสดใหม่ทุกเดือนอยู่แล้ว
+            let copyCalendarConfig = srcMeta.calendarConfig || null;
+            if (copyCalendarConfig && copyCalendarConfig.mode === 'cycle') {
+                copyCalendarConfig = { ...copyCalendarConfig, holidays: [] };
+            }
+
             await App.planRef(ym).set({
                 routeList:     copyRouteList,
                 cycleDays:     srcMeta.cycleDays     || State.db.cycleDays || 24,
-                calendarConfig: srcMeta.calendarConfig || null,
+                calendarConfig: copyCalendarConfig,
                 createdAt:     firebase.firestore.FieldValue.serverTimestamp(),
                 updatedAt:     firebase.firestore.FieldValue.serverTimestamp(),
                 copiedFrom:    srcYM || '',
             });
 
-            // Copy routes จาก plan ต้นทาง
+            // Copy routes จาก plan ต้นทาง — รวม calendarOverride เฉพาะสาย (ถ้ามี) ไปด้วย
+            // ล้าง holidays เฉพาะกิจของ override เหมือนกับที่ทำกับ default ของศูนย์ข้างบน
             if (srcYM && copyRouteList.length > 0) {
                 await Promise.all(copyRouteList.map(async name => {
                     const rd = await App.planRoutesCol(srcYM).doc(name).get();
                     const stores = rd.exists ? (rd.data().stores || []) : [];
-                    await App.planRoutesCol(ym).doc(name).set({ stores });
+                    let override = rd.exists ? (rd.data().calendarOverride || null) : null;
+                    if (override && override.mode === 'cycle') {
+                        override = { ...override, holidays: [] };
+                    }
+                    const payload = override ? { stores, calendarOverride: override } : { stores };
+                    await App.planRoutesCol(ym).doc(name).set(payload);
                 }));
             }
 
@@ -628,6 +643,24 @@ const App = {
             UI.showSaveToast('📅 บันทึกปฏิทินเรียบร้อย');
         } catch(err) {
             UI.showErrorToast('❌ บันทึกปฏิทินไม่สำเร็จ: ' + err.message);
+        }
+    },
+
+    // ─── calendarConfig เฉพาะสาย (override) ────────────────────────────────
+    // cfg = null → ลบ override ทิ้ง กลับไปใช้ default ของศูนย์ตามปกติ
+    saveRouteCalendarOverride: async (routeName, cfg) => {
+        const ym = App._currentPlanYM;
+        if (!ym || !routeName) return;
+        try {
+            const payload = cfg
+                ? { calendarOverride: cfg }
+                : { calendarOverride: firebase.firestore.FieldValue.delete() };
+            await App.planRoutesCol(ym).doc(routeName).set(payload, { merge: true });
+            UI.showSaveToast(cfg
+                ? `📅 บันทึกปฏิทินเฉพาะสาย ${routeName} เรียบร้อย`
+                : `↩️ สาย ${routeName} กลับไปใช้ปฏิทิน default ของศูนย์แล้ว`);
+        } catch(err) {
+            UI.showErrorToast('❌ บันทึกไม่สำเร็จ: ' + err.message);
         }
     },
 
