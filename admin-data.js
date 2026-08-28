@@ -409,7 +409,10 @@ const App = {
     },
 
     // ─── Create new plan ─────────────────────────────────────────────────
-    createPlan: async (ym) => {
+    // srcYM: เดือนต้นทางที่จะ copy มา — ถ้าไม่ระบุ fallback ไปใช้เดือนที่แอดมินกำลังดูอยู่ตอนนี้
+    // (ระบุไว้ชัดเจนเพื่อกันเคส "เลือกเดือนสร้างจาก dropdown ที่อิงจาก Plan ล่าสุด" แต่หน้าจอ
+    // ปัจจุบันดันเปิดดูเดือนอื่นอยู่ — ถ้าไม่ระบุ src จะ copy จากเดือนที่เปิดดูผิดเดือนได้)
+    createPlan: async (ym, srcYMOverride) => {
         if (!ym) return;
         UI.showLoader(`กำลังสร้าง Plan ${App.ymToLabel(ym)}...`, '');
         try {
@@ -421,7 +424,7 @@ const App = {
             }
 
             // Copy จาก plan ปัจจุบัน
-            const srcYM   = App._currentPlanYM;
+            const srcYM   = srcYMOverride || App._currentPlanYM;
             const srcData = srcYM ? (await App.planRef(srcYM).get()) : null;
             const srcMeta = srcData?.exists ? srcData.data() : {};
             const copyRouteList = srcMeta.routeList || State.db.routeList || [];
@@ -941,10 +944,23 @@ const PlanUI = {
     openCreatePlan: () => {
         const sel = document.getElementById('plan-month-select');
         if (sel) {
+            // ✅ FIX: เดิมอิงจาก "วันนี้จริง" เสมอ (+3 เดือน) ทำให้หน้าต่างเลือกเดือนขยับตาม
+            // วันปฏิทินจริงเท่านั้น ไม่เกี่ยวกับว่ามี Plan อยู่แล้วถึงเดือนไหน — พอมี Plan ล่วงหน้า
+            // ไปไกลกว่านั้นแล้ว กลับเพิ่มเดือนถัดไปอีกไม่ได้ (ต้องรอให้วันจริงเลื่อนมาถึงก่อน)
+            // เปลี่ยนเป็นอิงจาก Plan ล่าสุดที่มีอยู่แล้ว (planList[0], เรียงล่าสุดไว้หน้าสุดอยู่แล้ว)
+            // แล้วเสนอ 3 เดือนถัดจากนั้นแทน — ถ้ายังไม่มี Plan เลย (ศูนย์ใหม่) fallback ไปใช้วันนี้จริง
+            const latestYM = (State.db.planList && State.db.planList[0]) || null;
+            let baseYear, baseMonth; // baseMonth เป็น 0-indexed
+            if (latestYM) {
+                const [y, m] = latestYM.split('_').map(Number);
+                baseYear = y; baseMonth = m - 1;
+            } else {
+                const now = new Date();
+                baseYear = now.getFullYear(); baseMonth = now.getMonth();
+            }
             const months = [];
-            const d = new Date();
-            for (let i = 0; i <= 3; i++) {
-                const next = new Date(d.getFullYear(), d.getMonth() + i, 1);
+            for (let i = 1; i <= 3; i++) {
+                const next = new Date(baseYear, baseMonth + i, 1);
                 const ym   = `${next.getFullYear()}_${String(next.getMonth()+1).padStart(2,'0')}`;
                 const lbl  = App.ymToLabel(ym);
                 months.push({ ym, lbl });
@@ -958,7 +974,10 @@ const PlanUI = {
         const ym = document.getElementById('plan-month-select')?.value;
         document.getElementById('create-plan-modal')?.classList.add('hidden');
         if (!ym) return;
-        await App.createPlan(ym);
+        // ✅ FIX: ต้อง copy จาก "Plan ล่าสุดที่มีอยู่แล้ว" เสมอ (ฐานเดียวกับที่ dropdown ใช้คำนวณ
+        // ตัวเลือกเดือน) ไม่ใช่เดือนที่แอดมินบังเอิญเปิดดูอยู่ตอนนี้ — กันข้อมูลเพี้ยนถ้าสองอย่างไม่ตรงกัน
+        const latestYM = (State.db.planList && State.db.planList[0]) || App._currentPlanYM;
+        await App.createPlan(ym, latestYM);
     },
 
     confirmDelete: () => {
