@@ -738,6 +738,9 @@ const App = {
                 for (let i = 0; i < headers.length; i++) {
                     const h = String(headers[i]).toLowerCase();
                     if      (h.includes('รหัส') && !h.includes('เซลล์'))                         idCol = i;
+                    // ✅ FIX: ต้องเช็คก่อน nameCol เสมอ เพราะ "Cycle Name" มีคำว่า "name" ซ้อนอยู่
+                    // ถ้าเช็ค nameCol ก่อน จะโดนตีความเป็นคอลัมน์ชื่อร้านไปเลย ไม่มีทางถึง cycleNameCol
+                    else if (h.includes('cycle'))                                                 cycleNameCol = i;
                     else if ((h.includes('ชื่อ') && !h.includes('ตลาด')) || h.includes('name'))  nameCol = i;
                     else if (h.includes('lat') || h.includes('ละติจูด'))                         latCol = i;
                     else if (h.includes('lng') || h.includes('lon') || h.includes('ลองจิจูด'))   lngCol = i;
@@ -745,8 +748,6 @@ const App = {
                     // ✅ FIX (bug scan): exact 'route'/'สายวิ่ง' → salesCodeCol ก่อน dayCol (substring)
                     // เดิม column ชื่อ "สายวิ่ง" ถูก dayCol ดักไปก่อน จับรหัสสายไม่ได้เลย
                     else if (h === 'route' || h === 'สายวิ่ง')                                    salesCodeCol = i;
-                    // ✅ NEW: "Cycle Name" — ลำดับตลาดที่ตั้งใจให้ชัดเจนกว่าคอลัมน์ Day (เช่น 1 = D01)
-                    else if (h.includes('cycle'))                                                 cycleNameCol = i;
                     else if (h.includes('day') || h.includes('สายวิ่ง'))                         dayCol = i;
                     else if (h.includes('คิว') || h.includes('seq'))                              seqCol = i;
                     else if ((h.includes('salescode') || h.includes('รหัสเซลล์') || h === 'sales') && salesCodeCol === -1) salesCodeCol = i;

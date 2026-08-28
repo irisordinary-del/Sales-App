@@ -358,6 +358,10 @@ const FileManager = {
                 for (let i = 0; i < headers.length; i++) {
                     const h = String(headers[i]).toLowerCase();
                     if      (h.includes('รหัส') || h.includes('customer code') || h.includes('id'))  idCol = i;
+                    // ✅ FIX: ต้องเช็คก่อน nameCol เสมอ เพราะ "Cycle Name" มีคำว่า "name" ซ้อนอยู่
+                    // ถ้าเช็ค nameCol ก่อน จะโดนตีความเป็นคอลัมน์ชื่อร้านไปเลย ไม่มีทางถึง cycleNameCol
+                    // (บั๊กแบบเดียวกับที่เคยเจอ "ชื่อ" ซ้อนใน "ชื่อตลาด" มาก่อน — ดู bugfix-log.md 2026-05-06)
+                    else if (h.includes('cycle'))                                                    cycleNameCol = i;
                     else if ((h.includes('ชื่อ') && !h.includes('ตลาด')) || h.includes('name'))      nameCol = i;
                     else if (h.includes('lat') || h.includes('ละติจูด'))                             latCol = i;
                     else if (h.includes('lng') || h.includes('lon') || h.includes('ลองจิจูด'))       lngCol = i;
@@ -366,9 +370,6 @@ const FileManager = {
                     // เดิม dayCol เช็ค h.includes('สายวิ่ง') ดักไปก่อน ทำให้ column ชื่อ "สายวิ่ง"
                     // ไม่เคยเข้า salesCodeCol เลย (จับสายผิด) — ตอนนี้ exact match ชนะ substring
                     else if (h === 'route' || h === 'สายวิ่ง')                                       salesCodeCol = i;
-                    // ✅ NEW: "Cycle Name" — ลำดับตลาดที่ตั้งใจให้ชัดเจนกว่าคอลัมน์ Day (เช่น 1 = D01)
-                    // เช็คก่อน dayCol เพราะไม่มีคำว่า day/สายวิ่ง มาชนกัน แยกกันเด็ดขาดโดยธรรมชาติ
-                    else if (h.includes('cycle'))                                                    cycleNameCol = i;
                     else if (h.includes('สายวิ่ง') || h.includes('day'))                             dayCol = i;
                     else if (h.includes('คิว') || h.includes('seq') || h.includes('ลำดับ') || h.includes('order')) seqCol = i;
                     else if ((h.includes('salescode') || h.includes('รหัสเซลล์') || h === 'sales') && salesCodeCol === -1) salesCodeCol = i;
