@@ -1185,7 +1185,7 @@ const CalendarCtrl = {
     // และแบบใหม่ (อิงวันในสัปดาห์ เช่น "จันทร์แรกของเดือน") ที่ไม่เลื่อนตามวันที่แล้ว ไม่มีปัญหา
     // ตอน copy plan ข้ามเดือนอีกต่อไป เพราะคำนวณสดใหม่ทุกเดือนจากวันในสัปดาห์ ไม่ใช่เลขวันที่ค้าง
     _resolveCycleStartDate: (cfg, year, month) => {
-        if (cfg.anchorType === 'weekday-once' || cfg.anchorType === 'weekday-rolling') {
+        if (cfg.anchorType === 'weekday-once') {
             const daysInMonth = new Date(year, month + 1, 0).getDate();
             for (let d = 1; d <= daysInMonth; d++) {
                 if (new Date(year, month, d).getDay() === cfg.anchorWeekday) return d;
@@ -1201,6 +1201,38 @@ const CalendarCtrl = {
         if ((cfg.holidays || []).includes(d)) return true;
         if ((cfg.weeklyHolidays || []).includes(new Date(year, month, d).getDay())) return true;
         return false;
+    },
+
+    // ✅ REDESIGN: "วันในสัปดาห์ (วนซ้ำ)" — เปลี่ยนจากรีเซ็ตกลับ Day 1 ทุกต้นเดือน (ของเดิม)
+    // เป็นนับต่อเนื่องไหลข้ามเดือนไม่มีจุดรีเซ็ตเลย ยึดจาก "จุดอ้างอิง" คงที่ 1 จุด
+    // (เช่น "1 ต.ค. 2569 = D04") แล้วนับวันทำงานสะสมจากจุดนั้น mod ด้วยจำนวนวัน Cycle
+    // หมายเหตุสำคัญ: โหมดนี้ข้าม "วันหยุดประจำสัปดาห์" (weeklyHolidays) เท่านั้น — ไม่รองรับ
+    // "วันหยุดเฉพาะกิจ" (holidays รายเดือน) เพราะการนับข้ามหลายเดือนจะต้องรู้วันหยุดเฉพาะกิจ
+    // ของทุกเดือนระหว่างทางด้วย ซึ่งเกินขอบเขตของ config ปัจจุบันที่เก็บแยกรายเดือน
+    _computeRollingDayLabel: (cfg, targetDate) => {
+        if (!cfg.anchorDate) return null;
+        const anchor = new Date(cfg.anchorDate + 'T00:00:00');
+        const wk = cfg.weeklyHolidays || [];
+        const isWkHol = (d) => wk.includes(d.getDay());
+        if (isWkHol(targetDate)) return null;
+
+        let offset = 0;
+        const cur = new Date(anchor);
+        if (targetDate.getTime() >= anchor.getTime()) {
+            while (cur.getTime() < targetDate.getTime()) {
+                cur.setDate(cur.getDate() + 1);
+                if (!isWkHol(cur)) offset++;
+            }
+        } else {
+            while (cur.getTime() > targetDate.getTime()) {
+                cur.setDate(cur.getDate() - 1);
+                if (!isWkHol(cur)) offset--;
+            }
+        }
+        const cycleDays = parseInt(cfg.cycleDays || 24);
+        const startNum  = parseInt(cfg.anchorDayNum || 1);
+        const n = (((startNum - 1 + offset) % cycleDays) + cycleDays) % cycleDays + 1;
+        return 'Day ' + n;
     },
 
     getDayLabelForCfg: (dateNum, cfg, stores, year, month) => {
@@ -1232,6 +1264,10 @@ const CalendarCtrl = {
             return entry ? entry[0] : null;
         }
         if (cfg.mode === 'cycle') {
+            // ✅ "วันในสัปดาห์ (วนซ้ำ)" ใช้การนับต่อเนื่องแบบใหม่ทั้งหมด แยกออกจาก logic เดิมข้างล่าง
+            if (cfg.anchorType === 'weekday-rolling') {
+                return CalendarCtrl._computeRollingDayLabel(cfg, new Date(year, month, dateNum));
+            }
             const startDate = CalendarCtrl._resolveCycleStartDate(cfg, year, month);
             if (startDate === null || dateNum < startDate) return null;
             const cycleDays   = parseInt(cfg.cycleDays || 24);
@@ -1241,16 +1277,9 @@ const CalendarCtrl = {
                 if (CalendarCtrl._isCycleHoliday(cfg, year, month, d2)) continue;
                 workdays++;
                 if (d2 === dateNum) {
-                    let dayNum = dayCounter + workdays - 1;
-                    if (dayNum > cycleDays) {
-                        // ✅ แบบที่ 2 (weekday-rolling): วนกลับ Day 1 เมื่อครบรอบ วิ่งต่อจนหมดเดือน
-                        // แบบที่ 1 (weekday-once) และโหมดอิงวันที่แบบเดิม: จบรอบแล้วไม่มี Day ต่อ
-                        if (cfg.anchorType === 'weekday-rolling') {
-                            dayNum = ((dayNum - startDayNum) % cycleDays) + startDayNum;
-                        } else {
-                            return null;
-                        }
-                    }
+                    const dayNum = dayCounter + workdays - 1;
+                    // ✅ "วันในสัปดาห์ (จบเมื่อครบรอบ)" และโหมดอิงวันที่แบบเดิม: จบรอบแล้วไม่มี Day ต่อ
+                    if (dayNum > cycleDays) return null;
                     return 'Day ' + dayNum;
                 }
             }
@@ -1315,6 +1344,17 @@ const CalendarCtrl = {
             return entry ? parseInt(entry[0]) : null;
         }
         if (cfg.mode === 'cycle') {
+            // ✅ REDESIGN: "วันในสัปดาห์ (วนซ้ำ)" ใช้การนับต่อเนื่องแบบใหม่ — สแกนหาในเดือนที่ระบุ
+            // คืนวันแรกที่ตรงกัน (1 Day อาจตรงกับหลายวันที่ในเดือนเดียวกันได้ถ้า cycleDays สั้นกว่า
+            // จำนวนวันทำงานในเดือน — ใช้ getDatesFromDayInMonth() ถ้าต้องการทุกวันที่ตรง)
+            if (cfg.anchorType === 'weekday-rolling') {
+                const daysInMonth = new Date(CalendarCtrl._year, CalendarCtrl._month + 1, 0).getDate();
+                for (let d = 1; d <= daysInMonth; d++) {
+                    const lbl = CalendarCtrl._computeRollingDayLabel(cfg, new Date(CalendarCtrl._year, CalendarCtrl._month, d));
+                    if (lbl === dayLabel) return d;
+                }
+                return null;
+            }
             const startDate   = CalendarCtrl._resolveCycleStartDate(cfg, CalendarCtrl._year, CalendarCtrl._month);
             if (startDate === null) return null;
             const cycleDays   = parseInt(cfg.cycleDays || 24);
@@ -1323,14 +1363,8 @@ const CalendarCtrl = {
             let workDay = startDayNum;
             for (let d = startDate; d <= daysInMonth; d++) {
                 if (CalendarCtrl._isCycleHoliday(cfg, CalendarCtrl._year, CalendarCtrl._month, d)) continue;
-                // ✅ แบบที่ 2 (weekday-rolling): workDay ต้องวนกลับแบบเดียวกับ getDayLabelForCfg()
-                // ให้สอดคล้องกันเป๊ะ ไม่งั้นไป-กลับ (label↔date) จะได้คนละคำตอบ
-                // หมายเหตุ: โหมดนี้ 1 Day อาจตรงกับหลายวันที่ในเดือนเดียวกัน (วนซ้ำ) — คืนวันแรกที่เจอ
-                let effectiveWorkDay = workDay;
-                if (cfg.anchorType === 'weekday-rolling' && effectiveWorkDay > cycleDays) {
-                    effectiveWorkDay = ((effectiveWorkDay - startDayNum) % cycleDays) + startDayNum;
-                }
-                if (effectiveWorkDay === targetNum) return d;
+                if (workDay > cycleDays) return null; // "จบเมื่อครบรอบ" — เกินรอบแล้วไม่มีวันไหนตรงอีก
+                if (workDay === targetNum) return d;
                 workDay++;
             }
             return null;
@@ -1366,21 +1400,12 @@ const CalendarCtrl = {
 
         if (cfg.mode === 'cycle' && cfg.anchorType === 'weekday-rolling') {
             const targetNum = parseInt(String(dayLabel || '').replace('Day ', ''));
-            const startDate = CalendarCtrl._resolveCycleStartDate(cfg, year, month);
-            if (startDate === null || isNaN(targetNum)) return [];
-            const cycleDays   = parseInt(cfg.cycleDays || 24);
-            const startDayNum = parseInt(cfg.startDayNum || 1);
+            if (isNaN(targetNum)) return [];
             const daysInMonth = new Date(year, month + 1, 0).getDate();
             const dates = [];
-            let workDay = startDayNum;
-            for (let d = startDate; d <= daysInMonth; d++) {
-                if (CalendarCtrl._isCycleHoliday(cfg, year, month, d)) continue;
-                let effectiveWorkDay = workDay;
-                if (effectiveWorkDay > cycleDays) {
-                    effectiveWorkDay = ((effectiveWorkDay - startDayNum) % cycleDays) + startDayNum;
-                }
-                if (effectiveWorkDay === targetNum) dates.push(d);
-                workDay++;
+            for (let d = 1; d <= daysInMonth; d++) {
+                const lbl = CalendarCtrl._computeRollingDayLabel(cfg, new Date(year, month, d));
+                if (lbl === dayLabel) dates.push(d);
             }
             return dates;
         }

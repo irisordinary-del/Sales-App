@@ -1135,18 +1135,6 @@
                             <div class="text-xs font-black text-gray-700">วันที่ = Day ตรงกัน</div>
                             <div class="text-[10px] text-gray-500 mt-0.5">1 ก.ค. = Day 1 เสมอ</div>
                         </button>
-                        <button id="cal-mode-fixed" onclick="CalendarAdmin.setMode('fixed')"
-                            class="border-2 border-gray-200 bg-gray-50 rounded-xl p-3 text-center cursor-pointer transition">
-                            <div class="text-xl mb-1">📌</div>
-                            <div class="text-xs font-black text-gray-700">เลือกเองทีละวัน</div>
-                            <div class="text-[10px] text-gray-500 mt-0.5">จับคู่วันที่กับ Day เอง</div>
-                        </button>
-                        <button id="cal-mode-weekday" onclick="CalendarAdmin.setMode('weekday')"
-                            class="border-2 border-gray-200 bg-gray-50 rounded-xl p-3 text-center cursor-pointer transition">
-                            <div class="text-xl mb-1">📆</div>
-                            <div class="text-xs font-black text-gray-700">ตามวันในสัปดาห์</div>
-                            <div class="text-[10px] text-gray-500 mt-0.5">Day 1 = จันทร์ ทุกสัปดาห์</div>
-                        </button>
                     </div>
                     <!-- ✅ UX: ตัวอย่างผลลัพธ์ของโหมดที่เลือกอยู่ -->
                     <p id="cal-mode-example" class="text-[11px] text-gray-500 mt-2 bg-gray-50 border border-gray-100 rounded-lg px-3 py-2"></p>
@@ -1192,10 +1180,18 @@
                                     <option value="6">เสาร์</option>
                                 </select>
                             </div>
+                            <div id="cal-anchor-rolling-wrap" class="hidden flex-col gap-2">
+                                <div class="flex items-center justify-between">
+                                    <span class="text-xs font-bold text-gray-700">วันที่อ้างอิง:</span>
+                                    <input type="date" id="cal-anchor-rolling-date" oninput="CalendarAdmin._renderPreview()"
+                                        class="border border-gray-200 rounded-lg px-2 py-1.5 text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-300">
+                                </div>
+                                <p class="text-[10px] text-gray-400">ระบุว่าวันที่นี้คือ "Day เท่าไหร่" ในช่อง "Day เริ่มต้น" ด้านล่าง — ระบบจะนับต่อเนื่องไหลข้ามเดือนไปเรื่อยๆ จากจุดนี้ ไม่รีเซ็ตทุกต้นเดือน</p>
+                            </div>
                             <p id="cal-anchor-hint" class="text-[10px] text-indigo-500 mt-1.5"></p>
                         </div>
                         <div class="flex items-center justify-between">
-                            <label class="text-xs font-bold text-gray-700">Day เริ่มต้น (ที่วันเริ่ม):</label>
+                            <label class="text-xs font-bold text-gray-700">Day เริ่มต้น (ที่วันเริ่ม/วันที่อ้างอิง):</label>
                             <input type="number" id="cal-start-day-num" min="1" max="24" value="1" oninput="CalendarAdmin._renderPreview()"
                                 class="w-16 border border-gray-200 rounded-lg px-2 py-1.5 text-sm font-bold text-center outline-none focus:ring-2 focus:ring-indigo-300">
                         </div>
@@ -1351,8 +1347,13 @@
                         CalendarAdmin._anchorWeekday = (cfg.anchorWeekday !== undefined) ? cfg.anchorWeekday : 1;
                         document.getElementById('cal-start-date').value     = cfg.startDay    || 1;
                         document.getElementById('cal-anchor-weekday').value = CalendarAdmin._anchorWeekday;
-                        document.getElementById('cal-start-day-num').value  = cfg.startDayNum || 1;
+                        // ✅ "Day เริ่มต้น" ใช้ฟิลด์เดียวกันข้ามทุก anchorType — สำหรับ weekday-rolling
+                        // คือ anchorDayNum (Day ของ "วันที่อ้างอิง"), โหมดอื่นคือ startDayNum เดิม
+                        document.getElementById('cal-start-day-num').value  =
+                            (cfg.anchorType === 'weekday-rolling') ? (cfg.anchorDayNum || 1) : (cfg.startDayNum || 1);
                         document.getElementById('cal-cycle-days').value     = cfg.cycleDays   || 24;
+                        const rollingDateEl = document.getElementById('cal-anchor-rolling-date');
+                        if (rollingDateEl) rollingDateEl.value = cfg.anchorDate || '';
                         CalendarAdmin._holidays       = cfg.holidays       || [];
                         CalendarAdmin._weeklyHolidays = cfg.weeklyHolidays || [];
                         CalendarAdmin.setAnchorType(CalendarAdmin._anchorType);
@@ -1459,17 +1460,30 @@
                 });
                 const dateWrap    = document.getElementById('cal-anchor-date-wrap');
                 const weekdayWrap = document.getElementById('cal-anchor-weekday-wrap');
+                const rollingWrap = document.getElementById('cal-anchor-rolling-wrap');
                 if (dateWrap)    dateWrap.classList.toggle('hidden', type !== 'date');
                 if (weekdayWrap) {
-                    weekdayWrap.classList.toggle('hidden', type === 'date');
-                    weekdayWrap.classList.toggle('flex', type !== 'date');
+                    weekdayWrap.classList.toggle('hidden', type !== 'weekday-once');
+                    weekdayWrap.classList.toggle('flex', type === 'weekday-once');
+                }
+                if (rollingWrap) {
+                    rollingWrap.classList.toggle('hidden', type !== 'weekday-rolling');
+                    rollingWrap.classList.toggle('flex', type === 'weekday-rolling');
+                    // ✅ ตั้งค่าเริ่มต้นให้วันที่อ้างอิง ถ้ายังไม่เคยตั้งไว้เลย (สลับมาโหมดนี้ครั้งแรก)
+                    if (type === 'weekday-rolling' && CalendarAdmin._ym) {
+                        const dateInput = document.getElementById('cal-anchor-rolling-date');
+                        if (dateInput && !dateInput.value) {
+                            const [y, m] = CalendarAdmin._ym.split('_');
+                            dateInput.value = `${y}-${m}-01`;
+                        }
+                    }
                 }
                 const hint = document.getElementById('cal-anchor-hint');
                 if (hint) {
                     hint.textContent = type === 'weekday-once'
-                        ? '📌 Day 1 = วันในสัปดาห์ที่เลือก สัปดาห์แรกของเดือน ไล่ยาวจนครบ Cycle แล้วจบ (ไม่วนซ้ำ)'
+                        ? '📌 Day 1 = วันในสัปดาห์ที่เลือก สัปดาห์แรกของเดือน ไล่ยาวจนครบ Cycle แล้วจบ (ไม่วนซ้ำ) — รีเซ็ตกลับ Day 1 ใหม่ทุกต้นเดือน'
                         : type === 'weekday-rolling'
-                        ? '📌 Day 1 = วันในสัปดาห์ที่เลือก สัปดาห์แรกของเดือน ไล่ยาวจนครบ Cycle แล้ววนกลับ Day 1 ใหม่ วิ่งต่อจนหมดเดือน'
+                        ? '📌 นับต่อเนื่องไหลข้ามเดือนไม่มีจุดรีเซ็ต ยึดจาก "วันที่อ้างอิง" ที่ตั้งไว้เท่านั้น ⚠️ โหมดนี้ข้ามเฉพาะวันหยุดประจำสัปดาห์ (ด้านล่าง) — ไม่รองรับวันหยุดเฉพาะกิจรายเดือน เพราะนับข้ามหลายเดือน'
                         : '📌 Day 1 เริ่มที่เลขวันที่ตายตัวทุกเดือน (ถ้าอยากให้ Day 1 ตรงกับวันในสัปดาห์เดิมทุกเดือน ใช้ 2 ตัวเลือกด้านซ้าย/ขวาแทน)';
                 }
                 CalendarAdmin._renderPreview();
@@ -1548,15 +1562,37 @@
                     if (!CalendarAdmin._ym) return null;
                     const [y, m]     = CalendarAdmin._ym.split('_').map(Number); // m = 1-indexed
                     const anchorType = CalendarAdmin._anchorType || 'date';
-                    const startNum   = parseInt(document.getElementById('cal-start-day-num')?.value) || 1;
-                    const cycleDays  = parseInt(document.getElementById('cal-cycle-days')?.value)     || 24;
-                    const holidays       = CalendarAdmin._holidays       || [];
+                    const cycleDays  = parseInt(document.getElementById('cal-cycle-days')?.value) || 24;
                     const weeklyHolidays = CalendarAdmin._weeklyHolidays || [];
+
+                    // ✅ REDESIGN: "วันในสัปดาห์ (วนซ้ำ)" นับต่อเนื่องไม่รีเซ็ตรายเดือน — ใช้ algorithm
+                    // เดียวกับ CalendarCtrl._computeRollingDayLabel ใน sales-app.js (ต้องตรงกันเป๊ะ)
+                    if (anchorType === 'weekday-rolling') {
+                        const anchorDateStr = document.getElementById('cal-anchor-rolling-date')?.value;
+                        const anchorDayNum  = parseInt(document.getElementById('cal-start-day-num')?.value) || 1;
+                        if (!anchorDateStr) return null;
+                        const targetDate = new Date(y, m - 1, dateNum);
+                        const isWkHol = (d) => weeklyHolidays.includes(d.getDay());
+                        if (isWkHol(targetDate)) return null;
+                        const anchor = new Date(anchorDateStr + 'T00:00:00');
+                        let offset = 0;
+                        const cur = new Date(anchor);
+                        if (targetDate.getTime() >= anchor.getTime()) {
+                            while (cur.getTime() < targetDate.getTime()) { cur.setDate(cur.getDate()+1); if (!isWkHol(cur)) offset++; }
+                        } else {
+                            while (cur.getTime() > targetDate.getTime()) { cur.setDate(cur.getDate()-1); if (!isWkHol(cur)) offset--; }
+                        }
+                        const n = (((anchorDayNum - 1 + offset) % cycleDays) + cycleDays) % cycleDays + 1;
+                        return 'Day ' + n;
+                    }
+
+                    const startNum   = parseInt(document.getElementById('cal-start-day-num')?.value) || 1;
+                    const holidays   = CalendarAdmin._holidays || [];
                     const isHol = (d) => holidays.includes(d) || weeklyHolidays.includes(new Date(y, m-1, d).getDay());
 
-                    // ✅ จุดเริ่มนับ — แบบเดิม (เลขวันที่ตายตัว) หรือแบบใหม่ (วันในสัปดาห์แรกของเดือน)
+                    // ✅ จุดเริ่มนับ — แบบเดิม (เลขวันที่ตายตัว) หรือ "วันในสัปดาห์ (จบเมื่อครบรอบ)" — รีเซ็ตรายเดือนทั้งคู่
                     let startDate;
-                    if (anchorType === 'weekday-once' || anchorType === 'weekday-rolling') {
+                    if (anchorType === 'weekday-once') {
                         const anchorWd = parseInt(document.getElementById('cal-anchor-weekday')?.value);
                         const daysInMonth = new Date(y, m, 0).getDate();
                         startDate = null;
@@ -1574,15 +1610,8 @@
                         if (isHol(d)) continue;
                         workdays++;
                         if (d === dateNum) {
-                            let dayNum = dayCounter + workdays - 1;
-                            if (dayNum > cycleDays) {
-                                // ✅ weekday-rolling: วนกลับ Day 1 เมื่อครบรอบ — แบบอื่นจบเมื่อครบรอบ
-                                if (anchorType === 'weekday-rolling') {
-                                    dayNum = ((dayNum - startNum) % cycleDays) + startNum;
-                                } else {
-                                    return null;
-                                }
-                            }
+                            const dayNum = dayCounter + workdays - 1;
+                            if (dayNum > cycleDays) return null; // "จบเมื่อครบรอบ" — ไม่วนซ้ำ
                             return 'Day ' + dayNum;
                         }
                     }
@@ -1722,16 +1751,32 @@
                 }
                 let cfg;
                 if (CalendarAdmin._mode === 'cycle') {
-                    cfg = {
-                        mode:        'cycle',
-                        anchorType:  CalendarAdmin._anchorType || 'date',
-                        startDay:    parseInt(document.getElementById('cal-start-date').value)    || 1,
-                        anchorWeekday: parseInt(document.getElementById('cal-anchor-weekday').value),
-                        startDayNum: parseInt(document.getElementById('cal-start-day-num').value) || 1,
-                        cycleDays:   parseInt(document.getElementById('cal-cycle-days').value)    || 24,
-                        holidays:       [...CalendarAdmin._holidays].sort((a,b) => a-b),
-                        weeklyHolidays: [...CalendarAdmin._weeklyHolidays].sort((a,b) => a-b),
-                    };
+                    const anchorType = CalendarAdmin._anchorType || 'date';
+                    if (anchorType === 'weekday-rolling') {
+                        // ✅ VALIDATION: ต้องมีวันที่อ้างอิงเสมอ ไม่งั้นคำนวณต่อเนื่องไม่ได้เลย
+                        const anchorDateVal = document.getElementById('cal-anchor-rolling-date').value;
+                        if (!anchorDateVal) return UI.showErrorToast('⚠️ กรุณาระบุ "วันที่อ้างอิง" สำหรับโหมดวนซ้ำ');
+                        cfg = {
+                            mode:           'cycle',
+                            anchorType:     'weekday-rolling',
+                            anchorDate:     anchorDateVal,
+                            anchorDayNum:   parseInt(document.getElementById('cal-start-day-num').value) || 1,
+                            cycleDays:      parseInt(document.getElementById('cal-cycle-days').value)    || 24,
+                            weeklyHolidays: [...CalendarAdmin._weeklyHolidays].sort((a,b) => a-b),
+                            // holidays (เฉพาะกิจรายเดือน) ไม่รองรับในโหมดนี้ — ดูคำเตือนใน setAnchorType()
+                        };
+                    } else {
+                        cfg = {
+                            mode:        'cycle',
+                            anchorType:  anchorType,
+                            startDay:    parseInt(document.getElementById('cal-start-date').value)    || 1,
+                            anchorWeekday: parseInt(document.getElementById('cal-anchor-weekday').value),
+                            startDayNum: parseInt(document.getElementById('cal-start-day-num').value) || 1,
+                            cycleDays:   parseInt(document.getElementById('cal-cycle-days').value)    || 24,
+                            holidays:       [...CalendarAdmin._holidays].sort((a,b) => a-b),
+                            weeklyHolidays: [...CalendarAdmin._weeklyHolidays].sort((a,b) => a-b),
+                        };
+                    }
                 } else if (CalendarAdmin._mode === 'date') {
                     cfg = { mode: 'date' };
                 } else if (CalendarAdmin._mode === 'weekday') {

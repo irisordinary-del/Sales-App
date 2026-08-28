@@ -4,6 +4,107 @@
 // ==========================================
 const FileManager = {
 
+    // ✅ NEW: หาวันที่ปฏิทินจริงที่ "Day N" ตรงกับ ในเดือน/ปีที่ระบุ ตาม calendarConfig ที่มีผล
+    // (รองรับทุกโหมด รวมถึง cycle แบบ weekday-rolling ที่นับต่อเนื่องไม่รีเซ็ตรายเดือน)
+    // คืนค่าเป็น Date object หรือ null ถ้าหาไม่ได้ (เช่น label ไม่ตรงกับเดือนนี้เลย)
+    _resolveCalendarDate: (cfg, dayLabel, year, month) => {
+        if (!dayLabel || !cfg) return null;
+        const targetNum = parseInt(String(dayLabel).replace('Day ', ''));
+
+        if (!cfg.mode && (!cfg.mapping || Object.keys(cfg.mapping).length === 0)) {
+            return isNaN(targetNum) ? null : new Date(year, month, targetNum);
+        }
+        if (!cfg.mode && cfg.mapping) {
+            const entry = Object.entries(cfg.mapping).find(([, v]) => v === dayLabel);
+            return entry ? new Date(year, month, parseInt(entry[0])) : null;
+        }
+        if (cfg.mode === 'date') {
+            return isNaN(targetNum) ? null : new Date(year, month, targetNum);
+        }
+        if (cfg.mode === 'fixed') {
+            if (!cfg.mapping) return null;
+            const entry = Object.entries(cfg.mapping).find(([, v]) => v === dayLabel);
+            return entry ? new Date(year, month, parseInt(entry[0])) : null;
+        }
+        if (cfg.mode === 'weekday') {
+            const wmap = cfg.weekdayMap || {};
+            const targetWd = wmap[dayLabel];
+            if (targetWd === undefined) return null;
+            const daysInMonth = new Date(year, month + 1, 0).getDate();
+            for (let d = 1; d <= daysInMonth; d++) {
+                if (new Date(year, month, d).getDay() === targetWd) return new Date(year, month, d); // วันแรกที่เจอในเดือนนี้
+            }
+            return null;
+        }
+        if (cfg.mode === 'cycle') {
+            const isWkHol = (d) => (cfg.weeklyHolidays || []).includes(d.getDay());
+            if (cfg.anchorType === 'weekday-rolling') {
+                if (!cfg.anchorDate) return null;
+                const daysInMonth = new Date(year, month + 1, 0).getDate();
+                for (let d = 1; d <= daysInMonth; d++) {
+                    const target = new Date(year, month, d);
+                    if (isWkHol(target)) continue;
+                    const anchor = new Date(cfg.anchorDate + 'T00:00:00');
+                    let offset = 0;
+                    const cur = new Date(anchor);
+                    if (target.getTime() >= anchor.getTime()) {
+                        while (cur.getTime() < target.getTime()) { cur.setDate(cur.getDate()+1); if (!isWkHol(cur)) offset++; }
+                    } else {
+                        while (cur.getTime() > target.getTime()) { cur.setDate(cur.getDate()-1); if (!isWkHol(cur)) offset--; }
+                    }
+                    const cycleDays = parseInt(cfg.cycleDays || 24);
+                    const startNum  = parseInt(cfg.anchorDayNum || 1);
+                    const n = (((startNum - 1 + offset) % cycleDays) + cycleDays) % cycleDays + 1;
+                    if (('Day ' + n) === dayLabel) return target; // คืนวันแรกที่ตรงในเดือนนี้
+                }
+                return null;
+            }
+            // date-anchor / weekday-once — รีเซ็ตรายเดือน ไม่วนซ้ำ
+            const isHol = (d) => (cfg.holidays || []).includes(d) || isWkHol(new Date(year, month, d));
+            let startDate;
+            if (cfg.anchorType === 'weekday-once') {
+                const daysInMonth = new Date(year, month + 1, 0).getDate();
+                startDate = null;
+                for (let d = 1; d <= daysInMonth; d++) {
+                    if (new Date(year, month, d).getDay() === cfg.anchorWeekday) { startDate = d; break; }
+                }
+                if (startDate === null) return null;
+            } else {
+                startDate = parseInt(cfg.startDay || 1);
+            }
+            const cycleDays   = parseInt(cfg.cycleDays || 24);
+            const startDayNum = parseInt(cfg.startDayNum || 1);
+            const daysInMonth = new Date(year, month + 1, 0).getDate();
+            let workDay = startDayNum;
+            for (let d = startDate; d <= daysInMonth; d++) {
+                if (isHol(d)) continue;
+                if (workDay > cycleDays) return null;
+                if (workDay === targetNum) return new Date(year, month, d);
+                workDay++;
+            }
+            return null;
+        }
+        return null;
+    },
+
+    _fmtDateForExport: (date) => {
+        if (!date) return '';
+        const dd = String(date.getDate()).padStart(2, '0');
+        const mm = String(date.getMonth() + 1).padStart(2, '0');
+        return `${dd}/${mm}/${date.getFullYear()}`;
+    },
+
+    // ✅ คืนค่าคอลัมน์ Day สำหรับ export — พยายามคำนวณเป็นวันที่จริงก่อน (ตาม calendarConfig
+    // ที่มีผล) ถ้าคำนวณไม่ได้ (เช่นยังไม่เคยตั้งค่าปฏิทินเลย) fallback กลับไปโชว์ label/ค่าดิบเดิม
+    _dayColumnValue: (store, cfg, year, month) => {
+        const label = store.days?.length > 0 ? store.days[0] : '';
+        if (label && cfg) {
+            const d = FileManager._resolveCalendarDate(cfg, label, year, month);
+            if (d) return FileManager._fmtDateForExport(d);
+        }
+        return label || (store.dayOriginal || '');
+    },
+
     // ─── uploadRouteFile: Single-route upload ────────────────────────────
     uploadRouteFile: async (file) => {
         try {
@@ -119,6 +220,18 @@ const FileManager = {
 
             UI.showLoader('💾 กำลังสร้างไฟล์ Excel...', 'กำลังเตรียมข้อมูล');
 
+            // ✅ NEW: เช็ค override เฉพาะสายก่อน ถ้าไม่มีใช้ default ของศูนย์ — ใช้คำนวณวันที่จริง
+            // ของคอลัมน์ Day แทนที่จะโชว์แค่ "Day N" เฉยๆ
+            const ym = App._currentPlanYM;
+            let effectiveCfg = State.db.calendarConfig || null;
+            if (ym && State.localActiveRoute) {
+                try {
+                    const rd = await App.planRoutesCol(ym).doc(State.localActiveRoute).get();
+                    if (rd.exists && rd.data().calendarOverride) effectiveCfg = rd.data().calendarOverride;
+                } catch (e) { console.warn('exportTemplate: โหลด override ไม่สำเร็จ', e); }
+            }
+            const [expYear, expMonth] = ym ? ym.split('_').map(Number) : [null, null];
+
             const exportData = State.stores.map(store => ({
                 'A': store.cy || '',
                 'B': store.code || store.id,
@@ -131,7 +244,7 @@ const FileManager = {
                 'I': store.lat,
                 'J': store.lng,
                 'K': store.marketName || '',
-                'L': store.days?.length > 0 ? store.days[0] : (store.dayOriginal || ''),
+                'L': (expYear !== null) ? FileManager._dayColumnValue(store, effectiveCfg, expYear, expMonth - 1) : (store.days?.length > 0 ? store.days[0] : (store.dayOriginal || '')),
                 'M': (store.seqs && store.days?.length > 0) ? (store.seqs[store.days[0]] || '') : '',
             }));
 
@@ -221,6 +334,29 @@ const FileManager = {
 
             UI.showLoader('💾 กำลังรวมข้อมูลทุกสาย...', `รวม ${routeKeys.length} สาย เดือน ${planLabel}`);
 
+            // ✅ NEW: โหลด override เฉพาะสาย (ถ้ามี) ของทุกสายที่จะ export — ใช้คำนวณวันที่จริง
+            // ของคอลัมน์ Day แทนที่จะโชว์แค่ "Day N" เฉยๆ (แต่ละสายอาจมี override ต่างกัน)
+            const exportYM = selectedYM || App._currentPlanYM || '';
+            const [expYear, expMonthRaw] = exportYM ? exportYM.split('_').map(Number) : [null, null];
+            const expMonth = expMonthRaw !== undefined ? expMonthRaw - 1 : null;
+            const routeCfgs = {};
+            if (expYear !== null) {
+                const planRefForCfg = db.collection('appData').doc(window.CENTER_DOC).collection('plans').doc(exportYM);
+                const BATCH2 = 5;
+                for (let i = 0; i < routeKeys.length; i += BATCH2) {
+                    const chunk = routeKeys.slice(i, i + BATCH2);
+                    const docs = await Promise.all(
+                        chunk.map(r => planRefForCfg.collection('routes').doc(r).get().catch(() => null))
+                    );
+                    docs.forEach((d, j) => {
+                        routeCfgs[chunk[j]] = (d?.exists && d.data().calendarOverride) ? d.data().calendarOverride : State.db.calendarConfig;
+                    });
+                }
+            }
+            const dayColFor = (routeName, store) => (expYear !== null)
+                ? FileManager._dayColumnValue(store, routeCfgs[routeName], expYear, expMonth)
+                : (store.days?.length > 0 ? store.days[0] : (store.dayOriginal || ''));
+
             const wb = XLSX.utils.book_new();
             const allStores = [];
 
@@ -239,7 +375,7 @@ const FileManager = {
                         'I': store.lat,
                         'J': store.lng,
                         'K': store.marketName || '',
-                        'L': store.days?.length > 0 ? store.days[0] : (store.dayOriginal || ''),
+                        'L': dayColFor(routeName, store),
                         'M': (store.seqs && store.days?.length > 0) ? (store.seqs[store.days[0]] || '') : '',
                     });
                 });
@@ -285,7 +421,7 @@ const FileManager = {
                     'I': store.lat,
                     'J': store.lng,
                     'K': store.marketName || '',
-                    'L': store.days?.length > 0 ? store.days[0] : (store.dayOriginal || ''),
+                    'L': dayColFor(routeName, store),
                     'M': (store.seqs && store.days?.length > 0) ? (store.seqs[store.days[0]] || '') : '',
                 }));
 
