@@ -651,8 +651,13 @@ const App = {
 
     // ─── calendarConfig เฉพาะสาย (override) ────────────────────────────────
     // cfg = null → ลบ override ทิ้ง กลับไปใช้ default ของศูนย์ตามปกติ
-    saveRouteCalendarOverride: async (routeName, cfg) => {
-        const ym = App._currentPlanYM;
+    // ✅ BUGFIX (2026-08-29): เดิมใช้ App._currentPlanYM (เดือนที่หน้า Admin หลักกำลังเปิดดูอยู่)
+    // เสมอ ไม่รับ ym มาจากผู้เรียก — ตอนนี้ modal ตั้งค่าปฏิทินเลื่อนดูเดือนอื่นได้แล้ว
+    // (CalendarAdmin.shiftMonth) ถ้ายังใช้ App._currentPlanYM อยู่ การกด "บันทึก" ตอนเลื่อนไปดู
+    // เดือนอื่นจะเขียนทับ override ของเดือนที่หน้าหลักเปิดอยู่แบบเงียบๆ (คนละเดือนกับที่ตั้งใจแก้)
+    // ทำให้เดือนที่ตั้งใจแก้ดูเหมือน "ไม่ถูกบันทึก" (กลับไปเป็นค่าเดิมทุกครั้งที่เปิดดูใหม่)
+    saveRouteCalendarOverride: async (routeName, cfg, ym) => {
+        ym = ym || App._currentPlanYM;
         if (!ym || !routeName) return;
         try {
             const payload = cfg

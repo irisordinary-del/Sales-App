@@ -1431,7 +1431,10 @@
                 if (!CalendarAdmin._targetRoute) return;
                 const ok = confirm(`ลบการตั้งค่าเฉพาะของสาย ${CalendarAdmin._targetRoute} แล้วกลับไปใช้ default ของศูนย์?`);
                 if (!ok) return;
-                await App.saveRouteCalendarOverride(CalendarAdmin._targetRoute, null);
+                // ✅ BUGFIX (2026-08-29): ต้องส่ง CalendarAdmin._ym (เดือนที่ modal กำลังดูอยู่จริง)
+                // ไปด้วยเสมอ ไม่งั้นถ้าเลื่อนดูเดือนอื่นด้วย shiftMonth() ก่อนกดปุ่มนี้ จะไปลบ
+                // override ของเดือนที่หน้า Admin หลักเปิดอยู่แทน (คนละเดือนกับที่กำลังดู)
+                await App.saveRouteCalendarOverride(CalendarAdmin._targetRoute, null, CalendarAdmin._ym);
                 await CalendarAdmin._loadConfig();
             },
 
@@ -1861,7 +1864,9 @@
                     if (CalendarAdmin._targetRoute) {
                         // ✅ ตั้งค่าเฉพาะสาย — บันทึกเป็น override ของสายนั้น ไม่แตะ default ของศูนย์
                         // (saveRouteCalendarOverride แสดง toast ความสำเร็จของตัวเองอยู่แล้ว ไม่ต้องซ้ำ)
-                        await App.saveRouteCalendarOverride(CalendarAdmin._targetRoute, cfg);
+                        // ✅ BUGFIX (2026-08-29): ส่ง CalendarAdmin._ym ไปด้วย — ดู comment เดียวกัน
+                        // ใน removeOverride() ข้างบน และใน App.saveRouteCalendarOverride (admin-data.js)
+                        await App.saveRouteCalendarOverride(CalendarAdmin._targetRoute, cfg, CalendarAdmin._ym);
                         CalendarAdmin.close();
                     } else {
                         // ✅ BUGFIX: ใช้ mergeFields แทน merge:true ธรรมดา
