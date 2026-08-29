@@ -75,12 +75,18 @@ const FileManager = {
             const cycleDays   = parseInt(cfg.cycleDays || 24);
             const startDayNum = parseInt(cfg.startDayNum || 1);
             const daysInMonth = new Date(year, month + 1, 0).getDate();
-            let workDay = startDayNum;
+            // ✅ BUGFIX (2026-08-29): เดิมนับ workDay ไล่ขึ้นจาก startDayNum แล้วตัดจบทันทีที่เกิน
+            // cycleDays — ทำให้ถ้า startDayNum ไม่ใช่ 1 (เช่นเริ่ม Day 4) ช่วงท้ายเดือนที่ควร "วน"
+            // กลับไปใช้ D01, D02, D03 ที่ถูกข้ามไปตอนต้น กลับหายไปเฉยๆ (ไม่มี Day ให้เลย)
+            // ที่ถูกต้อง cycleDays คือ "จำนวนรอบทั้งหมดใน 1 cycle" ไม่ใช่เพดานตายตัวของเลข Day
+            // นับ count (ลำดับวันทำงานที่ 1,2,3,...) แล้ว wrap กลับด้วย modulo แทน
+            let count = 0;
             for (let d = startDate; d <= daysInMonth; d++) {
                 if (isHol(d)) continue;
-                if (workDay > cycleDays) return null;
-                if (workDay === targetNum) return new Date(year, month, d);
-                workDay++;
+                count++;
+                if (count > cycleDays) return null;
+                const dayNum = ((startDayNum - 1 + (count - 1)) % cycleDays) + 1;
+                if (dayNum === targetNum) return new Date(year, month, d);
             }
             return null;
         }

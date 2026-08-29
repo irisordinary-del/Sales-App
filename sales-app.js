@@ -1272,14 +1272,17 @@ const CalendarCtrl = {
             if (startDate === null || dateNum < startDate) return null;
             const cycleDays   = parseInt(cfg.cycleDays || 24);
             const startDayNum = parseInt(cfg.startDayNum || 1);
-            let dayCounter = startDayNum, workdays = 0;
+            // ✅ BUGFIX (2026-08-29): wraparound — ดู comment เดียวกันใน FileManager._resolveCalendarDate
+            // (file-manager.js) เดิมเช็ค "dayNum > cycleDays" เป็นเพดานตายตัว ทำให้ช่วงท้ายเดือน
+            // ที่ควรวนกลับไปใช้ D01, D02, ... หายไป แก้เป็นนับ count แล้ว wrap ด้วย modulo
+            let count = 0;
             for (let d2 = startDate; d2 <= dateNum; d2++) {
                 if (CalendarCtrl._isCycleHoliday(cfg, year, month, d2)) continue;
-                workdays++;
+                count++;
                 if (d2 === dateNum) {
-                    const dayNum = dayCounter + workdays - 1;
                     // ✅ "วันในสัปดาห์ (จบเมื่อครบรอบ)" และโหมดอิงวันที่แบบเดิม: จบรอบแล้วไม่มี Day ต่อ
-                    if (dayNum > cycleDays) return null;
+                    if (count > cycleDays) return null;
+                    const dayNum = ((startDayNum - 1 + (count - 1)) % cycleDays) + 1;
                     return 'Day ' + dayNum;
                 }
             }
@@ -1287,6 +1290,9 @@ const CalendarCtrl = {
         return null;
     },
 
+    // ⚠️ NOTE (2026-08-29): ฟังก์ชันนี้ดูเหมือนไม่มีจุดเรียกใช้แล้วในโค้ดปัจจุบัน (ถูกแทนที่ด้วย
+    // getDayLabelForCfg ข้างบน ซึ่งรับ cfg/year/month เป็น param แทนที่จะอ่านจาก State ตรงๆ) — คงไว้
+    // เผื่อมีที่อื่นเรียกใช้ และแก้บั๊ก wraparound ให้ตรงกันด้วยเพื่อความปลอดภัย ไม่ให้บั๊กเดิมหลงเหลือ
     getDayLabel: (dateNum) => {
         const cfg = State.calendarConfig;
         if (!cfg || cfg.mode === 'date') {
@@ -1301,17 +1307,18 @@ const CalendarCtrl = {
             return entry ? entry[0] : null;
         }
         if (cfg.mode === 'cycle') {
-            const startDate  = parseInt(cfg.startDay  || 1);
-            const holidays   = cfg.holidays  || [];
+            const startDate   = parseInt(cfg.startDay  || 1);
+            const holidays    = cfg.holidays  || [];
             if (dateNum < startDate) return null;
-            let dayCounter = parseInt(cfg.startDayNum || 1), workdays = 0;
+            const startDayNum = parseInt(cfg.startDayNum || 1);
+            const cycleDays   = parseInt(cfg.cycleDays || 24);
+            let count = 0;
             for (let d = startDate; d <= dateNum; d++) {
                 if (holidays.includes(d)) continue;
-                workdays++;
+                count++;
                 if (d === dateNum) {
-                    const dayNum    = dayCounter + workdays - 1;
-                    const cycleDays = cfg.cycleDays || 24;
-                    if (dayNum > cycleDays) return null;
+                    if (count > cycleDays) return null;
+                    const dayNum = ((startDayNum - 1 + (count - 1)) % cycleDays) + 1;
                     return 'Day ' + dayNum;
                 }
             }
@@ -1360,12 +1367,15 @@ const CalendarCtrl = {
             const cycleDays   = parseInt(cfg.cycleDays || 24);
             const startDayNum = parseInt(cfg.startDayNum || 1);
             const daysInMonth = new Date(CalendarCtrl._year, CalendarCtrl._month + 1, 0).getDate();
-            let workDay = startDayNum;
+            // ✅ BUGFIX (2026-08-29): wraparound — เหมือน getDayLabelForCfg ข้างบน (ต้องตรงกันเป๊ะ
+            // เพื่อให้ label↔date ไป-กลับสอดคล้องกัน)
+            let count = 0;
             for (let d = startDate; d <= daysInMonth; d++) {
                 if (CalendarCtrl._isCycleHoliday(cfg, CalendarCtrl._year, CalendarCtrl._month, d)) continue;
-                if (workDay > cycleDays) return null; // "จบเมื่อครบรอบ" — เกินรอบแล้วไม่มีวันไหนตรงอีก
-                if (workDay === targetNum) return d;
-                workDay++;
+                count++;
+                if (count > cycleDays) return null; // "จบเมื่อครบรอบ" — เกินรอบแล้วไม่มีวันไหนตรงอีก
+                const dayNum = ((startDayNum - 1 + (count - 1)) % cycleDays) + 1;
+                if (dayNum === targetNum) return d;
             }
             return null;
         }

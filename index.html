@@ -1605,13 +1605,15 @@
                     }
 
                     if (dateNum < startDate) return null;
-                    let dayCounter = startNum, workdays = 0;
+                    // ✅ BUGFIX (2026-08-29): wraparound — ต้องตรงกับ CalendarCtrl.getDayLabelForCfg
+                    // ใน sales-app.js เป๊ะ (ดู comment เดียวกันที่นั่น) ไม่งั้น preview จะโกหก
+                    let count = 0;
                     for (let d = startDate; d <= dateNum; d++) {
                         if (isHol(d)) continue;
-                        workdays++;
+                        count++;
                         if (d === dateNum) {
-                            const dayNum = dayCounter + workdays - 1;
-                            if (dayNum > cycleDays) return null; // "จบเมื่อครบรอบ" — ไม่วนซ้ำ
+                            if (count > cycleDays) return null; // "จบเมื่อครบรอบ" — ไม่วนซ้ำ
+                            const dayNum = ((startNum - 1 + (count - 1)) % cycleDays) + 1;
                             return 'Day ' + dayNum;
                         }
                     }
