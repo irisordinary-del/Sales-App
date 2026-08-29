@@ -310,7 +310,11 @@ const FileManager = {
             if (selectedYM && selectedYM !== App._currentPlanYM) {
                 UI.showLoader('⏳ โหลดข้อมูลเดือน ' + planLabel + '...', 'กำลังดึงข้อมูลจาก Firestore');
                 try {
-                    const planRef = db.collection('appData').doc(window.CENTER_DOC)
+                    // ✅ BUGFIX (2026-08-29): เดิมใช้ตัวแปร `db` เฉยๆ ซึ่งไม่มีอยู่จริงในหน้า Admin
+                    // (index.html โหลด app-config.js ที่ประกาศ `cloudDB` ไม่ใช่ `db` — `db` มีแค่ใน
+                    // sales-app.js ซึ่งหน้า Admin ไม่ได้โหลด) ทำให้กด Export ทุกสายแล้วขึ้น
+                    // "db is not defined" เสมอตอนเลือกเดือนอื่นที่ไม่ใช่เดือนปัจจุบัน
+                    const planRef = cloudDB.collection('appData').doc(window.CENTER_DOC)
                         .collection('plans').doc(selectedYM);
                     const routeList = State.db.routeList || [];
                     routes = {};
@@ -347,7 +351,8 @@ const FileManager = {
             const expMonth = expMonthRaw !== undefined ? expMonthRaw - 1 : null;
             const routeCfgs = {};
             if (expYear !== null) {
-                const planRefForCfg = db.collection('appData').doc(window.CENTER_DOC).collection('plans').doc(exportYM);
+                // ✅ BUGFIX (2026-08-29): เหมือนจุดข้างบน — ต้องใช้ cloudDB ไม่ใช่ db (ไม่มีอยู่จริงในหน้า Admin)
+                const planRefForCfg = cloudDB.collection('appData').doc(window.CENTER_DOC).collection('plans').doc(exportYM);
                 const BATCH2 = 5;
                 for (let i = 0; i < routeKeys.length; i += BATCH2) {
                     const chunk = routeKeys.slice(i, i + BATCH2);
