@@ -409,7 +409,10 @@ const App = {
     },
 
     // ─── Create new plan ─────────────────────────────────────────────────
-    createPlan: async (ym) => {
+    // srcYM: เดือนต้นทางที่จะ copy มา — ถ้าไม่ระบุ fallback ไปใช้เดือนที่แอดมินกำลังดูอยู่ตอนนี้
+    // (ระบุไว้ชัดเจนเพื่อกันเคส "เลือกเดือนสร้างจาก dropdown ที่อิงจาก Plan ล่าสุด" แต่หน้าจอ
+    // ปัจจุบันดันเปิดดูเดือนอื่นอยู่ — ถ้าไม่ระบุ src จะ copy จากเดือนที่เปิดดูผิดเดือนได้)
+    createPlan: async (ym, srcYMOverride) => {
         if (!ym) return;
         UI.showLoader(`กำลังสร้าง Plan ${App.ymToLabel(ym)}...`, '');
         try {
@@ -421,26 +424,41 @@ const App = {
             }
 
             // Copy จาก plan ปัจจุบัน
-            const srcYM   = App._currentPlanYM;
+            const srcYM   = srcYMOverride || App._currentPlanYM;
             const srcData = srcYM ? (await App.planRef(srcYM).get()) : null;
             const srcMeta = srcData?.exists ? srcData.data() : {};
             const copyRouteList = srcMeta.routeList || State.db.routeList || [];
 
+            // ✅ FIX: วันหยุด "เฉพาะกิจ" (เลขวันที่ เช่น วันหยุดนักขัตฤกษ์ 12 ส.ค.) ผูกกับเดือนต้นทาง
+            // เท่านั้น ห้าม copy ข้ามเดือนตรงๆ (วันที่ 12 เดือนหน้าอาจไม่ใช่วันหยุดเลย) ส่วน
+            // "วันหยุดประจำสัปดาห์" (เช่น อาทิตย์หยุดทุกสัปดาห์) เป็นกติกาที่ไม่ขึ้นกับเดือน copy ได้ปกติ
+            // เช่นเดียวกับ anchorType/anchorWeekday ของแบบวิ่งอิงวันในสัปดาห์ — คำนวณสดใหม่ทุกเดือนอยู่แล้ว
+            let copyCalendarConfig = srcMeta.calendarConfig || null;
+            if (copyCalendarConfig && copyCalendarConfig.mode === 'cycle') {
+                copyCalendarConfig = { ...copyCalendarConfig, holidays: [] };
+            }
+
             await App.planRef(ym).set({
                 routeList:     copyRouteList,
                 cycleDays:     srcMeta.cycleDays     || State.db.cycleDays || 24,
-                calendarConfig: srcMeta.calendarConfig || null,
+                calendarConfig: copyCalendarConfig,
                 createdAt:     firebase.firestore.FieldValue.serverTimestamp(),
                 updatedAt:     firebase.firestore.FieldValue.serverTimestamp(),
                 copiedFrom:    srcYM || '',
             });
 
-            // Copy routes จาก plan ต้นทาง
+            // Copy routes จาก plan ต้นทาง — รวม calendarOverride เฉพาะสาย (ถ้ามี) ไปด้วย
+            // ล้าง holidays เฉพาะกิจของ override เหมือนกับที่ทำกับ default ของศูนย์ข้างบน
             if (srcYM && copyRouteList.length > 0) {
                 await Promise.all(copyRouteList.map(async name => {
                     const rd = await App.planRoutesCol(srcYM).doc(name).get();
                     const stores = rd.exists ? (rd.data().stores || []) : [];
-                    await App.planRoutesCol(ym).doc(name).set({ stores });
+                    let override = rd.exists ? (rd.data().calendarOverride || null) : null;
+                    if (override && override.mode === 'cycle') {
+                        override = { ...override, holidays: [] };
+                    }
+                    const payload = override ? { stores, calendarOverride: override } : { stores };
+                    await App.planRoutesCol(ym).doc(name).set(payload);
                 }));
             }
 
@@ -631,6 +649,24 @@ const App = {
         }
     },
 
+    // ─── calendarConfig เฉพาะสาย (override) ────────────────────────────────
+    // cfg = null → ลบ override ทิ้ง กลับไปใช้ default ของศูนย์ตามปกติ
+    saveRouteCalendarOverride: async (routeName, cfg) => {
+        const ym = App._currentPlanYM;
+        if (!ym || !routeName) return;
+        try {
+            const payload = cfg
+                ? { calendarOverride: cfg }
+                : { calendarOverride: firebase.firestore.FieldValue.delete() };
+            await App.planRoutesCol(ym).doc(routeName).set(payload, { merge: true });
+            UI.showSaveToast(cfg
+                ? `📅 บันทึกปฏิทินเฉพาะสาย ${routeName} เรียบร้อย`
+                : `↩️ สาย ${routeName} กลับไปใช้ปฏิทิน default ของศูนย์แล้ว`);
+        } catch(err) {
+            UI.showErrorToast('❌ บันทึกไม่สำเร็จ: ' + err.message);
+        }
+    },
+
     // ─── Sales data ──────────────────────────────────────────────────────
     fetchSalesData: async () => {
         try {
@@ -694,17 +730,20 @@ const App = {
     handleMapUpload: (e) => {
         const file = e.target.files[0]; if (!file) return;
         const reader = new FileReader();
-        reader.onload = (ev) => {
+        reader.onload = async (ev) => {
             try {
                 const data     = new Uint8Array(ev.target.result);
                 const workbook = XLSX.read(data, { type: 'array' });
                 const json     = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1, defval: '' });
                 if (json.length < 2) return UI.showErrorToast('ไฟล์ว่างเปล่า');
                 const headers = json[0];
-                let idCol=-1, nameCol=-1, latCol=-1, lngCol=-1, freqCol=-1, dayCol=-1, seqCol=-1, salesCodeCol=-1, shopTypeCol=-1, subDistrictCol=-1, districtCol=-1, provinceCol=-1, marketNameCol=-1, cyCol=-1;
+                let idCol=-1, nameCol=-1, latCol=-1, lngCol=-1, freqCol=-1, dayCol=-1, seqCol=-1, salesCodeCol=-1, shopTypeCol=-1, subDistrictCol=-1, districtCol=-1, provinceCol=-1, marketNameCol=-1, cyCol=-1, cycleNameCol=-1;
                 for (let i = 0; i < headers.length; i++) {
                     const h = String(headers[i]).toLowerCase();
                     if      (h.includes('รหัส') && !h.includes('เซลล์'))                         idCol = i;
+                    // ✅ FIX: ต้องเช็คก่อน nameCol เสมอ เพราะ "Cycle Name" มีคำว่า "name" ซ้อนอยู่
+                    // ถ้าเช็ค nameCol ก่อน จะโดนตีความเป็นคอลัมน์ชื่อร้านไปเลย ไม่มีทางถึง cycleNameCol
+                    else if (h.includes('cycle'))                                                 cycleNameCol = i;
                     else if ((h.includes('ชื่อ') && !h.includes('ตลาด')) || h.includes('name'))  nameCol = i;
                     else if (h.includes('lat') || h.includes('ละติจูด'))                         latCol = i;
                     else if (h.includes('lng') || h.includes('lon') || h.includes('ลองจิจูด'))   lngCol = i;
@@ -724,6 +763,23 @@ const App = {
                 }
                 if (latCol === -1 || lngCol === -1 || idCol === -1)
                     return UI.showErrorToast('ไม่พบคอลัมน์ รหัส / Lat / Lng ในไฟล์ครับ');
+
+                // ✅ NEW: ไม่มีคอลัมน์ "Cycle Name" — หยุดถามยืนยันก่อน (การเรียงจากคอลัมน์ Day
+                // แทนเป็นแค่การเดา อาจไม่ตรงกับลำดับตลาดที่ตั้งใจจริงเสมอไป)
+                if (cycleNameCol === -1) {
+                    const proceed = await new Promise(resolve => {
+                        UI.showConfirm(
+                            '⚠️ ไม่พบคอลัมน์ "Cycle Name" ในไฟล์นี้\n\n' +
+                            'ระบบจะเรียงลำดับ D01, D02, ... จากคอลัมน์ Day ที่มีอยู่แทน (เรียงจากน้อยไปมาก) ' +
+                            'ซึ่งอาจไม่ตรงกับลำดับตลาดที่ตั้งใจจริงเสมอไป\n\n' +
+                            'ต้องการนำเข้าต่อโดยใช้วิธีนี้หรือไม่?',
+                            () => resolve(true),
+                            () => resolve(false)
+                        );
+                    });
+                    if (!proceed) return;
+                }
+
                 const storeMap = {};
                 for (let i = 1; i < json.length; i++) {
                     const row = json[i];
@@ -736,7 +792,11 @@ const App = {
                     const freq = (freqCol !== -1 && String(row[freqCol]||'').trim().toUpperCase().includes('2')) ? 2 : 1;
                     const rawDay = (dayCol !== -1 && row[dayCol]) ? String(row[dayCol]).trim() : '';
                     const dayNum = rawDay ? parseInt(rawDay.replace(/[^0-9]/g,'')) : NaN;
-                    const assignedDay = !isNaN(dayNum) ? 'Day ' + dayNum : '';
+                    // ✅ NEW: ถ้ามีคอลัมน์ "Cycle Name" ใช้ค่านี้กำหนดลำดับ D0N แทน dayNum เดิม
+                    const rawCycle = (cycleNameCol !== -1 && row[cycleNameCol]) ? String(row[cycleNameCol]).trim() : '';
+                    const cycleNum = rawCycle ? parseInt(rawCycle.replace(/[^0-9]/g,'')) : NaN;
+                    const seqNum   = (cycleNameCol !== -1 && !isNaN(cycleNum)) ? cycleNum : dayNum;
+                    const assignedDay = !isNaN(seqNum) ? 'Day ' + seqNum : '';
                     const assignedSeq = (seqCol !== -1 && row[seqCol]) ? parseInt(String(row[seqCol]).replace(/[^0-9]/g,'')) : NaN;
                     if (storeMap[idStr]) {
                         if (assignedDay && !storeMap[idStr].days.includes(assignedDay)) {
@@ -753,7 +813,7 @@ const App = {
                             province: provinceCol !== -1 ? String(row[provinceCol]||'').trim() : '',
                             marketName: marketNameCol !== -1 ? String(row[marketNameCol]||'').trim() : '',
                             cy: cyCol !== -1 ? String(row[cyCol]||'').trim() : '',
-                            dayOriginal: rawDay,
+                            dayOriginal: cycleNameCol !== -1 ? rawCycle : rawDay,
                         };
                         if (assignedDay) { s.days.push(assignedDay); if (!isNaN(assignedSeq)) s.seqs[assignedDay] = assignedSeq; }
                         storeMap[idStr] = s;
@@ -761,6 +821,34 @@ const App = {
                 }
                 const finalArray = Object.values(storeMap);
                 if (finalArray.length === 0) return UI.showErrorToast('ไม่พบพิกัด (Lat, Lng) ในไฟล์ครับ');
+
+                // ✅ NEW: ไฟล์ไม่มีคอลัมน์ "Cycle Name" เลย — เรียงเลข Day ที่มีจริงจากน้อยไปมาก
+                // แล้วแทนที่เป็นลำดับต่อเนื่อง D01, D02, D03... (อุดช่องว่าง) หน้านี้อัปโหลดทีละสาย
+                // อยู่แล้ว เลยทำรวมทั้งก้อนได้เลย ไม่ต้องแยกตามสายแบบ bulkImport
+                if (cycleNameCol === -1) {
+                    const usedNums = new Set();
+                    finalArray.forEach(s => s.days.forEach(d => {
+                        const n = parseInt(String(d).replace('Day ', ''));
+                        if (!isNaN(n)) usedNums.add(n);
+                    }));
+                    const sorted  = Array.from(usedNums).sort((a, b) => a - b);
+                    const rankMap = {};
+                    sorted.forEach((n, idx) => { rankMap[n] = idx + 1; });
+
+                    finalArray.forEach(s => {
+                        const newDays = [];
+                        const newSeqs = {};
+                        s.days.forEach(d => {
+                            const n = parseInt(String(d).replace('Day ', ''));
+                            const newLabel = (!isNaN(n) && rankMap[n]) ? ('Day ' + rankMap[n]) : d;
+                            if (!newDays.includes(newLabel)) newDays.push(newLabel);
+                            if (s.seqs[d] !== undefined) newSeqs[newLabel] = s.seqs[d];
+                        });
+                        s.days = newDays;
+                        s.seqs = newSeqs;
+                    });
+                }
+
                 MapCtrl.clearAll();
                 State.stores = finalArray;
                 App.sync(); App.saveDB(); MapCtrl.fitToStores();
@@ -856,10 +944,23 @@ const PlanUI = {
     openCreatePlan: () => {
         const sel = document.getElementById('plan-month-select');
         if (sel) {
+            // ✅ FIX: เดิมอิงจาก "วันนี้จริง" เสมอ (+3 เดือน) ทำให้หน้าต่างเลือกเดือนขยับตาม
+            // วันปฏิทินจริงเท่านั้น ไม่เกี่ยวกับว่ามี Plan อยู่แล้วถึงเดือนไหน — พอมี Plan ล่วงหน้า
+            // ไปไกลกว่านั้นแล้ว กลับเพิ่มเดือนถัดไปอีกไม่ได้ (ต้องรอให้วันจริงเลื่อนมาถึงก่อน)
+            // เปลี่ยนเป็นอิงจาก Plan ล่าสุดที่มีอยู่แล้ว (planList[0], เรียงล่าสุดไว้หน้าสุดอยู่แล้ว)
+            // แล้วเสนอ 3 เดือนถัดจากนั้นแทน — ถ้ายังไม่มี Plan เลย (ศูนย์ใหม่) fallback ไปใช้วันนี้จริง
+            const latestYM = (State.db.planList && State.db.planList[0]) || null;
+            let baseYear, baseMonth; // baseMonth เป็น 0-indexed
+            if (latestYM) {
+                const [y, m] = latestYM.split('_').map(Number);
+                baseYear = y; baseMonth = m - 1;
+            } else {
+                const now = new Date();
+                baseYear = now.getFullYear(); baseMonth = now.getMonth();
+            }
             const months = [];
-            const d = new Date();
-            for (let i = 0; i <= 3; i++) {
-                const next = new Date(d.getFullYear(), d.getMonth() + i, 1);
+            for (let i = 1; i <= 3; i++) {
+                const next = new Date(baseYear, baseMonth + i, 1);
                 const ym   = `${next.getFullYear()}_${String(next.getMonth()+1).padStart(2,'0')}`;
                 const lbl  = App.ymToLabel(ym);
                 months.push({ ym, lbl });
@@ -873,7 +974,10 @@ const PlanUI = {
         const ym = document.getElementById('plan-month-select')?.value;
         document.getElementById('create-plan-modal')?.classList.add('hidden');
         if (!ym) return;
-        await App.createPlan(ym);
+        // ✅ FIX: ต้อง copy จาก "Plan ล่าสุดที่มีอยู่แล้ว" เสมอ (ฐานเดียวกับที่ dropdown ใช้คำนวณ
+        // ตัวเลือกเดือน) ไม่ใช่เดือนที่แอดมินบังเอิญเปิดดูอยู่ตอนนี้ — กันข้อมูลเพี้ยนถ้าสองอย่างไม่ตรงกัน
+        const latestYM = (State.db.planList && State.db.planList[0]) || App._currentPlanYM;
+        await App.createPlan(ym, latestYM);
     },
 
     confirmDelete: () => {

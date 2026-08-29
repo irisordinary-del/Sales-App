@@ -4,6 +4,113 @@
 // ==========================================
 const FileManager = {
 
+    // ✅ NEW: หาวันที่ปฏิทินจริงที่ "Day N" ตรงกับ ในเดือน/ปีที่ระบุ ตาม calendarConfig ที่มีผล
+    // (รองรับทุกโหมด รวมถึง cycle แบบ weekday-rolling ที่นับต่อเนื่องไม่รีเซ็ตรายเดือน)
+    // คืนค่าเป็น Date object หรือ null ถ้าหาไม่ได้ (เช่น label ไม่ตรงกับเดือนนี้เลย)
+    _resolveCalendarDate: (cfg, dayLabel, year, month) => {
+        if (!dayLabel || !cfg) return null;
+        const targetNum = parseInt(String(dayLabel).replace('Day ', ''));
+
+        if (!cfg.mode && (!cfg.mapping || Object.keys(cfg.mapping).length === 0)) {
+            return isNaN(targetNum) ? null : new Date(year, month, targetNum);
+        }
+        if (!cfg.mode && cfg.mapping) {
+            const entry = Object.entries(cfg.mapping).find(([, v]) => v === dayLabel);
+            return entry ? new Date(year, month, parseInt(entry[0])) : null;
+        }
+        if (cfg.mode === 'date') {
+            return isNaN(targetNum) ? null : new Date(year, month, targetNum);
+        }
+        if (cfg.mode === 'fixed') {
+            if (!cfg.mapping) return null;
+            const entry = Object.entries(cfg.mapping).find(([, v]) => v === dayLabel);
+            return entry ? new Date(year, month, parseInt(entry[0])) : null;
+        }
+        if (cfg.mode === 'weekday') {
+            const wmap = cfg.weekdayMap || {};
+            const targetWd = wmap[dayLabel];
+            if (targetWd === undefined) return null;
+            const daysInMonth = new Date(year, month + 1, 0).getDate();
+            for (let d = 1; d <= daysInMonth; d++) {
+                if (new Date(year, month, d).getDay() === targetWd) return new Date(year, month, d); // วันแรกที่เจอในเดือนนี้
+            }
+            return null;
+        }
+        if (cfg.mode === 'cycle') {
+            const isWkHol = (d) => (cfg.weeklyHolidays || []).includes(d.getDay());
+            if (cfg.anchorType === 'weekday-rolling') {
+                if (!cfg.anchorDate) return null;
+                const daysInMonth = new Date(year, month + 1, 0).getDate();
+                for (let d = 1; d <= daysInMonth; d++) {
+                    const target = new Date(year, month, d);
+                    if (isWkHol(target)) continue;
+                    const anchor = new Date(cfg.anchorDate + 'T00:00:00');
+                    let offset = 0;
+                    const cur = new Date(anchor);
+                    if (target.getTime() >= anchor.getTime()) {
+                        while (cur.getTime() < target.getTime()) { cur.setDate(cur.getDate()+1); if (!isWkHol(cur)) offset++; }
+                    } else {
+                        while (cur.getTime() > target.getTime()) { cur.setDate(cur.getDate()-1); if (!isWkHol(cur)) offset--; }
+                    }
+                    const cycleDays = parseInt(cfg.cycleDays || 24);
+                    const startNum  = parseInt(cfg.anchorDayNum || 1);
+                    const n = (((startNum - 1 + offset) % cycleDays) + cycleDays) % cycleDays + 1;
+                    if (('Day ' + n) === dayLabel) return target; // คืนวันแรกที่ตรงในเดือนนี้
+                }
+                return null;
+            }
+            // date-anchor / weekday-once — รีเซ็ตรายเดือน ไม่วนซ้ำ
+            const isHol = (d) => (cfg.holidays || []).includes(d) || isWkHol(new Date(year, month, d));
+            let startDate;
+            if (cfg.anchorType === 'weekday-once') {
+                const daysInMonth = new Date(year, month + 1, 0).getDate();
+                startDate = null;
+                for (let d = 1; d <= daysInMonth; d++) {
+                    if (new Date(year, month, d).getDay() === cfg.anchorWeekday) { startDate = d; break; }
+                }
+                if (startDate === null) return null;
+            } else {
+                startDate = parseInt(cfg.startDay || 1);
+            }
+            const cycleDays   = parseInt(cfg.cycleDays || 24);
+            const startDayNum = parseInt(cfg.startDayNum || 1);
+            const daysInMonth = new Date(year, month + 1, 0).getDate();
+            // ✅ BUGFIX (2026-08-29): เดิมนับ workDay ไล่ขึ้นจาก startDayNum แล้วตัดจบทันทีที่เกิน
+            // cycleDays — ทำให้ถ้า startDayNum ไม่ใช่ 1 (เช่นเริ่ม Day 4) ช่วงท้ายเดือนที่ควร "วน"
+            // กลับไปใช้ D01, D02, D03 ที่ถูกข้ามไปตอนต้น กลับหายไปเฉยๆ (ไม่มี Day ให้เลย)
+            // ที่ถูกต้อง cycleDays คือ "จำนวนรอบทั้งหมดใน 1 cycle" ไม่ใช่เพดานตายตัวของเลข Day
+            // นับ count (ลำดับวันทำงานที่ 1,2,3,...) แล้ว wrap กลับด้วย modulo แทน
+            let count = 0;
+            for (let d = startDate; d <= daysInMonth; d++) {
+                if (isHol(d)) continue;
+                count++;
+                if (count > cycleDays) return null;
+                const dayNum = ((startDayNum - 1 + (count - 1)) % cycleDays) + 1;
+                if (dayNum === targetNum) return new Date(year, month, d);
+            }
+            return null;
+        }
+        return null;
+    },
+
+    _fmtDateForExport: (date) => {
+        if (!date) return '';
+        const dd = String(date.getDate()).padStart(2, '0');
+        const mm = String(date.getMonth() + 1).padStart(2, '0');
+        return `${dd}/${mm}/${date.getFullYear()}`;
+    },
+
+    // ✅ คืนค่าคอลัมน์ Day สำหรับ export — พยายามคำนวณเป็นวันที่จริงก่อน (ตาม calendarConfig
+    // ที่มีผล) ถ้าคำนวณไม่ได้ (เช่นยังไม่เคยตั้งค่าปฏิทินเลย) fallback กลับไปโชว์ label/ค่าดิบเดิม
+    _dayColumnValue: (store, cfg, year, month) => {
+        const label = store.days?.length > 0 ? store.days[0] : '';
+        if (label && cfg) {
+            const d = FileManager._resolveCalendarDate(cfg, label, year, month);
+            if (d) return FileManager._fmtDateForExport(d);
+        }
+        return label || (store.dayOriginal || '');
+    },
+
     // ─── uploadRouteFile: Single-route upload ────────────────────────────
     uploadRouteFile: async (file) => {
         try {
@@ -119,6 +226,18 @@ const FileManager = {
 
             UI.showLoader('💾 กำลังสร้างไฟล์ Excel...', 'กำลังเตรียมข้อมูล');
 
+            // ✅ NEW: เช็ค override เฉพาะสายก่อน ถ้าไม่มีใช้ default ของศูนย์ — ใช้คำนวณวันที่จริง
+            // ของคอลัมน์ Day แทนที่จะโชว์แค่ "Day N" เฉยๆ
+            const ym = App._currentPlanYM;
+            let effectiveCfg = State.db.calendarConfig || null;
+            if (ym && State.localActiveRoute) {
+                try {
+                    const rd = await App.planRoutesCol(ym).doc(State.localActiveRoute).get();
+                    if (rd.exists && rd.data().calendarOverride) effectiveCfg = rd.data().calendarOverride;
+                } catch (e) { console.warn('exportTemplate: โหลด override ไม่สำเร็จ', e); }
+            }
+            const [expYear, expMonth] = ym ? ym.split('_').map(Number) : [null, null];
+
             const exportData = State.stores.map(store => ({
                 'A': store.cy || '',
                 'B': store.code || store.id,
@@ -131,7 +250,7 @@ const FileManager = {
                 'I': store.lat,
                 'J': store.lng,
                 'K': store.marketName || '',
-                'L': store.days?.length > 0 ? store.days[0] : (store.dayOriginal || ''),
+                'L': (expYear !== null) ? FileManager._dayColumnValue(store, effectiveCfg, expYear, expMonth - 1) : (store.days?.length > 0 ? store.days[0] : (store.dayOriginal || '')),
                 'M': (store.seqs && store.days?.length > 0) ? (store.seqs[store.days[0]] || '') : '',
             }));
 
@@ -221,6 +340,29 @@ const FileManager = {
 
             UI.showLoader('💾 กำลังรวมข้อมูลทุกสาย...', `รวม ${routeKeys.length} สาย เดือน ${planLabel}`);
 
+            // ✅ NEW: โหลด override เฉพาะสาย (ถ้ามี) ของทุกสายที่จะ export — ใช้คำนวณวันที่จริง
+            // ของคอลัมน์ Day แทนที่จะโชว์แค่ "Day N" เฉยๆ (แต่ละสายอาจมี override ต่างกัน)
+            const exportYM = selectedYM || App._currentPlanYM || '';
+            const [expYear, expMonthRaw] = exportYM ? exportYM.split('_').map(Number) : [null, null];
+            const expMonth = expMonthRaw !== undefined ? expMonthRaw - 1 : null;
+            const routeCfgs = {};
+            if (expYear !== null) {
+                const planRefForCfg = db.collection('appData').doc(window.CENTER_DOC).collection('plans').doc(exportYM);
+                const BATCH2 = 5;
+                for (let i = 0; i < routeKeys.length; i += BATCH2) {
+                    const chunk = routeKeys.slice(i, i + BATCH2);
+                    const docs = await Promise.all(
+                        chunk.map(r => planRefForCfg.collection('routes').doc(r).get().catch(() => null))
+                    );
+                    docs.forEach((d, j) => {
+                        routeCfgs[chunk[j]] = (d?.exists && d.data().calendarOverride) ? d.data().calendarOverride : State.db.calendarConfig;
+                    });
+                }
+            }
+            const dayColFor = (routeName, store) => (expYear !== null)
+                ? FileManager._dayColumnValue(store, routeCfgs[routeName], expYear, expMonth)
+                : (store.days?.length > 0 ? store.days[0] : (store.dayOriginal || ''));
+
             const wb = XLSX.utils.book_new();
             const allStores = [];
 
@@ -239,7 +381,7 @@ const FileManager = {
                         'I': store.lat,
                         'J': store.lng,
                         'K': store.marketName || '',
-                        'L': store.days?.length > 0 ? store.days[0] : (store.dayOriginal || ''),
+                        'L': dayColFor(routeName, store),
                         'M': (store.seqs && store.days?.length > 0) ? (store.seqs[store.days[0]] || '') : '',
                     });
                 });
@@ -285,7 +427,7 @@ const FileManager = {
                     'I': store.lat,
                     'J': store.lng,
                     'K': store.marketName || '',
-                    'L': store.days?.length > 0 ? store.days[0] : (store.dayOriginal || ''),
+                    'L': dayColFor(routeName, store),
                     'M': (store.seqs && store.days?.length > 0) ? (store.seqs[store.days[0]] || '') : '',
                 }));
 
@@ -353,11 +495,15 @@ const FileManager = {
                 let idCol=-1, nameCol=-1, latCol=-1, lngCol=-1, freqCol=-1,
                     dayCol=-1, seqCol=-1, salesCodeCol=-1, shopTypeCol=-1,
                     subDistrictCol=-1, districtCol=-1, provinceCol=-1,
-                    marketNameCol=-1, cyCol=-1;
+                    marketNameCol=-1, cyCol=-1, cycleNameCol=-1;
 
                 for (let i = 0; i < headers.length; i++) {
                     const h = String(headers[i]).toLowerCase();
                     if      (h.includes('รหัส') || h.includes('customer code') || h.includes('id'))  idCol = i;
+                    // ✅ FIX: ต้องเช็คก่อน nameCol เสมอ เพราะ "Cycle Name" มีคำว่า "name" ซ้อนอยู่
+                    // ถ้าเช็ค nameCol ก่อน จะโดนตีความเป็นคอลัมน์ชื่อร้านไปเลย ไม่มีทางถึง cycleNameCol
+                    // (บั๊กแบบเดียวกับที่เคยเจอ "ชื่อ" ซ้อนใน "ชื่อตลาด" มาก่อน — ดู bugfix-log.md 2026-05-06)
+                    else if (h.includes('cycle'))                                                    cycleNameCol = i;
                     else if ((h.includes('ชื่อ') && !h.includes('ตลาด')) || h.includes('name'))      nameCol = i;
                     else if (h.includes('lat') || h.includes('ละติจูด'))                             latCol = i;
                     else if (h.includes('lng') || h.includes('lon') || h.includes('ลองจิจูด'))       lngCol = i;
@@ -383,6 +529,24 @@ const FileManager = {
                     return UI.showErrorToast('⚠️ ไม่พบ column "Sales Code" ในไฟล์ กรุณาตรวจสอบ header');
                 }
 
+                // ✅ NEW: ไม่มีคอลัมน์ "Cycle Name" — ต้องหยุดถามยืนยันก่อน เพราะการเรียงจาก
+                // คอลัมน์ Day แทนเป็นแค่การเดา (Day อาจไม่ใช่ลำดับตลาดที่ตั้งใจจริงเสมอไป)
+                if (cycleNameCol === -1) {
+                    UI.hideLoader();
+                    const proceed = await new Promise(resolve => {
+                        UI.showConfirm(
+                            '⚠️ ไม่พบคอลัมน์ "Cycle Name" ในไฟล์นี้\n\n' +
+                            'ระบบจะเรียงลำดับ D01, D02, ... จากคอลัมน์ Day ที่มีอยู่แทน (เรียงจากน้อยไปมาก) ' +
+                            'ซึ่งอาจไม่ตรงกับลำดับตลาดที่ตั้งใจจริงเสมอไป\n\n' +
+                            'ต้องการนำเข้าต่อโดยใช้วิธีนี้หรือไม่?',
+                            () => resolve(true),
+                            () => resolve(false)
+                        );
+                    });
+                    if (!proceed) return;
+                    UI.showLoader('📦 กำลังนำเข้าข้อมูล...', 'รอสักครู่');
+                }
+
                 // ─── Parse + จัดกลุ่มตาม salesCode ──────────────────────
                 const byRoute = {};
 
@@ -404,7 +568,14 @@ const FileManager = {
                     const freq   = (freqCol !== -1 && String(row[freqCol]||'').toUpperCase().includes('2')) ? 2 : 1;
                     const rawDay = (dayCol !== -1 && row[dayCol]) ? String(row[dayCol]).trim() : '';
                     const dayNum = rawDay ? parseInt(rawDay.replace(/[^0-9]/g, '')) : NaN;
-                    const aDay   = !isNaN(dayNum) ? 'Day ' + dayNum : '';
+                    // ✅ NEW: ถ้าไฟล์มีคอลัมน์ "Cycle Name" ให้ใช้ค่านี้เป็นตัวกำหนดลำดับ D0N แทน
+                    // (เช่น 1 = D01) แม่นยำกว่าคอลัมน์ Day เพราะตั้งใจให้เป็นลำดับตลาดโดยตรง
+                    // ถ้าไฟล์ไม่มีคอลัมน์นี้เลย ใช้ dayNum เดิมไปก่อน แล้วจะ normalize เรียงลำดับ
+                    // ใหม่เป็น D01, D02, ... ทีหลัง (ดูบล็อกหลัง loop นี้)
+                    const rawCycle = (cycleNameCol !== -1 && row[cycleNameCol]) ? String(row[cycleNameCol]).trim() : '';
+                    const cycleNum = rawCycle ? parseInt(rawCycle.replace(/[^0-9]/g, '')) : NaN;
+                    const seqNum   = (cycleNameCol !== -1 && !isNaN(cycleNum)) ? cycleNum : dayNum;
+                    const aDay   = !isNaN(seqNum) ? 'Day ' + seqNum : '';
                     const aSeq   = (seqCol !== -1 && row[seqCol]) ? parseInt(String(row[seqCol]).replace(/[^0-9]/g,'')) : NaN;
 
                     if (byRoute[routeKey][idStr]) {
@@ -426,7 +597,7 @@ const FileManager = {
                             province:    provinceCol !== -1   ? String(row[provinceCol]||'').trim()   : '',
                             marketName:  marketNameCol !== -1  ? String(row[marketNameCol]||'').trim()  : '',
                             cy:          cyCol !== -1          ? String(row[cyCol]||'').trim()          : '',
-                            dayOriginal: rawDay,
+                            dayOriginal: cycleNameCol !== -1 ? rawCycle : rawDay,
                         };
                         if (aDay) { store.days.push(aDay); if (!isNaN(aSeq)) store.seqs[aDay] = aSeq; }
                         byRoute[routeKey][idStr] = store;
@@ -437,6 +608,37 @@ const FileManager = {
                 if (routeKeys.length === 0) {
                     UI.hideLoader();
                     return UI.showErrorToast('⚠️ ไม่พบข้อมูลในไฟล์');
+                }
+
+                // ✅ NEW: ไฟล์ไม่มีคอลัมน์ "Cycle Name" เลย — เรียงเลข Day ที่มีจริงในแต่ละสาย
+                // จากน้อยไปมาก แล้วแทนที่เป็นลำดับต่อเนื่อง D01, D02, D03... (อุดช่องว่าง เช่น
+                // มีแค่ Day 1, 5, 10 ในไฟล์ → กลายเป็น D01, D02, D03 ตามลำดับ) ทำแยกต่อสาย เพราะ
+                // แต่ละสายมี cycle ของตัวเอง ไม่เกี่ยวกัน
+                if (cycleNameCol === -1) {
+                    routeKeys.forEach(routeKey => {
+                        const stores = Object.values(byRoute[routeKey]);
+                        const usedNums = new Set();
+                        stores.forEach(s => s.days.forEach(d => {
+                            const n = parseInt(String(d).replace('Day ', ''));
+                            if (!isNaN(n)) usedNums.add(n);
+                        }));
+                        const sorted  = Array.from(usedNums).sort((a, b) => a - b);
+                        const rankMap = {};
+                        sorted.forEach((n, idx) => { rankMap[n] = idx + 1; });
+
+                        stores.forEach(s => {
+                            const newDays = [];
+                            const newSeqs = {};
+                            s.days.forEach(d => {
+                                const n = parseInt(String(d).replace('Day ', ''));
+                                const newLabel = (!isNaN(n) && rankMap[n]) ? ('Day ' + rankMap[n]) : d;
+                                if (!newDays.includes(newLabel)) newDays.push(newLabel);
+                                if (s.seqs[d] !== undefined) newSeqs[newLabel] = s.seqs[d];
+                            });
+                            s.days = newDays;
+                            s.seqs = newSeqs;
+                        });
+                    });
                 }
 
                 // ─── Merge เข้า State.db.routes ──────────────────────────

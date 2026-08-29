@@ -415,9 +415,15 @@ const App = {
                 App._getWithTimeout(planRef,   15000),
                 App._getWithTimeout(routeRef,  15000),
             ]);
-            const calendarConfig = cfgSnap.exists   ? (cfgSnap.data().calendarConfig || null) : null;
+            const planConfig     = cfgSnap.exists   ? (cfgSnap.data().calendarConfig || null) : null;
             const stores         = routeSnap.exists ? (routeSnap.data().stores        || [])  : [];
-            State.planCache[ym]  = { stores, calendarConfig, ym, _ok: true };
+            // ✅ ตั้งค่าปฏิทินเฉพาะสาย (ถ้ามี) ใช้แทนค่า default ของศูนย์สำหรับสายนี้
+            const routeOverride  = routeSnap.exists ? (routeSnap.data().calendarOverride || null) : null;
+            const calendarConfig = routeOverride || planConfig;
+            State.planCache[ym]  = {
+                stores, calendarConfig, ym, _ok: true,
+                routeOverrides: { [State.myRoute]: routeOverride },
+            };
             return State.planCache[ym];
         } catch(e) {
             console.warn('loadPlanData:', ym, e);
@@ -586,17 +592,24 @@ const App = {
             const cfgSnap        = await App._getWithTimeout(planRef, 10000);
             const calendarConfig = cfgSnap.exists ? (cfgSnap.data().calendarConfig || null) : null;
             const routeList      = cfgSnap.exists ? (cfgSnap.data().routeList || []) : [];
-            // โหลด stores ทุกสาย batch 5
+            // โหลด stores ทุกสาย batch 5 — เก็บ calendarOverride ของแต่ละสายไว้ด้วย
+            // (ใช้ตอน Supervisor เลือกดูสายที่มี override เฉพาะตัว)
             let stores = [];
+            const routeOverrides = {};
             const BATCH = 5;
             for (let i = 0; i < routeList.length; i += BATCH) {
                 const chunk = routeList.slice(i, i + BATCH);
                 const docs  = await Promise.all(
                     chunk.map(r => planRef.collection('routes').doc(r).get().catch(() => null))
                 );
-                docs.forEach(d => { if (d?.exists) stores = stores.concat(d.data().stores || []); });
+                docs.forEach((d, idx) => {
+                    if (d?.exists) {
+                        stores = stores.concat(d.data().stores || []);
+                        routeOverrides[chunk[idx]] = d.data().calendarOverride || null;
+                    }
+                });
             }
-            State.planCache[ym] = { stores, calendarConfig, ym, _ok: true };
+            State.planCache[ym] = { stores, calendarConfig, ym, _ok: true, routeOverrides };
         } catch(e) {
             console.warn('loadPlanDataForSup:', ym, e);
             return { stores: [], calendarConfig: null, ym };
@@ -1168,6 +1181,60 @@ const CalendarCtrl = {
         return CalendarCtrl.getDayLabelForCfg(day, cfg, State.allStores, y, m) || null;
     },
 
+    // ✅ หา "วันเริ่มนับ" ของโหมด cycle ในเดือนนั้นๆ — รองรับทั้งแบบเดิม (เลขวันที่ตายตัว)
+    // และแบบใหม่ (อิงวันในสัปดาห์ เช่น "จันทร์แรกของเดือน") ที่ไม่เลื่อนตามวันที่แล้ว ไม่มีปัญหา
+    // ตอน copy plan ข้ามเดือนอีกต่อไป เพราะคำนวณสดใหม่ทุกเดือนจากวันในสัปดาห์ ไม่ใช่เลขวันที่ค้าง
+    _resolveCycleStartDate: (cfg, year, month) => {
+        if (cfg.anchorType === 'weekday-once') {
+            const daysInMonth = new Date(year, month + 1, 0).getDate();
+            for (let d = 1; d <= daysInMonth; d++) {
+                if (new Date(year, month, d).getDay() === cfg.anchorWeekday) return d;
+            }
+            return null; // ไม่ควรเกิด — ทุกเดือนมีทุกวันในสัปดาห์อย่างน้อย 1 ครั้ง
+        }
+        return parseInt(cfg.startDay || 1);
+    },
+
+    // ✅ วันหยุดของโหมด cycle — รวมทั้ง "วันหยุดเฉพาะกิจ" (เลขวันที่ เช่น วันหยุดนักขัตฤกษ์)
+    // และ "วันหยุดประจำสัปดาห์" (เช่น อาทิตย์หยุดทุกสัปดาห์ — ไม่ต้องมาร์คซ้ำทุกเดือน)
+    _isCycleHoliday: (cfg, year, month, d) => {
+        if ((cfg.holidays || []).includes(d)) return true;
+        if ((cfg.weeklyHolidays || []).includes(new Date(year, month, d).getDay())) return true;
+        return false;
+    },
+
+    // ✅ REDESIGN: "วันในสัปดาห์ (วนซ้ำ)" — เปลี่ยนจากรีเซ็ตกลับ Day 1 ทุกต้นเดือน (ของเดิม)
+    // เป็นนับต่อเนื่องไหลข้ามเดือนไม่มีจุดรีเซ็ตเลย ยึดจาก "จุดอ้างอิง" คงที่ 1 จุด
+    // (เช่น "1 ต.ค. 2569 = D04") แล้วนับวันทำงานสะสมจากจุดนั้น mod ด้วยจำนวนวัน Cycle
+    // หมายเหตุสำคัญ: โหมดนี้ข้าม "วันหยุดประจำสัปดาห์" (weeklyHolidays) เท่านั้น — ไม่รองรับ
+    // "วันหยุดเฉพาะกิจ" (holidays รายเดือน) เพราะการนับข้ามหลายเดือนจะต้องรู้วันหยุดเฉพาะกิจ
+    // ของทุกเดือนระหว่างทางด้วย ซึ่งเกินขอบเขตของ config ปัจจุบันที่เก็บแยกรายเดือน
+    _computeRollingDayLabel: (cfg, targetDate) => {
+        if (!cfg.anchorDate) return null;
+        const anchor = new Date(cfg.anchorDate + 'T00:00:00');
+        const wk = cfg.weeklyHolidays || [];
+        const isWkHol = (d) => wk.includes(d.getDay());
+        if (isWkHol(targetDate)) return null;
+
+        let offset = 0;
+        const cur = new Date(anchor);
+        if (targetDate.getTime() >= anchor.getTime()) {
+            while (cur.getTime() < targetDate.getTime()) {
+                cur.setDate(cur.getDate() + 1);
+                if (!isWkHol(cur)) offset++;
+            }
+        } else {
+            while (cur.getTime() > targetDate.getTime()) {
+                cur.setDate(cur.getDate() - 1);
+                if (!isWkHol(cur)) offset--;
+            }
+        }
+        const cycleDays = parseInt(cfg.cycleDays || 24);
+        const startNum  = parseInt(cfg.anchorDayNum || 1);
+        const n = (((startNum - 1 + offset) % cycleDays) + cycleDays) % cycleDays + 1;
+        return 'Day ' + n;
+    },
+
     getDayLabelForCfg: (dateNum, cfg, stores, year, month) => {
         // ✅ BUGFIX: เดิมเช็ค cfg.mapping ก่อนเช็ค cfg.mode เสมอ — ทำให้ mapping เก่าที่ค้างอยู่
         // ใน Firestore (จากตอนเคยตั้งโหมด "fixed" มาก่อน) มาบังทุกโหมดที่สลับมาทีหลัง
@@ -1197,17 +1264,25 @@ const CalendarCtrl = {
             return entry ? entry[0] : null;
         }
         if (cfg.mode === 'cycle') {
-            const startDate  = parseInt(cfg.startDay  || 1);
-            const holidays   = cfg.holidays  || [];
-            if (dateNum < startDate) return null;
-            let dayCounter = parseInt(cfg.startDayNum || 1), workdays = 0;
+            // ✅ "วันในสัปดาห์ (วนซ้ำ)" ใช้การนับต่อเนื่องแบบใหม่ทั้งหมด แยกออกจาก logic เดิมข้างล่าง
+            if (cfg.anchorType === 'weekday-rolling') {
+                return CalendarCtrl._computeRollingDayLabel(cfg, new Date(year, month, dateNum));
+            }
+            const startDate = CalendarCtrl._resolveCycleStartDate(cfg, year, month);
+            if (startDate === null || dateNum < startDate) return null;
+            const cycleDays   = parseInt(cfg.cycleDays || 24);
+            const startDayNum = parseInt(cfg.startDayNum || 1);
+            // ✅ BUGFIX (2026-08-29): wraparound — ดู comment เดียวกันใน FileManager._resolveCalendarDate
+            // (file-manager.js) เดิมเช็ค "dayNum > cycleDays" เป็นเพดานตายตัว ทำให้ช่วงท้ายเดือน
+            // ที่ควรวนกลับไปใช้ D01, D02, ... หายไป แก้เป็นนับ count แล้ว wrap ด้วย modulo
+            let count = 0;
             for (let d2 = startDate; d2 <= dateNum; d2++) {
-                if (holidays.includes(d2)) continue;
-                workdays++;
+                if (CalendarCtrl._isCycleHoliday(cfg, year, month, d2)) continue;
+                count++;
                 if (d2 === dateNum) {
-                    const dayNum    = dayCounter + workdays - 1;
-                    const cycleDays = cfg.cycleDays || 24;
-                    if (dayNum > cycleDays) return null;
+                    // ✅ "วันในสัปดาห์ (จบเมื่อครบรอบ)" และโหมดอิงวันที่แบบเดิม: จบรอบแล้วไม่มี Day ต่อ
+                    if (count > cycleDays) return null;
+                    const dayNum = ((startDayNum - 1 + (count - 1)) % cycleDays) + 1;
                     return 'Day ' + dayNum;
                 }
             }
@@ -1215,6 +1290,9 @@ const CalendarCtrl = {
         return null;
     },
 
+    // ⚠️ NOTE (2026-08-29): ฟังก์ชันนี้ดูเหมือนไม่มีจุดเรียกใช้แล้วในโค้ดปัจจุบัน (ถูกแทนที่ด้วย
+    // getDayLabelForCfg ข้างบน ซึ่งรับ cfg/year/month เป็น param แทนที่จะอ่านจาก State ตรงๆ) — คงไว้
+    // เผื่อมีที่อื่นเรียกใช้ และแก้บั๊ก wraparound ให้ตรงกันด้วยเพื่อความปลอดภัย ไม่ให้บั๊กเดิมหลงเหลือ
     getDayLabel: (dateNum) => {
         const cfg = State.calendarConfig;
         if (!cfg || cfg.mode === 'date') {
@@ -1229,17 +1307,18 @@ const CalendarCtrl = {
             return entry ? entry[0] : null;
         }
         if (cfg.mode === 'cycle') {
-            const startDate  = parseInt(cfg.startDay  || 1);
-            const holidays   = cfg.holidays  || [];
+            const startDate   = parseInt(cfg.startDay  || 1);
+            const holidays    = cfg.holidays  || [];
             if (dateNum < startDate) return null;
-            let dayCounter = parseInt(cfg.startDayNum || 1), workdays = 0;
+            const startDayNum = parseInt(cfg.startDayNum || 1);
+            const cycleDays   = parseInt(cfg.cycleDays || 24);
+            let count = 0;
             for (let d = startDate; d <= dateNum; d++) {
                 if (holidays.includes(d)) continue;
-                workdays++;
+                count++;
                 if (d === dateNum) {
-                    const dayNum    = dayCounter + workdays - 1;
-                    const cycleDays = cfg.cycleDays || 24;
-                    if (dayNum > cycleDays) return null;
+                    if (count > cycleDays) return null;
+                    const dayNum = ((startDayNum - 1 + (count - 1)) % cycleDays) + 1;
                     return 'Day ' + dayNum;
                 }
             }
@@ -1249,24 +1328,56 @@ const CalendarCtrl = {
 
     getDateFromDay: (dayLabel) => {
         const cfg = State.calendarConfig;
-        if (!cfg) return null;
+        const targetNum = parseInt(String(dayLabel || '').replace('Day ', ''));
+
+        // ✅ FIX: เดิมฟังก์ชันนี้ไม่มี branch สำหรับโหมด date/default/legacy เลย (คืน null เสมอ
+        // ทั้งที่เป็นกรณีที่ง่ายที่สุด — Day N ตรงกับวันที่ N ของเดือนตรงๆ) ทำให้ผู้เรียกต้อง
+        // เขียน logic เดาเองแยกต่างหาก (แล้วดันไปใช้แบบเดาผิดกับโหมดอื่นด้วย) แก้ให้ mirror
+        // การไล่เงื่อนไขแบบเดียวกับ getDayLabelForCfg() เป๊ะ เพื่อให้ไป-กลับ (label↔date) สอดคล้องกันเสมอ
+        if (!cfg || (!cfg.mode && (!cfg.mapping || Object.keys(cfg.mapping).length === 0))) {
+            return isNaN(targetNum) ? null : targetNum;
+        }
+        if (!cfg.mode && cfg.mapping) {
+            // legacy config เก่าสุดที่ไม่มี field mode เลย (ก่อนระบบ mode ถูกสร้าง) — lookup แบบเดียวกับ fixed
+            const entry = Object.entries(cfg.mapping).find(([, v]) => v === dayLabel);
+            return entry ? parseInt(entry[0]) : null;
+        }
+        if (cfg.mode === 'date') {
+            return isNaN(targetNum) ? null : targetNum;
+        }
         if (cfg.mode === 'fixed') {
             if (!cfg.mapping) return null;
             const entry = Object.entries(cfg.mapping).find(([, v]) => v === dayLabel);
             return entry ? parseInt(entry[0]) : null;
         }
         if (cfg.mode === 'cycle') {
-            const startDate   = parseInt(cfg.startDay   || 1);
-            const holidays    = cfg.holidays || [];
-            const startDayNum = parseInt(cfg.startDayNum || 1);
-            const targetNum   = parseInt(dayLabel.replace('Day ', ''));
-            const daysInMonth = new Date(CalendarCtrl._year, CalendarCtrl._month + 1, 0).getDate();
-            let workDay = startDayNum;
-            for (let d = startDate; d <= daysInMonth; d++) {
-                if (holidays.includes(d)) continue;
-                if (workDay === targetNum) return d;
-                workDay++;
+            // ✅ REDESIGN: "วันในสัปดาห์ (วนซ้ำ)" ใช้การนับต่อเนื่องแบบใหม่ — สแกนหาในเดือนที่ระบุ
+            // คืนวันแรกที่ตรงกัน (1 Day อาจตรงกับหลายวันที่ในเดือนเดียวกันได้ถ้า cycleDays สั้นกว่า
+            // จำนวนวันทำงานในเดือน — ใช้ getDatesFromDayInMonth() ถ้าต้องการทุกวันที่ตรง)
+            if (cfg.anchorType === 'weekday-rolling') {
+                const daysInMonth = new Date(CalendarCtrl._year, CalendarCtrl._month + 1, 0).getDate();
+                for (let d = 1; d <= daysInMonth; d++) {
+                    const lbl = CalendarCtrl._computeRollingDayLabel(cfg, new Date(CalendarCtrl._year, CalendarCtrl._month, d));
+                    if (lbl === dayLabel) return d;
+                }
+                return null;
             }
+            const startDate   = CalendarCtrl._resolveCycleStartDate(cfg, CalendarCtrl._year, CalendarCtrl._month);
+            if (startDate === null) return null;
+            const cycleDays   = parseInt(cfg.cycleDays || 24);
+            const startDayNum = parseInt(cfg.startDayNum || 1);
+            const daysInMonth = new Date(CalendarCtrl._year, CalendarCtrl._month + 1, 0).getDate();
+            // ✅ BUGFIX (2026-08-29): wraparound — เหมือน getDayLabelForCfg ข้างบน (ต้องตรงกันเป๊ะ
+            // เพื่อให้ label↔date ไป-กลับสอดคล้องกัน)
+            let count = 0;
+            for (let d = startDate; d <= daysInMonth; d++) {
+                if (CalendarCtrl._isCycleHoliday(cfg, CalendarCtrl._year, CalendarCtrl._month, d)) continue;
+                count++;
+                if (count > cycleDays) return null; // "จบเมื่อครบรอบ" — เกินรอบแล้วไม่มีวันไหนตรงอีก
+                const dayNum = ((startDayNum - 1 + (count - 1)) % cycleDays) + 1;
+                if (dayNum === targetNum) return d;
+            }
+            return null;
         }
         // ⚠️ โหมด weekday: 1 Day ตรงกับหลายวันที่ต่อเดือน (ทุกสัปดาห์) — ไม่มีคำตอบเดียวที่ถูกต้อง
         // เตือนแบบเห็นชัดใน console แทนที่จะคืน null แบบเงียบๆ ถ้ามีจุดไหนเรียกใช้ฟังก์ชันนี้กับโหมดนี้
@@ -1278,20 +1389,38 @@ const CalendarCtrl = {
         return null;
     },
 
-    // ✅ สำหรับโหมด weekday โดยเฉพาะ — คืน array ของ "วันที่" ทั้งหมดในเดือนที่ตรงกับ Day label ที่ระบุ
-    // (เพราะ 1 Day ขยายทุกสัปดาห์ จึงตรงกับหลายวันที่ในเดือนเดียวกันได้)
+    // ✅ คืน array ของ "วันที่" ทั้งหมดในเดือนที่ตรงกับ Day label — ใช้กับกรณีที่ 1 Day label
+    // ตรงกับหลายวันที่ในเดือนเดียวกันได้: โหมด weekday (ขยายทุกสัปดาห์) และโหมด cycle แบบ
+    // weekday-rolling (วนกลับ Day 1 เมื่อครบรอบ)
     getDatesFromDayInMonth: (dayLabel, year, month) => {
         const cfg = State.calendarConfig;
-        if (!cfg || cfg.mode !== 'weekday') return [];
-        const wmap = cfg.weekdayMap || {};
-        const targetWd = wmap[dayLabel];
-        if (targetWd === undefined) return [];
-        const daysInMonth = new Date(year, month + 1, 0).getDate();
-        const dates = [];
-        for (let d = 1; d <= daysInMonth; d++) {
-            if (new Date(year, month, d).getDay() === targetWd) dates.push(d);
+        if (!cfg) return [];
+
+        if (cfg.mode === 'weekday') {
+            const wmap = cfg.weekdayMap || {};
+            const targetWd = wmap[dayLabel];
+            if (targetWd === undefined) return [];
+            const daysInMonth = new Date(year, month + 1, 0).getDate();
+            const dates = [];
+            for (let d = 1; d <= daysInMonth; d++) {
+                if (new Date(year, month, d).getDay() === targetWd) dates.push(d);
+            }
+            return dates;
         }
-        return dates;
+
+        if (cfg.mode === 'cycle' && cfg.anchorType === 'weekday-rolling') {
+            const targetNum = parseInt(String(dayLabel || '').replace('Day ', ''));
+            if (isNaN(targetNum)) return [];
+            const daysInMonth = new Date(year, month + 1, 0).getDate();
+            const dates = [];
+            for (let d = 1; d <= daysInMonth; d++) {
+                const lbl = CalendarCtrl._computeRollingDayLabel(cfg, new Date(year, month, d));
+                if (lbl === dayLabel) dates.push(d);
+            }
+            return dates;
+        }
+
+        return [];
     },
 
     // ✅ ข้อ 5 (โหมดที่ 4): เช็ค exception วันหยุดของ "วันนี้" (calendar date จริง) แล้วปรับ list ร้านให้ตรง
@@ -1379,7 +1508,10 @@ const CalendarCtrl = {
 
         const _renderYM    = `${year}_${String(month+1).padStart(2,'0')}`;
         const _renderPlan  = State.planCache[_renderYM];
-        const _renderCfg   = _renderPlan !== undefined ? _renderPlan?.calendarConfig : cfg;
+        // ✅ ใช้ค่า override เฉพาะสายที่กำลังดูอยู่ (ถ้ามี) แทนค่า default ของศูนย์
+        const _routeForCfg = (App.isSupervisor() && SupervisorUI._selectedRoute) ? SupervisorUI._selectedRoute : State.myRoute;
+        const _routeOverride = _renderPlan?.routeOverrides?.[_routeForCfg];
+        const _renderCfg   = _routeOverride || (_renderPlan !== undefined ? _renderPlan?.calendarConfig : cfg);
         const _renderStores = _renderPlan?.stores || State.allStores;
 
         for (let d = 1; d <= daysInMonth; d++) {
@@ -1417,7 +1549,9 @@ const CalendarCtrl = {
             const mktMore  = mktsInCell.length > 1 ? '+' + (mktsInCell.length - 1) : '';
             const dayNum      = dayLabel ? parseInt(dayLabel.replace('Day ','')) : null;
             const isSameAsDate = true; // ไม่แสดงเลข Day badge
-            const clickHandler = dayLabel ? `CalendarCtrl.goToDay('${dayLabel}')` : '';
+            // ✅ FIX: ส่ง year/month/d ที่คลิกจริงไปด้วยเสมอ แทนการให้ showDaySheet เดาวันที่คืนจาก dayLabel เอง
+            // (จำเป็นมากในโหมด weekday ที่ 1 dayLabel ตรงกับหลายวันที่ในเดือนเดียวกัน)
+            const clickHandler = dayLabel ? `CalendarCtrl.goToDay('${dayLabel}', ${year}, ${month}, ${d})` : '';
 
             // 📌 งานที่ต้องส่ง — เช็คตามวันที่ปฏิทินจริง ไม่ขึ้นกับว่าสายวิ่งวันนั้นหรือไม่
             const tasksForDay = TaskCtrl.getForDate(new Date(year, month, d));
@@ -1442,7 +1576,7 @@ const CalendarCtrl = {
         container.innerHTML = html;
     },
 
-    goToDay: (dayLabel) => { CalendarCtrl.showDaySheet(dayLabel); },
+    goToDay: (dayLabel, year, month, day) => { CalendarCtrl.showDaySheet(dayLabel, year, month, day); },
 
     navigateToDay: async (dayLabel, market) => {
         CalendarCtrl.closePopup();
@@ -1467,7 +1601,7 @@ const CalendarCtrl = {
         showSalesToast('📅 ' + (market || (mkts[0] || dayLabel)));
     },
 
-    showDaySheet: async (dayLabel) => {
+    showDaySheet: async (dayLabel, clickYear, clickMonth, clickDay) => {
         const _calYM = `${CalendarCtrl._year}_${String(CalendarCtrl._month+1).padStart(2,'0')}`;
         if (_calYM !== (State.activePlanYM || '')) {
             const _pk = State.planList.find(p => p === _calYM);
@@ -1491,8 +1625,23 @@ const CalendarCtrl = {
             return Array.from(names).filter(Boolean).sort();
         })();
         const storeCount = _activeStores.filter(s => s.days?.includes(dayLabel)).length;
-        const dayNum     = parseInt(dayLabel.replace('Day ',''));
-        const sheetDate  = new Date(_sy, _sm, dayNum);
+
+        // ✅ FIX: ใช้วันที่ที่คลิกจริงถ้ามีส่งมา (แม่นยำทุกโหมดปฏิทิน รวมถึง weekday ที่ 1 dayLabel
+        // ตรงกับหลายวันที่ในเดือนเดียวกัน) — ก่อนหน้านี้เดาวันที่จากตัวเลขใน dayLabel ตรงๆ ซึ่งผิด
+        // ทันทีที่ไม่ใช่โหมด date/default (ดู CalendarCtrl.getDateFromDay)
+        // เผื่อกรณีถูกเรียกโดยไม่มี context วันที่ (ไม่ควรเกิดจาก UI ปกติ) ให้ fallback ไปที่ getDateFromDay()
+        let sheetDate;
+        if (Number.isInteger(clickDay)) {
+            sheetDate = new Date(clickYear, clickMonth, clickDay);
+        } else {
+            const _resolvedDay = CalendarCtrl.getDateFromDay(dayLabel);
+            if (_resolvedDay) {
+                sheetDate = new Date(_sy, _sm, _resolvedDay);
+            } else {
+                console.warn('CalendarCtrl.showDaySheet: ไม่ทราบวันที่แน่ชัดของ', dayLabel, '(โหมด weekday ต้องส่ง clickDay มาด้วยเสมอ) — ใช้วันที่ 1 ของเดือนแทนชั่วคราว');
+                sheetDate = new Date(_sy, _sm, 1);
+            }
+        }
         const dateStr    = sheetDate.toLocaleDateString('th-TH', {weekday:'long',day:'numeric',month:'long'});
         const dayTasks   = TaskCtrl.getForDate(sheetDate);
         const taskSection = dayTasks.length ? `
