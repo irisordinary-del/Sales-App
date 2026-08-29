@@ -1103,7 +1103,14 @@
             <div class="p-5 border-b flex justify-between items-center bg-gray-50 flex-shrink-0">
                 <div>
                     <h2 class="text-base font-black text-gray-900">📅 ตั้งค่าปฏิทิน</h2>
-                    <p id="cal-modal-plan-label" class="text-xs text-gray-500 mt-0.5"></p>
+                    <!-- ✅ NEW (2026-08-29): เลื่อนดูเดือนก่อนหน้า/ถัดไปได้เลยโดยไม่ต้องปิด modal -->
+                    <div class="flex items-center gap-1 mt-0.5">
+                        <button onclick="CalendarAdmin.shiftMonth(-1)" title="เดือนก่อนหน้า"
+                            class="w-5 h-5 flex items-center justify-center rounded text-gray-400 hover:bg-gray-200 hover:text-gray-700 text-sm font-bold leading-none">‹</button>
+                        <p id="cal-modal-plan-label" class="text-xs text-gray-500"></p>
+                        <button onclick="CalendarAdmin.shiftMonth(1)" title="เดือนถัดไป"
+                            class="w-5 h-5 flex items-center justify-center rounded text-gray-400 hover:bg-gray-200 hover:text-gray-700 text-sm font-bold leading-none">›</button>
+                    </div>
                 </div>
                 <button onclick="CalendarAdmin.close()" class="w-8 h-8 rounded-full border border-gray-200 text-gray-400 hover:bg-gray-100 font-bold">✕</button>
             </div>
@@ -1299,6 +1306,28 @@
                 }
 
                 await CalendarAdmin._loadConfig();
+            },
+
+            // ── เลื่อนดูเดือนก่อนหน้า/ถัดไป (delta = -1 หรือ +1) โดยไม่ต้องปิด modal ─────
+            // ✅ NEW (2026-08-29): แต่ละเดือน (plans/{ym}) มี calendarConfig ของตัวเอง — เลื่อนเดือน
+            // จึงต้องโหลด config ใหม่จริงๆ ไม่ใช่แค่เปลี่ยน label เฉยๆ แต่คงสายที่เลือกไว้เดิม
+            // (ต่างจาก open() ที่ reset กลับ "ทั้งศูนย์" ทุกครั้ง เพราะที่นี่แค่เลื่อนดูเดือน ไม่ได้เปิด modal ใหม่)
+            _shiftBusy: false,
+            shiftMonth: async (delta) => {
+                if (!CalendarAdmin._ym || CalendarAdmin._shiftBusy) return;
+                CalendarAdmin._shiftBusy = true;
+                try {
+                    const [y, m] = CalendarAdmin._ym.split('_').map(Number);
+                    const d = new Date(y, (m - 1) + delta, 1); // Date normalizes การข้ามปีให้เองอัตโนมัติ
+                    const newYm = `${d.getFullYear()}_${String(d.getMonth() + 1).padStart(2, '0')}`;
+                    CalendarAdmin._ym = newYm;
+                    CalendarAdmin._targetRef = App.plansCol().doc(newYm);
+                    const lbl = document.getElementById('cal-modal-plan-label');
+                    if (lbl) lbl.textContent = d.toLocaleDateString('th-TH', { year: 'numeric', month: 'long' });
+                    await CalendarAdmin._loadConfig();
+                } finally {
+                    CalendarAdmin._shiftBusy = false;
+                }
             },
 
             // ── สลับเป้าหมาย (ทั้งศูนย์ / เฉพาะสาย) ────────────────────────────
