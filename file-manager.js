@@ -252,10 +252,13 @@ const FileManager = {
                 'K': store.marketName || '',
                 'L': (expYear !== null) ? FileManager._dayColumnValue(store, effectiveCfg, expYear, expMonth - 1) : (store.days?.length > 0 ? store.days[0] : (store.dayOriginal || '')),
                 'M': (store.seqs && store.days?.length > 0) ? (store.seqs[store.days[0]] || '') : '',
+                // ✅ NEW (2026-08-29): เพิ่มคอลัมน์ "Cycle Name" กลับเข้าไปตอน export — เดิมค่าดิบที่
+                // อ่านมาจากไฟล์ upload (เก็บไว้ใน store.dayOriginal) ไม่เคยถูกเขียนกลับออกไปเลย
+                'N': store.dayOriginal || '',
             }));
 
             const ws = XLSX.utils.json_to_sheet(exportData, {
-                header: ['A','B','C','D','E','F','G','H','I','J','K','L','M'],
+                header: ['A','B','C','D','E','F','G','H','I','J','K','L','M','N'],
             });
 
             ws['A1'] = { v: 'CY', t: 's' };
@@ -271,11 +274,13 @@ const FileManager = {
             ws['K1'] = { v: 'ชื่อตลาด', t: 's' };
             ws['L1'] = { v: 'Day', t: 's' };
             ws['M1'] = { v: 'ลำดับ', t: 's' };
+            ws['N1'] = { v: 'Cycle Name', t: 's' };
 
             ws['!cols'] = [
                 { wch: 14 }, { wch: 12 }, { wch: 40 }, { wch: 10 },
                 { wch: 8  }, { wch: 18 }, { wch: 18 }, { wch: 14 },
                 { wch: 14 }, { wch: 14 }, { wch: 30 }, { wch: 6  }, { wch: 6 },
+                { wch: 16 },
             ];
 
             const wb  = XLSX.utils.book_new();
@@ -310,7 +315,11 @@ const FileManager = {
             if (selectedYM && selectedYM !== App._currentPlanYM) {
                 UI.showLoader('⏳ โหลดข้อมูลเดือน ' + planLabel + '...', 'กำลังดึงข้อมูลจาก Firestore');
                 try {
-                    const planRef = db.collection('appData').doc(window.CENTER_DOC)
+                    // ✅ BUGFIX (2026-08-29): เดิมใช้ตัวแปร `db` เฉยๆ ซึ่งไม่มีอยู่จริงในหน้า Admin
+                    // (index.html โหลด app-config.js ที่ประกาศ `cloudDB` ไม่ใช่ `db` — `db` มีแค่ใน
+                    // sales-app.js ซึ่งหน้า Admin ไม่ได้โหลด) ทำให้กด Export ทุกสายแล้วขึ้น
+                    // "db is not defined" เสมอตอนเลือกเดือนอื่นที่ไม่ใช่เดือนปัจจุบัน
+                    const planRef = cloudDB.collection('appData').doc(window.CENTER_DOC)
                         .collection('plans').doc(selectedYM);
                     const routeList = State.db.routeList || [];
                     routes = {};
@@ -347,7 +356,8 @@ const FileManager = {
             const expMonth = expMonthRaw !== undefined ? expMonthRaw - 1 : null;
             const routeCfgs = {};
             if (expYear !== null) {
-                const planRefForCfg = db.collection('appData').doc(window.CENTER_DOC).collection('plans').doc(exportYM);
+                // ✅ BUGFIX (2026-08-29): เหมือนจุดข้างบน — ต้องใช้ cloudDB ไม่ใช่ db (ไม่มีอยู่จริงในหน้า Admin)
+                const planRefForCfg = cloudDB.collection('appData').doc(window.CENTER_DOC).collection('plans').doc(exportYM);
                 const BATCH2 = 5;
                 for (let i = 0; i < routeKeys.length; i += BATCH2) {
                     const chunk = routeKeys.slice(i, i + BATCH2);
@@ -383,12 +393,14 @@ const FileManager = {
                         'K': store.marketName || '',
                         'L': dayColFor(routeName, store),
                         'M': (store.seqs && store.days?.length > 0) ? (store.seqs[store.days[0]] || '') : '',
+                        // ✅ NEW (2026-08-29): ดู comment เดียวกันใน exportTemplate ข้างบน
+                        'N': store.dayOriginal || '',
                     });
                 });
             });
 
             const wsAll = XLSX.utils.json_to_sheet(allStores, {
-                header: ['A','B','C','D','E','F','G','H','I','J','K','L','M'],
+                header: ['A','B','C','D','E','F','G','H','I','J','K','L','M','N'],
             });
             wsAll['A1'] = { v: 'สายวิ่ง', t: 's' };
             wsAll['B1'] = { v: 'รหัส', t: 's' };
@@ -403,10 +415,12 @@ const FileManager = {
             wsAll['K1'] = { v: 'ชื่อตลาด', t: 's' };
             wsAll['L1'] = { v: 'Day', t: 's' };
             wsAll['M1'] = { v: 'ลำดับ', t: 's' };
+            wsAll['N1'] = { v: 'Cycle Name', t: 's' };
             wsAll['!cols'] = [
                 { wch: 18 }, { wch: 12 }, { wch: 40 }, { wch: 10 },
                 { wch: 8  }, { wch: 18 }, { wch: 18 }, { wch: 14 },
                 { wch: 14 }, { wch: 14 }, { wch: 30 }, { wch: 6  },
+                { wch: 16 },
             ];
             XLSX.utils.book_append_sheet(wb, wsAll, 'ทุกสาย');
 
@@ -429,10 +443,12 @@ const FileManager = {
                     'K': store.marketName || '',
                     'L': dayColFor(routeName, store),
                     'M': (store.seqs && store.days?.length > 0) ? (store.seqs[store.days[0]] || '') : '',
+                    // ✅ NEW (2026-08-29): ดู comment เดียวกันใน exportTemplate ข้างบน
+                    'N': store.dayOriginal || '',
                 }));
 
                 const ws = XLSX.utils.json_to_sheet(exportData, {
-                    header: ['A','B','C','D','E','F','G','H','I','J','K','L','M'],
+                    header: ['A','B','C','D','E','F','G','H','I','J','K','L','M','N'],
                 });
                 ws['A1'] = { v: 'CY', t: 's' };
                 ws['B1'] = { v: 'รหัส', t: 's' };
@@ -447,10 +463,12 @@ const FileManager = {
                 ws['K1'] = { v: 'ชื่อตลาด', t: 's' };
                 ws['L1'] = { v: 'Day', t: 's' };
                 ws['M1'] = { v: 'ลำดับ', t: 's' };
+                ws['N1'] = { v: 'Cycle Name', t: 's' };
                 ws['!cols'] = [
                     { wch: 14 }, { wch: 12 }, { wch: 40 }, { wch: 10 },
                     { wch: 8  }, { wch: 18 }, { wch: 18 }, { wch: 14 },
                     { wch: 14 }, { wch: 14 }, { wch: 30 }, { wch: 6  }, { wch: 6 },
+                    { wch: 16 },
                 ];
                 XLSX.utils.book_append_sheet(wb, ws, routeName.substring(0, 31));
             });
