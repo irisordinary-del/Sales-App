@@ -126,6 +126,12 @@
             color: #2563eb !important;
             font-size: 20px !important;
         }
+        /* ✅ NEW (2026-08-31): ปุ่ม "🔁 ขอย้ายวัน" ซ่อนไว้เป็นปกติ — โชว์เฉพาะตอนกด "✏️ แก้ไขลำดับ" */
+        .move-req-btn { display: none; }
+        .store-item.edit-mode-on .move-req-btn { display: inline-flex; }
+        /* ✅ NEW: ตอนอยู่ในโหมดแก้ไขลำดับ ซ่อน 📊 KPI และ 🚗 นำทาง เหลือแค่ปุ่มย้ายวัน */
+        .store-item.edit-mode-on .kpi-btn,
+        .store-item.edit-mode-on .gps-btn { display: none; }
     </style>
 </head>
 <body>

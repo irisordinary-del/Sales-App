@@ -934,10 +934,12 @@ const Processor = {
                     onerror="this.style.display='none'">`).join('');
 
             // ✅ NEW (2026-08-31): ร้านที่มีคำขอย้ายวัน "รออนุมัติ" ค้างอยู่ — ปุ่มเปลี่ยนเป็น ⏳ กดไม่ได้ กันส่งซ้ำ
+            // ปุ่มนี้ (class="move-req-btn") ซ่อนไว้เป็นปกติ — CSS จะโชว์เฉพาะตอนอยู่ในโหมด "แก้ไขลำดับ"
+            // (ดู .store-item.edit-mode-on .move-req-btn ใน sales.html)
             const _movePending = (typeof MoveRequest !== 'undefined') && MoveRequest._pendingSet.has(String(s.id));
             const moveBtn = _movePending
-                ? `<button title="รออนุมัติคำขอย้ายวัน" disabled class="bg-gray-100 text-gray-400 px-2 py-1.5 rounded-lg font-bold text-[10px] border border-gray-200 cursor-default">⏳</button>`
-                : `<button onclick="MoveRequest.openPicker('${s.id}','${State.currentDay}')" title="ขอย้ายวัน" class="bg-purple-50 hover:bg-purple-100 text-purple-600 px-2 py-1.5 rounded-lg font-bold text-[10px] border border-purple-100 transition active:scale-95">🔁</button>`;
+                ? `<button title="รออนุมัติคำขอย้ายวัน" disabled class="move-req-btn bg-gray-100 text-gray-400 px-2 py-1.5 rounded-lg font-bold text-[10px] border border-gray-200 cursor-default">⏳</button>`
+                : `<button onclick="MoveRequest.openPicker('${s.id}','${State.currentDay}')" title="ขอย้ายวัน" class="move-req-btn bg-purple-50 hover:bg-purple-100 text-purple-600 px-2 py-1.5 rounded-lg font-bold text-[10px] border border-purple-100 transition active:scale-95">🔁</button>`;
 
             return `
             <div data-id="${s.id}" class="store-item bg-white p-2.5 rounded-xl border shadow-sm flex items-center gap-1.5 relative mb-2.5">
@@ -946,8 +948,8 @@ const Processor = {
                 <div class="flex-1 font-bold text-sm text-gray-800 leading-tight cursor-pointer truncate" onclick="UI.openModal('${s.id}')">${s.name}</div>
                 <div class="flex items-center gap-1.5 shrink-0">
                     ${campIcons}
-                    <button onclick="UI.openModal('${s.id}')" class="bg-blue-50 hover:bg-blue-100 text-blue-600 px-2 py-1.5 rounded-lg font-bold text-[10px] border border-blue-100 transition active:scale-95">📊 KPI</button>
-                    <a href="${navLink}" target="_blank" class="bg-emerald-50 hover:bg-emerald-100 text-emerald-600 px-2 py-1.5 rounded-lg font-bold text-[10px] text-center border border-emerald-100 transition active:scale-95">🚗</a>
+                    <button onclick="UI.openModal('${s.id}')" class="kpi-btn bg-blue-50 hover:bg-blue-100 text-blue-600 px-2 py-1.5 rounded-lg font-bold text-[10px] border border-blue-100 transition active:scale-95">📊 KPI</button>
+                    <a href="${navLink}" target="_blank" class="gps-btn bg-emerald-50 hover:bg-emerald-100 text-emerald-600 px-2 py-1.5 rounded-lg font-bold text-[10px] text-center border border-emerald-100 transition active:scale-95">🚗</a>
                     ${moveBtn}
                 </div>
             </div>`;
@@ -1132,12 +1134,10 @@ const RouteConfirm = {
         const route = RouteConfirm._activeRoute();
         if (!ym || !route) { host.style.display = 'none'; return; }
         const { confirmedBy, confirmedAt } = RouteConfirm.getStatus(ym);
+        // ✅ NEW (2026-08-31): ยืนยันแล้ว → ไม่ต้องโชว์แถบเขียวเลย (ซ่อนทั้งหมด ไม่ใช่แค่เปลี่ยนสี)
+        if (confirmedBy) { host.style.display = 'none'; return; }
         host.style.display = 'flex';
-        if (confirmedBy) {
-            const dateStr = confirmedAt?.toDate ? confirmedAt.toDate().toLocaleDateString('th-TH', { day: 'numeric', month: 'short' }) : '';
-            host.style.background = '#f0fdf4'; host.style.borderColor = '#bbf7d0';
-            host.innerHTML = `<span style="font-size:12px;font-weight:800;color:#15803d;">✅ ยืนยันรับสายวิ่งเดือนนี้แล้ว${dateStr ? ' · ' + dateStr : ''}</span>`;
-        } else if (RouteConfirm._canConfirm()) {
+        if (RouteConfirm._canConfirm()) {
             host.style.background = '#fffbeb'; host.style.borderColor = '#fde68a';
             host.innerHTML = `<span style="font-size:12px;font-weight:800;color:#92400e;flex:1;">⏳ ยังไม่ยืนยันรับสายวิ่งเดือนนี้</span>
                 <button onclick="RouteConfirm.confirm()" style="font-size:11px;font-weight:800;padding:5px 12px;border-radius:8px;border:none;background:#f59e0b;color:#fff;cursor:pointer;">ยืนยันเลย</button>`;
