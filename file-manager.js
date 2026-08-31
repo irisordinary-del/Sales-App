@@ -716,7 +716,14 @@ const FileManager = {
                             `💾 กำลังบันทึก... (${_si+1}/${savedRoutes.length} สาย)`,
                             `สาย ${_n} — ${(State.db.routes[_n]||[]).length} ร้าน`
                         );
-                        await App.planRoutesCol(App._currentPlanYM).doc(_n).set({ stores: State.db.routes[_n] || [] });
+                        // ✅ BUGFIX (2026-08-29): merge:true — ไม่งั้น calendarOverride ของสายนั้น
+                        // จะหายไปเงียบๆ ทุกครั้งที่ bulk import ทับ (ดู comment เดียวกันใน admin-data.js)
+                        // ✅ NEW: bulk import ทับร้านในสาย = รีเซ็ตสถานะ "ยืนยันรับสายวิ่ง" ด้วย
+                        await App.planRoutesCol(App._currentPlanYM).doc(_n).set({
+                            stores: State.db.routes[_n] || [],
+                            confirmedBy: firebase.firestore.FieldValue.delete(),
+                            confirmedAt: firebase.firestore.FieldValue.delete(),
+                        }, { merge: true });
                     }
                     const ym = App._currentPlanYM;
                     await App.planRef(ym).set(

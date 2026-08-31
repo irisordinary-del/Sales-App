@@ -174,6 +174,7 @@ const UI = {
         localStorage.setItem('sales_tab_date', new Date().toDateString());
 
         if (id === 'route') {
+            if (typeof RouteConfirm !== 'undefined') RouteConfirm.renderBanner();
             setTimeout(() => {
                 if (App.isSupervisor()) {
                     if (!SupervisorUI._selectedRoute) {
@@ -420,9 +421,13 @@ const App = {
             // ✅ ตั้งค่าปฏิทินเฉพาะสาย (ถ้ามี) ใช้แทนค่า default ของศูนย์สำหรับสายนี้
             const routeOverride  = routeSnap.exists ? (routeSnap.data().calendarOverride || null) : null;
             const calendarConfig = routeOverride || planConfig;
+            // ✅ NEW (2026-08-29): ดึงสถานะ "ยืนยันรับสายวิ่ง" มาด้วยเลย — ไม่ต้องอ่านซ้ำ (ดู RouteConfirm)
+            const confirmedBy    = routeSnap.exists ? (routeSnap.data().confirmedBy || null) : null;
+            const confirmedAt    = routeSnap.exists ? (routeSnap.data().confirmedAt || null) : null;
             State.planCache[ym]  = {
                 stores, calendarConfig, ym, _ok: true,
                 routeOverrides: { [State.myRoute]: routeOverride },
+                confirmedBy, confirmedAt,
             };
             return State.planCache[ym];
         } catch(e) {
@@ -442,6 +447,8 @@ const App = {
         State.activePlanYM   = data.ym;
         State._filterMarket  = '';
         if (State.isLoaded) { Processor.run(); CalendarCtrl.render(); }
+        if (typeof RouteConfirm !== 'undefined') RouteConfirm.renderBanner();
+        if (typeof NotifCtrl !== 'undefined') NotifCtrl.refresh();
     },
 
     startSupervisor: async () => {
@@ -518,6 +525,8 @@ const App = {
         let loaded = 0;
         State.allRoutes = {};
         State.allStores = [];
+        // ✅ NEW (2026-08-29): เก็บสถานะ "ยืนยันรับสายวิ่ง" ของแต่ละสายไว้ด้วย (ดู RouteConfirm)
+        const _confirmations = {};
 
         for (let i = 0; i < State.routeList.length; i += BATCH) {
             const chunk = State.routeList.slice(i, i + BATCH);
@@ -525,6 +534,7 @@ const App = {
                 try {
                     const rd = await App._getWithTimeout(_routesCol.doc(routeId), 8000);
                     State.allRoutes[routeId] = rd.exists ? (rd.data().stores || []) : [];
+                    _confirmations[routeId]  = rd.exists ? { confirmedBy: rd.data().confirmedBy || null, confirmedAt: rd.data().confirmedAt || null } : { confirmedBy: null, confirmedAt: null };
                 } catch(e) { State.allRoutes[routeId] = []; }
             }));
             loaded += chunk.length;
@@ -539,6 +549,7 @@ const App = {
             calendarConfig: State.calendarConfig,
             ym:             _useYM,
             _ok:            true,
+            confirmations:  _confirmations,
         };
 
         LoadBar.setProgress(80, 'โหลดยอดขาย...');
@@ -554,6 +565,7 @@ const App = {
         document.getElementById('loader').style.display = 'none';
         State.isLoaded = true;
         SupervisorUI.init();
+        if (typeof NotifCtrl !== 'undefined') NotifCtrl.refresh();
 
         // ── Step 5: calendar init — โหลด config เดือนอื่น background ──
         // เหมือน openPopup ของ Sales
@@ -596,6 +608,8 @@ const App = {
             // (ใช้ตอน Supervisor เลือกดูสายที่มี override เฉพาะตัว)
             let stores = [];
             const routeOverrides = {};
+            // ✅ NEW (2026-08-29): เก็บสถานะ "ยืนยันรับสายวิ่ง" ของแต่ละสายไว้ด้วย (ดู RouteConfirm)
+            const confirmations = {};
             const BATCH = 5;
             for (let i = 0; i < routeList.length; i += BATCH) {
                 const chunk = routeList.slice(i, i + BATCH);
@@ -606,10 +620,11 @@ const App = {
                     if (d?.exists) {
                         stores = stores.concat(d.data().stores || []);
                         routeOverrides[chunk[idx]] = d.data().calendarOverride || null;
+                        confirmations[chunk[idx]]  = { confirmedBy: d.data().confirmedBy || null, confirmedAt: d.data().confirmedAt || null };
                     }
                 });
             }
-            State.planCache[ym] = { stores, calendarConfig, ym, _ok: true, routeOverrides };
+            State.planCache[ym] = { stores, calendarConfig, ym, _ok: true, routeOverrides, confirmations };
         } catch(e) {
             console.warn('loadPlanDataForSup:', ym, e);
             return { stores: [], calendarConfig: null, ym };
@@ -664,6 +679,7 @@ const App = {
                     waitForLeaflet(() => MapCtrl.initAndDraw());
                     // ✅ โหลด campaign icons background
                     App._loadCampaignIcons().catch((e) => console.warn('[App] start: โหลด campaign icons ไม่สำเร็จ:', e));
+                    if (typeof NotifCtrl !== 'undefined') NotifCtrl.refresh();
                 }
             }
         };
@@ -730,12 +746,18 @@ const App = {
             if (!rd.exists) return;
             State.allStores = rd.data().stores || [];
             if (State.activePlanYM) {
-                State.planCache[State.activePlanYM] = { stores: State.allStores, calendarConfig: State.calendarConfig, ym: State.activePlanYM, _ok: true };
+                // ✅ FIX: ต้องเก็บ confirmedBy/confirmedAt ไว้ด้วย ไม่งั้น banner "ยืนยันรับสายวิ่ง"
+                // จะเด้งกลับเป็น "ยังไม่ยืนยัน" ทุกครั้งที่ onSnapshot ทำงาน (เช่น ตอนเซลกดยืนยันเอง)
+                State.planCache[State.activePlanYM] = {
+                    stores: State.allStores, calendarConfig: State.calendarConfig, ym: State.activePlanYM, _ok: true,
+                    confirmedBy: rd.data().confirmedBy || null, confirmedAt: rd.data().confirmedAt || null,
+                };
             }
             if (State.isLoaded) {
                 Processor.run();
                 const popup = document.getElementById('calendar-popup');
                 if (popup?.style.display !== 'none') CalendarCtrl.render();
+                if (typeof RouteConfirm !== 'undefined') RouteConfirm.renderBanner();
             }
         });
 
@@ -913,6 +935,7 @@ const Processor = {
                     ${campIcons}
                     <button onclick="UI.openModal('${s.id}')" class="bg-blue-50 hover:bg-blue-100 text-blue-600 px-2 py-1.5 rounded-lg font-bold text-[10px] border border-blue-100 transition active:scale-95">📊 KPI</button>
                     <a href="${navLink}" target="_blank" class="bg-emerald-50 hover:bg-emerald-100 text-emerald-600 px-2 py-1.5 rounded-lg font-bold text-[10px] text-center border border-emerald-100 transition active:scale-95">🚗</a>
+                    <button onclick="MoveRequest.openPicker('${s.id}','${State.currentDay}')" title="ขอย้ายวัน" class="bg-purple-50 hover:bg-purple-100 text-purple-600 px-2 py-1.5 rounded-lg font-bold text-[10px] border border-purple-100 transition active:scale-95">🔁</button>
                 </div>
             </div>`;
         }).join('');
@@ -1002,9 +1025,270 @@ const Processor = {
         const _writeRef = db.collection('appData').doc(_centerDocId)
             .collection('plans').doc(State.activePlanYM)
             .collection('routes').doc(State.myRoute);
-        _writeRef.set({ stores: updated })
+        // ✅ BUGFIX (2026-08-29): เดิม .set({stores}) ไม่มี merge:true — Firestore แทนที่เอกสาร
+        // ทั้งก้อน ทำให้ calendarOverride ของสายนี้หายไปเงียบๆ ทุกครั้งที่ลากสลับลำดับร้าน
+        // ✅ NEW: สลับลำดับร้าน = แก้ไขสายนี้ — รีเซ็ตสถานะ "ยืนยันรับสายวิ่ง" ด้วย (ต้องยืนยันใหม่)
+        _writeRef.set({
+            stores: updated,
+            confirmedBy: firebase.firestore.FieldValue.delete(),
+            confirmedAt: firebase.firestore.FieldValue.delete(),
+        }, { merge: true })
             .catch(e => showSalesToast('❌ บันทึกลำดับไม่สำเร็จ: ' + e.message, true));
     },
+};
+
+// ═════════════════════════════════════════════════════════════════════════
+// ✅ NEW (2026-08-29): RouteConfirm — เซลยืนยันว่าจะใช้สายวิ่งเดือนนี้
+// แอดมินเช็คสถานะได้จากฝั่ง admin (RouteConfirmAdmin ใน index.html) ถ้าแอดมินแก้ไข
+// ร้าน/ปฏิทินของสายนี้ทีหลัง สถานะจะถูกรีเซ็ตกลับเป็น "รอยืนยันใหม่" อัตโนมัติ
+// (ดู comment "รีเซ็ตสถานะยืนยันรับสายวิ่ง" ทุกจุดที่เขียน stores/calendarOverride)
+// ═════════════════════════════════════════════════════════════════════════
+const RouteConfirm = {
+    _activeRoute: () => (App.isSupervisor() && typeof SupervisorUI !== 'undefined') ? SupervisorUI._selectedRoute : State.myRoute,
+
+    getStatus: (ym) => {
+        const route = RouteConfirm._activeRoute();
+        const cache = State.planCache[ym];
+        if (!route || !cache) return { confirmedBy: null, confirmedAt: null };
+        if (cache.confirmations) return cache.confirmations[route] || { confirmedBy: null, confirmedAt: null };
+        return { confirmedBy: cache.confirmedBy || null, confirmedAt: cache.confirmedAt || null };
+    },
+
+    confirm: async () => {
+        const route = RouteConfirm._activeRoute();
+        const ym    = State.activePlanYM;
+        if (!route || !ym) return;
+        const session = Auth.getSession();
+        const name    = session?.displayName || session?.username || route;
+        try {
+            const centerMatch = route.match(/^(\d+)/);
+            const centerDocId = centerMatch ? (centerMatch[1] + '_main') : (State.planCenterDocId || 'v1_main');
+            await db.collection('appData').doc(centerDocId)
+                .collection('plans').doc(ym).collection('routes').doc(route)
+                .set({ confirmedBy: name, confirmedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true });
+            // ✅ อัปเดต cache local ทันที ไม่ต้องรอโหลดใหม่จาก server
+            const cache = State.planCache[ym];
+            const fakeTs = { toDate: () => new Date() };
+            if (cache) {
+                if (cache.confirmations) cache.confirmations[route] = { confirmedBy: name, confirmedAt: fakeTs };
+                else { cache.confirmedBy = name; cache.confirmedAt = fakeTs; }
+            }
+            showSalesToast('✅ ยืนยันรับสายวิ่งเรียบร้อย');
+            RouteConfirm.renderBanner();
+            if (typeof NotifCtrl !== 'undefined') NotifCtrl.refresh();
+        } catch(e) {
+            showSalesToast('❌ ยืนยันไม่สำเร็จ: ' + e.message, true);
+        }
+    },
+
+    // แสดง banner ในแท็บ "คิวงาน" — เรียกทุกครั้งที่เข้าแท็บนี้ หรือสลับเดือน/สาย
+    renderBanner: () => {
+        const host  = document.getElementById('route-confirm-banner');
+        if (!host) return;
+        const ym    = State.activePlanYM;
+        const route = RouteConfirm._activeRoute();
+        if (!ym || !route) { host.style.display = 'none'; return; }
+        const { confirmedBy, confirmedAt } = RouteConfirm.getStatus(ym);
+        host.style.display = 'flex';
+        if (confirmedBy) {
+            const dateStr = confirmedAt?.toDate ? confirmedAt.toDate().toLocaleDateString('th-TH', { day: 'numeric', month: 'short' }) : '';
+            host.style.background = '#f0fdf4'; host.style.borderColor = '#bbf7d0';
+            host.innerHTML = `<span style="font-size:12px;font-weight:800;color:#15803d;">✅ ยืนยันรับสายวิ่งเดือนนี้แล้ว${dateStr ? ' · ' + dateStr : ''}</span>`;
+        } else {
+            host.style.background = '#fffbeb'; host.style.borderColor = '#fde68a';
+            host.innerHTML = `<span style="font-size:12px;font-weight:800;color:#92400e;flex:1;">⏳ ยังไม่ยืนยันรับสายวิ่งเดือนนี้</span>
+                <button onclick="RouteConfirm.confirm()" style="font-size:11px;font-weight:800;padding:5px 12px;border-radius:8px;border:none;background:#f59e0b;color:#fff;cursor:pointer;">ยืนยันเลย</button>`;
+        }
+    },
+
+    // นับจำนวนเดือน (เดือนปัจจุบันขึ้นไป) ที่ยังไม่ยืนยัน — ใช้ทำ badge จุดแดง
+    computeBadgeCount: () => {
+        const route = RouteConfirm._activeRoute();
+        if (!route) return 0;
+        const d = new Date();
+        const nowYM = `${d.getFullYear()}_${String(d.getMonth() + 1).padStart(2, '0')}`;
+        let count = 0;
+        (State.planList || []).forEach(ym => {
+            if (ym < nowYM) return; // ข้ามเดือนที่ผ่านไปแล้ว ไม่ต้องยืนยันย้อนหลัง
+            const cache = State.planCache[ym];
+            if (!cache) return; // ยังไม่โหลด — badge จะอัปเดตอีกทีตอนโหลดครบ (preload ทำงานอยู่แล้ว)
+            const status = cache.confirmations ? (cache.confirmations[route] || {}) : cache;
+            if (!status.confirmedBy) count++;
+        });
+        return count;
+    },
+};
+
+// ═════════════════════════════════════════════════════════════════════════
+// ✅ NEW (2026-08-29): MoveRequest — เซลขอย้ายร้านจาก Day เดิม → Day ใหม่
+// "ภายในสายเดียวกันเท่านั้น" คำขอรออนุมัติจากแอดมินก่อนจะมีผลจริง (ไม่แก้ stores ตรงๆ)
+// เก็บที่ appData/{centerId}_main/moveRequests/{autoId} — ดู MoveRequestAdmin ใน index.html
+// ═════════════════════════════════════════════════════════════════════════
+const MoveRequest = {
+    _col: (centerDocId) => db.collection('appData').doc(centerDocId).collection('moveRequests'),
+
+    _centerDocId: () => {
+        const route = RouteConfirm._activeRoute() || State.myRoute;
+        const m = (route || '').match(/^(\d+)/);
+        return m ? (m[1] + '_main') : (State.planCenterDocId || 'v1_main');
+    },
+
+    // เปิด sheet เลือก Day ปลายทาง สำหรับร้าน storeId ที่ตอนนี้อยู่ Day = fromDay
+    openPicker: (storeId, fromDay) => {
+        const route  = RouteConfirm._activeRoute() || State.myRoute;
+        const stores = (App.isSupervisor() && SupervisorUI._selectedRoute) ? (State.allRoutes[route] || []) : State.allStores;
+        const store  = stores.find(s => String(s.id) === String(storeId));
+        if (!store) return showSalesToast('⚠️ ไม่พบร้านนี้', true);
+        const days = Array.from(new Set(stores.flatMap(s => s.days || []))).filter(d => d && d !== fromDay).sort();
+        if (!days.length) return showSalesToast('⚠️ ไม่มี Day อื่นให้ย้ายไปในสายนี้', true);
+
+        let sheet = document.getElementById('move-request-sheet');
+        if (!sheet) {
+            sheet = document.createElement('div');
+            sheet.id = 'move-request-sheet';
+            sheet.style.cssText = 'position:fixed;inset:0;z-index:99999;display:flex;align-items:flex-end;justify-content:center;';
+            document.body.appendChild(sheet);
+        }
+        sheet.innerHTML = `
+        <div style="position:absolute;inset:0;background:rgba(0,0,0,0.5);" onclick="MoveRequest.closePicker()"></div>
+        <div style="position:relative;background:#fff;border-radius:20px 20px 0 0;width:100%;max-width:480px;max-height:70vh;overflow-y:auto;padding:16px 16px 28px;">
+            <div style="display:flex;justify-content:center;padding:0 0 10px;"><div style="width:40px;height:4px;border-radius:2px;background:#e5e7eb;"></div></div>
+            <div style="font-size:15px;font-weight:900;color:#111827;margin-bottom:2px;">🔁 ขอย้ายวัน — ${store.name}</div>
+            <div style="font-size:12px;color:#6b7280;margin-bottom:14px;">ตอนนี้อยู่ ${fromDay} · เลือกวันปลายทาง (ต้องรอแอดมินอนุมัติก่อน มีผลจริง)</div>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+                ${days.map(d => `<button onclick="MoveRequest.submit('${storeId}','${fromDay}','${d}')"
+                    style="width:100%;padding:12px 16px;border-radius:14px;border:1.5px solid #e5e7eb;background:#f9fafb;text-align:left;font-size:14px;font-weight:700;color:#111827;cursor:pointer;">${d}</button>`).join('')}
+            </div>
+        </div>`;
+    },
+
+    closePicker: () => { document.getElementById('move-request-sheet')?.remove(); },
+
+    submit: async (storeId, fromDay, toDay) => {
+        MoveRequest.closePicker();
+        const route  = RouteConfirm._activeRoute() || State.myRoute;
+        const ym     = State.activePlanYM;
+        const stores = (App.isSupervisor() && SupervisorUI._selectedRoute) ? (State.allRoutes[route] || []) : State.allStores;
+        const store  = stores.find(s => String(s.id) === String(storeId));
+        const session = Auth.getSession();
+        const name    = session?.displayName || session?.username || route;
+        try {
+            await MoveRequest._col(MoveRequest._centerDocId()).add({
+                ym, route, storeId, storeCode: store?.code || store?.id || '', storeName: store?.name || String(storeId),
+                fromDay, toDay,
+                requestedBy: name, requestedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                status: 'pending',
+            });
+            showSalesToast(`📨 ส่งคำขอย้าย "${store?.name || storeId}" → ${toDay} แล้ว รออนุมัติจากแอดมิน`);
+        } catch(e) {
+            showSalesToast('❌ ส่งคำขอไม่สำเร็จ: ' + e.message, true);
+        }
+    },
+
+    // นับคำขอของสายตัวเองที่ status เปลี่ยนแล้ว (approved/rejected) แต่ยังไม่เคยเปิดดู
+    checkUpdates: async () => {
+        const route = RouteConfirm._activeRoute() || State.myRoute;
+        if (!route) return 0;
+        try {
+            const snap = await MoveRequest._col(MoveRequest._centerDocId())
+                .where('route', '==', route).orderBy('requestedAt', 'desc').limit(15).get();
+            const seenKey = `moveReq_seen_${route}`;
+            const seen = new Set(JSON.parse(localStorage.getItem(seenKey) || '[]'));
+            return snap.docs.filter(d => d.data().status !== 'pending' && !seen.has(d.id)).length;
+        } catch(e) { console.warn('MoveRequest.checkUpdates:', e); return 0; }
+    },
+};
+
+// ═════════════════════════════════════════════════════════════════════════
+// ✅ NEW (2026-08-29): NotifCtrl — รวมการแจ้งเตือนทั้ง 2 เรื่องไว้จุดเดียว
+// เปิดจากไอคอนแฮมเบอร์เกอร์มุมขวาบน (มีจุดแดงเตือนถ้ามีอะไรค้าง)
+// ═════════════════════════════════════════════════════════════════════════
+const NotifCtrl = {
+    refresh: async () => {
+        const dot = document.getElementById('header-notif-dot');
+        if (!dot) return;
+        try {
+            const pendingConfirm = RouteConfirm.computeBadgeCount();
+            const moveUpdates    = await MoveRequest.checkUpdates();
+            dot.style.display = (pendingConfirm > 0 || moveUpdates > 0) ? 'block' : 'none';
+        } catch(e) { console.warn('NotifCtrl.refresh:', e); }
+    },
+
+    openPanel: async () => {
+        if (typeof Drawer !== 'undefined') Drawer.close();
+        const route = RouteConfirm._activeRoute() || State.myRoute;
+        let sheet = document.getElementById('notif-sheet');
+        if (!sheet) {
+            sheet = document.createElement('div');
+            sheet.id = 'notif-sheet';
+            sheet.style.cssText = 'position:fixed;inset:0;z-index:99999;display:flex;align-items:flex-end;justify-content:center;';
+            document.body.appendChild(sheet);
+        }
+        sheet.innerHTML = `<div style="position:absolute;inset:0;background:rgba(0,0,0,0.5);" onclick="NotifCtrl.close()"></div>
+        <div style="position:relative;background:#fff;border-radius:20px 20px 0 0;width:100%;max-width:480px;max-height:75vh;overflow-y:auto;padding:16px 16px 28px;">
+            <div style="display:flex;justify-content:center;padding:0 0 10px;"><div style="width:40px;height:4px;border-radius:2px;background:#e5e7eb;"></div></div>
+            <div style="font-size:16px;font-weight:900;color:#111827;margin-bottom:12px;">🔔 การแจ้งเตือน</div>
+            <div id="notif-confirm-section" style="margin-bottom:16px;"><div style="font-size:12px;color:#9ca3af;">⏳ กำลังโหลด...</div></div>
+            <div style="font-size:12px;font-weight:800;color:#6b7280;text-transform:uppercase;margin-bottom:8px;">คำขอย้ายวันของฉัน</div>
+            <div id="notif-moves-section"><div style="font-size:12px;color:#9ca3af;">⏳ กำลังโหลด...</div></div>
+        </div>`;
+
+        // ─── ส่วนยืนยันรับสายวิ่ง ───
+        const confirmHost = document.getElementById('notif-confirm-section');
+        const d = new Date(); const nowYM = `${d.getFullYear()}_${String(d.getMonth() + 1).padStart(2, '0')}`;
+        const pendingYms = (State.planList || []).filter(ym => {
+            if (ym < nowYM) return false;
+            const cache = State.planCache[ym];
+            if (!cache) return false;
+            const status = cache.confirmations ? (cache.confirmations[route] || {}) : cache;
+            return !status.confirmedBy;
+        });
+        confirmHost.innerHTML = pendingYms.length
+            ? pendingYms.map(ym => {
+                const [y, m] = ym.split('_');
+                const label = new Date(+y, +m - 1, 1).toLocaleDateString('th-TH', { year: 'numeric', month: 'long' });
+                return `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:#fffbeb;border:1px solid #fde68a;border-radius:12px;margin-bottom:8px;">
+                    <span style="font-size:13px;font-weight:700;color:#92400e;">⏳ ยืนยันรับสายวิ่งเดือน ${label}</span>
+                    <button onclick="NotifCtrl.confirmFor('${ym}')" style="font-size:11px;font-weight:800;padding:5px 12px;border-radius:8px;border:none;background:#f59e0b;color:#fff;cursor:pointer;">ยืนยัน</button>
+                </div>`;
+              }).join('')
+            : `<div style="font-size:12px;color:#9ca3af;">✅ ไม่มีสายวิ่งที่ต้องยืนยันเพิ่ม</div>`;
+
+        // ─── ส่วนคำขอย้ายวัน ───
+        const movesHost = document.getElementById('notif-moves-section');
+        try {
+            const snap = await MoveRequest._col(MoveRequest._centerDocId())
+                .where('route', '==', route).orderBy('requestedAt', 'desc').limit(15).get();
+            const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+            movesHost.innerHTML = rows.length ? rows.map(r => {
+                const icon       = r.status === 'approved' ? '✅' : r.status === 'rejected' ? '🚫' : '⏳';
+                const statusText = r.status === 'approved' ? 'อนุมัติแล้ว' : r.status === 'rejected' ? 'ถูกปฏิเสธ' : 'รออนุมัติ';
+                return `<div style="padding:10px 12px;background:#f9fafb;border:1px solid #eee;border-radius:12px;margin-bottom:8px;">
+                    <div style="font-size:13px;font-weight:700;color:#111827;">${icon} ${r.storeName || r.storeId} — ${r.fromDay} → ${r.toDay}</div>
+                    <div style="font-size:11px;color:#6b7280;margin-top:2px;">${statusText}${r.note ? ' · ' + r.note : ''}</div>
+                </div>`;
+            }).join('') : `<div style="font-size:12px;color:#9ca3af;">— ยังไม่เคยขอย้ายวัน —</div>`;
+
+            // mark seen — ครั้งต่อไปจะไม่ขึ้นจุดแดงซ้ำสำหรับรายการเดิม
+            const seenKey = `moveReq_seen_${route}`;
+            const seen = new Set(rows.filter(r => r.status !== 'pending').map(r => r.id));
+            localStorage.setItem(seenKey, JSON.stringify([...seen]));
+        } catch(e) {
+            movesHost.innerHTML = `<div style="font-size:12px;color:#dc2626;">⚠️ โหลดไม่สำเร็จ: ${e.message}</div>`;
+        }
+
+        NotifCtrl.refresh();
+    },
+
+    confirmFor: async (ym) => {
+        const prevYm = State.activePlanYM;
+        if (ym !== prevYm) await App.switchToPlan(ym);
+        await RouteConfirm.confirm();
+        if (ym !== prevYm) await App.switchToPlan(prevYm);
+        NotifCtrl.openPanel();
+    },
+
+    close: () => { document.getElementById('notif-sheet')?.remove(); },
 };
 
 // ─── GPS ─────────────────────────────────────────────────────────────────
@@ -2173,7 +2457,14 @@ const SupervisorUI = {
         _writeRef = db.collection('appData').doc(centerDocId)
             .collection('plans').doc(State.activePlanYM)
             .collection('routes').doc(routeId);
-        _writeRef.set({ stores: updated })
+        // ✅ BUGFIX (2026-08-29): merge:true — ดู comment เดียวกันด้านบน (จุดลากสลับลำดับของ
+        // สายตัวเอง) จุดนี้คือ Supervisor/ASM ดูสายลูกทีมแล้วลากสลับลำดับแทน มีปัญหาเดียวกัน
+        // ✅ NEW: รีเซ็ตสถานะ "ยืนยันรับสายวิ่ง" ของสายที่ถูกแก้ไขด้วย
+        _writeRef.set({
+            stores: updated,
+            confirmedBy: firebase.firestore.FieldValue.delete(),
+            confirmedAt: firebase.firestore.FieldValue.delete(),
+        }, { merge: true })
             .then(() => showSalesToast('✅ บันทึกลำดับเรียบร้อย'))
             .catch(e  => showSalesToast('❌ บันทึกไม่สำเร็จ: ' + e.message, true));
     },
