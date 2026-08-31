@@ -175,6 +175,11 @@ const UI = {
 
         if (id === 'route') {
             if (typeof RouteConfirm !== 'undefined') RouteConfirm.renderBanner();
+            // ✅ NEW: อัปเดตสถานะ "มีคำขอย้ายวันค้างอยู่" ต่อร้าน + เปิดฟังการเปลี่ยนแปลงแบบ realtime
+            if (typeof MoveRequest !== 'undefined' && (!App.isSupervisor() || SupervisorUI._selectedRoute)) {
+                MoveRequest.refreshPendingSet();
+                MoveRequest.startLiveListener();
+            }
             setTimeout(() => {
                 if (App.isSupervisor()) {
                     if (!SupervisorUI._selectedRoute) {
@@ -680,6 +685,8 @@ const App = {
                     // ✅ โหลด campaign icons background
                     App._loadCampaignIcons().catch((e) => console.warn('[App] start: โหลด campaign icons ไม่สำเร็จ:', e));
                     if (typeof NotifCtrl !== 'undefined') NotifCtrl.refresh();
+                    // ✅ NEW: เปิดฟัง moveRequests ของสายตัวเองแบบ realtime ตั้งแต่เข้าแอป
+                    if (typeof MoveRequest !== 'undefined') { MoveRequest.refreshPendingSet(); MoveRequest.startLiveListener(); }
                 }
             }
         };
@@ -926,6 +933,12 @@ const Processor = {
                     style="width:22px;height:22px;border-radius:6px;object-fit:cover;border:1.5px solid #e5e7eb;box-shadow:0 1px 3px rgba(0,0,0,0.1);"
                     onerror="this.style.display='none'">`).join('');
 
+            // ✅ NEW (2026-08-31): ร้านที่มีคำขอย้ายวัน "รออนุมัติ" ค้างอยู่ — ปุ่มเปลี่ยนเป็น ⏳ กดไม่ได้ กันส่งซ้ำ
+            const _movePending = (typeof MoveRequest !== 'undefined') && MoveRequest._pendingSet.has(String(s.id));
+            const moveBtn = _movePending
+                ? `<button title="รออนุมัติคำขอย้ายวัน" disabled class="bg-gray-100 text-gray-400 px-2 py-1.5 rounded-lg font-bold text-[10px] border border-gray-200 cursor-default">⏳</button>`
+                : `<button onclick="MoveRequest.openPicker('${s.id}','${State.currentDay}')" title="ขอย้ายวัน" class="bg-purple-50 hover:bg-purple-100 text-purple-600 px-2 py-1.5 rounded-lg font-bold text-[10px] border border-purple-100 transition active:scale-95">🔁</button>`;
+
             return `
             <div data-id="${s.id}" class="store-item bg-white p-2.5 rounded-xl border shadow-sm flex items-center gap-1.5 relative mb-2.5">
                 <div class="drag-handle text-gray-300 cursor-grab active:cursor-grabbing leading-none">≡</div>
@@ -935,7 +948,7 @@ const Processor = {
                     ${campIcons}
                     <button onclick="UI.openModal('${s.id}')" class="bg-blue-50 hover:bg-blue-100 text-blue-600 px-2 py-1.5 rounded-lg font-bold text-[10px] border border-blue-100 transition active:scale-95">📊 KPI</button>
                     <a href="${navLink}" target="_blank" class="bg-emerald-50 hover:bg-emerald-100 text-emerald-600 px-2 py-1.5 rounded-lg font-bold text-[10px] text-center border border-emerald-100 transition active:scale-95">🚗</a>
-                    <button onclick="MoveRequest.openPicker('${s.id}','${State.currentDay}')" title="ขอย้ายวัน" class="bg-purple-50 hover:bg-purple-100 text-purple-600 px-2 py-1.5 rounded-lg font-bold text-[10px] border border-purple-100 transition active:scale-95">🔁</button>
+                    ${moveBtn}
                 </div>
             </div>`;
         }).join('');
@@ -1038,6 +1051,27 @@ const Processor = {
 };
 
 // ═════════════════════════════════════════════════════════════════════════
+// ✅ NEW (2026-08-31): writeAuditLog — บันทึกประวัติการยืนยันรับสายวิ่ง/ขอย้ายวัน
+// ลง auditLogs/{centerId}/logs (collection เดียวกับที่หน้า Audit Log ของแอดมินใช้อยู่แล้ว)
+// เขียนแบบ fire-and-forget ไม่ await/บล็อก UI และไม่ทำให้ action หลัก fail ถ้าเขียนไม่สำเร็จ
+// ═════════════════════════════════════════════════════════════════════════
+function writeAuditLog(actionKey, extra = {}) {
+    try {
+        const session   = Auth.getSession();
+        const validRoles = ['admin', 'supervisor', 'sales', 'route_supervisor', 'asm'];
+        const role      = validRoles.includes(session?.role) ? session.role : (validRoles.includes(State.viewMode) ? State.viewMode : 'sales');
+        const centerId  = State.centerId || (State.myRoute || '').match(/^(\d+)/)?.[1] || 'v1';
+        db.collection('auditLogs').doc(centerId).collection('logs').add({
+            actionKey,
+            username: session?.displayName || session?.username || State.myRoute || 'unknown',
+            role,
+            ts: firebase.firestore.FieldValue.serverTimestamp(),
+            ...extra,
+        }).catch(e => console.warn('[AuditLog] เขียนไม่สำเร็จ (ไม่กระทบการทำงานหลัก):', e));
+    } catch(e) { console.warn('[AuditLog] เขียนไม่สำเร็จ:', e); }
+}
+
+// ═════════════════════════════════════════════════════════════════════════
 // ✅ NEW (2026-08-29): RouteConfirm — เซลยืนยันว่าจะใช้สายวิ่งเดือนนี้
 // แอดมินเช็คสถานะได้จากฝั่ง admin (RouteConfirmAdmin ใน index.html) ถ้าแอดมินแก้ไข
 // ร้าน/ปฏิทินของสายนี้ทีหลัง สถานะจะถูกรีเซ็ตกลับเป็น "รอยืนยันใหม่" อัตโนมัติ
@@ -1045,6 +1079,10 @@ const Processor = {
 // ═════════════════════════════════════════════════════════════════════════
 const RouteConfirm = {
     _activeRoute: () => (App.isSupervisor() && typeof SupervisorUI !== 'undefined') ? SupervisorUI._selectedRoute : State.myRoute,
+
+    // ✅ NEW (2026-08-31): เฉพาะ role "sales" ตัวจริงเท่านั้นที่กดยืนยันได้
+    // Supervisor/ASM ดูสถานะได้อย่างเดียว ตามที่ตกลงกันไว้ตอนแรก ("แค่เซลล์ยืนยันกลับเฉยๆ")
+    _canConfirm: () => Auth.getSession()?.role === 'sales',
 
     getStatus: (ym) => {
         const route = RouteConfirm._activeRoute();
@@ -1055,6 +1093,10 @@ const RouteConfirm = {
     },
 
     confirm: async () => {
+        // 🔒 กันไว้อีกชั้น เผื่อถูกเรียกตรงๆ (ปุ่มถูกซ่อนสำหรับ Supervisor/ASM อยู่แล้วใน renderBanner)
+        if (!RouteConfirm._canConfirm()) {
+            return showSalesToast('⚠️ เฉพาะเซลเจ้าของสายเท่านั้นที่ยืนยันได้', true);
+        }
         const route = RouteConfirm._activeRoute();
         const ym    = State.activePlanYM;
         if (!route || !ym) return;
@@ -1076,6 +1118,7 @@ const RouteConfirm = {
             showSalesToast('✅ ยืนยันรับสายวิ่งเรียบร้อย');
             RouteConfirm.renderBanner();
             if (typeof NotifCtrl !== 'undefined') NotifCtrl.refresh();
+            if (typeof writeAuditLog === 'function') writeAuditLog('route_confirm', { route, ym });
         } catch(e) {
             showSalesToast('❌ ยืนยันไม่สำเร็จ: ' + e.message, true);
         }
@@ -1094,10 +1137,14 @@ const RouteConfirm = {
             const dateStr = confirmedAt?.toDate ? confirmedAt.toDate().toLocaleDateString('th-TH', { day: 'numeric', month: 'short' }) : '';
             host.style.background = '#f0fdf4'; host.style.borderColor = '#bbf7d0';
             host.innerHTML = `<span style="font-size:12px;font-weight:800;color:#15803d;">✅ ยืนยันรับสายวิ่งเดือนนี้แล้ว${dateStr ? ' · ' + dateStr : ''}</span>`;
-        } else {
+        } else if (RouteConfirm._canConfirm()) {
             host.style.background = '#fffbeb'; host.style.borderColor = '#fde68a';
             host.innerHTML = `<span style="font-size:12px;font-weight:800;color:#92400e;flex:1;">⏳ ยังไม่ยืนยันรับสายวิ่งเดือนนี้</span>
                 <button onclick="RouteConfirm.confirm()" style="font-size:11px;font-weight:800;padding:5px 12px;border-radius:8px;border:none;background:#f59e0b;color:#fff;cursor:pointer;">ยืนยันเลย</button>`;
+        } else {
+            // Supervisor/ASM: เห็นสถานะอย่างเดียว กดยืนยันแทนเซลไม่ได้
+            host.style.background = '#fffbeb'; host.style.borderColor = '#fde68a';
+            host.innerHTML = `<span style="font-size:12px;font-weight:800;color:#92400e;">⏳ ยังไม่ยืนยันรับสายวิ่งเดือนนี้ (รอเซลยืนยัน)</span>`;
         }
     },
 
@@ -1127,14 +1174,35 @@ const RouteConfirm = {
 const MoveRequest = {
     _col: (centerDocId) => db.collection('appData').doc(centerDocId).collection('moveRequests'),
 
+    // ✅ NEW (2026-08-31): เก็บ storeId ที่มีคำขอ "รออนุมัติ" ค้างอยู่ของสายที่กำลังดู
+    // กันกดส่งคำขอซ้ำร้านเดิม — รีเฟรชตอนเข้าแท็บคิวงาน / หลัง submit / cancel / realtime update
+    _pendingSet: new Set(),
+    _unsubLive: null,
+
     _centerDocId: () => {
         const route = RouteConfirm._activeRoute() || State.myRoute;
         const m = (route || '').match(/^(\d+)/);
         return m ? (m[1] + '_main') : (State.planCenterDocId || 'v1_main');
     },
 
+    // โหลดรายชื่อร้านที่มีคำขอ "pending" ค้างอยู่ของสายปัจจุบัน — ใช้ปิดปุ่ม 🔁 ไม่ให้กดซ้ำ
+    refreshPendingSet: async () => {
+        const route = RouteConfirm._activeRoute() || State.myRoute;
+        if (!route) { MoveRequest._pendingSet = new Set(); return; }
+        try {
+            const snap = await MoveRequest._col(MoveRequest._centerDocId())
+                .where('route', '==', route).where('status', '==', 'pending').get();
+            MoveRequest._pendingSet = new Set(snap.docs.map(d => String(d.data().storeId)));
+        } catch(e) { console.warn('MoveRequest.refreshPendingSet:', e); }
+        if (typeof Processor !== 'undefined' && State.isLoaded) Processor.routeList();
+    },
+
     // เปิด sheet เลือก Day ปลายทาง สำหรับร้าน storeId ที่ตอนนี้อยู่ Day = fromDay
     openPicker: (storeId, fromDay) => {
+        // ✅ NEW: กันส่งคำขอซ้ำร้านเดิมที่ยังรออนุมัติอยู่
+        if (MoveRequest._pendingSet.has(String(storeId))) {
+            return showSalesToast('⏳ ร้านนี้มีคำขอย้ายวันค้างอยู่แล้ว รอแอดมินอนุมัติ/ปฏิเสธก่อน', true);
+        }
         const route  = RouteConfirm._activeRoute() || State.myRoute;
         const stores = (App.isSupervisor() && SupervisorUI._selectedRoute) ? (State.allRoutes[route] || []) : State.allStores;
         const store  = stores.find(s => String(s.id) === String(storeId));
@@ -1166,6 +1234,10 @@ const MoveRequest = {
 
     submit: async (storeId, fromDay, toDay) => {
         MoveRequest.closePicker();
+        // 🔒 กันไว้อีกชั้น เผื่อ pendingSet ยังไม่ทันอัปเดตตอนกดปุ่มก่อนหน้า
+        if (MoveRequest._pendingSet.has(String(storeId))) {
+            return showSalesToast('⏳ ร้านนี้มีคำขอย้ายวันค้างอยู่แล้ว', true);
+        }
         const route  = RouteConfirm._activeRoute() || State.myRoute;
         const ym     = State.activePlanYM;
         const stores = (App.isSupervisor() && SupervisorUI._selectedRoute) ? (State.allRoutes[route] || []) : State.allStores;
@@ -1173,15 +1245,35 @@ const MoveRequest = {
         const session = Auth.getSession();
         const name    = session?.displayName || session?.username || route;
         try {
-            await MoveRequest._col(MoveRequest._centerDocId()).add({
+            const docRef = await MoveRequest._col(MoveRequest._centerDocId()).add({
                 ym, route, storeId, storeCode: store?.code || store?.id || '', storeName: store?.name || String(storeId),
                 fromDay, toDay,
                 requestedBy: name, requestedAt: firebase.firestore.FieldValue.serverTimestamp(),
                 status: 'pending',
             });
+            MoveRequest._pendingSet.add(String(storeId)); // ✅ อัปเดต local ทันที ไม่ต้องรอ query ใหม่
+            if (typeof Processor !== 'undefined' && State.isLoaded) Processor.routeList();
             showSalesToast(`📨 ส่งคำขอย้าย "${store?.name || storeId}" → ${toDay} แล้ว รออนุมัติจากแอดมิน`);
+            if (typeof NotifCtrl !== 'undefined') NotifCtrl.refresh();
+            if (typeof writeAuditLog === 'function') {
+                writeAuditLog('move_request_create', { route, ym, storeId: String(storeId), storeName: store?.name || '', fromDay, toDay, reqId: docRef.id });
+            }
         } catch(e) {
             showSalesToast('❌ ส่งคำขอไม่สำเร็จ: ' + e.message, true);
+        }
+    },
+
+    // ✅ NEW (2026-08-31): ยกเลิกคำขอของตัวเองที่ยังเป็น "pending" อยู่ (ยังไม่ผ่านแอดมิน)
+    cancel: async (reqId, storeId) => {
+        try {
+            await MoveRequest._col(MoveRequest._centerDocId()).doc(reqId).delete();
+            MoveRequest._pendingSet.delete(String(storeId));
+            if (typeof Processor !== 'undefined' && State.isLoaded) Processor.routeList();
+            showSalesToast('🗑️ ยกเลิกคำขอย้ายวันแล้ว');
+            if (typeof NotifCtrl !== 'undefined') { NotifCtrl.openPanel(); NotifCtrl.refresh(); }
+            if (typeof writeAuditLog === 'function') writeAuditLog('move_request_cancel', { reqId, storeId: String(storeId) });
+        } catch(e) {
+            showSalesToast('❌ ยกเลิกไม่สำเร็จ: ' + e.message, true);
         }
     },
 
@@ -1196,6 +1288,25 @@ const MoveRequest = {
             const seen = new Set(JSON.parse(localStorage.getItem(seenKey) || '[]'));
             return snap.docs.filter(d => d.data().status !== 'pending' && !seen.has(d.id)).length;
         } catch(e) { console.warn('MoveRequest.checkUpdates:', e); return 0; }
+    },
+
+    // ✅ NEW (2026-08-31): ฟัง moveRequests ของสายปัจจุบันแบบ realtime
+    // ให้ badge/pendingSet อัปเดตทันทีที่แอดมิน approve/reject โดยไม่ต้องสลับหน้าจอ
+    startLiveListener: () => {
+        if (MoveRequest._unsubLive) { MoveRequest._unsubLive(); MoveRequest._unsubLive = null; }
+        const route = RouteConfirm._activeRoute() || State.myRoute;
+        if (!route) return;
+        try {
+            MoveRequest._unsubLive = MoveRequest._col(MoveRequest._centerDocId())
+                .where('route', '==', route)
+                .onSnapshot(snap => {
+                    MoveRequest._pendingSet = new Set(
+                        snap.docs.filter(d => d.data().status === 'pending').map(d => String(d.data().storeId))
+                    );
+                    if (typeof Processor !== 'undefined' && State.isLoaded) Processor.routeList();
+                    if (typeof NotifCtrl !== 'undefined') NotifCtrl.refresh();
+                }, e => console.warn('MoveRequest live listener:', e));
+        } catch(e) { console.warn('MoveRequest.startLiveListener:', e); }
     },
 };
 
@@ -1243,13 +1354,17 @@ const NotifCtrl = {
             const status = cache.confirmations ? (cache.confirmations[route] || {}) : cache;
             return !status.confirmedBy;
         });
+        // ✅ NEW: Supervisor/ASM เห็นสถานะได้อย่างเดียว ปุ่ม "ยืนยัน" ให้เฉพาะ role sales จริงเท่านั้น
+        const _canConfirm = (typeof RouteConfirm !== 'undefined') ? RouteConfirm._canConfirm() : true;
         confirmHost.innerHTML = pendingYms.length
             ? pendingYms.map(ym => {
                 const [y, m] = ym.split('_');
                 const label = new Date(+y, +m - 1, 1).toLocaleDateString('th-TH', { year: 'numeric', month: 'long' });
                 return `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:#fffbeb;border:1px solid #fde68a;border-radius:12px;margin-bottom:8px;">
                     <span style="font-size:13px;font-weight:700;color:#92400e;">⏳ ยืนยันรับสายวิ่งเดือน ${label}</span>
-                    <button onclick="NotifCtrl.confirmFor('${ym}')" style="font-size:11px;font-weight:800;padding:5px 12px;border-radius:8px;border:none;background:#f59e0b;color:#fff;cursor:pointer;">ยืนยัน</button>
+                    ${_canConfirm
+                        ? `<button onclick="NotifCtrl.confirmFor('${ym}')" style="font-size:11px;font-weight:800;padding:5px 12px;border-radius:8px;border:none;background:#f59e0b;color:#fff;cursor:pointer;">ยืนยัน</button>`
+                        : ''}
                 </div>`;
               }).join('')
             : `<div style="font-size:12px;color:#9ca3af;">✅ ไม่มีสายวิ่งที่ต้องยืนยันเพิ่ม</div>`;
@@ -1263,9 +1378,14 @@ const NotifCtrl = {
             movesHost.innerHTML = rows.length ? rows.map(r => {
                 const icon       = r.status === 'approved' ? '✅' : r.status === 'rejected' ? '🚫' : '⏳';
                 const statusText = r.status === 'approved' ? 'อนุมัติแล้ว' : r.status === 'rejected' ? 'ถูกปฏิเสธ' : 'รออนุมัติ';
+                // ✅ NEW: คำขอที่ยังรออนุมัติ ยกเลิกเองได้
+                const cancelBtn  = r.status === 'pending'
+                    ? `<button onclick="MoveRequest.cancel('${r.id}','${r.storeId}')" style="font-size:10px;font-weight:800;padding:3px 10px;border-radius:7px;border:1px solid #fecaca;background:#fef2f2;color:#dc2626;cursor:pointer;margin-top:6px;">ยกเลิกคำขอ</button>`
+                    : '';
                 return `<div style="padding:10px 12px;background:#f9fafb;border:1px solid #eee;border-radius:12px;margin-bottom:8px;">
                     <div style="font-size:13px;font-weight:700;color:#111827;">${icon} ${r.storeName || r.storeId} — ${r.fromDay} → ${r.toDay}</div>
                     <div style="font-size:11px;color:#6b7280;margin-top:2px;">${statusText}${r.note ? ' · ' + r.note : ''}</div>
+                    ${cancelBtn}
                 </div>`;
             }).join('') : `<div style="font-size:12px;color:#9ca3af;">— ยังไม่เคยขอย้ายวัน —</div>`;
 

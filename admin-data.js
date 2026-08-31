@@ -687,6 +687,26 @@ const App = {
     },
 
     // ══════════════════════════════════════════════════════════════════════
+    // ✅ NEW (2026-08-31): writeAuditLog — บันทึกประวัติการอนุมัติ/ปฏิเสธคำขอย้ายวัน
+    // ลง auditLogs/{centerId}/logs (collection เดียวกับหน้า Audit Log เดิม) — fire-and-forget
+    // ══════════════════════════════════════════════════════════════════════
+    writeAuditLog: (actionKey, extra = {}) => {
+        try {
+            const session   = Auth.getSession();
+            const validRoles = ['admin', 'supervisor', 'sales', 'route_supervisor', 'asm'];
+            const role      = validRoles.includes(session?.role) ? session.role : 'admin';
+            const centerId  = window.CENTER_ID || (window.CENTER_DOC || 'v1_main').replace(/_main$/, '');
+            cloudDB.collection('auditLogs').doc(centerId).collection('logs').add({
+                actionKey,
+                username: session?.displayName || session?.username || 'admin',
+                role,
+                ts: firebase.firestore.FieldValue.serverTimestamp(),
+                ...extra,
+            }).catch(e => console.warn('[AuditLog] เขียนไม่สำเร็จ (ไม่กระทบการทำงานหลัก):', e));
+        } catch(e) { console.warn('[AuditLog] เขียนไม่สำเร็จ:', e); }
+    },
+
+    // ══════════════════════════════════════════════════════════════════════
     // ✅ NEW (2026-08-29): ระบบยืนยันรับสายวิ่ง (Route Confirm)
     // เซลกดยืนยันฝั่ง sales.html (ดู RouteConfirm ใน sales-app.js) — ฟังก์ชันนี้แค่ "อ่าน"
     // สถานะกลับมาให้แอดมินเช็คเฉยๆ ไม่มีการเขียนข้อมูลใดๆ จากฝั่งแอดมิน
@@ -768,6 +788,10 @@ const App = {
             }, { merge: true });
 
             UI.showSaveToast(`✅ อนุมัติย้าย "${req.storeName}" → ${req.toDay} เรียบร้อย`);
+            App.writeAuditLog('move_request_approve', {
+                reqId, route: req.route, ym: req.ym, storeId: String(req.storeId),
+                storeName: req.storeName || '', fromDay: req.fromDay, toDay: req.toDay,
+            });
         } catch(e) {
             UI.showErrorToast('❌ อนุมัติไม่สำเร็จ: ' + e.message);
         }
@@ -775,6 +799,9 @@ const App = {
 
     rejectMoveRequest: async (reqId, note) => {
         try {
+            // ✅ ดึงข้อมูลคำขอมาก่อน เพื่อบันทึก audit log ให้ครบ (route/ร้าน/วัน)
+            const reqSnap = await App._moveRequestsCol().doc(reqId).get();
+            const req     = reqSnap.exists ? reqSnap.data() : {};
             await App._moveRequestsCol().doc(reqId).set({
                 status:     'rejected',
                 reviewedBy: Auth.getSession()?.displayName || Auth.getSession()?.username || 'admin',
@@ -782,6 +809,10 @@ const App = {
                 note:       note || '',
             }, { merge: true });
             UI.showSaveToast('🚫 ปฏิเสธคำขอเรียบร้อย');
+            App.writeAuditLog('move_request_reject', {
+                reqId, route: req.route || '', ym: req.ym || '', storeId: String(req.storeId || ''),
+                storeName: req.storeName || '', fromDay: req.fromDay || '', toDay: req.toDay || '', note: note || '',
+            });
         } catch(e) {
             UI.showErrorToast('❌ ดำเนินการไม่สำเร็จ: ' + e.message);
         }
@@ -1004,7 +1035,12 @@ const PlanUI = {
             // ✅ NEW (2026-08-29): อัปเดต badge ของ "เช็คการยืนยัน" + "คำขอย้ายวัน" ไปพร้อมกันทุกครั้ง
             // ที่หน้า Plan รีเฟรช (โหลดหน้าแรก / สลับเดือน / บันทึกต่างๆ) — เรียกแบบ non-blocking
             if (typeof RouteConfirmAdmin !== 'undefined') RouteConfirmAdmin.refreshBadge();
-            if (typeof MoveRequestAdmin  !== 'undefined') MoveRequestAdmin.refreshBadge();
+            if (typeof MoveRequestAdmin  !== 'undefined') {
+                MoveRequestAdmin.refreshBadge();
+                // ✅ NEW (2026-08-31): เปิดฟังคำขอย้ายวันแบบ realtime ครั้งเดียว (idempotent) —
+                // ให้ badge ขึ้นทันทีตอนเซลส่งคำขอใหม่ ไม่ต้องรอแอดมินสลับหน้า/รีเฟรชเอง
+                if (typeof MoveRequestAdmin.startLiveBadge === 'function') MoveRequestAdmin.startLiveBadge();
+            }
         } catch(e) { console.warn('PlanUI.refresh:', e); }
     },
 

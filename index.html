@@ -2054,6 +2054,28 @@
                 if (reqs.length > 0) { badge.textContent = reqs.length; badge.classList.remove('hidden'); }
                 else { badge.classList.add('hidden'); }
             },
+
+            // ✅ NEW (2026-08-31): ฟังคำขอย้ายวัน "pending" แบบ realtime ทั้งคอลเลกชัน
+            // ให้ badge ขึ้นทันทีที่เซลส่งคำขอใหม่ โดยแอดมินไม่ต้องสลับหน้า/กดรีเฟรชเอง
+            // เรียกครั้งเดียวพอ (idempotent) — ดูจุดเรียกใน PlanUI.refresh() (admin-data.js)
+            _unsub: null,
+            startLiveBadge: () => {
+                if (MoveRequestAdmin._unsub) return; // กันเปิดซ้ำหลาย listener
+                try {
+                    MoveRequestAdmin._unsub = App._moveRequestsCol()
+                        .where('status', '==', 'pending')
+                        .onSnapshot(snap => {
+                            const badge = document.getElementById('move-request-badge');
+                            if (badge) {
+                                if (snap.size > 0) { badge.textContent = snap.size; badge.classList.remove('hidden'); }
+                                else { badge.classList.add('hidden'); }
+                            }
+                            // ถ้าเปิด modal ค้างอยู่พอดี ให้รีโหลดลิสต์ให้เห็นการเปลี่ยนแปลงทันที
+                            const modal = document.getElementById('move-request-modal');
+                            if (modal && !modal.classList.contains('hidden')) MoveRequestAdmin.load();
+                        }, e => console.warn('MoveRequestAdmin live badge:', e));
+                } catch(e) { console.warn('MoveRequestAdmin.startLiveBadge:', e); }
+            },
         };
     </script>
 
