@@ -270,6 +270,18 @@
                         📅 ปฏิทิน
                     </button>
                     <span id="cal-mode-badge" class="hidden bg-gray-700 text-gray-200 px-2 py-1 rounded-lg text-[10px] font-bold whitespace-nowrap" title="โหมดปฏิทินของเดือนนี้"></span>
+                    <!-- ✅ NEW (2026-08-29): เช็คว่าสายไหนยืนยันรับสายวิ่งเดือนนี้แล้วบ้าง -->
+                    <button onclick="RouteConfirmAdmin.open()" style="position:relative;"
+                        class="bg-teal-600 hover:bg-teal-500 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap" title="เช็คว่าสายไหนยืนยันรับสายวิ่งแล้วบ้าง">
+                        ✅ เช็คการยืนยัน
+                        <span id="route-confirm-badge" class="hidden" style="position:absolute;top:-6px;right:-6px;background:#dc2626;color:#fff;font-size:10px;font-weight:900;min-width:16px;height:16px;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:0 3px;">0</span>
+                    </button>
+                    <!-- ✅ NEW (2026-08-29): อนุมัติ/ปฏิเสธคำขอย้ายวันของร้านค้าจากฝั่งเซล -->
+                    <button onclick="MoveRequestAdmin.open()" style="position:relative;"
+                        class="bg-pink-600 hover:bg-pink-500 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap" title="คำขอย้ายวันร้านค้าจากฝั่งเซล">
+                        🔁 คำขอย้ายวัน
+                        <span id="move-request-badge" class="hidden" style="position:absolute;top:-6px;right:-6px;background:#dc2626;color:#fff;font-size:10px;font-weight:900;min-width:16px;height:16px;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:0 3px;">0</span>
+                    </button>
                     <button onclick="HolidayException.open()"
                         class="bg-amber-500 hover:bg-amber-400 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap" title="จัดการวันหยุด (เฉพาะโหมดตามวันในสัปดาห์)">
                         📆 จัดการวันหยุด
@@ -1887,6 +1899,182 @@
                 } catch(e) {
                     UI.showErrorToast('❌ บันทึกไม่สำเร็จ: ' + e.message);
                 }
+            },
+        };
+    </script>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         ✅ NEW (2026-08-29): เช็คการยืนยันรับสายวิ่ง (Route Confirm)
+         ═══════════════════════════════════════════════════════════════ -->
+    <div id="route-confirm-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden" style="max-height:90dvh;display:flex;flex-direction:column;">
+            <div class="p-5 border-b flex justify-between items-center bg-gray-50 flex-shrink-0">
+                <div>
+                    <h2 class="text-base font-black text-gray-900">✅ เช็คการยืนยันรับสายวิ่ง</h2>
+                    <p class="text-xs text-gray-500 mt-0.5">ดูว่าสายไหนกดยืนยันรับสายวิ่งเดือนนี้แล้วบ้าง</p>
+                </div>
+                <button onclick="RouteConfirmAdmin.close()" class="w-8 h-8 rounded-full border border-gray-200 text-gray-400 hover:bg-gray-100 font-bold">✕</button>
+            </div>
+            <div class="p-4 border-b flex-shrink-0">
+                <select id="route-confirm-ym-select" onchange="RouteConfirmAdmin.load(this.value)"
+                    class="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-bold outline-none focus:ring-2 focus:ring-teal-300"></select>
+            </div>
+            <div id="route-confirm-list" class="overflow-y-auto flex-1 p-4 space-y-2">
+                <div class="text-center text-xs text-gray-400 py-6">⏳ กำลังโหลด...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         ✅ NEW (2026-08-29): คำขอย้ายวันร้านค้า (Move Requests) — อนุมัติ/ปฏิเสธ
+         ═══════════════════════════════════════════════════════════════ -->
+    <div id="move-request-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden" style="max-height:90dvh;display:flex;flex-direction:column;">
+            <div class="p-5 border-b flex justify-between items-center bg-gray-50 flex-shrink-0">
+                <div>
+                    <h2 class="text-base font-black text-gray-900">🔁 คำขอย้ายวันร้านค้า</h2>
+                    <p class="text-xs text-gray-500 mt-0.5">คำขอจากเซล — ย้ายได้เฉพาะภายในสายเดียวกัน อนุมัติแล้วต่อท้ายลำดับสุดท้ายของวันปลายทางเสมอ</p>
+                </div>
+                <button onclick="MoveRequestAdmin.close()" class="w-8 h-8 rounded-full border border-gray-200 text-gray-400 hover:bg-gray-100 font-bold">✕</button>
+            </div>
+            <div id="move-request-list" class="overflow-y-auto flex-1 p-4 space-y-2">
+                <div class="text-center text-xs text-gray-400 py-6">⏳ กำลังโหลด...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ═════════════════════════════════════════════════════════════════
+        // ✅ NEW (2026-08-29): RouteConfirmAdmin — เช็คการยืนยันรับสายวิ่ง
+        // ═════════════════════════════════════════════════════════════════
+        const RouteConfirmAdmin = {
+            _ym: '',
+
+            open: async () => {
+                document.getElementById('route-confirm-modal').classList.remove('hidden');
+                const sel = document.getElementById('route-confirm-ym-select');
+                const planList = (State.db.planList || []).slice().sort().reverse();
+                const defaultYm = planList[0] || App._currentPlanYM || '';
+                sel.innerHTML = planList.length
+                    ? planList.map(ym => `<option value="${ym}" ${ym === defaultYm ? 'selected' : ''}>${App.ymToLabel(ym)}</option>`).join('')
+                    : `<option value="">— ไม่มีแผนเดือนไหนเลย —</option>`;
+                RouteConfirmAdmin._ym = defaultYm;
+                await RouteConfirmAdmin.load(defaultYm);
+            },
+
+            close: () => document.getElementById('route-confirm-modal').classList.add('hidden'),
+
+            load: async (ym) => {
+                RouteConfirmAdmin._ym = ym;
+                const list = document.getElementById('route-confirm-list');
+                if (!ym) { list.innerHTML = '<div class="text-center text-xs text-gray-400 py-6">— ไม่มีแผนเดือนไหนเลย —</div>'; return; }
+                list.innerHTML = '<div class="text-center text-xs text-gray-400 py-6">⏳ กำลังโหลด...</div>';
+                const results = await App.getRouteConfirmStatus(ym);
+                if (!results.length) { list.innerHTML = '<div class="text-center text-xs text-gray-400 py-6">— เดือนนี้ยังไม่มีสายวิ่งเลย —</div>'; return; }
+                const confirmedCount = results.filter(r => r.confirmedBy).length;
+                list.innerHTML = `
+                <div class="text-xs font-bold text-gray-500 mb-2">ยืนยันแล้ว ${confirmedCount}/${results.length} สาย</div>
+                ${results.map(r => {
+                    const dateStr = r.confirmedAt?.toDate ? r.confirmedAt.toDate().toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' }) : '';
+                    return r.confirmedBy
+                        ? `<div class="flex items-center justify-between p-3 rounded-xl bg-emerald-50 border border-emerald-100">
+                            <div><div class="text-sm font-bold text-gray-800">${r.route}</div><div class="text-[11px] text-emerald-600 font-semibold">✅ ${r.confirmedBy} · ${dateStr}</div></div>
+                          </div>`
+                        : `<div class="flex items-center justify-between p-3 rounded-xl bg-amber-50 border border-amber-100">
+                            <div><div class="text-sm font-bold text-gray-800">${r.route}</div><div class="text-[11px] text-amber-600 font-semibold">⏳ รอยืนยัน</div></div>
+                          </div>`;
+                }).join('')}`;
+            },
+
+            // ✅ badge บนปุ่มหลัก — นับจำนวนสายที่ยังไม่ยืนยันของ "เดือนล่าสุดที่สร้างไว้" (ปกติคือ
+            // เดือนถัดไปที่แอดมินเพิ่งจัดสายเสร็จ ต้องการให้เซลยืนยันกลับ)
+            refreshBadge: async () => {
+                const badge = document.getElementById('route-confirm-badge');
+                if (!badge) return;
+                const planList = (State.db.planList || []).slice().sort().reverse();
+                const ym = planList[0];
+                if (!ym) { badge.classList.add('hidden'); return; }
+                const results = await App.getRouteConfirmStatus(ym);
+                const pending = results.filter(r => !r.confirmedBy).length;
+                if (pending > 0) { badge.textContent = pending; badge.classList.remove('hidden'); }
+                else { badge.classList.add('hidden'); }
+            },
+        };
+
+        // ═════════════════════════════════════════════════════════════════
+        // ✅ NEW (2026-08-29): MoveRequestAdmin — อนุมัติ/ปฏิเสธคำขอย้ายวันร้านค้า
+        // ═════════════════════════════════════════════════════════════════
+        const MoveRequestAdmin = {
+            open: async () => {
+                document.getElementById('move-request-modal').classList.remove('hidden');
+                await MoveRequestAdmin.load();
+            },
+
+            close: () => document.getElementById('move-request-modal').classList.add('hidden'),
+
+            load: async () => {
+                const list = document.getElementById('move-request-list');
+                list.innerHTML = '<div class="text-center text-xs text-gray-400 py-6">⏳ กำลังโหลด...</div>';
+                const reqs = await App.fetchPendingMoveRequests();
+                if (!reqs.length) { list.innerHTML = '<div class="text-center text-xs text-gray-400 py-6">✨ ไม่มีคำขอค้างอยู่</div>'; return; }
+                list.innerHTML = reqs.map(r => {
+                    const dateStr = r.requestedAt?.toDate ? r.requestedAt.toDate().toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' }) : '';
+                    return `
+                    <div class="p-3 rounded-xl bg-gray-50 border border-gray-200">
+                        <div class="text-sm font-bold text-gray-800">${r.storeName || r.storeId} <span class="text-[11px] font-normal text-gray-400">(${r.storeCode || r.storeId})</span></div>
+                        <div class="text-xs text-gray-600 mt-1">สาย <b>${r.route}</b> · ${r.fromDay} → <b>${r.toDay}</b></div>
+                        <div class="text-[11px] text-gray-400 mt-1">ขอโดย ${r.requestedBy || '—'} · ${dateStr}</div>
+                        <div class="flex gap-2 mt-2.5">
+                            <button onclick="MoveRequestAdmin.approve('${r.id}')" class="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold py-2 rounded-lg">✅ อนุมัติ</button>
+                            <button onclick="MoveRequestAdmin.reject('${r.id}')" class="flex-1 bg-red-100 hover:bg-red-200 text-red-700 text-xs font-bold py-2 rounded-lg">🚫 ปฏิเสธ</button>
+                        </div>
+                    </div>`;
+                }).join('');
+            },
+
+            approve: async (reqId) => {
+                if (!confirm('ยืนยันอนุมัติคำขอนี้? ระบบจะย้ายร้านให้ทันที')) return;
+                await App.approveMoveRequest(reqId);
+                await MoveRequestAdmin.load();
+                MoveRequestAdmin.refreshBadge();
+                if (typeof PlanUI !== 'undefined') PlanUI.refresh();
+            },
+
+            reject: async (reqId) => {
+                const note = prompt('เหตุผลที่ปฏิเสธ (ไม่บังคับ):') || '';
+                await App.rejectMoveRequest(reqId, note);
+                await MoveRequestAdmin.load();
+                MoveRequestAdmin.refreshBadge();
+            },
+
+            refreshBadge: async () => {
+                const badge = document.getElementById('move-request-badge');
+                if (!badge) return;
+                const reqs = await App.fetchPendingMoveRequests();
+                if (reqs.length > 0) { badge.textContent = reqs.length; badge.classList.remove('hidden'); }
+                else { badge.classList.add('hidden'); }
+            },
+
+            // ✅ NEW (2026-08-31): ฟังคำขอย้ายวัน "pending" แบบ realtime ทั้งคอลเลกชัน
+            // ให้ badge ขึ้นทันทีที่เซลส่งคำขอใหม่ โดยแอดมินไม่ต้องสลับหน้า/กดรีเฟรชเอง
+            // เรียกครั้งเดียวพอ (idempotent) — ดูจุดเรียกใน PlanUI.refresh() (admin-data.js)
+            _unsub: null,
+            startLiveBadge: () => {
+                if (MoveRequestAdmin._unsub) return; // กันเปิดซ้ำหลาย listener
+                try {
+                    MoveRequestAdmin._unsub = App._moveRequestsCol()
+                        .where('status', '==', 'pending')
+                        .onSnapshot(snap => {
+                            const badge = document.getElementById('move-request-badge');
+                            if (badge) {
+                                if (snap.size > 0) { badge.textContent = snap.size; badge.classList.remove('hidden'); }
+                                else { badge.classList.add('hidden'); }
+                            }
+                            // ถ้าเปิด modal ค้างอยู่พอดี ให้รีโหลดลิสต์ให้เห็นการเปลี่ยนแปลงทันที
+                            const modal = document.getElementById('move-request-modal');
+                            if (modal && !modal.classList.contains('hidden')) MoveRequestAdmin.load();
+                        }, e => console.warn('MoveRequestAdmin live badge:', e));
+                } catch(e) { console.warn('MoveRequestAdmin.startLiveBadge:', e); }
             },
         };
     </script>

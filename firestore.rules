@@ -1,13 +1,15 @@
 // ==========================================
 // 🔒 Firestore Security Rules — Route Planner
-// Version: 2.0 — ปรับปรุง Security 2026-05-26
+// Version: 2.1 — เพิ่ม moveRequests + confirmedBy/confirmedAt 2026-08-31
 //
 // ข้อจำกัด: ระบบใช้ Custom Auth (SHA-256 + localStorage)
 // ไม่ใช้ Firebase Auth → Rules ไม่สามารถ verify token ได้
 // แนวทาง: ปิด write ที่อันตราย + ซ่อน app_users จากภายนอก
 //
 // โครงสร้าง Collections:
-//   appData/{centerId}_main/plans/{ym}/routes/{r}  ← ระบบใหม่
+//   appData/{centerId}_main/plans/{ym}/routes/{r}   ← ระบบใหม่
+//     ├─ routes/{r} มี field confirmedBy/confirmedAt เพิ่ม (เซลยืนยันรับสายวิ่ง)
+//   appData/{centerId}_main/moveRequests/{reqId}    ← ✅ NEW: คำขอย้ายวันร้านค้า
 //   appData/app_users                               ← users (ปิด read)
 //   appData/app_centers                             ← รายการศูนย์
 //   sellout/{YYYY_MM}/chunks/{c}                    ← Sellout rows
@@ -157,6 +159,33 @@ service cloud.firestore {
                      && request.resource.data.active is bool
                      && (!request.resource.data.keys().hasAll(['routes'])    || request.resource.data.routes is list)
                      && (!request.resource.data.keys().hasAll(['dayOfMonth']) || request.resource.data.dayOfMonth is number);
+      }
+
+      // ─── moveRequests/{reqId} — ✅ NEW (2026-08-31) ────────────────
+      // เซล/แอดมิน/หัวหน้างาน ขอย้ายร้านค้าจาก Day เดิม → Day ใหม่ "ภายในสายเดียวกัน"
+      // คำขอต้องรอแอดมินอนุมัติก่อนถึงจะมีผลจริงกับ stores ใน plans/{ym}/routes/{routeId}
+      // (ดู MoveRequest ใน sales-app.js ฝั่งขอ, MoveRequestAdmin ใน index.html ฝั่งอนุมัติ)
+      match /moveRequests/{reqId} {
+        allow read: if true;
+        allow delete: if true;
+
+        // สร้างคำขอใหม่: ต้องมี field ครบ และสถานะตอนสร้างต้องเป็น 'pending' เท่านั้น
+        // (กันไม่ให้ยิง status 'approved' เข้ามาตรงๆ โดยไม่ผ่านแอดมิน)
+        allow create: if request.resource.data.keys().hasAll([
+                          'ym','route','storeId','storeName','fromDay','toDay',
+                          'requestedBy','requestedAt','status'
+                      ])
+                      && request.resource.data.ym is string
+                      && request.resource.data.route is string
+                      && request.resource.data.fromDay is string
+                      && request.resource.data.toDay is string
+                      && request.resource.data.status == 'pending';
+
+        // อนุมัติ/ปฏิเสธ (แอดมิน): เปลี่ยน status ได้เฉพาะ approved/rejected
+        // และต้องระบุ reviewedBy/reviewedAt มาด้วยเสมอตอนเปลี่ยนสถานะ
+        allow update: if request.resource.data.status in ['pending','approved','rejected']
+                      && (request.resource.data.status == 'pending'
+                          || request.resource.data.keys().hasAll(['reviewedBy','reviewedAt']));
       }
     }
 

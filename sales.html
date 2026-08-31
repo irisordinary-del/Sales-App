@@ -126,6 +126,12 @@
             color: #2563eb !important;
             font-size: 20px !important;
         }
+        /* ✅ NEW (2026-08-31): ปุ่ม "🔁 ขอย้ายวัน" ซ่อนไว้เป็นปกติ — โชว์เฉพาะตอนกด "✏️ แก้ไขลำดับ" */
+        .move-req-btn { display: none; }
+        .store-item.edit-mode-on .move-req-btn { display: inline-flex; }
+        /* ✅ NEW: ตอนอยู่ในโหมดแก้ไขลำดับ ซ่อน 📊 KPI และ 🚗 นำทาง เหลือแค่ปุ่มย้ายวัน */
+        .store-item.edit-mode-on .kpi-btn,
+        .store-item.edit-mode-on .gps-btn { display: none; }
     </style>
 </head>
 <body>
@@ -143,8 +149,15 @@
     <!-- Header -->
     <header id="main-header" class="bg-white text-gray-900 px-4 py-2 shrink-0 shadow-sm relative z-50 hidden border-b">
         <div class="flex justify-between items-center">
-            <!-- ซ้าย: spacer -->
-            <div style="width:36px;"></div>
+            <!-- ซ้าย: 🔔 การแจ้งเตือน (ยืนยันรับสายวิ่ง / คำขอย้ายวัน) -->
+            <button onclick="NotifCtrl.openPanel()"
+                style="width:36px;height:36px;border-radius:10px;border:1px solid #e5e7eb;background:#f8fafc;display:flex;align-items:center;justify-content:center;cursor:pointer;position:relative;transition:background 0.15s;"
+                onmouseenter="this.style.background='#f1f5f9'" onmouseleave="this.style.background='#f8fafc'">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#374151" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+                </svg>
+                <span id="header-notif-dot" style="display:none;position:absolute;top:5px;right:5px;width:9px;height:9px;border-radius:50%;background:#dc2626;border:1.5px solid #fff;"></span>
+            </button>
             <!-- กลาง: ชื่อสาย -->
             <div class="bg-blue-600 text-white text-xs font-black px-3 py-1.5 rounded-lg shadow-sm">
                 <span id="user-route-label">—</span>
@@ -283,6 +296,8 @@
                     style="flex-shrink:0;width:38px;height:38px;border-radius:10px;border:1px solid #e5e7eb;background:#f9fafb;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:18px;transition:background 0.15s;"
                     title="ปฏิทิน">📅</button>
             </div>
+            <!-- ✅ NEW (2026-08-29): banner "ยืนยันรับสายวิ่ง" — RouteConfirm.renderBanner() -->
+            <div id="route-confirm-banner" style="display:none;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid;flex-shrink:0;"></div>
             <div id="split-container" class="flex-1 flex flex-col lg:flex-row min-h-0 w-full relative">
                 <div id="map-container" class="relative bg-gray-200 z-10 transition-none">
                     <div id="map" class="w-full h-full"></div>
@@ -557,6 +572,13 @@
             <button onclick="Drawer.close(); showChangePwModal();" class="drawer-item">
                 <span class="drawer-item-icon">🔑</span>
                 <span>เปลี่ยน Password</span>
+            </button>
+
+            <div style="font-size:10px;font-weight:800;color:#94a3b8;text-transform:uppercase;letter-spacing:0.6px;padding:14px 10px 6px;">แจ้งเตือน</div>
+
+            <button onclick="NotifCtrl.openPanel()" class="drawer-item">
+                <span class="drawer-item-icon">🔔</span>
+                <span>การแจ้งเตือน</span>
             </button>
 
             <!-- เพิ่มเมนูใหม่ตรงนี้ในอนาคต -->

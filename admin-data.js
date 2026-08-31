@@ -349,7 +349,14 @@ const App = {
         const routeList = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
 
         Promise.all([
-            App.planRoutesCol(ym).doc(State.localActiveRoute).set({ stores: State.stores }),
+            // ✅ BUGFIX (2026-08-29): เดิม .set({stores}) ไม่มี merge:true — Firestore จะแทนที่
+            // เอกสารทั้งก้อน ทำให้ calendarOverride ของสายนั้นหายไปเงียบๆ ทุกครั้งที่กดบันทึก
+            // ✅ NEW: แก้ไขร้าน/วันในสายนี้แล้ว = รีเซ็ตสถานะ "ยืนยันรับสายวิ่ง" ของเซลด้วย
+            App.planRoutesCol(ym).doc(State.localActiveRoute).set({
+                stores: State.stores,
+                confirmedBy: firebase.firestore.FieldValue.delete(),
+                confirmedAt: firebase.firestore.FieldValue.delete(),
+            }, { merge: true }),
             App.planRef(ym).set({ routeList, cycleDays: State.db.cycleDays || 24, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true }),
         ])
         .then(() => UI.showSaveToast(`💾 บันทึกเรียบร้อย`))
@@ -458,7 +465,9 @@ const App = {
                         override = { ...override, holidays: [] };
                     }
                     const payload = override ? { stores, calendarOverride: override } : { stores };
-                    await App.planRoutesCol(ym).doc(name).set(payload);
+                    // ✅ BUGFIX (2026-08-29): เพิ่ม merge:true ให้ปลอดภัยไว้ก่อน เผื่อ ym ปลายทาง
+                    // มีเอกสารอยู่แล้วบางส่วน (เช่น รันซ้ำ) — กันเขียนทับ field อื่นที่อาจมีอยู่แล้ว
+                    await App.planRoutesCol(ym).doc(name).set(payload, { merge: true });
                 }));
             }
 
@@ -601,7 +610,8 @@ const App = {
             const routeList = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
             Promise.all([
                 App.planRoutesCol(ym).doc(oldName).delete(),
-                App.planRoutesCol(ym).doc(newName).set({ stores: State.db.routes[newName] || [] }),
+                // ✅ BUGFIX (2026-08-29): merge:true — ดู comment เดียวกันใน saveDB() ข้างบน
+                App.planRoutesCol(ym).doc(newName).set({ stores: State.db.routes[newName] || [] }, { merge: true }),
                 App.planRef(ym).set({ routeList }, { merge: true }),
             ]).then(() => UI.showSaveToast('💾 เปลี่ยนชื่อสายเรียบร้อย'))
               .catch(err => UI.showErrorToast('❌ เปลี่ยนชื่อไม่สำเร็จ: ' + err.message));
@@ -663,12 +673,148 @@ const App = {
             const payload = cfg
                 ? { calendarOverride: cfg }
                 : { calendarOverride: firebase.firestore.FieldValue.delete() };
+            // ✅ NEW (2026-08-29): เปลี่ยนปฏิทินของสายนี้ = Day label อาจเปลี่ยนไป — รีเซ็ตสถานะ
+            // "ยืนยันรับสายวิ่ง" ของเซลกลับเป็นรอยืนยันใหม่เสมอ (ดู RouteConfirm ฝั่ง sales-app.js)
+            payload.confirmedBy = firebase.firestore.FieldValue.delete();
+            payload.confirmedAt = firebase.firestore.FieldValue.delete();
             await App.planRoutesCol(ym).doc(routeName).set(payload, { merge: true });
             UI.showSaveToast(cfg
                 ? `📅 บันทึกปฏิทินเฉพาะสาย ${routeName} เรียบร้อย`
                 : `↩️ สาย ${routeName} กลับไปใช้ปฏิทิน default ของศูนย์แล้ว`);
         } catch(err) {
             UI.showErrorToast('❌ บันทึกไม่สำเร็จ: ' + err.message);
+        }
+    },
+
+    // ══════════════════════════════════════════════════════════════════════
+    // ✅ NEW (2026-08-31): writeAuditLog — บันทึกประวัติการอนุมัติ/ปฏิเสธคำขอย้ายวัน
+    // ลง auditLogs/{centerId}/logs (collection เดียวกับหน้า Audit Log เดิม) — fire-and-forget
+    // ══════════════════════════════════════════════════════════════════════
+    writeAuditLog: (actionKey, extra = {}) => {
+        try {
+            const session   = Auth.getSession();
+            const validRoles = ['admin', 'supervisor', 'sales', 'route_supervisor', 'asm'];
+            const role      = validRoles.includes(session?.role) ? session.role : 'admin';
+            const centerId  = window.CENTER_ID || (window.CENTER_DOC || 'v1_main').replace(/_main$/, '');
+            cloudDB.collection('auditLogs').doc(centerId).collection('logs').add({
+                actionKey,
+                username: session?.displayName || session?.username || 'admin',
+                role,
+                ts: firebase.firestore.FieldValue.serverTimestamp(),
+                ...extra,
+            }).catch(e => console.warn('[AuditLog] เขียนไม่สำเร็จ (ไม่กระทบการทำงานหลัก):', e));
+        } catch(e) { console.warn('[AuditLog] เขียนไม่สำเร็จ:', e); }
+    },
+
+    // ══════════════════════════════════════════════════════════════════════
+    // ✅ NEW (2026-08-29): ระบบยืนยันรับสายวิ่ง (Route Confirm)
+    // เซลกดยืนยันฝั่ง sales.html (ดู RouteConfirm ใน sales-app.js) — ฟังก์ชันนี้แค่ "อ่าน"
+    // สถานะกลับมาให้แอดมินเช็คเฉยๆ ไม่มีการเขียนข้อมูลใดๆ จากฝั่งแอดมิน
+    // ══════════════════════════════════════════════════════════════════════
+    getRouteConfirmStatus: async (ym) => {
+        if (!ym) return [];
+        try {
+            const planSnap  = await App.planRef(ym).get();
+            const routeList = ((planSnap.exists ? planSnap.data().routeList : null) || State.db.routeList || [])
+                .slice().sort((a, b) => a.localeCompare(b, 'th', { numeric: true }));
+            const results = [];
+            const BATCH = 5;
+            for (let i = 0; i < routeList.length; i += BATCH) {
+                const chunk = routeList.slice(i, i + BATCH);
+                const docs  = await Promise.all(chunk.map(r => App.planRoutesCol(ym).doc(r).get().catch(() => null)));
+                docs.forEach((d, idx) => {
+                    const data = d?.exists ? d.data() : {};
+                    results.push({ route: chunk[idx], confirmedBy: data.confirmedBy || null, confirmedAt: data.confirmedAt || null });
+                });
+            }
+            return results;
+        } catch(e) { console.warn('getRouteConfirmStatus:', e); return []; }
+    },
+
+    // ══════════════════════════════════════════════════════════════════════
+    // ✅ NEW (2026-08-29): ระบบขอย้ายวันร้านค้า (Move Requests)
+    // เซลขอย้ายร้านจาก Day เดิม → Day ใหม่ "ภายในสายตัวเองเท่านั้น" — คำขอรออนุมัติจากแอดมิน
+    // ก่อนจะมีผลจริง (ดู MoveRequest ใน sales-app.js ฝั่งขอ, ฟังก์ชันด้านล่างนี้ฝั่งอนุมัติ)
+    // เก็บที่ appData/{centerId}_main/moveRequests/{autoId}
+    // ══════════════════════════════════════════════════════════════════════
+    _moveRequestsCol: () => cloudDB.collection('appData').doc(window.CENTER_DOC || 'v1_main').collection('moveRequests'),
+
+    fetchPendingMoveRequests: async () => {
+        try {
+            const snap = await App._moveRequestsCol().where('status', '==', 'pending').get();
+            return snap.docs
+                .map(d => ({ id: d.id, ...d.data() }))
+                .sort((a, b) => (a.requestedAt?.toMillis?.() || 0) - (b.requestedAt?.toMillis?.() || 0));
+        } catch(e) { console.warn('fetchPendingMoveRequests:', e); return []; }
+    },
+
+    // ✅ อนุมัติ: ย้ายร้านจริงในสายนั้น (fromDay → toDay) — ต่อท้ายลำดับสุดท้ายของวันปลายทางเสมอ
+    // ไม่ต้องเลือกตำแหน่งเอง แล้วปิดคำขอเป็น 'approved'
+    approveMoveRequest: async (reqId) => {
+        try {
+            const reqRef  = App._moveRequestsCol().doc(reqId);
+            const reqSnap = await reqRef.get();
+            if (!reqSnap.exists) return UI.showErrorToast('⚠️ ไม่พบคำขอนี้ (อาจถูกจัดการไปแล้ว)');
+            const req = reqSnap.data();
+            if (req.status !== 'pending') return UI.showErrorToast('⚠️ คำขอนี้ถูกดำเนินการไปแล้ว');
+
+            const routeRef  = App.planRoutesCol(req.ym).doc(req.route);
+            const routeSnap = await routeRef.get();
+            if (!routeSnap.exists) return UI.showErrorToast('⚠️ ไม่พบสายวิ่งของคำขอนี้ (อาจถูกลบไปแล้ว)');
+            const stores = routeSnap.data().stores || [];
+            const store  = stores.find(s => String(s.id) === String(req.storeId));
+            if (!store) return UI.showErrorToast('⚠️ ไม่พบร้านนี้ในสายแล้ว (อาจถูกย้าย/ลบไปแล้วโดยวิธีอื่น)');
+
+            // ✅ ต่อท้ายลำดับสุดท้ายของวันปลายทางเสมอ (ตามที่ตกลงกันไว้ — เซลไม่ต้องเลือกตำแหน่ง)
+            const maxSeq = stores.reduce((max, s) => {
+                const v = (s.days?.includes(req.toDay) && s.seqs?.[req.toDay]) ? s.seqs[req.toDay] : 0;
+                return Math.max(max, v);
+            }, 0);
+            if (!store.seqs) store.seqs = {};
+            delete store.seqs[req.fromDay];
+            store.seqs[req.toDay] = maxSeq + 1;
+            store.days = [req.toDay]; // ระบบนี้ถือว่า 1 ร้าน = 1 Day ต่อเดือน (ตาม pattern ที่ใช้อยู่ทั้งระบบ)
+
+            await routeRef.set({
+                stores,
+                confirmedBy: firebase.firestore.FieldValue.delete(),
+                confirmedAt: firebase.firestore.FieldValue.delete(),
+            }, { merge: true });
+
+            await reqRef.set({
+                status:     'approved',
+                reviewedBy: Auth.getSession()?.displayName || Auth.getSession()?.username || 'admin',
+                reviewedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            }, { merge: true });
+
+            UI.showSaveToast(`✅ อนุมัติย้าย "${req.storeName}" → ${req.toDay} เรียบร้อย`);
+            App.writeAuditLog('move_request_approve', {
+                reqId, route: req.route, ym: req.ym, storeId: String(req.storeId),
+                storeName: req.storeName || '', fromDay: req.fromDay, toDay: req.toDay,
+            });
+        } catch(e) {
+            UI.showErrorToast('❌ อนุมัติไม่สำเร็จ: ' + e.message);
+        }
+    },
+
+    rejectMoveRequest: async (reqId, note) => {
+        try {
+            // ✅ ดึงข้อมูลคำขอมาก่อน เพื่อบันทึก audit log ให้ครบ (route/ร้าน/วัน)
+            const reqSnap = await App._moveRequestsCol().doc(reqId).get();
+            const req     = reqSnap.exists ? reqSnap.data() : {};
+            await App._moveRequestsCol().doc(reqId).set({
+                status:     'rejected',
+                reviewedBy: Auth.getSession()?.displayName || Auth.getSession()?.username || 'admin',
+                reviewedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                note:       note || '',
+            }, { merge: true });
+            UI.showSaveToast('🚫 ปฏิเสธคำขอเรียบร้อย');
+            App.writeAuditLog('move_request_reject', {
+                reqId, route: req.route || '', ym: req.ym || '', storeId: String(req.storeId || ''),
+                storeName: req.storeName || '', fromDay: req.fromDay || '', toDay: req.toDay || '', note: note || '',
+            });
+        } catch(e) {
+            UI.showErrorToast('❌ ดำเนินการไม่สำเร็จ: ' + e.message);
         }
     },
 
@@ -886,6 +1032,15 @@ const PlanUI = {
                 : `<option value="${currentPlanYM}">${App.ymToLabel(currentPlanYM)}</option>`;
 
             PlanUI.updateBadge();
+            // ✅ NEW (2026-08-29): อัปเดต badge ของ "เช็คการยืนยัน" + "คำขอย้ายวัน" ไปพร้อมกันทุกครั้ง
+            // ที่หน้า Plan รีเฟรช (โหลดหน้าแรก / สลับเดือน / บันทึกต่างๆ) — เรียกแบบ non-blocking
+            if (typeof RouteConfirmAdmin !== 'undefined') RouteConfirmAdmin.refreshBadge();
+            if (typeof MoveRequestAdmin  !== 'undefined') {
+                MoveRequestAdmin.refreshBadge();
+                // ✅ NEW (2026-08-31): เปิดฟังคำขอย้ายวันแบบ realtime ครั้งเดียว (idempotent) —
+                // ให้ badge ขึ้นทันทีตอนเซลส่งคำขอใหม่ ไม่ต้องรอแอดมินสลับหน้า/รีเฟรชเอง
+                if (typeof MoveRequestAdmin.startLiveBadge === 'function') MoveRequestAdmin.startLiveBadge();
+            }
         } catch(e) { console.warn('PlanUI.refresh:', e); }
     },
 
@@ -1065,9 +1220,13 @@ const StoreTrans = {
         else if (State.localActiveRoute === dstRoute) State.stores = State.db.routes[dstRoute];
         const ym = App._currentPlanYM;
         try {
+            // ✅ NEW (2026-08-29): ย้ายร้านข้ามสาย = รายชื่อร้านของทั้ง 2 สายเปลี่ยน — รีเซ็ต
+            // สถานะ "ยืนยันรับสายวิ่ง" ของทั้งสายต้นทางและปลายทาง
+            const _resetConfirm = { confirmedBy: firebase.firestore.FieldValue.delete(), confirmedAt: firebase.firestore.FieldValue.delete() };
             await Promise.all([
-                App.planRoutesCol(ym).doc(srcRoute).set({ stores: State.db.routes[srcRoute] }),
-                App.planRoutesCol(ym).doc(dstRoute).set({ stores: State.db.routes[dstRoute] }),
+                // ✅ BUGFIX (2026-08-29): merge:true — ดู comment เดียวกันใน saveDB() ข้างบน
+                App.planRoutesCol(ym).doc(srcRoute).set({ stores: State.db.routes[srcRoute], ..._resetConfirm }, { merge: true }),
+                App.planRoutesCol(ym).doc(dstRoute).set({ stores: State.db.routes[dstRoute], ..._resetConfirm }, { merge: true }),
             ]);
             StoreTrans.close(); App.sync();
             UI.showSaveToast(`✅ ย้าย ${moving.length} ร้าน → ${dstRoute}`);
