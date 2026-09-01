@@ -311,6 +311,12 @@ const App = {
             // ✅ เดือนที่ "Live" จริงให้ Sales เห็น — แยกจาก App._currentPlanYM ซึ่งเป็นแค่เดือนที่แอดมินกำลังดูอยู่
             App._livePlanYM = currentPlanYM;
 
+            // ✅ NEW: จุดเริ่ม-จุดจบ สำหรับ "จัดลำดับการเยี่ยมอัตโนมัติ" — อยู่ระดับศูนย์ ไม่ผูกกับเดือน
+            // depotLocation = พิกัดศูนย์/โกดัง (ใช้ร่วมกันทุกสาย), routeSettings = ตั้งค่าต่อสาย
+            // { [routeCode]: { mode: 'center'|'home'|'none', homeLocation?, returnToStart } }
+            State.db.depotLocation = d.depotLocation || null;
+            State.db.routeSettings = d.routeSettings || {};
+
             App.log(`📋 planList: [${planList.join(', ')}], current: ${currentPlanYM}`);
 
             // ถ้ายังไม่ได้เลือก plan → ใช้ currentPlanYM จาก centerDoc
@@ -1011,6 +1017,122 @@ const App = {
     },
 
     logout: () => { if (typeof Auth !== 'undefined') Auth.logout(); else window.location.replace('login.html'); },
+
+    // ══════════════════════════════════════════════════════════════════════
+    // ✅ NEW: 🧭 จัดลำดับการเยี่ยมอัตโนมัติ — คำนวณเส้นทางจริงผ่าน
+    // /api/optimize-route (proxy ไป OpenRouteService Optimization API ฟรี)
+    // จากจุดเริ่มต้นของสาย → ร้านทั้งหมดในวันนั้น → (กลับจุดเดิม หรือไม่ก็ได้)
+    // แล้วเขียนผลลัพธ์กลับเป็น seqs[day] เหมือนการลากเรียงเอง — แก้มือทีหลังได้เสมอ
+    // ══════════════════════════════════════════════════════════════════════
+
+    // อ่านค่าตั้งค่าจุดเริ่มต้นของสาย "route" ที่ resolve แล้ว (คืนพิกัดจริงพร้อมใช้ หรือ point:null ถ้ายังตั้งไม่ครบ)
+    getRouteStartConfig: (route) => {
+        const rs   = (State.db.routeSettings || {})[route];
+        const mode = rs?.mode || 'none';
+        if (mode === 'none') return { mode: 'none', point: null };
+        if (mode === 'home') {
+            return {
+                mode: 'home',
+                point: rs.homeLocation || null,
+                returnToStart: rs.returnToStart !== false,
+            };
+        }
+        // mode === 'center'
+        return {
+            mode: 'center',
+            point: State.db.depotLocation || null,
+            returnToStart: rs?.returnToStart !== false,
+        };
+    },
+
+    saveDepotLocation: async (lat, lng) => {
+        const latN = parseFloat(lat), lngN = parseFloat(lng);
+        if (isNaN(latN) || isNaN(lngN)) return UI.showErrorToast('⚠️ กรอกพิกัดให้ครบ (ตัวเลขเท่านั้น)');
+        try {
+            await App.dbRef.set({ depotLocation: { lat: latN, lng: lngN } }, { merge: true });
+            State.db.depotLocation = { lat: latN, lng: lngN };
+            UI.showSaveToast('✅ บันทึกพิกัดศูนย์เรียบร้อย');
+        } catch (e) { UI.showErrorToast('❌ บันทึกไม่สำเร็จ: ' + ErrorMsg.translate(e)); }
+    },
+
+    saveRouteStartConfig: async (route, { mode, homeLocation, returnToStart }) => {
+        if (!route) return;
+        try {
+            // ✅ ประกอบ routeSettings เต็มก้อนฝั่ง client ก่อนส่ง กันปัญหาการ merge ซ้อนของ Firestore
+            // กับ map field ที่มีหลายสายอยู่ข้างในเดียวกัน (ชัวร์กว่าพึ่ง merge:true อย่างเดียว)
+            const routeSettings = { ...(State.db.routeSettings || {}) };
+            routeSettings[route] = {
+                mode,
+                ...(mode === 'home' && homeLocation ? { homeLocation } : {}),
+                returnToStart: returnToStart !== false,
+            };
+            await App.dbRef.set({ routeSettings }, { merge: true });
+            State.db.routeSettings = routeSettings;
+            UI.showSaveToast('✅ บันทึกจุดเริ่มต้นของสายเรียบร้อย');
+        } catch (e) { UI.showErrorToast('❌ บันทึกไม่สำเร็จ: ' + ErrorMsg.translate(e)); }
+    },
+
+    optimizeDayOrder: async (day) => {
+        const stores = State.stores.filter(s => s.days && s.days.includes(day) && !s.inactive);
+        if (stores.length < 2) {
+            return UI.showErrorToast('ℹ️ วันนี้มีร้าน ' + stores.length + ' ร้าน ไม่ต้องจัดลำดับ');
+        }
+        if (stores.length > 48) {
+            return UI.showErrorToast('⚠️ วันนี้มี ' + stores.length + ' ร้าน — จัดลำดับอัตโนมัติรองรับสูงสุด 48 ร้าน/วัน (แผนฟรีของ OpenRouteService)');
+        }
+        const noCoord = stores.filter(s => typeof s.lat !== 'number' || typeof s.lng !== 'number' || isNaN(s.lat) || isNaN(s.lng));
+        if (noCoord.length) {
+            return UI.showErrorToast('⚠️ มี ' + noCoord.length + ' ร้านที่ยังไม่มีพิกัด (lat/lng) — เพิ่มพิกัดให้ครบก่อนจัดลำดับอัตโนมัติ');
+        }
+        const cfg = App.getRouteStartConfig(State.localActiveRoute);
+        if (cfg.mode === 'none') {
+            return UI.showErrorToast('⚠️ สายนี้ยังไม่ได้ตั้งจุดเริ่มต้น — กดปุ่ม "📍 จุดเริ่ม-จุดจบ" เพื่อตั้งค่าก่อน');
+        }
+        if (!cfg.point) {
+            return UI.showErrorToast(cfg.mode === 'home'
+                ? '⚠️ ตั้งเป็น "จากที่พัก" ไว้ แต่ยังไม่ได้ปักพิกัดที่พัก — ตั้งค่าที่ปุ่ม "📍 จุดเริ่ม-จุดจบ"'
+                : '⚠️ ยังไม่ได้ตั้งพิกัดศูนย์ — ตั้งค่าที่ปุ่ม "📍 จุดเริ่ม-จุดจบ"');
+        }
+
+        UI.showLoader('กำลังจัดลำดับการเยี่ยม...', `คำนวณเส้นทางจริง ${stores.length} ร้าน (${DAY_COLORS[day]?.name || day})`);
+        try {
+            const res = await fetch('/api/optimize-route', {
+                method:  'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    start: cfg.point,
+                    end:   cfg.returnToStart ? cfg.point : null,
+                    jobs:  stores.map(s => ({ id: s.id, lat: s.lat, lng: s.lng })),
+                }),
+            });
+            const result = await res.json().catch(() => ({}));
+            UI.hideLoader();
+
+            if (!res.ok || !Array.isArray(result.order)) {
+                UI.showErrorToast('❌ จัดลำดับไม่สำเร็จ: ' + (result.error || res.statusText || 'ไม่ทราบสาเหตุ'));
+                return;
+            }
+
+            result.order.forEach((storeId, idx) => {
+                const s = State.stores.find(x => String(x.id) === String(storeId));
+                if (s) { if (!s.seqs) s.seqs = {}; s.seqs[day] = idx + 1; }
+            });
+            App.saveDB();
+            UI.render();
+            if (State.openDayModal === day) UI.showDayModal(day);
+
+            const unassignedCount = Array.isArray(result.unassigned) ? result.unassigned.length : 0;
+            if (unassignedCount > 0) {
+                UI.showErrorToast(`⚠️ จัดลำดับได้ ${result.order.length} ร้าน แต่มี ${unassignedCount} ร้านที่ระบบคำนวณเส้นทางไม่ได้ (อาจพิกัดผิดปกติ) — เรียงร้านเหล่านั้นด้วยมือเพิ่มเติม`);
+            } else {
+                UI.showSaveToast(`✅ จัดลำดับ ${DAY_COLORS[day]?.name || day} เรียบร้อย (${stores.length} ร้าน)`);
+            }
+            App.writeAuditLog('optimize_day_order', { day, route: State.localActiveRoute, storeCount: stores.length, unassignedCount });
+        } catch (e) {
+            UI.hideLoader();
+            UI.showErrorToast('❌ เชื่อมต่อไม่สำเร็จ: ' + e.message);
+        }
+    },
 };
 
 // ==========================================

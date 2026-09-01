@@ -1,6 +1,6 @@
 // ==========================================
 // 🔒 Firestore Security Rules — Route Planner
-// Version: 2.1 — เพิ่ม moveRequests + confirmedBy/confirmedAt 2026-08-31
+// Version: 2.2 — เพิ่ม depotLocation/routeSettings (จัดลำดับการเยี่ยมอัตโนมัติ) 2026-09-01
 //
 // ข้อจำกัด: ระบบใช้ Custom Auth (SHA-256 + localStorage)
 // ไม่ใช้ Firebase Auth → Rules ไม่สามารถ verify token ได้
@@ -10,6 +10,8 @@
 //   appData/{centerId}_main/plans/{ym}/routes/{r}   ← ระบบใหม่
 //     ├─ routes/{r} มี field confirmedBy/confirmedAt เพิ่ม (เซลยืนยันรับสายวิ่ง)
 //   appData/{centerId}_main/moveRequests/{reqId}    ← ✅ NEW: คำขอย้ายวันร้านค้า
+//   appData/{centerId}_main.depotLocation           ← ✅ NEW: พิกัดศูนย์ (จัดลำดับอัตโนมัติ)
+//   appData/{centerId}_main.routeSettings           ← ✅ NEW: จุดเริ่ม/จุดจบต่อสาย (จัดลำดับอัตโนมัติ)
 //   appData/app_users                               ← users (ปิด read)
 //   appData/app_centers                             ← รายการศูนย์
 //   sellout/{YYYY_MM}/chunks/{c}                    ← Sellout rows
@@ -335,13 +337,21 @@ service cloud.firestore {
                'routeList','cycleDays','routes','kpiSettings',
                'savedRawColumns','createdAt','draftList','historyList',
                'lastActivated','updatedAt','calendarConfig','skuWhitelist',
-               'planList','currentPlanYM'
+               'planList','currentPlanYM',
+               // ✅ NEW: จุดเริ่ม-จุดจบ สำหรับ "จัดลำดับการเยี่ยมอัตโนมัติ"
+               'depotLocation','routeSettings'
            ])
            && (!data.keys().hasAll(['routeList'])   || data.routeList is list)
            && (!data.keys().hasAll(['cycleDays'])    || data.cycleDays is number)
            && (!data.keys().hasAll(['draftList'])    || data.draftList is list)
            && (!data.keys().hasAll(['historyList'])  || data.historyList is list)
-           && (!data.keys().hasAll(['planList'])     || data.planList is list);
+           && (!data.keys().hasAll(['planList'])     || data.planList is list)
+           // ✅ NEW: depotLocation ต้องเป็น map ที่มี lat/lng เป็นตัวเลข (ถ้ามี field นี้)
+           && (!data.keys().hasAll(['depotLocation']) || data.depotLocation == null ||
+               (data.depotLocation.keys().hasAll(['lat','lng'])
+                && data.depotLocation.lat is number && data.depotLocation.lng is number))
+           // ✅ NEW: routeSettings ต้องเป็น map (คีย์ = รหัสสาย) ไม่จำกัดขนาดเกินไป
+           && (!data.keys().hasAll(['routeSettings']) || data.routeSettings is map);
   }
 
   function validYearMonth(ym) {

@@ -270,6 +270,11 @@
                         📅 ปฏิทิน
                     </button>
                     <span id="cal-mode-badge" class="hidden bg-gray-700 text-gray-200 px-2 py-1 rounded-lg text-[10px] font-bold whitespace-nowrap" title="โหมดปฏิทินของเดือนนี้"></span>
+                    <!-- ✅ NEW: ตั้งจุดเริ่ม/จุดจบ สำหรับ "จัดลำดับการเยี่ยมอัตโนมัติ" -->
+                    <button onclick="StartPointCtrl.open()"
+                        class="bg-cyan-700 hover:bg-cyan-600 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap" title="ตั้งจุดเริ่มต้น/จุดจบของสาย สำหรับจัดลำดับการเยี่ยมอัตโนมัติ">
+                        📍 จุดเริ่ม-จุดจบ
+                    </button>
                     <!-- ✅ NEW (2026-08-29): เช็คว่าสายไหนยืนยันรับสายวิ่งเดือนนี้แล้วบ้าง -->
                     <button onclick="RouteConfirmAdmin.open()" style="position:relative;"
                         class="bg-teal-600 hover:bg-teal-500 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap" title="เช็คว่าสายไหนยืนยันรับสายวิ่งแล้วบ้าง">
@@ -871,6 +876,14 @@
 
             <div id="modalContent" class="p-4 flex-1 overflow-y-auto space-y-2 bg-gray-50/50"></div>
 
+            <!-- ✅ NEW: ปุ่มจัดลำดับการเยี่ยมอัตโนมัติ (คำนวณเส้นทางจริงผ่าน OpenRouteService) -->
+            <div class="p-3 border-t bg-white">
+                <button onclick="App.optimizeDayOrder(State.openDayModal)"
+                    class="w-full bg-cyan-700 hover:bg-cyan-600 text-white rounded-xl py-2.5 text-sm font-bold transition shadow-sm flex items-center justify-center gap-2">
+                    🧭 จัดลำดับการเยี่ยมอัตโนมัติ
+                </button>
+            </div>
+
         </div>
 
     </div>
@@ -1271,6 +1284,128 @@
             </div>
         </div>
     </div>
+
+    <!-- ✅ NEW: Modal ตั้งจุดเริ่ม-จุดจบ สำหรับ "🧭 จัดลำดับการเยี่ยมอัตโนมัติ" -->
+    <div id="startpoint-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden" style="max-height:90dvh;display:flex;flex-direction:column;">
+            <div class="p-5 border-b flex justify-between items-center bg-gray-50 flex-shrink-0">
+                <div>
+                    <h2 class="text-base font-black text-gray-900">📍 จุดเริ่ม-จุดจบ</h2>
+                    <p class="text-xs text-gray-500 mt-0.5">ใช้ตอนกด "🧭 จัดลำดับอัตโนมัติ" ในแต่ละวัน</p>
+                </div>
+                <button onclick="StartPointCtrl.close()" class="w-8 h-8 rounded-full border border-gray-200 text-gray-400 hover:bg-gray-100 font-bold">✕</button>
+            </div>
+            <div class="overflow-y-auto flex-1 p-5 space-y-5">
+
+                <div class="bg-gray-50 border border-gray-200 rounded-xl p-4">
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-2">🏢 พิกัดศูนย์ (ใช้ร่วมกันทุกสาย)</label>
+                    <div class="grid grid-cols-2 gap-2">
+                        <input type="number" step="any" id="sp-depot-lat" placeholder="ละติจูด"
+                            class="border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-300">
+                        <input type="number" step="any" id="sp-depot-lng" placeholder="ลองจิจูด"
+                            class="border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-300">
+                    </div>
+                    <p class="text-[10px] text-gray-400 mt-1.5">เปิด Google Maps คลิกขวาที่ตำแหน่งศูนย์ แล้วคัดลอกตัวเลขพิกัดมาวาง</p>
+                    <button onclick="StartPointCtrl.saveDepot()" class="mt-2 w-full bg-gray-800 hover:bg-gray-900 text-white rounded-lg py-2 text-xs font-bold transition">💾 บันทึกพิกัดศูนย์</button>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-2">🚚 จุดเริ่มต้นของสายนี้ (<span id="sp-route-label" class="text-gray-700 normal-case"></span>)</label>
+                    <div class="grid grid-cols-3 gap-2 mb-3">
+                        <button id="sp-mode-center" onclick="StartPointCtrl.setMode('center')" type="button" class="border-2 border-gray-200 bg-gray-50 rounded-xl p-2.5 text-center text-xs font-bold transition">🏢<br>จากศูนย์</button>
+                        <button id="sp-mode-home" onclick="StartPointCtrl.setMode('home')" type="button" class="border-2 border-gray-200 bg-gray-50 rounded-xl p-2.5 text-center text-xs font-bold transition">🏠<br>จากที่พัก</button>
+                        <button id="sp-mode-none" onclick="StartPointCtrl.setMode('none')" type="button" class="border-2 border-gray-200 bg-gray-50 rounded-xl p-2.5 text-center text-xs font-bold transition">🚫<br>ไม่มี</button>
+                    </div>
+
+                    <div id="sp-home-wrap" class="hidden space-y-2 mb-3">
+                        <div class="grid grid-cols-2 gap-2">
+                            <input type="number" step="any" id="sp-home-lat" placeholder="ละติจูดที่พัก"
+                                class="border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-300">
+                            <input type="number" step="any" id="sp-home-lng" placeholder="ลองจิจูดที่พัก"
+                                class="border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-300">
+                        </div>
+                    </div>
+
+                    <label id="sp-return-wrap" class="hidden items-center gap-2 text-xs font-bold text-gray-600 cursor-pointer">
+                        <input type="checkbox" id="sp-return-toggle" checked class="w-4 h-4">
+                        กลับจุดเดิมหลังเยี่ยมร้านสุดท้าย (ไม่ติ๊ก = จบที่ร้านสุดท้ายเลย ไม่ต้องกลับ)
+                    </label>
+                </div>
+
+            </div>
+            <div class="p-5 border-t flex gap-3 flex-shrink-0">
+                <button onclick="StartPointCtrl.close()" class="flex-1 border border-gray-200 rounded-xl py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-50 transition">ปิด</button>
+                <button onclick="StartPointCtrl.saveRoute()" class="flex-1 bg-cyan-700 hover:bg-cyan-800 text-white rounded-xl py-2.5 text-sm font-bold transition shadow-sm">💾 บันทึกของสายนี้</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ✅ NEW: StartPointCtrl — ตั้งจุดเริ่ม/จุดจบต่อสาย ใช้โดย App.optimizeDayOrder
+        // (จุดศูนย์ใช้ร่วมกันทุกสาย, จุดที่พักผูกกับสายนั้นๆ, เก็บทั้งคู่ไว้ที่ระดับศูนย์ ไม่ผูกกับเดือน)
+        const StartPointCtrl = {
+            _mode: 'none',
+
+            open: () => {
+                const route = State.localActiveRoute;
+                if (!route) return UI.showErrorToast('⚠️ เลือกสายก่อนครับ');
+                document.getElementById('sp-route-label').textContent = route;
+
+                const depot = State.db.depotLocation;
+                document.getElementById('sp-depot-lat').value = depot ? depot.lat : '';
+                document.getElementById('sp-depot-lng').value = depot ? depot.lng : '';
+
+                const rs = (State.db.routeSettings || {})[route];
+                document.getElementById('sp-home-lat').value = rs?.homeLocation?.lat ?? '';
+                document.getElementById('sp-home-lng').value = rs?.homeLocation?.lng ?? '';
+                document.getElementById('sp-return-toggle').checked = rs?.returnToStart !== false;
+
+                StartPointCtrl.setMode(rs?.mode || 'none');
+                document.getElementById('startpoint-modal').classList.remove('hidden');
+            },
+
+            close: () => document.getElementById('startpoint-modal').classList.add('hidden'),
+
+            setMode: (mode) => {
+                StartPointCtrl._mode = mode;
+                ['center', 'home', 'none'].forEach(m => {
+                    const btn = document.getElementById('sp-mode-' + m);
+                    if (!btn) return;
+                    btn.classList.toggle('border-cyan-500', m === mode);
+                    btn.classList.toggle('bg-cyan-50',      m === mode);
+                    btn.classList.toggle('text-cyan-700',   m === mode);
+                    btn.classList.toggle('border-gray-200', m !== mode);
+                    btn.classList.toggle('bg-gray-50',      m !== mode);
+                });
+                document.getElementById('sp-home-wrap').classList.toggle('hidden', mode !== 'home');
+                const returnWrap = document.getElementById('sp-return-wrap');
+                returnWrap.classList.toggle('hidden', mode === 'none');
+                returnWrap.classList.toggle('flex',   mode !== 'none');
+            },
+
+            saveDepot: () => {
+                const lat = document.getElementById('sp-depot-lat').value;
+                const lng = document.getElementById('sp-depot-lng').value;
+                App.saveDepotLocation(lat, lng);
+            },
+
+            saveRoute: () => {
+                const route = State.localActiveRoute;
+                if (!route) return;
+                const mode = StartPointCtrl._mode;
+                let homeLocation = null;
+                if (mode === 'home') {
+                    const lat = parseFloat(document.getElementById('sp-home-lat').value);
+                    const lng = parseFloat(document.getElementById('sp-home-lng').value);
+                    if (isNaN(lat) || isNaN(lng)) return UI.showErrorToast('⚠️ กรอกพิกัดที่พักให้ครบก่อน');
+                    homeLocation = { lat, lng };
+                }
+                const returnToStart = document.getElementById('sp-return-toggle').checked;
+                App.saveRouteStartConfig(route, { mode, homeLocation, returnToStart });
+                StartPointCtrl.close();
+            },
+        };
+    </script>
 
     <script>
         // CalendarAdmin — ตั้งค่าปฏิทินสำหรับแต่ละ Plan
