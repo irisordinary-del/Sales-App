@@ -583,6 +583,7 @@ const App = {
             const n = inp.value.trim(); close(); if (!n) return;
             State.db.routes[n] = []; State.localActiveRoute = n; State.stores = [];
             App.sync(); App.saveDB();
+            if (typeof AuditLog !== 'undefined') AuditLog.routeAdd(n);
         };
         box.querySelector('#_add-route-cancel').onclick = close;
         box.querySelector('#_add-route-ok').onclick     = confirm;
@@ -619,8 +620,10 @@ const App = {
                 // ✅ BUGFIX (2026-08-29): merge:true — ดู comment เดียวกันใน saveDB() ข้างบน
                 App.planRoutesCol(ym).doc(newName).set({ stores: State.db.routes[newName] || [] }, { merge: true }),
                 App.planRef(ym).set({ routeList }, { merge: true }),
-            ]).then(() => UI.showSaveToast('💾 เปลี่ยนชื่อสายเรียบร้อย'))
-              .catch(err => UI.showErrorToast('❌ เปลี่ยนชื่อไม่สำเร็จ: ' + err.message));
+            ]).then(() => {
+                UI.showSaveToast('💾 เปลี่ยนชื่อสายเรียบร้อย');
+                if (typeof AuditLog !== 'undefined') AuditLog.routeRename(oldName, newName);
+            }).catch(err => UI.showErrorToast('❌ เปลี่ยนชื่อไม่สำเร็จ: ' + err.message));
         };
         box.querySelector('#_ren-cancel').onclick = close;
         box.querySelector('#_ren-ok').onclick     = confirm;
@@ -645,24 +648,6 @@ const App = {
             ]).then(() => UI.showSaveToast('🗑️ ลบสายเรียบร้อย'))
               .catch(err => UI.showErrorToast('❌ ลบไม่สำเร็จ: ' + err.message));
         });
-    },
-
-    // ─── calendarConfig ──────────────────────────────────────────────────
-    saveCalendarConfig: async (cfg) => {
-        const ym = App._currentPlanYM;
-        if (!ym) return;
-        try {
-            // ✅ BUGFIX: mergeFields แทน merge:true — กัน field เก่าจากโหมดก่อนหน้า (เช่น mapping)
-            // ค้างอยู่ใน Firestore แล้วไปบัง getDayLabelForCfg() ตอนสลับโหมด (ดู index.html CalendarAdmin.save)
-            await App.planRef(ym).set(
-                { calendarConfig: cfg, updatedAt: firebase.firestore.FieldValue.serverTimestamp() },
-                { mergeFields: ['calendarConfig', 'updatedAt'] }
-            );
-            State.db.calendarConfig = cfg;
-            UI.showSaveToast('📅 บันทึกปฏิทินเรียบร้อย');
-        } catch(err) {
-            UI.showErrorToast('❌ บันทึกปฏิทินไม่สำเร็จ: ' + err.message);
-        }
     },
 
     // ─── calendarConfig เฉพาะสาย (override) ────────────────────────────────

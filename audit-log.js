@@ -11,9 +11,30 @@ const AuditLog = {
     MAX_DISPLAY: 200,     // แสดงสูงสุดกี่รายการ
 
     // ─── Firestore path ──────────────────────────────────────────────────
+    // ✅ FIX: หน้าเบาๆ (login.html/tasks.html/users.html) โหลดแค่ app-config-init.js
+    // ซึ่งไม่มี cloudDB (มีแค่ใน app-config.js เต็ม) ส่วน sales.html ใช้ชื่อตัวแปร "db" แทน
+    // — fallback ไล่หาตัวไหนมีอยู่จริง ก่อนใช้ firebase.firestore() ตรงๆ เป็นทางสุดท้าย
+    //
+    // ✅ FIX (2026-09-04 — สำคัญ): window.CENTER_ID ถูก set แค่โดย app-config.js (index.html เท่านั้น)
+    // sales.html ไม่เคยตั้ง window.CENTER_ID เลยตลอดทั้งไฟล์ (ใช้ State.centerId แทนคนละตัวแปร)
+    // ส่วน login.html ยังไม่รู้ศูนย์เลยตอน login (ศูนย์มากับ user record ถึงจะรู้) — ถ้าใช้แค่
+    // window.CENTER_ID เฉยๆ log จาก login/logout/user management ทุกจุด (ยกเว้นที่กดจาก index.html)
+    // จะตกไปอยู่ที่ auditLogs/unknown/logs ทั้งหมด ซึ่งเป็นคนละที่กับที่หน้า Audit Log ของแอดมิน
+    // อ่าน (auditLogs/{ศูนย์จริง}/logs) แอดมินจะไม่มีทางเห็น log พวกนี้เลย
+    // แก้โดยไล่หาแหล่งที่มาของ centerId ตามลำดับความน่าเชื่อถือ: ตัวแปรของหน้านั้นๆ ก่อน
+    // (ตรงกับศูนย์ที่ "กำลังทำงานอยู่" จริง) แล้วค่อย fallback ไปที่ centerId ของ user เอง (จาก
+    // session — มีทุก role ยกเว้น admin ที่เลือกศูนย์เองได้ไม่ผูกตายตัว)
+    _centerId: () => {
+        if (window.CENTER_ID) return window.CENTER_ID;
+        if (typeof State !== 'undefined' && State.centerId) return State.centerId;
+        const session = (typeof Auth !== 'undefined') ? Auth.getSession() : null;
+        return session?.centerId || 'unknown';
+    },
     _col: () => {
-        const centerId = window.CENTER_ID || 'unknown';
-        return cloudDB.collection('auditLogs').doc(centerId).collection('logs');
+        const fs = (typeof cloudDB !== 'undefined') ? cloudDB
+                 : (typeof db      !== 'undefined') ? db
+                 : firebase.firestore();
+        return fs.collection('auditLogs').doc(AuditLog._centerId()).collection('logs');
     },
 
     // ─── Action Types ─────────────────────────────────────────────────────
@@ -71,17 +92,19 @@ const AuditLog = {
                 username:    session.username,
                 displayName: session.displayName || session.username,
                 role:        session.role,
-                centerId:    window.CENTER_ID || null,
+                centerId:    AuditLog._centerId(),
                 centerDoc:   window.CENTER_DOC || null,
                 details,
                 ts:          firebase.firestore.FieldValue.serverTimestamp(),
                 tsLocal:     new Date().toISOString(),
             };
 
-            // เขียน async โดยไม่ block UI (fire-and-forget)
-            AuditLog._col().add(logEntry).catch(e => {
-                console.warn('AuditLog.write failed:', e.message);
-            });
+            // ✅ FIX (2026-09-04): เดิมไม่ await การเขียน — write() เลย resolve ทันทีก่อนที่ log จะไปถึง
+            // Firestore จริง จุดที่ผู้เรียก await write() (เช่น Auth.logout() ก่อน redirect หน้า)
+            // จะ "รอ" อะไรไม่จริง เพราะ promise คืนค่าไปแล้วตั้งแต่ก่อน request ยิงเสร็จ
+            // ผู้เรียกส่วนใหญ่ไม่ await อยู่แล้ว (fire-and-forget ตามปกติ) — await ในนี้จึงไม่กระทบใคร
+            // นอกจากจุดที่ตั้งใจ await จริงๆ
+            await AuditLog._col().add(logEntry);
         } catch (e) {
             console.warn('AuditLog.write error:', e.message);
         }
@@ -362,15 +385,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
 function _patchAuditLog() {
 
-    // ── App.addRoute ─────────────────────────────────────────────────────
+    // ✅ FIX (ตรวจสอบ 2026-09-04): App.addRoute log ตรงใน admin-data.js เองแล้ว (ผ่าน confirm
+    // callback ใน modal ที่ patch จากข้างนอกไม่ได้ตามที่ comment เดิมบอกไว้) — ไม่ต้อง patch ที่นี่ซ้ำ
     if (typeof App !== 'undefined') {
-        const _origAddRoute = App.addRoute;
-        App.addRoute = function() {
-            // patch ผ่าน confirm button ใน modal ไม่ได้โดยตรง
-            // ให้ wrap saveDB แทน
-            _origAddRoute.apply(this, arguments);
-        };
-
         // ── App.deleteRoute ───────────────────────────────────────────────
         const _origDeleteRoute = App.deleteRoute;
         App.deleteRoute = function() {
@@ -386,26 +403,26 @@ function _patchAuditLog() {
             _origDeleteRoute.apply(this, arguments);
         };
 
-        // ── App.createDraft ───────────────────────────────────────────────
-        const _origCreateDraft = App.createDraft;
-        App.createDraft = async function(ym) {
-            await _origCreateDraft.call(this, ym);
+        // ── App.createPlan ────────────────────────────────────────────────
+        // ✅ FIX (2026-09-04): เดิม patch ชื่อ App.createDraft ซึ่งไม่มีอยู่จริงในโค้ดปัจจุบันแล้ว
+        // (renamed เป็น createPlan ตอน refactor เป็นระบบ multi-month plans) — patch เดิมเลย
+        // ไม่เคยทำงานจริงเพราะไม่มีจุดไหนเรียก App.createDraft
+        const _origCreatePlan = App.createPlan;
+        App.createPlan = async function(ym, srcYMOverride) {
+            await _origCreatePlan.call(this, ym, srcYMOverride);
             AuditLog.draftCreate(ym);
         };
 
-        // ── App.activateDraft ─────────────────────────────────────────────
-        const _origActivate = App.activateDraft;
-        App.activateDraft = async function(ym) {
-            await _origActivate.call(this, ym);
+        // ── App.publishPlan ───────────────────────────────────────────────
+        // ✅ FIX (2026-09-04): เดิม patch ชื่อ App.activateDraft (renamed เป็น publishPlan) — เหตุผลเดียวกัน
+        const _origPublishPlan = App.publishPlan;
+        App.publishPlan = async function(ym) {
+            await _origPublishPlan.call(this, ym);
             AuditLog.draftActivate(ym);
         };
 
-        // ── App.switchPlanMode ────────────────────────────────────────────
-        const _origSwitch = App.switchPlanMode;
-        App.switchPlanMode = async function(mode) {
-            await _origSwitch.call(this, mode);
-            AuditLog.planSwitch(mode);
-        };
+        // ✅ ตัด App.switchPlanMode ออก (2026-09-04) — ฟังก์ชันนี้ไม่มีอยู่จริงแล้ว (แนวคิด "โหมด draft/live"
+        // เดิมถูกแทนที่ด้วยระบบ multi-month plans ทั้งหมด ไม่มี mode ให้ switch อีกต่อไป)
 
         // ── App.handleMapUpload (route upload) ────────────────────────────
         const _origMapUpload = App.handleMapUpload;
@@ -473,31 +490,10 @@ function _patchAuditLog() {
         };
     }
 
-    // ── KPIMgr.deployToSales ──────────────────────────────────────────────
-    if (typeof KPIMgr !== 'undefined') {
-        const _origDeploy = KPIMgr.deployToSales;
-        KPIMgr.deployToSales = function() {
-            const cnt = State.previewSales ? Object.keys(State.previewSales).length : 0;
-            _origDeploy.call(this);
-            AuditLog.kpiDeploy(cnt);
-        };
-    }
-
-    // ── RawDataMgr.clearAll ───────────────────────────────────────────────
-    if (typeof RawDataMgr !== 'undefined') {
-        const _origClearRaw = RawDataMgr.clearAll;
-        RawDataMgr.clearAll = function() {
-            const _origShowConfirm2 = UI.showConfirm;
-            UI.showConfirm = function(msg, onConfirm, onCancel) {
-                UI.showConfirm = _origShowConfirm2;
-                _origShowConfirm2(msg, () => {
-                    AuditLog.rawClear();
-                    if (onConfirm) onConfirm();
-                }, onCancel);
-            };
-            _origClearRaw.call(this);
-        };
-    }
+    // ✅ ตัด KPIMgr.deployToSales / RawDataMgr.clearAll ออก (ตรวจสอบ 2026-09-04) — ทั้ง 2 object นี้
+    // ไม่มีอยู่ในโค้ดปัจจุบันแล้วทั้งคู่ (ฟีเจอร์ "Raw Data" ถูกแทนที่ด้วยระบบ sellout chunks ทั้งหมด,
+    // KPI deploy เดิมไม่มี object นี้เหลืออยู่แล้ว) — KPI_DEPLOY/RAW_UPLOAD/RAW_CLEAR ใน ACTIONS
+    // เลยไม่มีจุดเรียกใช้จริงในระบบปัจจุบัน (เก็บ dictionary ไว้เผื่อฟีเจอร์กลับมาในอนาคต)
 
     // ── Dashboard._saveTargets ────────────────────────────────────────────
     if (typeof Dashboard !== 'undefined') {

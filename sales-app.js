@@ -106,17 +106,6 @@ function _getTabKey() {
 }
 
 const UI = {
-    // ✅ Hamburger menu
-    toggleMenu: () => {
-        const overlay = document.getElementById('menu-overlay');
-        if (!overlay) return;
-        overlay.style.display = overlay.style.display === 'flex' ? 'none' : 'flex';
-    },
-    closeMenu: () => {
-        const overlay = document.getElementById('menu-overlay');
-        if (overlay) overlay.style.display = 'none';
-    },
-
     // ✅ Edit order mode
     _editMode: false,
     startEditOrder: () => {
@@ -1451,13 +1440,6 @@ const GPS = {
         }
     },
 
-    locate: () => {
-        if (GPS.watchId === null) GPS.start();
-        GPS.autoFollow = true;
-        GPS._updateBtn('on');
-        if (GPS.marker) { GPS._isSelfMoving = true; map.setView(GPS.marker.getLatLng(), 16); GPS._isSelfMoving = false; }
-    },
-
     _onSuccess: (pos) => {
         const { latitude: lat, longitude: lng, accuracy } = pos.coords;
         if (!map) return;
@@ -1685,42 +1667,6 @@ const CalendarCtrl = {
                 count++;
                 if (d2 === dateNum) {
                     // ✅ "วันในสัปดาห์ (จบเมื่อครบรอบ)" และโหมดอิงวันที่แบบเดิม: จบรอบแล้วไม่มี Day ต่อ
-                    if (count > cycleDays) return null;
-                    const dayNum = ((startDayNum - 1 + (count - 1)) % cycleDays) + 1;
-                    return 'Day ' + dayNum;
-                }
-            }
-        }
-        return null;
-    },
-
-    // ⚠️ NOTE (2026-08-29): ฟังก์ชันนี้ดูเหมือนไม่มีจุดเรียกใช้แล้วในโค้ดปัจจุบัน (ถูกแทนที่ด้วย
-    // getDayLabelForCfg ข้างบน ซึ่งรับ cfg/year/month เป็น param แทนที่จะอ่านจาก State ตรงๆ) — คงไว้
-    // เผื่อมีที่อื่นเรียกใช้ และแก้บั๊ก wraparound ให้ตรงกันด้วยเพื่อความปลอดภัย ไม่ให้บั๊กเดิมหลงเหลือ
-    getDayLabel: (dateNum) => {
-        const cfg = State.calendarConfig;
-        if (!cfg || cfg.mode === 'date') {
-            const label = `Day ${dateNum}`;
-            return State.allStores.some(s => s.days?.includes(label)) ? label : null;
-        }
-        if (cfg.mode === 'fixed') return cfg.mapping ? (cfg.mapping[String(dateNum)] || null) : null;
-        if (cfg.mode === 'weekday') {
-            const wmap = cfg.weekdayMap || {};
-            const wd   = new Date(CalendarCtrl._year, CalendarCtrl._month, dateNum).getDay();
-            const entry = Object.entries(wmap).find(([, w]) => w === wd);
-            return entry ? entry[0] : null;
-        }
-        if (cfg.mode === 'cycle') {
-            const startDate   = parseInt(cfg.startDay  || 1);
-            const holidays    = cfg.holidays  || [];
-            if (dateNum < startDate) return null;
-            const startDayNum = parseInt(cfg.startDayNum || 1);
-            const cycleDays   = parseInt(cfg.cycleDays || 24);
-            let count = 0;
-            for (let d = startDate; d <= dateNum; d++) {
-                if (holidays.includes(d)) continue;
-                count++;
-                if (d === dateNum) {
                     if (count > cycleDays) return null;
                     const dayNum = ((startDayNum - 1 + (count - 1)) % cycleDays) + 1;
                     return 'Day ' + dayNum;
@@ -2297,7 +2243,6 @@ const MapCtrl = {
     },
 
     fitBounds:      () => { if (mapMarkers.length && map) map.fitBounds(new L.featureGroup(mapMarkers).getBounds(), { padding: [30,30] }); },
-    forceFitBounds: () => { State.mapNeedsFit = true; MapCtrl.drawMap(); },
 
     _currentBearing: 0,
 

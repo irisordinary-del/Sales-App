@@ -1,6 +1,46 @@
 # 📁 Working Files Registry — Route Planner
-> อัพเดทล่าสุด: 2026-07-09
+> อัพเดทล่าสุด: 2026-07-13
 > ⚠️ ทุกครั้งที่แก้ไฟล์ ให้ดึงจาก /home/claude/ เท่านั้น ไม่ใช่จาก /mnt/user-data/uploads/
+
+## 🆕 Session ใหญ่ (2026-07-12 → 2026-07-13) — Firestore connection fix + Cross-center bug + UX pass + Toggle feature
+
+### 🔴 Root-cause fixes (กระทบ user จริง)
+- **`experimentalForceLongPolling`** เพิ่มใน `sales-app.js` + `app-config.js` — แก้ error
+  `WebChannelConnection RPC 'Listen' stream transport errored` ที่วนซ้ำมาตลอดหลาย session
+  (เครือข่ายบางที่บล็อก Firestore streaming แต่ยอม long-polling) — นี่คือรากของปัญหา "ยอดขายไม่ขึ้น"
+  ที่แท้จริง ไม่ใช่แค่ race condition ที่แก้ไปก่อนหน้า
+- **targets/{ym} ไม่มี centerId prefix** — ศูนย์ไหนบันทึกทีหลังทับของศูนย์อื่นทั้งเดือน แก้ครบ 6 จุด
+  ใน `dashboard.js` + `sales-dashboard.js` (ดูรายละเอียดใน `bugfix-log.md` [2026-07-13])
+  **⚠️ ต้องให้ทุกศูนย์ตั้ง Target ใหม่หลัง deploy — ข้อมูลเก่าอาจถูกทับไปแล้ว**
+- **Column "สายวิ่ง" ตรวจจับสายไม่ได้** — แก้ลำดับ if-else ใน `file-manager.js` (bulkImport) และ
+  `admin-data.js` (handleMapUpload) ดูรายละเอียดใน `bugfix-log.md`
+- **`_showDataWarning()` signature ไม่ตรงกับตอนเรียก** — banner โชว์ข้อความเพี้ยน ปุ่มลองใหม่ไม่ทำงาน
+  แก้ใน `sales-dashboard.js`
+- **`store-history.js` init() หาเดือนไม่เจอ** — regex เดิมจับได้แค่ `YYYY_MM` ไม่รองรับ centerId prefix
+  พังหลังลบเอกสาร legacy ที่ไม่มี prefix ทิ้ง แก้ให้ตรวจจับทั้ง 2 รูปแบบเหมือน `SalesDashboard._loadMonthList`
+
+### 🟡 UX improvement pass
+- `ErrorMsg.translate(e)` — แปล Firebase error code → ข้อความไทย เพิ่มใน `app-config.js`,
+  `app-config-init.js`, `sales-app.js` ใช้แล้วใน `admin-data.js`, `dashboard.js`, `sku-distribution.js`,
+  `users.js` (⚠️ ยังเหลือ 15 จุดใน admin-data.js/admin-ai.js/file-manager.js ที่ยังโชว์ `err.message` ดิบ)
+- แยก state "กำลังโหลด / ไม่มีข้อมูลจริง / โหลดพลาด" ใน `sales-dashboard.js` — เดิมโชว์ "—" เหมือนกันหมด
+- Route Analysis (`dashboard.js`) แยกสี "—" (ไม่มีแผน) vs "⚠️ 0 ร้านในแผน" (มีแผนแต่ผิดปกติ)
+- `center-select.js` เปลี่ยน `prompt()` ดิบ → modal ธีมแอป พร้อม validation
+- เพิ่ม confirm summary ก่อนบันทึกปฏิทินโหมด "ตามวันในสัปดาห์" ใน `index.html`
+- Supervisor Activity tab: empty-state + hint banner อธิบาย scope ให้ชัด (`sales-app.js`)
+
+### 🟢 Feature ใหม่: Toggle รายเดือน / รวมทุกเดือน
+เพิ่มปุ่มสลับมุมมองในการ์ด KPI เดิม (ไม่สร้างหน้าใหม่) ทั้ง 3 หน้า:
+- `SalesDashboard.setViewMode()` + `_loadAllMonths()` — `sales-dashboard.js`
+- `SupervisorDashboard.setViewMode()` + `_loadAllMonths()` — `sales-dashboard.js`
+- `Dashboard.setViewMode()` + `_loadAllMonths()` — `dashboard.js` (มี guard กัน `_openTargetModal`/
+  `_saveTargets` ทำงานตอนอยู่โหมด `__all__` เพราะ Target ผูกกับเดือนเดียวเสมอ)
+- HTML toggle button เพิ่มใน `sales.html`
+
+### 📊 ไฟล์นำเสนอที่สร้างเพิ่ม (ไม่ใช่โค้ดระบบ)
+`RoutePlan_Workflow.pptx`, `RoutePlan_SetupGuide.pptx`, `RoutePlan_Purpose_WorkflowCompare.pptx`
+
+---
 
 ## 🧹 Cleanup (2026-07-09) — ลบไฟล์ orphaned/ไม่ได้ใช้งานจริง
 ตรวจสอบทั้ง repo (syntax check + onclick/namespace wiring check ทุกไฟล์) พบว่าไฟล์ต่อไปนี้**ไม่ได้ถูกโหลด**จาก index.html/sales.html/center-select.html เลย จึงลบออกจาก working directory:
@@ -30,16 +70,25 @@ BUG-01 ถึง BUG-10 จาก PROJECT_ANALYSIS.md (2026-05-13) ยืนย�
 appData/{centerId}_main/plans/{ym}/routes/{routeId}  ← plan รายเดือน
 sellout/{YYYY_MM}/chunks/                             ← ยอดขาย format เก่า (มีข้อมูลจริง)
 sellout/{CID}_{YYYY_MM}/chunks/                       ← ยอดขาย format ใหม่ (หลัง deploy dashboard.js ใหม่)
-targets/{YYYY_MM}                                     ← targets รายสาย
+targets/{CID}_{YYYY_MM}                               ← targets รายสาย (✅ แก้ 2026-07-13 — เดิมไม่มี CID prefix
+                                                          ทำให้ศูนย์ทับกัน ดู bugfix-log.md)
+targets/{YYYY_MM}                                     ← format เก่า (legacy fallback อ่านอย่างเดียว ไม่เขียนแล้ว)
 skuDistribution/{id}                                  ← campaigns
 auditLogs/{centerId}/logs/{logId}
 appData/app_users
+appData/app_centers                                   ← รายชื่อศูนย์ทั้งหมด { centerId: {name, docId, routeCount} }
 ```
 
 **หมายเหตุ sellout path:**
 - ข้อมูลเก่า (ม.ค.-พ.ค. 2569) อยู่ที่ `sellout/2026_01` ถึง `2026_05`
 - ข้อมูลใหม่ (หลัง deploy dashboard.js ล่าสุด) จะเขียนที่ `sellout/402_2026_06` เป็นต้นไป
 - `sales-dashboard._loadChunks` มี fallback รองรับทั้ง 2 format
+
+**หมายเหตุ targets path (สำคัญ):**
+- ก่อน 2026-07-13 เขียนที่ `targets/{ym}` เฉยๆ ไม่มี centerId — เป็นบั๊กร้ายแรง ศูนย์ไหนบันทึกทีหลัง
+  จะเขียนทับ (`.set()` ไม่มี merge) ลบ target ของศูนย์อื่นทั้งเดือนทิ้งหมด
+- หลังแก้ เขียน/อ่านที่ `targets/{CID}_{ym}` เป็นหลัก มี fallback อ่าน `targets/{ym}` เก่าเผื่อไว้
+- **Target ทุกเดือนที่เคยตั้งไว้ก่อนแก้บั๊กนี้ไม่น่าเชื่อถือ 100%** — แนะนำให้ทุกศูนย์ตั้งใหม่หลัง deploy
 
 ---
 
@@ -146,6 +195,8 @@ appData/app_users
 - [ ] Publish `firestore.rules` ใน Firebase Console → Firestore → Rules
 - [ ] **Bump `CACHE_VERSION` ใน `sw.js`** ทุกครั้ง
 - [ ] Admin อัปโหลดยอดขายใหม่หลัง deploy `dashboard.js` (เพื่อใช้ path ใหม่)
+- [ ] **⚠️ (ใหม่ 2026-07-13) ทุกศูนย์ต้องตั้ง Target รายสายใหม่หลัง deploy** — เพราะบั๊ก cross-center
+      ทำให้ target เดิมไม่น่าเชื่อถือ (ดู bugfix-log.md)
 
 ---
 
@@ -161,6 +212,15 @@ appData/app_users
 - BUG-03: file-manager bulkImport route name อาจซ้ำ
 - BUG-05: sales-app docMain ชี้ผิด doc ตอน drag reorder
 - BUG-08: admin-data duplicate toast ใน clearAllAssignments
+- BUG-09 (2026-07-13, low priority): `err.message` ดิบยังหลุดไป user 15 จุด ใน `admin-data.js`,
+  `admin-ai.js`, `file-manager.js` — ยังไม่ได้เปลี่ยนเป็น `ErrorMsg.translate()` (ไม่ทำให้พัง แค่ user
+  เห็นข้อความอังกฤษ/technical)
+- BUG-10 (2026-07-13, low priority): `store-history.js` บรรทัด ~88 มี fallback path อ่าน sellout
+  ด้วย ym ไม่มี centerId prefix — เป็น dead code ในทางปฏิบัติ (ทางหลักที่ผ่าน
+  `SalesDashboard._loadChunks` ถูกต้องอยู่แล้ว) แต่ถ้า SalesDashboard โหลดไม่ทันจะพัง ควรแก้ให้ตรงด้วย
+- BUG-11 (2026-07-13, low priority): `SalesDashboard._initOfflineListener()` ไม่มี guard กันผูก
+  event listener ซ้ำถ้า `init()` ถูกเรียกมากกว่า 1 ครั้ง — ปัจจุบันไม่มีจุดที่เรียกซ้ำจริง ปลอดภัยอยู่
+  แต่เสี่ยงถ้า refactor ในอนาคต
 
 ---
 

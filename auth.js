@@ -114,10 +114,17 @@ const Auth = {
         if (user.passwordHash !== hash) throw new Error('Password ไม่ถูกต้อง');
 
         Auth.setSession(user);
+        if (typeof AuditLog !== 'undefined') AuditLog.userLogin();
         return user;
     },
 
-    logout: () => {
+    // ✅ NEW (2026-09-04): log ก่อน clearSession — AuditLog.write() อ่าน session ปัจจุบันจาก
+    // Auth.getSession() เองข้างใน ถ้า clear ก่อนจะไม่มี username/role ให้บันทึก
+    // await ให้ log ไปถึง Firestore ก่อน redirect (ไม่งั้น request อาจถูกตัดกลางทางตอนเปลี่ยนหน้า)
+    logout: async () => {
+        if (typeof AuditLog !== 'undefined') {
+            try { await AuditLog.userLogout(); } catch(e) {}
+        }
         Auth.clearSession();
         window.location.replace('login.html');
     },
@@ -154,6 +161,7 @@ const Auth = {
             createdAt:   new Date().toISOString()
         });
         await Auth.saveAllUsers(users);
+        if (typeof AuditLog !== 'undefined') AuditLog.userCreate(uname, role);
         return users;
     },
 
@@ -168,6 +176,7 @@ const Auth = {
         }
         users[idx] = { ...users[idx], ...updates };
         await Auth.saveAllUsers(users);
+        if (typeof AuditLog !== 'undefined') AuditLog.userUpdate(username);
         return users;
     },
 
@@ -180,6 +189,7 @@ const Auth = {
         }
         users = users.filter(u => u.username.toUpperCase() !== username.toUpperCase());
         await Auth.saveAllUsers(users);
+        if (typeof AuditLog !== 'undefined') AuditLog.userDelete(username);
         return users;
     },
 
