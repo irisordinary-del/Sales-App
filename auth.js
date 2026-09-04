@@ -114,7 +114,12 @@ const Auth = {
         if (user.passwordHash !== hash) throw new Error('Password ไม่ถูกต้อง');
 
         Auth.setSession(user);
-        if (typeof AuditLog !== 'undefined') AuditLog.userLogin();
+        // ✅ FIX (2026-09-04 — พบจากทดสอบจริง): เดิมไม่ await ตรงนี้ — ผู้เรียก Auth.login() (login.html)
+        // redirect ไปหน้าอื่นทันทีหลัง return โดยไม่รอ ทำให้ request เขียน log ถูกตัดกลางทางเกือบทุกครั้ง
+        // (ตรวจสอบจริงแล้ว: USER_LOGOUT ที่ await ไว้แล้วบันทึกติด แต่ USER_LOGIN ที่ไม่ await ไม่ติดเลยสักครั้ง)
+        if (typeof AuditLog !== 'undefined') {
+            try { await AuditLog.userLogin(); } catch(e) {}
+        }
         return user;
     },
 
