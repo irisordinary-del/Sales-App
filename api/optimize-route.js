@@ -73,7 +73,10 @@ module.exports = async (req, res) => {
         location: [j.lng, j.lat], // VROOM/ORS ใช้ลำดับ [lon, lat]
     }));
 
-    const vehicle = { id: 1, start: [start.lng, start.lat] };
+    // ✅ FIX (2026-09-04 — พบจากทดสอบจริงบน Vercel): เดิมไม่ส่ง profile เลย ทำให้ ORS
+    // fallback เป็นค่าดิบ "car" ซึ่งไม่ใช่ชื่อ profile ที่ ORS รู้จัก (ต้องเป็น "driving-car"
+    // เต็มรูปแบบ) reject กลับมาเป็น "Invalid profile: car." ทุกครั้ง
+    const vehicle = { id: 1, profile: 'driving-car', start: [start.lng, start.lat] };
     if (end && typeof end.lat === 'number' && typeof end.lng === 'number') {
         vehicle.end = [end.lng, end.lat];
     }
