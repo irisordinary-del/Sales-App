@@ -21,9 +21,9 @@
 //   }
 //
 // ส่งกลับ:
-//   { order: [storeId, ...] }                          -> สำเร็จ
-//   { order: [storeId, ...], unassigned: [storeId,...] } -> สำเร็จบางส่วน (บางร้านคำนวณไม่ได้)
-//   { error: "ข้อความ" }                                -> ล้มเหลว
+//   { order: [storeId, ...], distanceKm, durationMin }                    -> สำเร็จ
+//   { order: [...], unassigned: [storeId,...], distanceKm, durationMin }  -> สำเร็จบางส่วน (บางร้านคำนวณไม่ได้)
+//   { error: "ข้อความ" }                                                  -> ล้มเหลว
 // ══════════════════════════════════════════════════════════════════════
 
 const ORS_OPTIMIZATION_URL = 'https://api.openrouteservice.org/optimization';
@@ -116,7 +116,14 @@ module.exports = async (req, res) => {
             .map(u => idMap[u.id])
             .filter(id => id !== undefined);
 
-        res.status(200).json(unassigned.length ? { order, unassigned } : { order });
+        // ✅ NEW (2026-09-04): ส่ง distance/duration ของเส้นทางจริงกลับไปด้วย — VROOM คำนวณให้อยู่แล้ว
+        // เดิมทิ้งไป ใช้แค่ order (สำหรับ "ระยะทางรวมของสาย" และเทียบระยะทางจริงระหว่างจุด)
+        const result = { order };
+        if (unassigned.length) result.unassigned = unassigned;
+        if (typeof route.distance === 'number') result.distanceKm = +(route.distance / 1000).toFixed(2);
+        if (typeof route.duration === 'number') result.durationMin = Math.round(route.duration / 60);
+
+        res.status(200).json(result);
     } catch (e) {
         res.status(502).json({ error: 'เชื่อมต่อ OpenRouteService ไม่สำเร็จ: ' + e.message });
     }
