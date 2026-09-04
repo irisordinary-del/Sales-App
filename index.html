@@ -232,39 +232,32 @@
                         class="bg-gray-900 text-white border-none text-sm focus:ring-0 outline-none font-bold py-1 px-2 rounded cursor-pointer max-w-[110px] sm:max-w-[200px]">
                     </select>
                     <div class="flex items-center border-l border-gray-700 ml-1 pl-1">
-                        <button onclick="App.renameRoute()" class="text-gray-400 hover:text-white px-1.5 py-1 transition text-sm" title="เปลี่ยนชื่อ">✏️</button>
-                        <button onclick="App.deleteRoute()" class="text-gray-400 hover:text-red-400 px-1.5 py-1 transition text-sm" title="ลบสาย">🗑️</button>
+                        <button onclick="RouteSettingsCtrl.open()" class="text-gray-400 hover:text-white px-1.5 py-1 transition text-sm" title="ตั้งค่าสาย (ลบ/เปลี่ยนชื่อได้หลายสาย)">⚙️</button>
                     </div>
                 </div>
                 <button onclick="App.addRoute()" class="bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm transition whitespace-nowrap">
                     + สาย
                 </button>
-                <button onclick="StoreTrans.open()" class="bg-violet-600 hover:bg-violet-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm transition whitespace-nowrap" title="ย้ายร้านระหว่างสาย">
+                <button onclick="StoreTrans.open()" class="bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm transition whitespace-nowrap" title="ย้ายร้านระหว่างสาย">
                     🔀 ย้ายร้าน
                 </button>
-                <button onclick="document.getElementById('bulkUpload').click()" class="bg-emerald-700 hover:bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 whitespace-nowrap transition">
+                <button onclick="document.getElementById('bulkUpload').click()" class="bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 whitespace-nowrap transition">
                     📦 อัปโหลดพิกัด
                 </button>
                 <input type="file" id="bulkUpload" accept=".xlsx,.xls" class="hidden" onchange="FileManager.bulkImport(event)">
                 <div class="flex-1"></div>
                 <!-- Plan Selector -->
                 <div class="flex items-center gap-1.5">
-                    <!-- Plan selector — ระบบใหม่ plans/{YYYY_MM} -->
-                    <div id="plan-mode-badge"
-                        style="font-size:10px;font-weight:800;padding:3px 8px;border-radius:6px;background:#4f46e5;color:#fff;white-space:nowrap;">
-                        📅 Plan
+                    <!-- Plan selector — ระบบใหม่ plans/{YYYY_MM} — จัดกลุ่มกับปุ่มตั้งค่าเป็นชุดเดียวกัน
+                         เหมือนกับ route selector ด้านซ้าย (border ล้อมรวม แทนที่จะแยกกันดูคนละส่วน) -->
+                    <div class="flex items-center bg-gray-900 rounded-lg p-1 border border-gray-700 min-w-0">
+                        <select id="plan-selector" onchange="PlanUI.onSelect(this.value)"
+                            class="bg-gray-900 text-white border-none text-xs font-bold rounded py-1 px-2 outline-none focus:ring-0 cursor-pointer max-w-[120px]">
+                        </select>
+                        <div class="flex items-center border-l border-gray-700 ml-1 pl-1">
+                            <button onclick="PlanSettingsCtrl.open()" class="text-gray-400 hover:text-white px-1.5 py-1 transition text-sm" title="ตั้งค่าเดือน (เพิ่ม/ลบได้หลายเดือน)">⚙️</button>
+                        </div>
                     </div>
-                    <select id="plan-selector" onchange="PlanUI.onSelect(this.value)"
-                        class="bg-gray-700 border border-gray-600 text-white text-xs font-bold rounded-lg px-2 py-1.5 outline-none focus:ring-2 focus:ring-indigo-400 max-w-[140px]">
-                    </select>
-                    <div id="plan-live-badge"
-                        style="font-size:10px;font-weight:800;padding:3px 8px;border-radius:6px;white-space:nowrap;">
-                    </div>
-                    <button id="plan-publish-btn" onclick="PlanUI.publishCurrent()"
-                        class="hidden bg-orange-500 hover:bg-orange-400 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap"
-                        title="ตั้งเดือนที่กำลังดูอยู่ให้เป็นเดือนที่ Sales เห็นจริง">
-                        📢 ตั้งเป็นเดือนที่ใช้งานจริง
-                    </button>
                     <button onclick="CalendarAdmin.open(App._currentPlanYM)"
                         class="bg-indigo-600 hover:bg-indigo-500 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap" title="ตั้งค่าปฏิทิน">
                         📅 ปฏิทิน
@@ -272,32 +265,20 @@
                     <span id="cal-mode-badge" class="hidden bg-gray-700 text-gray-200 px-2 py-1 rounded-lg text-[10px] font-bold whitespace-nowrap" title="โหมดปฏิทินของเดือนนี้"></span>
                     <!-- ✅ NEW: ตั้งจุดเริ่ม/จุดจบ สำหรับ "จัดลำดับการเยี่ยมอัตโนมัติ" -->
                     <button onclick="StartPointCtrl.open()"
-                        class="bg-cyan-700 hover:bg-cyan-600 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap" title="ตั้งจุดเริ่มต้น/จุดจบของสาย สำหรับจัดลำดับการเยี่ยมอัตโนมัติ">
+                        class="bg-indigo-600 hover:bg-indigo-500 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap" title="ตั้งจุดเริ่มต้น/จุดจบของสาย สำหรับจัดลำดับการเยี่ยมอัตโนมัติ">
                         📍 จุดเริ่ม-จุดจบ
                     </button>
                     <!-- ✅ NEW (2026-08-29): เช็คว่าสายไหนยืนยันรับสายวิ่งเดือนนี้แล้วบ้าง -->
                     <button onclick="RouteConfirmAdmin.open()" style="position:relative;"
-                        class="bg-teal-600 hover:bg-teal-500 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap" title="เช็คว่าสายไหนยืนยันรับสายวิ่งแล้วบ้าง">
+                        class="bg-indigo-600 hover:bg-indigo-500 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap" title="เช็คว่าสายไหนยืนยันรับสายวิ่งแล้วบ้าง">
                         ✅ เช็คการยืนยัน
                         <span id="route-confirm-badge" class="hidden" style="position:absolute;top:-6px;right:-6px;background:#dc2626;color:#fff;font-size:10px;font-weight:900;min-width:16px;height:16px;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:0 3px;">0</span>
                     </button>
                     <!-- ✅ NEW (2026-08-29): อนุมัติ/ปฏิเสธคำขอย้ายวันของร้านค้าจากฝั่งเซล -->
                     <button onclick="MoveRequestAdmin.open()" style="position:relative;"
-                        class="bg-pink-600 hover:bg-pink-500 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap" title="คำขอย้ายวันร้านค้าจากฝั่งเซล">
+                        class="bg-indigo-600 hover:bg-indigo-500 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap" title="คำขอย้ายวันร้านค้าจากฝั่งเซล">
                         🔁 คำขอย้ายวัน
                         <span id="move-request-badge" class="hidden" style="position:absolute;top:-6px;right:-6px;background:#dc2626;color:#fff;font-size:10px;font-weight:900;min-width:16px;height:16px;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:0 3px;">0</span>
-                    </button>
-                    <button onclick="HolidayException.open()"
-                        class="bg-amber-500 hover:bg-amber-400 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap" title="จัดการวันหยุด (เฉพาะโหมดตามวันในสัปดาห์)">
-                        📆 จัดการวันหยุด
-                    </button>
-                    <button onclick="PlanUI.openCreatePlan()"
-                        class="bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap" title="เพิ่มเดือนใหม่">
-                        + เพิ่มเดือน
-                    </button>
-                    <button onclick="PlanUI.confirmDelete()"
-                        class="bg-red-600 hover:bg-red-500 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap" title="ลบ Plan เดือนนี้">
-                        🗑️ ลบเดือน
                     </button>
                 </div>
                 <button onclick="UI.showSummaryModal()" class="bg-gray-700 hover:bg-gray-600 border border-gray-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap">
@@ -2215,309 +2196,195 @@
     </script>
 
     <!-- ═══════════════════════════════════════════════════════════════
-         📆 Holiday Exception Manager — โหมดที่ 4 (ตามวันในสัปดาห์)
-         เลือกวันหยุด → auto แบ่งครึ่งร้านตาม seq → ตรวจสอบ/ปรับด้วยแผนที่ → ยืนยัน
+         ⚙️ Route Settings — ลบ/เปลี่ยนชื่อได้หลายสายพร้อมกัน (แทนปุ่ม ✏️/🗑️ เดิม)
          ═══════════════════════════════════════════════════════════════ -->
-    <div id="holiday-exception-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
-        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden" style="max-height:90dvh;display:flex;flex-direction:column;">
+    <div id="route-settings-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden" style="max-height:90dvh;display:flex;flex-direction:column;">
             <div class="p-5 border-b flex justify-between items-center bg-gray-50 flex-shrink-0">
                 <div>
-                    <h2 class="text-base font-black text-gray-900">📆 จัดการวันหยุด</h2>
-                    <p class="text-xs text-gray-500 mt-0.5">ใช้ได้เฉพาะแผนที่ตั้งค่าโหมด "ตามวันในสัปดาห์" — ร้านของวันหยุดจะถูกแบ่งครึ่งไปวันก่อนหน้า/ถัดไปอัตโนมัติ</p>
+                    <h2 class="text-base font-black text-gray-900">⚙️ ตั้งค่าสาย</h2>
+                    <p class="text-xs text-gray-500 mt-0.5">ติ๊กเลือกเพื่อลบได้หลายสายพร้อมกัน หรือแก้ชื่อในช่องแล้วกด "บันทึก"</p>
                 </div>
-                <button onclick="HolidayException.close()" class="w-8 h-8 rounded-full border border-gray-200 text-gray-400 hover:bg-gray-100 font-bold flex-shrink-0">✕</button>
+                <button onclick="RouteSettingsCtrl.close()" class="w-8 h-8 rounded-full border border-gray-200 text-gray-400 hover:bg-gray-100 font-bold flex-shrink-0">✕</button>
             </div>
-
-            <div class="overflow-y-auto flex-1 p-5 space-y-4">
-                <div class="flex items-end gap-2">
-                    <div class="flex-1">
-                        <label class="block text-xs font-bold text-gray-500 uppercase mb-1.5">เลือกวันที่เป็นวันหยุด</label>
-                        <input type="date" id="he-date-input" class="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-300">
-                    </div>
-                    <button onclick="HolidayException.check()"
-                        class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-xl text-sm font-bold transition shadow-sm whitespace-nowrap">
-                        🔍 ตรวจสอบ
-                    </button>
-                </div>
-
-                <div id="he-result"></div>
-            </div>
-
+            <div id="route-settings-list" class="overflow-y-auto flex-1 p-5 space-y-2"></div>
             <div class="p-5 border-t flex gap-3 flex-shrink-0">
-                <button onclick="HolidayException.close()"
-                    class="flex-1 border border-gray-200 rounded-xl py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-50 transition">ยกเลิก</button>
-                <button onclick="HolidayException.confirmAll()"
-                    class="flex-1 bg-amber-500 hover:bg-amber-600 text-white rounded-xl py-2.5 text-sm font-bold transition shadow-sm">✅ ยืนยันบันทึก</button>
+                <button onclick="RouteSettingsCtrl.close()" class="flex-1 border border-gray-200 rounded-xl py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-50 transition">ยกเลิก</button>
+                <button onclick="RouteSettingsCtrl.save()" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl py-2.5 text-sm font-bold transition shadow-sm">💾 บันทึกการเปลี่ยนแปลง</button>
             </div>
         </div>
     </div>
 
     <script>
-        // ✅ ข้อ 5 (โหมดที่ 4): ระบบจัดการวันหยุด — เลือกวันที่ → auto แบ่งครึ่งร้านตาม seq เดิม
-        // → เด้งแผนที่ให้ตรวจสอบ/ปรับก่อนยืนยัน (คลิกจุดบนแผนที่เพื่อสลับกลุ่ม) → บันทึก exception
-        const HolidayException = {
-            _ym:       '',
-            _dateStr:  '',
-            _affected: {},   // { route: { day, prevDay, nextDay, prevDate, nextDate, stores, prevGroup:Set, nextGroup:Set } }
-            _maps:     {},   // route -> Leaflet map instance (มินิแผนที่แยกต่อสาย)
-
+        const RouteSettingsCtrl = {
             open: () => {
-                document.getElementById('holiday-exception-modal').classList.remove('hidden');
-                document.getElementById('he-result').innerHTML = '';
-                const dateInput = document.getElementById('he-date-input');
-                if (dateInput && !dateInput.value) {
-                    const now = new Date();
-                    dateInput.value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
-                }
-                HolidayException._affected = {};
+                document.getElementById('route-settings-modal').classList.remove('hidden');
+                RouteSettingsCtrl._render();
+            },
+            close: () => document.getElementById('route-settings-modal').classList.add('hidden'),
+
+            _render: () => {
+                const routes = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
+                const list = document.getElementById('route-settings-list');
+                list.innerHTML = routes.map(name => `
+                    <div class="flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-2" data-route="${name}">
+                        <input type="checkbox" class="rs-check w-4 h-4 text-red-600 rounded flex-shrink-0" title="เลือกลบ">
+                        <input type="text" class="rs-name flex-1 bg-white border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-300" value="${name}">
+                    </div>
+                `).join('');
             },
 
-            close: () => {
-                document.getElementById('holiday-exception-modal').classList.add('hidden');
-                // ✅ ทำลาย mini map ทุกอันกัน memory leak
-                Object.values(HolidayException._maps).forEach(m => { try { m.remove(); } catch(e) {} });
-                HolidayException._maps = {};
-            },
-
-            // ── หา Day label ก่อนหน้า/ถัดไปที่ "มีวิ่งจริง" ตาม weekdayMap (ข้าม weekday ที่ไม่ได้ตั้งค่า) ──
-            _findAdjacentDate: (baseDate, dir, daysByWeekday) => {
-                const dt = new Date(baseDate);
-                for (let i = 0; i < 7; i++) {
-                    dt.setDate(dt.getDate() + dir);
-                    if (daysByWeekday[dt.getDay()]) return dt;
-                }
-                return null;
-            },
-            _fmtDate: (dt) => `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`,
-
-            check: async () => {
-                const dateStr = document.getElementById('he-date-input')?.value;
-                if (!dateStr) return UI.showErrorToast('⚠️ กรุณาเลือกวันที่ก่อน');
-                HolidayException._dateStr = dateStr;
-
-                const [y, m, d] = dateStr.split('-').map(Number);
-                const ym = `${y}_${String(m).padStart(2,'0')}`;
-                HolidayException._ym = ym;
-
-                UI.showLoader('กำลังตรวจสอบ...', 'หาร้านที่ได้รับผลกระทบ');
-                try {
-                    const planSnap = await App.planRef(ym).get();
-                    if (!planSnap.exists) { UI.hideLoader(); return UI.showErrorToast('⚠️ ไม่พบแผนของเดือนนี้'); }
-                    const meta = planSnap.data();
-                    const cfg  = meta.calendarConfig;
-                    if (!cfg || cfg.mode !== 'weekday') {
-                        UI.hideLoader();
-                        return UI.showErrorToast('⚠️ ฟีเจอร์นี้ใช้ได้เฉพาะเดือนที่ตั้งค่าโหมด "ตามวันในสัปดาห์" เท่านั้น');
-                    }
-
-                    const wmap = cfg.weekdayMap || {};
-                    const daysByWeekday = {};
-                    Object.entries(wmap).forEach(([day, w]) => { daysByWeekday[w] = day; });
-
-                    const baseDate = new Date(y, m-1, d);
-                    const wd = baseDate.getDay();
-                    const dayLabel = daysByWeekday[wd];
-                    if (!dayLabel) { UI.hideLoader(); return UI.showErrorToast('⚠️ วันที่เลือกไม่ตรงกับ Day ไหนเลยตามที่ตั้งค่าไว้ (ไม่มีร้านวิ่งวันนี้อยู่แล้ว)'); }
-
-                    const prevDateObj = HolidayException._findAdjacentDate(baseDate, -1, daysByWeekday);
-                    const nextDateObj = HolidayException._findAdjacentDate(baseDate, 1, daysByWeekday);
-                    if (!prevDateObj || !nextDateObj) {
-                        UI.hideLoader();
-                        return UI.showErrorToast('⚠️ หาวันก่อนหน้า/ถัดไปไม่เจอ (ตั้งค่า weekday ไว้น้อยกว่า 2 วัน)');
-                    }
-                    const prevDayLabel = daysByWeekday[prevDateObj.getDay()];
-                    const nextDayLabel = daysByWeekday[nextDateObj.getDay()];
-
-                    const routeList = meta.routeList || [];
-                    const affected  = {};
-                    // ✅ PERF: โหลดทุกสายพร้อมกัน
-                    await Promise.all(routeList.map(async name => {
-                        try {
-                            const rd = await App.planRoutesCol(ym).doc(name).get();
-                            const stores = rd.exists ? (rd.data().stores || []) : [];
-                            const inDay  = stores.filter(s => s.days?.includes(dayLabel));
-                            if (!inDay.length) return;
-
-                            // ✅ เรียงตาม seq เดิมของร้านในวันนั้น → ตัดครึ่ง
-                            const sorted = [...inDay].sort((a,b) => (a.seqs?.[dayLabel]||999) - (b.seqs?.[dayLabel]||999));
-                            const half   = Math.ceil(sorted.length / 2);
-                            affected[name] = {
-                                day: dayLabel, prevDay: prevDayLabel, nextDay: nextDayLabel,
-                                prevDate: HolidayException._fmtDate(prevDateObj),
-                                nextDate: HolidayException._fmtDate(nextDateObj),
-                                stores: sorted,
-                                prevGroup: new Set(sorted.slice(0, half).map(s => s.id)),
-                                nextGroup: new Set(sorted.slice(half).map(s => s.id)),
-                            };
-                        } catch(e) { console.warn('HolidayException.check route', name, e); }
-                    }));
-
-                    HolidayException._affected = affected;
-                    UI.hideLoader();
-                    HolidayException._renderResult();
-                } catch(e) {
-                    UI.hideLoader();
-                    UI.showErrorToast('❌ ตรวจสอบไม่สำเร็จ: ' + e.message);
-                }
-            },
-
-            _renderResult: () => {
-                const el = document.getElementById('he-result');
-                if (!el) return;
-                const routes = Object.keys(HolidayException._affected);
-                if (!routes.length) {
-                    el.innerHTML = '<p class="text-center text-gray-400 text-xs py-8">📭 ไม่พบร้านที่ได้รับผลกระทบในวันที่เลือก</p>';
-                    return;
-                }
-                el.innerHTML = `
-                    <p class="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 mb-3">
-                        💡 คลิกจุดบนแผนที่เพื่อสลับร้านระหว่าง 2 กลุ่ม ถ้าเห็นว่าระบบแบ่งมาไม่เหมาะกับระยะทางจริง
-                    </p>
-                ` + routes.map(route => {
-                    const d = HolidayException._affected[route];
-                    return `
-                    <div class="border border-gray-200 rounded-2xl p-3 mb-3">
-                        <p class="text-xs font-black text-gray-800 mb-2">
-                            🚚 ${route} — ${d.day} ทั้งหมด ${d.stores.length} ร้าน
-                            <span class="text-gray-400 font-normal block mt-0.5">แบ่งไป ${d.prevDay} (${d.prevDate}) และ ${d.nextDay} (${d.nextDate})</span>
-                        </p>
-                        <div id="he-map-${route}" style="height:220px;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;" class="mb-2"></div>
-                        <div class="flex gap-4 text-[11px] font-bold">
-                            <span class="flex items-center gap-1.5"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#3b82f6;"></span> ไป ${d.prevDay}: <span id="he-count-prev-${route}">${d.prevGroup.size}</span> ร้าน</span>
-                            <span class="flex items-center gap-1.5"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#f97316;"></span> ไป ${d.nextDay}: <span id="he-count-next-${route}">${d.nextGroup.size}</span> ร้าน</span>
-                        </div>
-                    </div>`;
-                }).join('');
-
-                // สร้าง mini map ทีละสาย (ต้องรอ DOM render เสร็จก่อน)
-                setTimeout(() => routes.forEach(route => HolidayException._renderMiniMap(route)), 50);
-            },
-
-            _renderMiniMap: (route) => {
-                const data = HolidayException._affected[route];
-                const elId = `he-map-${route}`;
-                const el   = document.getElementById(elId);
-                if (!el || typeof L === 'undefined' || !data.stores.length) return;
-
-                const map = L.map(elId, { zoomControl: true, attributionControl: false })
-                    .setView([data.stores[0].lat, data.stores[0].lng], 13);
-                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(map);
-                HolidayException._maps[route] = map;
-
-                data.stores.forEach(s => {
-                    const color = data.prevGroup.has(s.id) ? '#3b82f6' : '#f97316';
-                    const marker = L.circleMarker([s.lat, s.lng], {
-                        radius: 9, fillColor: color, fillOpacity: 0.9, color: '#fff', weight: 2,
-                    }).addTo(map);
-                    marker.bindTooltip(s.name, { direction: 'top' });
-                    // ✅ คลิกเพื่อสลับกลุ่ม (แทน drag — ใช้ pattern click-toggle แบบเดียวกับที่มีอยู่แล้วในระบบ)
-                    marker.on('click', () => {
-                        if (data.prevGroup.has(s.id)) { data.prevGroup.delete(s.id); data.nextGroup.add(s.id); }
-                        else { data.nextGroup.delete(s.id); data.prevGroup.add(s.id); }
-                        marker.setStyle({ fillColor: data.prevGroup.has(s.id) ? '#3b82f6' : '#f97316' });
-                        HolidayException._updateCounts(route);
-                    });
+            save: async () => {
+                const rows = Array.from(document.querySelectorAll('#route-settings-list > div'));
+                const toDelete = [];
+                const toRename = [];
+                rows.forEach(row => {
+                    const original = row.dataset.route;
+                    const checked  = row.querySelector('.rs-check').checked;
+                    const newName  = row.querySelector('.rs-name').value.trim();
+                    if (checked) { toDelete.push(original); return; }
+                    if (newName && newName !== original) toRename.push({ from: original, to: newName });
                 });
 
-                try {
-                    const bounds = L.latLngBounds(data.stores.map(s => [s.lat, s.lng]));
-                    map.fitBounds(bounds, { padding: [24, 24] });
-                } catch(e) { /* ร้านเดียวหรือพิกัดผิดปกติ ใช้ view เริ่มต้น */ }
+                if (!toDelete.length && !toRename.length) return UI.showErrorToast('⚠️ ไม่มีการเปลี่ยนแปลง');
+
+                const totalAfterDelete = Object.keys(State.db.routes).length - toDelete.length;
+                if (toDelete.length && totalAfterDelete < 1) return UI.showErrorToast('⚠️ ห้ามลบสายจนเหลือ 0 สาย');
+
+                // กันชื่อใหม่ซ้ำกับสายอื่นที่ยังอยู่ (ทั้งสายที่ไม่ได้แก้ และสายที่แก้ในรอบนี้ด้วยกัน)
+                const remainingNames = Object.keys(State.db.routes).filter(n => !toDelete.includes(n));
+                const newNames = toRename.map(r => r.to);
+                for (const r of toRename) {
+                    const collideExisting = remainingNames.includes(r.to) && r.to !== r.from;
+                    const collideBatch = newNames.filter(n => n === r.to).length > 1;
+                    if (collideExisting || collideBatch) return UI.showErrorToast(`⚠️ ชื่อสาย "${r.to}" ซ้ำกับสายอื่น — แก้ให้ไม่ซ้ำก่อน`);
+                }
+
+                const msgParts = [];
+                if (toDelete.length) msgParts.push(`ลบ ${toDelete.length} สาย (${toDelete.join(', ')})`);
+                if (toRename.length) msgParts.push(`เปลี่ยนชื่อ ${toRename.length} สาย`);
+                UI.showConfirm(`ยืนยัน ${msgParts.join(' และ ')}?`, () => RouteSettingsCtrl._doSave(toDelete, toRename, msgParts));
             },
 
-            _updateCounts: (route) => {
-                const data = HolidayException._affected[route];
-                const prevEl = document.getElementById(`he-count-prev-${route}`);
-                const nextEl = document.getElementById(`he-count-next-${route}`);
-                if (prevEl) prevEl.textContent = data.prevGroup.size;
-                if (nextEl) nextEl.textContent = data.nextGroup.size;
-            },
-
-            confirmAll: async () => {
-                const routes = Object.keys(HolidayException._affected);
-                if (!routes.length) return UI.showErrorToast('⚠️ ยังไม่มีข้อมูลให้บันทึก — กด "ตรวจสอบ" ก่อน');
-                if (!confirm(`ยืนยันบันทึกวันหยุด ${HolidayException._dateStr} สำหรับ ${routes.length} สาย?\nร้านจะถูกแบ่งไปวันก่อนหน้า/ถัดไปตามที่ตรวจสอบไว้`)) return;
-
+            _doSave: async (toDelete, toRename, msgParts) => {
                 UI.showLoader('กำลังบันทึก...', '');
                 try {
-                    const splits = {};
-                    let originalDay = '', prevDay = '', nextDay = '', prevDate = '', nextDate = '';
-                    routes.forEach(route => {
-                        const d = HolidayException._affected[route];
-                        splits[route] = { prevStores: [...d.prevGroup], nextStores: [...d.nextGroup] };
-                        originalDay = d.day; prevDay = d.prevDay; nextDay = d.nextDay;
-                        prevDate = d.prevDate; nextDate = d.nextDate;
-                    });
-                    const exceptionEntry = {
-                        originalDay, prevDay, nextDay, prevDate, nextDate, splits,
-                        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-                    };
+                    const ym = App._currentPlanYM;
 
-                    // ✅ BUGFIX: วันก่อนหน้า/ถัดไปอาจตกไปอยู่คนละเดือนกับวันหยุด (เช่น วันหยุดต้น/ปลายเดือน)
-                    // เดิมเขียน exception ไว้แค่ในเดือนของวันหยุดเดือนเดียว — พอถึงวันจริงที่อยู่คนละเดือน
-                    // แอปฝั่งเซลจะโหลด calendarConfig จากแผนของเดือนนั้น ซึ่งไม่มี exception นี้อยู่เลย
-                    // ทำให้ร้านที่ควรถูกเพิ่มเข้าคิววันนั้นหายไปแบบเงียบๆ ไม่มีใครไปวิ่งให้
-                    // แก้โดยเขียน exception entry เดียวกันซ้ำลงไปทุกเดือนที่เกี่ยวข้อง
-                    const ymOf = (dateStr) => { const [y, m] = dateStr.split('-'); return `${y}_${m}`; };
-                    const targetYMs = new Set([HolidayException._ym, ymOf(prevDate), ymOf(nextDate)]);
-
-                    const skipped = [];
-                    const writes  = [];
-                    for (const ym of targetYMs) {
-                        if (ym === HolidayException._ym) {
-                            // เดือนหลัก (เดือนของวันหยุดเอง) — เขียนเสมอ
-                            writes.push(App.planRef(ym).set({
-                                calendarConfig: { exceptions: { [HolidayException._dateStr]: exceptionEntry } }
-                            }, { merge: true }));
-                            continue;
-                        }
-                        // เดือนข้างเคียง — เช็คก่อนว่ามีแผนเดือนนั้นจริง ตั้งโหมด weekday ไว้เหมือนกัน
-                        // และตั้งชื่อ Day ตรงกับที่ใช้ในเดือนหลัก (กันกรณีสองเดือนตั้งชื่อ Day ไม่ตรงกัน
-                        // เช่น เดือนนี้ใช้ "Day 1" แต่เดือนหน้าใช้ "Day A" สำหรับวันจันทร์เหมือนกัน —
-                        // ถ้าไม่ตรง exception จะเขียนลงไปได้แต่ dayLabel จะไม่ match ตอนอ่านจริง ใช้งานไม่ได้อยู่ดี)
-                        try {
-                            const snap = await App.planRef(ym).get();
-                            if (!snap.exists) { skipped.push(`${ym.replace('_','/')} (ยังไม่มีแผนเดือนนี้)`); continue; }
-                            const otherCfg = snap.data().calendarConfig;
-                            if (!otherCfg || otherCfg.mode !== 'weekday') {
-                                skipped.push(`${ym.replace('_','/')} (ไม่ได้ตั้งโหมด "ตามวันในสัปดาห์" ไว้)`);
-                                continue;
-                            }
-                            const otherMap = otherCfg.weekdayMap || {};
-                            // เช็ค label ของทุกวันที่ตกอยู่ในเดือนนี้ (อาจเป็น prevDate, nextDate หรือทั้งคู่)
-                            const datesInThisYM = [
-                                { date: prevDate, label: prevDay },
-                                { date: nextDate, label: nextDay },
-                            ].filter(x => ymOf(x.date) === ym);
-                            const mismatch = datesInThisYM.find(x => {
-                                const [yy, mm, dd] = x.date.split('-').map(Number);
-                                const wd = new Date(yy, mm - 1, dd).getDay();
-                                return otherMap[x.label] !== wd;
-                            });
-                            if (mismatch) {
-                                skipped.push(`${ym.replace('_','/')} (ชื่อ Day "${mismatch.label}" ในเดือนนี้ไม่ตรงกับที่ใช้อยู่ — ตั้งค่าปฏิทินเดือนนี้ให้ตรงกันก่อน)`);
-                                continue;
-                            }
-                            writes.push(App.planRef(ym).set({
-                                calendarConfig: { exceptions: { [HolidayException._dateStr]: exceptionEntry } }
-                            }, { merge: true }));
-                        } catch(e) {
-                            skipped.push(`${ym.replace('_','/')} (เช็คไม่สำเร็จ: ${e.message})`);
-                        }
+                    for (const name of toDelete) {
+                        delete State.db.routes[name];
+                        await App.planRoutesCol(ym).doc(name).delete();
+                        if (typeof AuditLog !== 'undefined') AuditLog.routeDelete(name);
                     }
 
-                    await Promise.all(writes);
+                    for (const { from, to } of toRename) {
+                        State.db.routes[to] = State.db.routes[from];
+                        delete State.db.routes[from];
+                        await App.planRoutesCol(ym).doc(from).delete();
+                        await App.planRoutesCol(ym).doc(to).set({ stores: State.db.routes[to] || [] }, { merge: true });
+                        if (typeof AuditLog !== 'undefined') AuditLog.routeRename(from, to);
+                    }
 
+                    const routeList = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
+                    await App.planRef(ym).set({ routeList }, { merge: true });
+
+                    // ถ้าสายที่กำลังเลือกอยู่ถูกลบ/เปลี่ยนชื่อไป ต้องสลับไปสายอื่นที่ยังอยู่จริง
+                    if (!State.db.routes[State.localActiveRoute]) {
+                        State.localActiveRoute = routeList[0] || '';
+                        State.stores = State.db.routes[State.localActiveRoute] || [];
+                    }
+
+                    App.sync();
                     UI.hideLoader();
-                    HolidayException.close();
-                    if (skipped.length) {
-                        UI.showErrorToast(`⚠️ บันทึกสำเร็จบางส่วน — ข้ามเดือน: ${skipped.join(', ')} กรุณาตรวจแผนเดือนดังกล่าวเอง ไม่งั้นร้านบางส่วนอาจไม่ถูกจัดคิวในวันที่เกี่ยวข้อง`);
-                    } else {
-                        UI.showSaveToast(`✅ บันทึกวันหยุด ${HolidayException._dateStr} เรียบร้อย (${routes.length} สาย, ${writes.length} เดือน)`);
-                    }
+                    RouteSettingsCtrl.close();
+                    UI.showSaveToast(`✅ บันทึกเรียบร้อย — ${msgParts.join(', ')}`);
                 } catch(e) {
                     UI.hideLoader();
-                    UI.showErrorToast('❌ บันทึกไม่สำเร็จ: ' + e.message);
+                    UI.showErrorToast('❌ บันทึกไม่สำเร็จ: ' + ErrorMsg.translate(e));
+                }
+            },
+        };
+    </script>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         ⚙️ Plan Settings — ลบได้หลายเดือนพร้อมกัน (แทนปุ่ม "🗑️ ลบเดือน" เดิม)
+         ═══════════════════════════════════════════════════════════════ -->
+    <div id="plan-settings-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden" style="max-height:90dvh;display:flex;flex-direction:column;">
+            <div class="p-5 border-b flex justify-between items-center bg-gray-50 flex-shrink-0">
+                <div>
+                    <h2 class="text-base font-black text-gray-900">⚙️ ตั้งค่าเดือน</h2>
+                    <p class="text-xs text-gray-500 mt-0.5">เพิ่มเดือนใหม่ หรือติ๊กเลือกเดือนที่ต้องการลบ (ลบได้หลายเดือนพร้อมกัน)</p>
+                </div>
+                <button onclick="PlanSettingsCtrl.close()" class="w-8 h-8 rounded-full border border-gray-200 text-gray-400 hover:bg-gray-100 font-bold flex-shrink-0">✕</button>
+            </div>
+            <div class="p-5 pb-0 flex-shrink-0">
+                <button onclick="PlanSettingsCtrl.close(); PlanUI.openCreatePlan();"
+                    class="w-full bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl py-2.5 text-sm font-bold transition shadow-sm">+ เพิ่มเดือนใหม่</button>
+            </div>
+            <div id="plan-settings-list" class="overflow-y-auto flex-1 p-5 space-y-2"></div>
+            <div class="p-5 border-t flex gap-3 flex-shrink-0">
+                <button onclick="PlanSettingsCtrl.close()" class="flex-1 border border-gray-200 rounded-xl py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-50 transition">ยกเลิก</button>
+                <button onclick="PlanSettingsCtrl.save()" class="flex-1 bg-red-600 hover:bg-red-700 text-white rounded-xl py-2.5 text-sm font-bold transition shadow-sm">🗑️ ลบที่เลือก</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const PlanSettingsCtrl = {
+            open: () => {
+                document.getElementById('plan-settings-modal').classList.remove('hidden');
+                PlanSettingsCtrl._render();
+            },
+            close: () => document.getElementById('plan-settings-modal').classList.add('hidden'),
+
+            _render: () => {
+                const planList = (State.db.planList || []).sort().reverse();
+                const list = document.getElementById('plan-settings-list');
+                list.innerHTML = planList.map(ym => `
+                    <label class="flex items-center gap-2.5 bg-gray-50 rounded-xl px-3 py-2.5 cursor-pointer hover:bg-red-50 transition">
+                        <input type="checkbox" class="ps-check w-4 h-4 text-red-600 rounded flex-shrink-0" value="${ym}">
+                        <span class="text-sm font-bold text-gray-800">${App.ymToLabel(ym)}</span>
+                    </label>
+                `).join('');
+            },
+
+            save: async () => {
+                const checked = Array.from(document.querySelectorAll('#plan-settings-list .ps-check:checked')).map(el => el.value);
+                if (!checked.length) return UI.showErrorToast('⚠️ ยังไม่ได้เลือกเดือนที่จะลบ');
+                const totalAfter = (State.db.planList || []).length - checked.length;
+                if (totalAfter < 1) return UI.showErrorToast('⚠️ ห้ามลบจนไม่เหลือ Plan เลยสักเดือน');
+                UI.showConfirm(
+                    `ยืนยันลบ ${checked.length} เดือน (${checked.map(ym => App.ymToLabel(ym)).join(', ')})?\nข้อมูลร้าน/การจัดสายของเดือนเหล่านี้จะหายถาวร กู้คืนไม่ได้`,
+                    () => PlanSettingsCtrl._doSave(checked)
+                );
+            },
+
+            _doSave: async (checked) => {
+                UI.showLoader('กำลังลบ...', '');
+                try {
+                    for (const ym of checked) {
+                        const routeDocs = await App.planRoutesCol(ym).get();
+                        await Promise.all(routeDocs.docs.map(d => d.ref.delete()));
+                        await App.planRef(ym).delete();
+                    }
+                    const planList = (State.db.planList || []).filter(p => !checked.includes(p)).sort().reverse();
+                    await App.dbRef.set({ planList }, { merge: true });
+                    State.db.planList = planList;
+
+                    // ถ้าเดือนที่กำลังดูอยู่โดนลบไปด้วย ต้องสลับไปเดือนล่าสุดที่เหลือ
+                    if (checked.includes(App._currentPlanYM)) {
+                        const fallbackYM = planList[0] || App.currentYM();
+                        await App._loadPlan(fallbackYM);
+                    }
+
+                    UI.hideLoader();
+                    PlanSettingsCtrl.close();
+                    PlanUI.refresh();
+                    UI.showSaveToast(`✅ ลบ ${checked.length} เดือนเรียบร้อย`);
+                } catch(e) {
+                    UI.hideLoader();
+                    UI.showErrorToast('❌ ลบไม่สำเร็จ: ' + ErrorMsg.translate(e));
                 }
             },
         };

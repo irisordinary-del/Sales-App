@@ -1156,32 +1156,12 @@ const PlanUI = {
         await App.switchPlan(ym);
     },
 
-    // ✅ ปุ่ม "ตั้งเป็นเดือนที่ใช้งานจริง" — publish เดือนที่กำลังดูอยู่ให้ Sales เห็น
-    publishCurrent: async () => {
-        await App.publishPlan(App._currentPlanYM);
-    },
-
     updateBadge: () => {
         const ym    = App._currentPlanYM;
         const badge = document.getElementById('plan-mode-badge');
         if (badge) badge.textContent = ym ? `📅 ${App.ymToLabel(ym)}` : '📅 Plan';
         const sel = document.getElementById('plan-selector');
         if (sel && ym) sel.value = ym;
-
-        // ✅ ตัวบอกสถานะ live — เดือนที่แอดมินกำลังดูอยู่ ใช่เดือนที่ Sales เห็นจริงไหม
-        const liveBadge  = document.getElementById('plan-live-badge');
-        const publishBtn = document.getElementById('plan-publish-btn');
-        const isLive = ym && ym === App._livePlanYM;
-        if (liveBadge) {
-            if (isLive) {
-                liveBadge.textContent = '🟢 LIVE';
-                liveBadge.style.background = '#059669'; liveBadge.style.color = '#fff';
-            } else {
-                liveBadge.textContent = `⚪ กำลังดู (Live จริง: ${App.ymToLabel(App._livePlanYM || '')})`;
-                liveBadge.style.background = '#e5e7eb'; liveBadge.style.color = '#4b5563';
-            }
-        }
-        if (publishBtn) publishBtn.classList.toggle('hidden', isLive);
 
         // ✅ UX: badge โหมดปฏิทิน — ไม่ต้องเปิด settings ก็รู้ว่าเดือนนี้ใช้โหมดไหน
         const modeBadge = document.getElementById('cal-mode-badge');

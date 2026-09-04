@@ -482,8 +482,12 @@ const App = {
         const _centerData = _centerSnap?.exists ? _centerSnap.data() : {};
         State.planList       = (_centerData.planList || []).sort().reverse();
 
+        // ✅ CHANGE (2026-09-04): ตัดขั้นตอน "ตั้งเป็นเดือนที่ใช้งานจริง" ออก — ยึดวันที่จริงเป็นหลักแทน
+        // พอปฏิทินขึ้นเดือนใหม่ ระบบสลับให้อัตโนมัติ ไม่ต้องรอแอดมินกดยืนยัน (เดิมอ่าน centerData.currentPlanYM
+        // ซึ่งต้องกดปุ่ม publish ก่อนถึงจะเปลี่ยน) — ถ้ายังไม่มี Plan ของเดือนจริงนี้ (แอดมินยังไม่ได้สร้าง)
+        // fallback ไปที่ Plan ล่าสุดที่มีอยู่แทน กันเซลเห็นหน้าว่างเปล่า
         const _nowYM = (() => { const d=new Date(); return `${d.getFullYear()}_${String(d.getMonth()+1).padStart(2,'0')}`; })();
-        const _useYM = _centerData.currentPlanYM || State.planList[0] || _nowYM;
+        const _useYM = State.planList.includes(_nowYM) ? _nowYM : (State.planList[0] || _nowYM);
         State.activePlanYM   = _useYM;
         State.currentPlanYM  = _useYM;
 
@@ -696,8 +700,9 @@ const App = {
         State.planCenterDocId = _centerDocId;
         State.planList        = (_centerData.planList || []).sort().reverse();
 
+        // ✅ CHANGE (2026-09-04): ยึดวันที่จริงเป็นหลักแทนรอกดปุ่ม publish — ดู comment เดียวกันใน startSupervisor
         const _nowYM = (() => { const d=new Date(); return `${d.getFullYear()}_${String(d.getMonth()+1).padStart(2,'0')}`; })();
-        const _useYM = _centerData.currentPlanYM || State.planList[0] || _nowYM;
+        const _useYM = State.planList.includes(_nowYM) ? _nowYM : (State.planList[0] || _nowYM);
 
         LoadBar.setProgress(20, `📅 Plan ${_useYM}...`);
         App.loadCalendarConfig(_centerDocId, _useYM);
