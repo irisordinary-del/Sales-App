@@ -153,6 +153,10 @@
                 <span class="text-xl md:text-lg md:mr-3">📈</span>
                 <span class="hidden md:inline">วิเคราะห์สายวิ่ง</span>
             </button>
+            <button onclick="Nav.go('cellsplit')" id="nav-cellsplit" class="sidebar-menu w-full flex items-center justify-center md:justify-start px-0 md:px-5 py-3 md:py-3.5 text-sm font-bold">
+                <span class="text-xl md:text-lg md:mr-3">🗂️</span>
+                <span class="hidden md:inline">แบ่งเซลล์</span>
+            </button>
             <button onclick="Nav.go('planning')" id="nav-planning" class="sidebar-menu w-full flex items-center justify-center md:justify-start px-0 md:px-5 py-3 md:py-3.5 text-sm font-bold">
                 <span class="text-xl md:text-lg md:mr-3">📍</span>
                 <span class="hidden md:inline">วางแผนคิวงาน</span>
@@ -213,6 +217,88 @@
 
 
         <!-- ===== PAGE: Planning ===== -->
+
+        <!-- ✅ NEW (2026-09-05): หน้า "แบ่งเซลล์" — แบ่งพื้นที่ทั้งหมด/สายที่เกินภาระ ออกเป็น K เซลล์ใหม่
+             ก่อนเข้า AI Route Builder ต่อ (ดู admin-cellsplit.js) -->
+        <div id="page-cellsplit" class="app-page hidden">
+
+            <div class="h-12 bg-gray-900 text-white flex items-center justify-between px-3 md:px-4 shadow-md z-[5000] relative shrink-0 border-b-2 border-indigo-600">
+                <div class="flex items-center gap-3">
+                    <button onclick="SidebarCtrl.toggle()"
+                        class="w-8 h-8 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white flex items-center justify-center transition shrink-0">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+                            <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+                        </svg>
+                    </button>
+                    <span class="text-base font-black text-indigo-400 tracking-wide">Route<span class="text-white">Plan</span></span>
+                </div>
+                <span class="text-xs text-gray-500 font-bold">🗂️ แบ่งเซลล์</span>
+            </div>
+
+            <div class="flex-1 overflow-y-auto p-4 bg-gray-50">
+
+                <!-- ── ขั้น 1: เลือกสายต้นทาง + จำนวนเซลล์ ── -->
+                <div id="cellsplit-step1" class="max-w-2xl mx-auto">
+                    <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-5">
+                        <h2 class="text-lg font-black text-gray-800 mb-1">🗂️ แบ่งเซลล์ใหม่</h2>
+                        <p class="text-xs text-gray-500 mb-4">
+                            เลือกสายที่มีร้านค้าอยู่แล้ว (เช่น สายที่เพิ่งอัปโหลดพิกัดร้านทั้งพื้นที่ไว้ ยังไม่กำหนดเซลล์ หรือสายที่เกินภาระ)
+                            ระบบจะแบ่งร้านทั้งหมดออกเป็นเซลล์ใหม่ตามจำนวนที่ระบุ — ไม่ข้ามจังหวัดเด็ดขาด พยายามไม่ข้ามอำเภอ
+                        </p>
+
+                        <label class="text-xs font-bold text-gray-600 mb-1.5 block">เลือกสายต้นทาง (เลือกได้หลายสาย)</label>
+                        <div id="cellsplit-route-list" class="border border-gray-200 rounded-xl max-h-48 overflow-y-auto mb-4 p-1"></div>
+
+                        <label class="text-xs font-bold text-gray-600 mb-1.5 block">จำนวนเซลล์ที่ต้องการ (K)</label>
+                        <input type="number" id="cellsplit-k" min="1" placeholder="เช่น 7" value="7"
+                            class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500 mb-4">
+
+                        <button onclick="CellSplitApp.run()"
+                            class="w-full bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl py-2.5 text-sm font-bold transition shadow-sm">
+                            ▶ ดูตัวอย่างการแบ่ง (Preview)
+                        </button>
+                    </div>
+                </div>
+
+                <!-- ── ขั้น 2: Preview จังหวัด/อำเภอ + แผนที่ + ตั้งชื่อเซลล์ ── -->
+                <div id="cellsplit-step2" class="hidden max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <div>
+                        <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 mb-4">
+                            <h3 class="text-sm font-black text-gray-800 mb-2">📍 การจัดสรรจังหวัด</h3>
+                            <table class="w-full text-xs">
+                                <thead>
+                                    <tr class="text-gray-500 border-b border-gray-200">
+                                        <th class="text-left py-1 px-2 font-bold">จังหวัด</th>
+                                        <th class="text-right py-1 px-2 font-bold">ร้าน</th>
+                                        <th class="text-right py-1 px-2 font-bold">เซลล์</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="cellsplit-province-table"></tbody>
+                            </table>
+                        </div>
+                        <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-4">
+                            <h3 class="text-sm font-black text-gray-800 mb-2">🎨 ตั้งชื่อเซลล์ใหม่</h3>
+                            <p id="cellsplit-balance-summary" class="text-xs text-gray-600 mb-2"></p>
+                            <div id="cellsplit-cell-cards" class="max-h-72 overflow-y-auto pr-1"></div>
+                        </div>
+                    </div>
+                    <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-2 flex flex-col">
+                        <div id="cellsplit-map" class="flex-1 rounded-xl overflow-hidden" style="min-height:360px"></div>
+                    </div>
+                    <div class="lg:col-span-2 flex gap-2">
+                        <button onclick="CellSplitApp.back()"
+                            class="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-xl py-2.5 text-sm font-bold transition">
+                            ← กลับ
+                        </button>
+                        <button onclick="CellSplitApp.confirm()"
+                            class="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl py-2.5 text-sm font-bold transition shadow-sm">
+                            ✅ ยืนยันสร้างสายใหม่
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+        </div>
 
         <div id="page-planning" class="app-page hidden">
 
@@ -932,6 +1018,7 @@
     <!-- 5. AI (ต้องหลัง StoreMgr) -->
 
     <script src="admin-ai.js"></script>
+    <script src="admin-cellsplit.js"></script>
 
     <script src="file-manager.js"></script>
     <script src="dashboard.js"></script>
@@ -1021,7 +1108,7 @@
             }
 
             if (_session.role === 'sales') {
-                ['nav-planning', 'nav-allroutes'].forEach(id => {
+                ['nav-planning', 'nav-allroutes', 'nav-cellsplit'].forEach(id => {
                     const el = document.getElementById(id);
                     if (el) el.style.display = 'none';
                 });

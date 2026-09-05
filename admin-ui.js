@@ -25,6 +25,9 @@ const Nav = {
         if (page === 'planning') {
             setTimeout(() => { if (MapCtrl.map) MapCtrl.map.invalidateSize(); }, 200);
         }
+        if (page === 'cellsplit') {
+            if (typeof CellSplitApp !== 'undefined') CellSplitApp.init();
+        }
     }
 };
 
