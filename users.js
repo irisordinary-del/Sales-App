@@ -195,15 +195,36 @@ const UsersApp = {
         }
     },
 
+    // ✅ FIX (2026-09-05 — พบว่า confirm() แบบ native ของเบราว์เซอร์ไม่ยอมเด้งขึ้นมาให้กดยืนยัน
+    // ในบางสภาพแวดล้อม กดปุ่มลบแล้วไม่มีอะไรเกิดขึ้นเลย): dialog ยืนยันแบบกำหนดเอง
+    // (หน้านี้ไม่ได้โหลด admin-ui.js เหมือนหน้า index.html เลยไม่มี UI.showConfirm ให้ใช้ร่วม)
+    showConfirm: (message, onConfirm) => {
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.55);z-index:9999;display:flex;align-items:center;justify-content:center;';
+        const box = document.createElement('div');
+        box.style.cssText = 'background:#fff;border-radius:16px;padding:24px;max-width:360px;width:90%;font-family:inherit;box-shadow:0 20px 60px rgba(0,0,0,0.3);';
+        box.innerHTML = '<p style="font-size:14px;color:#374151;white-space:pre-line;margin-bottom:20px;line-height:1.6;">' + message + '</p>'
+            + '<div style="display:flex;gap:8px;justify-content:flex-end;">'
+            + '<button id="uc-cancel" style="padding:8px 18px;border-radius:8px;border:1px solid #d1d5db;background:#fff;color:#6b7280;cursor:pointer;font-size:13px;font-weight:600;">ยกเลิก</button>'
+            + '<button id="uc-ok" style="padding:8px 18px;border-radius:8px;border:none;background:#dc2626;color:#fff;cursor:pointer;font-size:13px;font-weight:700;">ยืนยัน</button>'
+            + '</div>';
+        overlay.appendChild(box); document.body.appendChild(overlay);
+        const close = () => { if (document.body.contains(overlay)) document.body.removeChild(overlay); };
+        box.querySelector('#uc-cancel').onclick = close;
+        box.querySelector('#uc-ok').onclick     = () => { close(); onConfirm(); };
+        overlay.onclick = (e) => { if (e.target === overlay) close(); };
+    },
+
     // ─── Delete ──────────────────────────────────────────────────────────
     confirmDelete: (username) => {
-        if (!confirm(`ยืนยันลบ user "${username}"?\nการลบไม่สามารถย้อนกลับได้`)) return;
-        Auth.deleteUser(username).then(users => {
-            UsersApp._allUsers = users;
-            UsersApp.renderTable(users);
-            UsersApp.updateStats(users);
-            UsersApp.toast(`🗑️ ลบ "${username}" เรียบร้อย`);
-        }).catch(err => UsersApp.toast('❌ ' + ErrorMsg.translate(err), true));
+        UsersApp.showConfirm(`ยืนยันลบ user "${username}"?\nการลบไม่สามารถย้อนกลับได้`, () => {
+            Auth.deleteUser(username).then(users => {
+                UsersApp._allUsers = users;
+                UsersApp.renderTable(users);
+                UsersApp.updateStats(users);
+                UsersApp.toast(`🗑️ ลบ "${username}" เรียบร้อย`);
+            }).catch(err => UsersApp.toast('❌ ' + ErrorMsg.translate(err), true));
+        });
     },
 
     // ─── Gen from Routes ─────────────────────────────────────────────────

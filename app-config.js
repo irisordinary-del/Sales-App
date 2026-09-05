@@ -59,7 +59,7 @@ const DAY_COLORS = Config.getDays();
 // 🗄️ Global State (ตัวแปรกลางทั้งระบบ)
 // ==========================================
 const State = {
-    db: { routes: {}, cycleDays: 24, backups: {} },
+    db: { routes: {}, cycleDays: 24, backups: {}, routeDayStats: {} },
     sales: {},
     rawData: [],
     previewSales: null,
