@@ -538,6 +538,9 @@
 
                             </div>
 
+                            <!-- ✅ NEW (2026-09-05): สรุประยะทางจริงต่อวัน (จาก ORS) — ก่อนช่องค้นหาร้านตามที่ขอ -->
+                            <div id="daystats-panel"></div>
+
                             <input type="text" onkeyup="UI.filterList('list-upload', this.value)" placeholder="🔍 ค้นหาร้าน..." class="w-full p-2.5 border border-gray-300 rounded-xl text-sm outline-none shadow-inner">
 
                             <div id="list-upload" class="space-y-2 mt-2"></div>
@@ -952,11 +955,17 @@
             <div id="modalContent" class="p-4 flex-1 overflow-y-auto space-y-2 bg-gray-50/50"></div>
 
             <!-- ✅ NEW: ปุ่มจัดลำดับการเยี่ยมอัตโนมัติ (คำนวณเส้นทางจริงผ่าน OpenRouteService) -->
-            <div class="p-3 border-t bg-white">
+            <div class="p-3 border-t bg-white space-y-2">
+                <!-- ✅ NEW (2026-09-05): แทรกเฉพาะร้านใหม่ — ไม่แตะลำดับเดิมที่เซลล์อาจลากจัดเองมาแล้ว -->
+                <button onclick="App.insertNewIntoDayOrder(State.openDayModal)"
+                    class="w-full bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl py-2.5 text-sm font-bold transition shadow-sm flex items-center justify-center gap-2">
+                    ➕ แทรกเฉพาะร้านใหม่ (คงลำดับเดิมไว้)
+                </button>
                 <button onclick="App.optimizeDayOrder(State.openDayModal)"
                     class="w-full bg-cyan-700 hover:bg-cyan-600 text-white rounded-xl py-2.5 text-sm font-bold transition shadow-sm flex items-center justify-center gap-2">
-                    🧭 จัดลำดับการเยี่ยมอัตโนมัติ
+                    🧭 จัดลำดับใหม่ทั้งหมด (คำนวณจากเส้นทางจริง)
                 </button>
+                <p class="text-[10px] text-gray-400 text-center">💡 ถ้าเซลล์เคยลากจัดลำดับเองแล้ว แนะนำใช้ "แทรกเฉพาะร้านใหม่" — ปุ่มบนคำนวณใหม่หมดทุกร้าน</p>
             </div>
 
         </div>

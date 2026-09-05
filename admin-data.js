@@ -111,6 +111,7 @@ const App = {
         try {
             const d = await col.doc(activeRoute).get();
             State.db.routes[activeRoute] = d.exists ? (d.data().stores || []) : [];
+            State.db.routeDayStats[activeRoute] = d.exists ? (d.data().dayStats || {}) : {};
             App.log(`  ✅ ${activeRoute}: ${State.db.routes[activeRoute].length} ร้าน (active)`);
             State.localActiveRoute = activeRoute;
             State.stores = State.db.routes[activeRoute];
@@ -145,6 +146,7 @@ const App = {
             try {
                 const d = await _getWithTimeout(col.doc(name));
                 State.db.routes[name] = d.exists ? (d.data().stores || []) : [];
+                State.db.routeDayStats[name] = d.exists ? (d.data().dayStats || {}) : {};
                 delete State.db._failedRoutes?.[name]; // เคลียร์ failed flag ถ้า retry สำเร็จ
                 App.log(`  ✅ ${name}: ${State.db.routes[name].length} ร้าน`);
                 return true;
@@ -155,6 +157,7 @@ const App = {
                     await new Promise(r => setTimeout(r, 1500));
                     const d2 = await _getWithTimeout(col.doc(name), 15000);
                     State.db.routes[name] = d2.exists ? (d2.data().stores || []) : [];
+                    State.db.routeDayStats[name] = d2.exists ? (d2.data().dayStats || {}) : {};
                     delete State.db._failedRoutes?.[name];
                     App.log(`  ✅ ${name} (retry): ${State.db.routes[name].length} ร้าน`);
                     return true;
@@ -360,6 +363,7 @@ const App = {
             // ✅ NEW: แก้ไขร้าน/วันในสายนี้แล้ว = รีเซ็ตสถานะ "ยืนยันรับสายวิ่ง" ของเซลด้วย
             App.planRoutesCol(ym).doc(State.localActiveRoute).set({
                 stores: State.stores,
+                dayStats: State.db.routeDayStats[State.localActiveRoute] || {},
                 confirmedBy: firebase.firestore.FieldValue.delete(),
                 confirmedAt: firebase.firestore.FieldValue.delete(),
             }, { merge: true }),
@@ -385,6 +389,7 @@ const App = {
         UI.initDaySelector();
         UI.switchTab('tab1');
         UI.render();
+        if (typeof UI.renderDayStats === 'function') UI.renderDayStats();
     },
 
     // ─── Switch plan (แค่ "ดู/แก้ไข" ฝั่งแอดมิน — ไม่กระทบ Sales) ──────────
@@ -550,6 +555,7 @@ const App = {
             UI.showLoader((isRetry ? '🔄 โหลดใหม่ ' : 'กำลังโหลด ') + name + '...');
             App.planRoutesCol(App._currentPlanYM).doc(name).get().then(d => {
                 State.db.routes[name] = d.exists ? (d.data().stores || []) : [];
+                State.db.routeDayStats[name] = d.exists ? (d.data().dayStats || {}) : {};
                 if (State.db._failedRoutes) delete State.db._failedRoutes[name];
                 State.stores = State.db.routes[name];
                 App.sync(); MapCtrl.fitToStores(); UI.hideLoader();
@@ -1109,8 +1115,17 @@ const App = {
                 const s = State.stores.find(x => String(x.id) === String(storeId));
                 if (s) { if (!s.seqs) s.seqs = {}; s.seqs[day] = idx + 1; }
             });
+            // ✅ NEW: เก็บระยะทาง/เวลาจริงที่ ORS คำนวณให้ ไว้โชว์สรุปในแท็บ "1. ข้อมูล"
+            if (!State.db.routeDayStats[State.localActiveRoute]) State.db.routeDayStats[State.localActiveRoute] = {};
+            State.db.routeDayStats[State.localActiveRoute][day] = {
+                distanceKm: typeof result.distanceKm === 'number' ? result.distanceKm : null,
+                durationMin: typeof result.durationMin === 'number' ? result.durationMin : null,
+                storeCount: stores.length,
+                updatedAt: Date.now(),
+            };
             App.saveDB();
             UI.render();
+            if (typeof UI.renderDayStats === 'function') UI.renderDayStats();
             if (State.openDayModal === day) UI.showDayModal(day);
 
             const unassignedCount = Array.isArray(result.unassigned) ? result.unassigned.length : 0;
@@ -1124,6 +1139,159 @@ const App = {
             UI.hideLoader();
             UI.showErrorToast('❌ เชื่อมต่อไม่สำเร็จ: ' + e.message);
         }
+    },
+
+    // ══════════════════════════════════════════════════════════════════════
+    // ✅ NEW (2026-09-05): แทรกเฉพาะร้านใหม่เข้าไปในลำดับที่มีอยู่แล้ว — ไม่แตะร้านที่
+    // ถูกจัดลำดับไว้แล้ว (ไม่ว่าจะมาจาก optimizeDayOrder หรือเซลล์ลากจัดเองในหน้า sales.html)
+    // ปัญหาที่แก้: เดิม "จัดลำดับการเยี่ยมอัตโนมัติ" คำนวณใหม่ทั้งวันทุกครั้ง ถ้าเซลล์เคยลากจัด
+    // ลำดับเองไว้แล้ว (sales-app.js มี drag-to-reorder เขียนลง seqs[day] เหมือนกัน) พอแอดมินกด
+    // ปุ่มนี้ซ้ำ (เช่น เพิ่มร้านใหม่เข้าวันเดิม) จะเขียนทับลำดับที่เซลล์จัดไว้ทิ้งหมด
+    //
+    // ใช้ cheapest-insertion heuristic (ระยะเส้นตรง ไม่เรียก ORS — เร็ว ไม่กินโควตา) หาตำแหน่ง
+    // ที่แทรกร้านใหม่แล้วเพิ่มระยะทางน้อยที่สุด โดยไม่ขยับร้านเดิมออกจากตำแหน่งเดิมเลย
+    // ข้อจำกัด: ไม่ได้อัปเดต routeDayStats (ระยะทางจริง) เพราะไม่ได้เรียก ORS — ถ้าอยากได้ระยะทาง
+    // จริงที่แม่นยำ ต้องกด "จัดลำดับใหม่ทั้งหมด" แทน
+    // ══════════════════════════════════════════════════════════════════════
+    // ✅ NEW (2026-09-05): cheapest-insertion heuristic แบบล้วน (ระยะเส้นตรง ไม่เรียก ORS) — ใช้ร่วมกัน
+    // ระหว่างปุ่ม "แทรกเฉพาะร้านใหม่" (ด้านล่าง) กับ AI._sequenceAllDays (admin-ai.js) ตอนรันแบบ
+    // "ล็อคร้านที่จัดแล้ว" ที่ไม่ควรไปรบกวนลำดับเดิมที่มีอยู่แล้วในวันที่ไม่ได้เปลี่ยนแปลงอะไร
+    // existing = ร้านที่มีลำดับอยู่แล้ว (เรียงตามลำดับเดิม, ไม่ขยับ), fresh = ร้านใหม่ที่ยังไม่มีลำดับ
+    // คืนค่า: array ของร้านเรียงลำดับใหม่ (existing คงตำแหน่งเดิม, fresh แทรกตรงจุดที่เพิ่มระยะน้อยสุด)
+    cheapestInsertOrder: (existing, fresh, cfg) => {
+        const distKm = (a, b) => {
+            const R = 6371, dLat = (b.lat - a.lat) * Math.PI / 180, dLng = (b.lng - a.lng) * Math.PI / 180;
+            const x = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * Math.PI / 180) * Math.cos(b.lat * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+            return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+        };
+        const seq = existing.slice();
+        fresh.forEach(store => {
+            let bestPos = 0, bestCost = Infinity;
+            for (let i = 0; i <= seq.length; i++) {
+                const prev = i === 0 ? cfg.point : seq[i - 1];
+                const next = i === seq.length ? (cfg.returnToStart ? cfg.point : null) : seq[i];
+                const dPrevNew  = distKm(prev, store);
+                const dNewNext  = next ? distKm(store, next) : 0;
+                const dPrevNext = next ? distKm(prev, next) : 0;
+                const added = dPrevNew + dNewNext - dPrevNext;
+                if (added < bestCost) { bestCost = added; bestPos = i; }
+            }
+            seq.splice(bestPos, 0, store);
+        });
+        return seq;
+    },
+
+    insertNewIntoDayOrder: (day) => {
+        const stores = State.stores.filter(s => s.days && s.days.includes(day) && !s.inactive
+            && typeof s.lat === 'number' && typeof s.lng === 'number' && !isNaN(s.lat) && !isNaN(s.lng));
+        if (!stores.length) return UI.showErrorToast('ℹ️ วันนี้ไม่มีร้าน');
+
+        const cfg = App.getRouteStartConfig(State.localActiveRoute);
+        if (cfg.mode === 'none') {
+            return UI.showErrorToast('⚠️ สายนี้ยังไม่ได้ตั้งจุดเริ่มต้น — กดปุ่ม "📍 จุดเริ่ม-จุดจบ" เพื่อตั้งค่าก่อน');
+        }
+        if (!cfg.point) {
+            return UI.showErrorToast(cfg.mode === 'home'
+                ? '⚠️ ตั้งเป็น "จากที่พัก" ไว้ แต่ยังไม่ได้ปักพิกัดที่พัก — ตั้งค่าที่ปุ่ม "📍 จุดเริ่ม-จุดจบ"'
+                : '⚠️ ยังไม่ได้ตั้งพิกัดศูนย์ — ตั้งค่าที่ปุ่ม "📍 จุดเริ่ม-จุดจบ"');
+        }
+
+        const existing = stores.filter(s => s.seqs && s.seqs[day] != null).sort((a, b) => a.seqs[day] - b.seqs[day]);
+        const fresh    = stores.filter(s => !s.seqs || s.seqs[day] == null);
+
+        if (!fresh.length) return UI.showErrorToast('ℹ️ ทุกร้านมีลำดับอยู่แล้ว ไม่มีร้านใหม่ให้แทรก');
+        if (!existing.length) {
+            return UI.showErrorToast('ℹ️ วันนี้ยังไม่มีลำดับเดิมให้คงไว้เลย — กด "จัดลำดับใหม่ทั้งหมด" แทนครับ');
+        }
+
+        const seq = App.cheapestInsertOrder(existing, fresh, cfg);
+        seq.forEach((s, idx) => { if (!s.seqs) s.seqs = {}; s.seqs[day] = idx + 1; });
+
+        App.saveDB();
+        UI.render();
+        if (State.openDayModal === day) UI.showDayModal(day);
+        UI.showSaveToast(`✅ แทรกร้านใหม่ ${fresh.length} ร้าน เข้าลำดับเดิมแล้ว (คงร้านเดิม ${existing.length} ร้านไว้ตำแหน่งเดิม)`);
+        App.writeAuditLog('insert_new_day_order', {
+            day, route: State.localActiveRoute, inserted: fresh.length, keptExisting: existing.length,
+        });
+    },
+
+    // ══════════════════════════════════════════════════════════════════════
+    // ✅ NEW (2026-09-05): คำนวณระยะทางจริงจาก "ลำดับที่มีอยู่แล้ว" — ไม่จัดลำดับใหม่เลย
+    // ต่างจาก optimizeDayOrder (เรียก ORS Optimization API เพื่อหาลำดับที่ดีที่สุด) ตรงที่ฟังก์ชันนี้
+    // ใช้ ORS Directions API (api/route-distance.js) ซึ่งรับลำดับจุดตายตัว แล้วแค่วัดระยะทาง/เวลา
+    // จริงตามลำดับนั้น — เหมาะกับสายที่เซลล์ลากจัดลำดับเองมาแล้วทุกวัน (ไม่อยากให้ระบบไปสลับลำดับ
+    // ที่ใช้งานจริงอยู่ แค่อยากรู้ว่าลำดับที่มีอยู่นี้ระยะทางจริงเท่าไร)
+    // ══════════════════════════════════════════════════════════════════════
+    calcDayDistanceFromExisting: async (day) => {
+        const stores = State.stores.filter(s => s.days && s.days.includes(day) && !s.inactive
+            && typeof s.lat === 'number' && typeof s.lng === 'number' && !isNaN(s.lat) && !isNaN(s.lng));
+        if (stores.length < 2) return { skipped: true, reason: 'too-few' };
+        if (stores.some(s => !s.seqs || s.seqs[day] == null)) return { skipped: true, reason: 'incomplete-order' };
+
+        const cfg = App.getRouteStartConfig(State.localActiveRoute);
+        if (cfg.mode === 'none' || !cfg.point) return { skipped: true, reason: 'no-start' };
+
+        const sorted = stores.slice().sort((a, b) => a.seqs[day] - b.seqs[day]);
+        const points = [cfg.point, ...sorted.map(s => ({ lat: s.lat, lng: s.lng }))];
+        if (cfg.returnToStart) points.push(cfg.point);
+        if (points.length > 50) return { skipped: true, reason: 'too-many' }; // ข้อจำกัด ORS Directions ต่อ request
+
+        try {
+            const res = await fetch('/api/route-distance', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ points }),
+            });
+            const result = await res.json().catch(() => ({}));
+            if (!res.ok || typeof result.distanceKm !== 'number') return { skipped: true, reason: 'api-error', error: result.error };
+
+            if (!State.db.routeDayStats[State.localActiveRoute]) State.db.routeDayStats[State.localActiveRoute] = {};
+            State.db.routeDayStats[State.localActiveRoute][day] = {
+                distanceKm: result.distanceKm,
+                durationMin: result.durationMin,
+                storeCount: stores.length,
+                updatedAt: Date.now(),
+            };
+            return { skipped: false };
+        } catch (e) {
+            return { skipped: true, reason: 'network-error', error: e.message };
+        }
+    },
+
+    // เวอร์ชันรันทุกวันของสายที่เปิดอยู่ในคราวเดียว — ใช้ตอนสายทั้งสายถูกเซลล์จัดลำดับมาแล้วทุกวัน
+    // แล้วอยากรู้ระยะทางจริงของทุกวันโดยไม่ต้องกดทีละวัน 24 ครั้ง
+    calcAllDayDistancesFromExisting: async () => {
+        const cfg = App.getRouteStartConfig(State.localActiveRoute);
+        if (cfg.mode === 'none' || !cfg.point) {
+            return UI.showErrorToast('⚠️ สายนี้ยังไม่ได้ตั้งจุดเริ่มต้น — กดปุ่ม "📍 จุดเริ่ม-จุดจบ" ก่อน');
+        }
+        const k = State.db.cycleDays || 24;
+        const dayKeys = Array.from({ length: k }, (_, i) => `Day ${i + 1}`)
+            .filter(d => State.stores.some(s => s.days && s.days.includes(d)));
+        if (!dayKeys.length) return UI.showErrorToast('ℹ️ สายนี้ยังไม่มีร้านที่จัดวันแล้ว');
+
+        UI.showLoader('กำลังคำนวณระยะทางจริงจากลำดับที่มีอยู่แล้ว...', '');
+        UI.setLoaderProgress(0);
+        let done = 0, skippedIncomplete = 0, skippedOther = 0;
+        for (let i = 0; i < dayKeys.length; i++) {
+            const day = dayKeys[i];
+            UI.setLoaderProgress((i / dayKeys.length) * 100, `กำลังคำนวณ ${DAY_COLORS[day]?.name || day} (${i + 1}/${dayKeys.length})`);
+            const r = await App.calcDayDistanceFromExisting(day);
+            if (r.skipped) {
+                if (r.reason === 'incomplete-order') skippedIncomplete++; else skippedOther++;
+            } else done++;
+        }
+        UI.setLoaderProgress(100, 'เสร็จสิ้น!');
+        App.saveDB();
+        UI.hideLoader();
+        if (typeof UI.renderDayStats === 'function') UI.renderDayStats();
+
+        let msg = `✅ คำนวณระยะทางจริงสำเร็จ ${done}/${dayKeys.length} วัน`;
+        if (skippedIncomplete > 0) msg += ` | ข้าม ${skippedIncomplete} วัน (ลำดับยังไม่ครบทุกร้าน)`;
+        if (skippedOther > 0) msg += ` | ข้าม ${skippedOther} วัน (คำนวณไม่สำเร็จ)`;
+        UI.showSaveToast(msg);
+        App.writeAuditLog('calc_all_day_distance', { route: State.localActiveRoute, done, skippedIncomplete, skippedOther });
     },
 };
 

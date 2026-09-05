@@ -348,6 +348,82 @@ const UI = {
         }, 100);
     },
 
+    // ✅ NEW (2026-09-05): สรุประยะทาง/เวลาจริงต่อวัน (จากผลลัพธ์ ORS ของ "🧭 จัดลำดับการเยี่ยมอัตโนมัติ"
+    // หรือ AI Route Builder ที่จัดลำดับให้อัตโนมัติ) — แสดงในแท็บ "1. ข้อมูล" ก่อนช่องค้นหาร้าน
+    // วันที่ยังไม่เคยจัดลำดับ (ไม่มีข้อมูลระยะทางจริง) จะโชว์ "ยังไม่ได้จัดลำดับ" แทน
+    renderDayStats: () => {
+        const el = document.getElementById('daystats-panel');
+        if (!el) return;
+        const route = State.localActiveRoute;
+        if (!route) { el.innerHTML = ''; return; }
+
+        const stats = (State.db.routeDayStats && State.db.routeDayStats[route]) || {};
+        const k = State.db.cycleDays || 24;
+        const dayKeys = Array.from({ length: k }, (_, i) => `Day ${i + 1}`)
+            .filter(d => State.stores.some(s => s.days && s.days.includes(d)));
+
+        if (!dayKeys.length) { el.innerHTML = ''; return; }
+
+        const fmtDuration = (min) => {
+            if (typeof min !== 'number') return '—';
+            const h = Math.floor(min / 60), m = Math.round(min % 60);
+            return h > 0 ? `${h} ชม. ${m} นาที` : `${m} นาที`;
+        };
+
+        let totalKm = 0, doneCount = 0;
+        const rows = dayKeys.map(d => {
+            const s = stats[d];
+            const storeCount = State.stores.filter(x => x.days && x.days.includes(d)).length;
+            const label = DAY_COLORS[d]?.name || d;
+            const color = DAY_COLORS[d]?.hex || '#94a3b8';
+            if (s && typeof s.distanceKm === 'number') {
+                totalKm += s.distanceKm; doneCount++;
+                return `<tr class="border-b border-gray-100">
+                    <td class="py-1.5 px-2"><span class="inline-block w-2.5 h-2.5 rounded-full mr-1.5" style="background:${color}"></span>${label}</td>
+                    <td class="py-1.5 px-2 text-right">${storeCount}</td>
+                    <td class="py-1.5 px-2 text-right font-bold text-indigo-700">${s.distanceKm.toFixed(1)} กม.</td>
+                    <td class="py-1.5 px-2 text-right text-gray-500">${fmtDuration(s.durationMin)}</td>
+                </tr>`;
+            }
+            // ✅ NEW: แยก 2 กรณี — ยังไม่มีลำดับเลย vs มีลำดับครบแล้ว(เช่น เซลล์ลากจัดเอง) แค่ยังไม่เคยคำนวณระยะทาง
+            const hasFullOrder = storeCount > 0 && State.stores.filter(x => x.days && x.days.includes(d))
+                .every(x => x.seqs && x.seqs[d] != null);
+            const placeholder = hasFullOrder ? 'มีลำดับแล้ว — ยังไม่ได้คำนวณระยะทาง' : 'ยังไม่ได้จัดลำดับ';
+            return `<tr class="border-b border-gray-100">
+                <td class="py-1.5 px-2"><span class="inline-block w-2.5 h-2.5 rounded-full mr-1.5" style="background:${color}"></span>${label}</td>
+                <td class="py-1.5 px-2 text-right">${storeCount}</td>
+                <td class="py-1.5 px-2 text-right text-gray-400 italic" colspan="2">${placeholder}</td>
+            </tr>`;
+        }).join('');
+
+        el.innerHTML = `
+            <div class="bg-white p-4 rounded-2xl border border-gray-200 shadow-sm mb-3">
+                <div class="flex items-center justify-between mb-2">
+                    <h3 class="font-bold text-sm text-gray-800">📏 ระยะทางจริงต่อวัน (${route})</h3>
+                    ${doneCount > 0 ? `<span class="text-xs font-bold text-indigo-700">รวม ${totalKm.toFixed(1)} กม. (${doneCount}/${dayKeys.length} วัน)</span>` : ''}
+                </div>
+                <!-- ✅ NEW (2026-09-05): คำนวณระยะทางจริงจากลำดับที่มีอยู่แล้ว (เช่น เซลล์ลากจัดเองมาแล้ว)
+                     โดยไม่จัดลำดับใหม่ — ใช้ ORS Directions API แทน Optimization API -->
+                <button onclick="App.calcAllDayDistancesFromExisting()"
+                    class="w-full bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg py-1.5 text-xs font-bold transition mb-2">
+                    📏 คำนวณระยะทางจริงจากลำดับที่มีอยู่แล้ว (ไม่จัดลำดับใหม่)
+                </button>
+                <div class="max-h-56 overflow-y-auto">
+                    <table class="w-full text-xs">
+                        <thead>
+                            <tr class="text-gray-500 border-b border-gray-200 sticky top-0 bg-white">
+                                <th class="text-left py-1 px-2 font-bold">วัน</th>
+                                <th class="text-right py-1 px-2 font-bold">ร้าน</th>
+                                <th class="text-right py-1 px-2 font-bold" colspan="2">ระยะทาง/เวลา</th>
+                            </tr>
+                        </thead>
+                        <tbody>${rows}</tbody>
+                    </table>
+                </div>
+                ${doneCount < dayKeys.length ? `<p class="text-[11px] text-gray-400 mt-2">💡 กด "🧭 จัดลำดับการเยี่ยมอัตโนมัติ" ในแต่ละวัน หรือกด AI Route Builder ใหม่ (หลังตั้งจุดเริ่มต้นของสาย) เพื่อให้ได้ระยะทางจริงครบทุกวัน</p>` : ''}
+            </div>`;
+    },
+
     render: () => {
         // ✅ UX: อัปเดตป้ายนับร้านที่เลือกอยู่ — ให้เห็นก่อนกด "จัดลงวัน" ไม่ต้องรอ error toast
         const selCount = State.stores.filter(s => s.selected).length;

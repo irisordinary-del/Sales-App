@@ -365,6 +365,20 @@ const AI = {
             if (stores.length < 2) continue; // ไม่ต้องจัดลำดับ (เหมือนเงื่อนไขในปุ่มเดิม)
             if (stores.length > 48) { failed++; continue; } // เกินลิมิตแผนฟรี ORS ต่อ request — ข้าม ให้แอดมินจัดมือ
 
+            // ✅ NEW (2026-09-05): ถ้าวันนี้มีร้านที่ถูกจัดลำดับไว้แล้วบางส่วน (เช่น รันแบบ "ล็อคร้านที่
+            // จัดแล้ว" แล้วมีแค่ร้านใหม่ถูกเติมเข้ามา หรือเซลล์เคยลากจัดลำดับเองในหน้า sales.html)
+            // ให้แทรกเฉพาะร้านใหม่ด้วย cheapest-insertion แทนการยิง ORS จัดใหม่ทั้งวัน — กันไม่ให้
+            // ลำดับที่มีอยู่แล้วโดนเขียนทับทิ้งโดยไม่จำเป็น (ประหยัดโควตา ORS ไปในตัวด้วย)
+            const existing = stores.filter(s => s.seqs && s.seqs[day] != null).sort((a, b) => a.seqs[day] - b.seqs[day]);
+            const fresh    = stores.filter(s => !s.seqs || s.seqs[day] == null);
+            if (existing.length && !fresh.length) { done++; continue; } // ทุกร้านมีลำดับอยู่แล้ว ไม่มีอะไรให้ทำ — ข้ามไปเลย ไม่ยิง ORS ซ้ำ
+            if (existing.length && fresh.length) {
+                const seq = App.cheapestInsertOrder(existing, fresh, cfg);
+                seq.forEach((s, idx) => { if (!s.seqs) s.seqs = {}; s.seqs[day] = idx + 1; });
+                done++;
+                continue; // ไม่ต้องเรียก ORS สำหรับวันนี้
+            }
+
             try {
                 const res = await fetch('/api/optimize-route', {
                     method: 'POST',
@@ -381,6 +395,16 @@ const AI = {
                         const s = State.stores.find(x => String(x.id) === String(storeId));
                         if (s) { if (!s.seqs) s.seqs = {}; s.seqs[day] = idx + 1; }
                     });
+                    // ✅ NEW (2026-09-05): เก็บระยะทาง/เวลาจริงที่ ORS คำนวณให้ ไว้โชว์สรุปให้แอดมินดู
+                    // (ก่อนหน้านี้ api/optimize-route.js ส่ง distanceKm/durationMin กลับมาอยู่แล้ว
+                    // แต่ไม่มีใครเก็บไว้ใช้เลย — เก็บไว้ที่ State.db.routeDayStats[สาย][วัน]
+                    if (!State.db.routeDayStats[State.localActiveRoute]) State.db.routeDayStats[State.localActiveRoute] = {};
+                    State.db.routeDayStats[State.localActiveRoute][day] = {
+                        distanceKm: typeof result.distanceKm === 'number' ? result.distanceKm : null,
+                        durationMin: typeof result.durationMin === 'number' ? result.durationMin : null,
+                        storeCount: stores.length,
+                        updatedAt: Date.now(),
+                    };
                     done++;
                 } else { failed++; }
             } catch (e) { failed++; }
@@ -394,7 +418,8 @@ const AI = {
     calc: async (k, lock, limit, mxD) => {
         try {
             State.db.cycleDays = k;
-            if (!lock) State.stores.forEach(s => { s.days=[]; s.selected=false; s.seqs={}; });
+            // ✅ NEW: จัดวันใหม่ทั้งหมด = ระยะทางจริงต่อวันเดิม (routeDayStats) ใช้ไม่ได้แล้ว เคลียร์ทิ้งด้วย
+            if (!lock) { State.stores.forEach(s => { s.days=[]; s.selected=false; s.seqs={}; }); State.db.routeDayStats[State.localActiveRoute] = {}; }
 
             const tIdx = [];
             const tgts = State.stores.filter((s, i) => {
@@ -496,6 +521,7 @@ const AI = {
 
             UI.setLoaderProgress(100, 'เสร็จสิ้น!');
             MapCtrl.clearRoad(true); UI.hideLoader(); UI.render(); App.saveDB();
+            if (typeof UI.renderDayStats === 'function') UI.renderDayStats();
 
             if (limit&&drop===tgts.length) {
                 UI.showErrorToast(`⚠️ ตัดร้านโดด (${mxD}กม.) ทิ้งทั้งหมด กรุณาปรับค่า`);
