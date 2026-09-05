@@ -569,29 +569,45 @@
 
                                 <p class="text-[11px] text-indigo-600 -mt-2 mb-3">จัดเฉพาะร้านที่ยังไม่ได้กำหนดวัน — ติ๊ก "ล็อคร้านที่จัดแล้ว" ด้านล่างถ้าไม่อยากให้ AI แตะร้านที่จัดไว้แล้ว</p>
 
-                                <div class="flex justify-between mb-2">
+                                <div class="mb-3">
 
-                                    <label class="text-xs font-bold text-gray-700">จำนวนวันทั้งหมด:</label>
+                                    <div class="flex justify-between items-center">
 
-                                    <input type="number" id="ai-days" value="24" min="4" step="2" class="w-16 p-1 border border-indigo-200 rounded-lg text-center font-bold text-indigo-800 bg-white">
+                                        <label class="text-xs font-bold text-gray-700">จำนวนวันทั้งหมด:</label>
 
-                                </div>
+                                        <input type="number" id="ai-days" value="24" min="4" step="1" class="w-16 p-1 border border-indigo-200 rounded-lg text-center font-bold text-indigo-800 bg-white">
 
-                                <div class="flex justify-between mb-2">
+                                    </div>
 
-                                    <label class="text-xs font-bold text-gray-700 flex items-center gap-2">
-
-                                        <input type="checkbox" id="ai-outlier" checked class="w-3.5 h-3.5">
-
-                                        ตัดร้านโดด (กม.):
-
-                                    </label>
-
-                                    <input type="number" id="ai-dist" value="5" min="1" class="w-16 p-1 border border-indigo-200 rounded-lg text-center font-bold text-red-600 bg-white">
+                                    <p class="text-[10px] text-gray-400 mt-1">AI จะแบ่งร้านทั้งหมดในสายนี้ออกเป็นกี่วัน (ปกติ = จำนวนวันทำงานในรอบเดือน)</p>
 
                                 </div>
 
-                                <div class="flex justify-between mb-3 border-t border-indigo-200 pt-2">
+                                <div class="mb-3">
+
+                                    <div class="flex justify-between items-center">
+
+                                        <label class="text-xs font-bold text-gray-700 flex items-center gap-2">
+
+                                            <input type="checkbox" id="ai-outlier" checked class="w-3.5 h-3.5" onchange="document.getElementById('ai-dist').disabled = !this.checked; document.getElementById('ai-dist-wrap').classList.toggle('opacity-40', !this.checked);">
+
+                                            ตัดร้านโดด (กม.):
+
+                                        </label>
+
+                                        <div id="ai-dist-wrap">
+
+                                            <input type="number" id="ai-dist" value="5" min="1" class="w-16 p-1 border border-indigo-200 rounded-lg text-center font-bold text-red-600 bg-white">
+
+                                        </div>
+
+                                    </div>
+
+                                    <p class="text-[10px] text-gray-400 mt-1">ร้านที่อยู่ไกลจากกลุ่มเกินระยะนี้จะไม่ถูกจัดวันให้ (ต้องมาจัดเองทีหลัง) — ยกเลิกติ๊กถ้าไม่ต้องการกันร้านโดดออก</p>
+
+                                </div>
+
+                                <div class="mb-3 border-t border-indigo-200 pt-2">
 
                                     <label class="text-xs font-bold text-gray-700 flex items-center gap-2">
 
@@ -600,6 +616,8 @@
                                         ล็อคร้านที่จัดแล้ว
 
                                     </label>
+
+                                    <p class="text-[10px] text-gray-400 mt-1 ml-5">ติ๊กถ้าไม่ต้องการให้ AI ย้ายร้านที่เคยจัดวันไว้แล้ว (จัดเฉพาะร้านใหม่/ร้านที่ยังไม่มีวัน)</p>
 
                                 </div>
 
