@@ -739,6 +739,19 @@ const App = {
             // ของเดือนที่ใช้งานอยู่ตอนนี้ (active month) จะไม่เห็น override เฉพาะสาย — ตกไปใช้
             // ค่า default ของศูนย์เสมอ (routeOverrides ถูกใช้จริงใน CalendarCtrl.render())
             State.activeRouteOverrides = { [State.myRoute]: rd?.exists ? (rd.data().calendarOverride || null) : null };
+            // ✅ FIX (2026-09-05): seed State.planCache ตรงนี้เลย (sync, ก่อน checkReady()/Processor.run())
+            // เดิม planCache ของเดือน active ถูกเซ็ตครั้งแรกใน onSnapshot ด้านล่างเท่านั้น ซึ่งเป็น
+            // async — ถ้า snapshot แรกยังมาไม่ถึงตอน Processor.setupRoute() เรียก getTodayDayLabel()
+            // (ซึ่งเรียก CalendarCtrl._resolveActiveCfg() ที่อ่านจาก planCache) จะหา override ไม่เจอ
+            // เลยตกไปใช้ค่าศูนย์แทนชั่วคราว ทำให้ "Day วันนี้" ที่โชว์ตอนเปิดแอปผิดได้ (race condition)
+            if (State.activePlanYM) {
+                State.planCache[State.activePlanYM] = {
+                    stores: State.allStores, calendarConfig: State.calendarConfig, ym: State.activePlanYM, _ok: true,
+                    confirmedBy: rd?.exists ? (rd.data().confirmedBy || null) : null,
+                    confirmedAt: rd?.exists ? (rd.data().confirmedAt || null) : null,
+                    routeOverrides: State.activeRouteOverrides,
+                };
+            }
         } catch(e) { State.allStores = []; State.activeRouteOverrides = {}; }
         isMainLoaded = true; checkReady();
 
@@ -1579,10 +1592,23 @@ const CalendarCtrl = {
         CalendarCtrl.render();
     },
 
-    // ✅ ข้อ 6: คืน dayLabel ของวันนี้ตาม calendarConfig
+    // ✅ FIX (2026-09-05): จุดกลางเดียวสำหรับ resolve calendarConfig ที่ "ใช้งานจริง" ของสาย
+    // ที่กำลังดูอยู่ — ใช้ override เฉพาะสาย (ถ้ามี) แทนค่า default ของศูนย์เสมอ ทุกฟังก์ชันที่ต้อง
+    // รู้โหมดปฏิทินของสายต้องเรียกผ่านตัวนี้ ห้ามอ่าน State.calendarConfig ตรงๆ อีก — เดิมมีจุดที่
+    // ลืมทำแบบนี้กระจายอยู่หลายจุด (getTodayDayLabel, getDateFromDay, getDatesFromDayInMonth,
+    // applyExceptions, render) ทำให้สายที่มี override เห็นค่าปฏิทินของศูนย์แทนของตัวเองแบบเงียบๆ
+    _resolveActiveCfg: (year, month) => {
+        const ym    = `${year}_${String(month + 1).padStart(2, '0')}`;
+        const plan  = State.planCache[ym];
+        const route = (App.isSupervisor() && SupervisorUI._selectedRoute) ? SupervisorUI._selectedRoute : State.myRoute;
+        const override = plan?.routeOverrides?.[route];
+        return override || (plan !== undefined ? plan?.calendarConfig : State.calendarConfig);
+    },
+
+    // ✅ ข้อ 6: คืน dayLabel ของวันนี้ตาม calendarConfig (ของสายตัวเอง ถ้ามี override)
     getTodayDayLabel: () => {
         const now   = new Date();
-        const cfg   = State.calendarConfig;
+        const cfg   = CalendarCtrl._resolveActiveCfg(now.getFullYear(), now.getMonth());
         const day   = now.getDate();
         const y     = now.getFullYear();
         const m     = now.getMonth();
@@ -1699,7 +1725,8 @@ const CalendarCtrl = {
     },
 
     getDateFromDay: (dayLabel) => {
-        const cfg = State.calendarConfig;
+        // ✅ FIX (2026-09-05): เดิมอ่าน State.calendarConfig (ศูนย์) ตรงๆ ไม่เช็ค override เฉพาะสาย
+        const cfg = CalendarCtrl._resolveActiveCfg(CalendarCtrl._year, CalendarCtrl._month);
         const targetNum = parseInt(String(dayLabel || '').replace('Day ', ''));
 
         // ✅ FIX: เดิมฟังก์ชันนี้ไม่มี branch สำหรับโหมด date/default/legacy เลย (คืน null เสมอ
@@ -1765,7 +1792,8 @@ const CalendarCtrl = {
     // ตรงกับหลายวันที่ในเดือนเดียวกันได้: โหมด weekday (ขยายทุกสัปดาห์) และโหมด cycle แบบ
     // weekday-rolling (วนกลับ Day 1 เมื่อครบรอบ)
     getDatesFromDayInMonth: (dayLabel, year, month) => {
-        const cfg = State.calendarConfig;
+        // ✅ FIX (2026-09-05): เดิมอ่าน State.calendarConfig (ศูนย์) ตรงๆ ไม่เช็ค override เฉพาะสาย
+        const cfg = CalendarCtrl._resolveActiveCfg(year, month);
         if (!cfg) return [];
 
         if (cfg.mode === 'weekday') {
@@ -1799,11 +1827,13 @@ const CalendarCtrl = {
     // — วันหยุดเอง: เอาร้านที่ถูกแบ่งออกไปทั้งหมดออกจาก queue
     // — วันที่รับร้านเพิ่ม (prevDate/nextDate): เพิ่มร้านกลุ่มที่ถูกโยกมาเข้า queue
     applyExceptions: (baseList, dayLabel) => {
-        const cfg = State.calendarConfig;
+        const now = new Date();
+        // ✅ FIX (2026-09-05): เดิมอ่าน State.calendarConfig (ศูนย์) ตรงๆ ไม่เช็ค override เฉพาะสาย
+        // — สายที่มี override เป็นของตัวเองจะไม่เห็น exceptions ของศูนย์เลย (override แทนที่ทั้งก้อน)
+        const cfg = CalendarCtrl._resolveActiveCfg(now.getFullYear(), now.getMonth());
         CalendarCtrl._lastExceptionApplied = false;
         if (!cfg || !cfg.exceptions) return baseList;
 
-        const now = new Date();
         const todayStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
         const route = State.myRoute;
         let list = [...baseList];
@@ -1846,7 +1876,6 @@ const CalendarCtrl = {
         const now   = new Date();
         const daysInMonth = new Date(year, month + 1, 0).getDate();
         const firstDow    = new Date(year, month, 1).getDay();
-        const cfg  = State.calendarConfig;
 
         const monthLabel = new Date(year, month, 1).toLocaleDateString('th-TH', { year: 'numeric', month: 'long' });
         const headerEl   = document.getElementById('calendar-month-label');
@@ -1854,10 +1883,9 @@ const CalendarCtrl = {
 
         const _renderYM    = `${year}_${String(month+1).padStart(2,'0')}`;
         const _renderPlan  = State.planCache[_renderYM];
-        // ✅ ใช้ค่า override เฉพาะสายที่กำลังดูอยู่ (ถ้ามี) แทนค่า default ของศูนย์
-        const _routeForCfg = (App.isSupervisor() && SupervisorUI._selectedRoute) ? SupervisorUI._selectedRoute : State.myRoute;
-        const _routeOverride = _renderPlan?.routeOverrides?.[_routeForCfg];
-        const _renderCfg   = _routeOverride || (_renderPlan !== undefined ? _renderPlan?.calendarConfig : cfg);
+        // ✅ ใช้ค่า override เฉพาะสายที่กำลังดูอยู่ (ถ้ามี) แทนค่า default ของศูนย์ — resolve ผ่าน
+        // จุดกลางเดียว (_resolveActiveCfg) เพื่อไม่ให้ตรรกะเพี้ยนไปคนละจุดแบบที่เคยเกิดบั๊กมาแล้ว
+        const _renderCfg    = CalendarCtrl._resolveActiveCfg(year, month);
         const _renderStores = _renderPlan?.stores || State.allStores;
 
         const modeEl = document.getElementById('calendar-mode-badge');
