@@ -525,6 +525,10 @@ const App = {
         State.allStores = [];
         // ✅ NEW (2026-08-29): เก็บสถานะ "ยืนยันรับสายวิ่ง" ของแต่ละสายไว้ด้วย (ดู RouteConfirm)
         const _confirmations = {};
+        // ✅ FIX (2026-09-05): เก็บ calendarOverride ต่อสายไว้ด้วย — ขาดจุดนี้ทำให้ Supervisor เปิดดู
+        // ปฏิทินของเดือนที่ใช้งานอยู่ (active month) แล้วไม่เห็น override เฉพาะสายเลย ตกไปใช้
+        // ค่า default ของศูนย์เสมอ ทั้งที่เดือนอื่นๆ (โหลดผ่าน loadPlanDataForSup) เห็น override ถูกต้อง
+        const _routeOverridesActive = {};
 
         for (let i = 0; i < State.routeList.length; i += BATCH) {
             const chunk = State.routeList.slice(i, i + BATCH);
@@ -533,6 +537,7 @@ const App = {
                     const rd = await App._getWithTimeout(_routesCol.doc(routeId), 8000);
                     State.allRoutes[routeId] = rd.exists ? (rd.data().stores || []) : [];
                     _confirmations[routeId]  = rd.exists ? { confirmedBy: rd.data().confirmedBy || null, confirmedAt: rd.data().confirmedAt || null } : { confirmedBy: null, confirmedAt: null };
+                    _routeOverridesActive[routeId] = rd.exists ? (rd.data().calendarOverride || null) : null;
                 } catch(e) { State.allRoutes[routeId] = []; }
             }));
             loaded += chunk.length;
@@ -540,6 +545,7 @@ const App = {
                 `โหลด ${loaded}/${State.routeList.length} สาย...`);
         }
         State.allStores = Object.values(State.allRoutes).flat();
+        State.activeRouteOverrides = _routeOverridesActive;
 
         // seed planCache เดือน active — ปฏิทินใช้ได้ทันที
         State.planCache[_useYM] = {
@@ -548,6 +554,7 @@ const App = {
             ym:             _useYM,
             _ok:            true,
             confirmations:  _confirmations,
+            routeOverrides: _routeOverridesActive,
         };
 
         LoadBar.setProgress(80, 'โหลดยอดขาย...');
@@ -728,7 +735,11 @@ const App = {
         try {
             const rd = _routeResult.status === 'fulfilled' ? _routeResult.value : null;
             State.allStores = rd?.exists ? (rd.data().stores || []) : [];
-        } catch(e) { State.allStores = []; }
+            // ✅ FIX (2026-09-05): ต้องเก็บ calendarOverride ของสายตัวเองไว้ด้วย ไม่งั้นปฏิทิน
+            // ของเดือนที่ใช้งานอยู่ตอนนี้ (active month) จะไม่เห็น override เฉพาะสาย — ตกไปใช้
+            // ค่า default ของศูนย์เสมอ (routeOverrides ถูกใช้จริงใน CalendarCtrl.render())
+            State.activeRouteOverrides = { [State.myRoute]: rd?.exists ? (rd.data().calendarOverride || null) : null };
+        } catch(e) { State.allStores = []; State.activeRouteOverrides = {}; }
         isMainLoaded = true; checkReady();
 
         // process sales
@@ -746,12 +757,18 @@ const App = {
         App._unsubRoute = _liveRouteRef.onSnapshot(rd => {
             if (!rd.exists) return;
             State.allStores = rd.data().stores || [];
+            // ✅ FIX (2026-09-05): sync override สดๆ ด้วย (เผื่อแอดมินแก้ระหว่างที่เซลเปิดแอปอยู่)
+            State.activeRouteOverrides = { [State.myRoute]: rd.data().calendarOverride || null };
             if (State.activePlanYM) {
                 // ✅ FIX: ต้องเก็บ confirmedBy/confirmedAt ไว้ด้วย ไม่งั้น banner "ยืนยันรับสายวิ่ง"
                 // จะเด้งกลับเป็น "ยังไม่ยืนยัน" ทุกครั้งที่ onSnapshot ทำงาน (เช่น ตอนเซลกดยืนยันเอง)
+                // ✅ FIX (2026-09-05): เพิ่ม routeOverrides ที่ขาดไป — เดิมไม่มี field นี้เลยทำให้
+                // CalendarCtrl.render() หา override เฉพาะสายของเดือนปัจจุบันไม่เจอ ตกไปใช้ calendarConfig
+                // ของศูนย์แทนเสมอ (ดูปัญหาที่ผู้ใช้แจ้ง 2026-09-05: ตั้งค่าเฉพาะสายแล้วแต่เซลไม่เห็นผล)
                 State.planCache[State.activePlanYM] = {
                     stores: State.allStores, calendarConfig: State.calendarConfig, ym: State.activePlanYM, _ok: true,
                     confirmedBy: rd.data().confirmedBy || null, confirmedAt: rd.data().confirmedAt || null,
+                    routeOverrides: State.activeRouteOverrides,
                 };
             }
             if (State.isLoaded) {
@@ -1835,11 +1852,22 @@ const CalendarCtrl = {
         const headerEl   = document.getElementById('calendar-month-label');
         if (headerEl) headerEl.textContent = monthLabel;
 
+        const _renderYM    = `${year}_${String(month+1).padStart(2,'0')}`;
+        const _renderPlan  = State.planCache[_renderYM];
+        // ✅ ใช้ค่า override เฉพาะสายที่กำลังดูอยู่ (ถ้ามี) แทนค่า default ของศูนย์
+        const _routeForCfg = (App.isSupervisor() && SupervisorUI._selectedRoute) ? SupervisorUI._selectedRoute : State.myRoute;
+        const _routeOverride = _renderPlan?.routeOverrides?.[_routeForCfg];
+        const _renderCfg   = _routeOverride || (_renderPlan !== undefined ? _renderPlan?.calendarConfig : cfg);
+        const _renderStores = _renderPlan?.stores || State.allStores;
+
         const modeEl = document.getElementById('calendar-mode-badge');
         if (modeEl) {
             // ✅ UX-FIX-3: Sales ไม่ต้องเห็น warning ที่ทำอะไรไม่ได้
             const _isSalesRole = Auth.getSession()?.role === 'sales';
-            if (!cfg) {
+            // ✅ FIX (2026-09-05): ป้ายบอกโหมดต้องอ่านจาก _renderCfg (override เฉพาะสายถ้ามี)
+            // ไม่ใช่ cfg (calendarConfig ของศูนย์ตรงๆ) เดิมป้ายนี้ไม่เคยดู override เลย ทำให้เซล/
+            // supervisor เห็นป้ายโหมดของศูนย์ (เช่น "Cycle D1-24") ทั้งที่สายตัวเองถูกตั้งเป็นโหมดอื่น
+            if (!_renderCfg) {
                 if (_isSalesRole) {
                     // Sales เห็นข้อความที่ไม่ทำให้งง และไม่ให้ความรู้สึกว่ามี error
                     modeEl.textContent = '📅 ปฏิทินวิ่งงาน';
@@ -1848,8 +1876,8 @@ const CalendarCtrl = {
                     modeEl.textContent = '⚠️ ยังไม่ได้ตั้งค่าปฏิทิน';
                     modeEl.style.background = '#fef3c7'; modeEl.style.color = '#92400e';
                 }
-            } else if (cfg.mode === 'cycle') {
-                modeEl.textContent = '🔄 Cycle D1-' + (cfg.cycleDays || 24);
+            } else if (_renderCfg.mode === 'cycle') {
+                modeEl.textContent = '🔄 Cycle D1-' + (_renderCfg.cycleDays || 24);
                 modeEl.style.background = '#ede9fe'; modeEl.style.color = '#5b21b6';
             } else {
                 modeEl.textContent = '📌 กำหนดวันที่เอง';
@@ -1860,14 +1888,6 @@ const CalendarCtrl = {
         const DOW  = ['อา','จ','อ','พ','พฤ','ศ','ส'];
         let html   = DOW.map(d => `<div style="text-align:center;font-size:10px;font-weight:800;color:#9ca3af;padding:4px 0;">${d}</div>`).join('');
         for (let i = 0; i < firstDow; i++) html += `<div></div>`;
-
-        const _renderYM    = `${year}_${String(month+1).padStart(2,'0')}`;
-        const _renderPlan  = State.planCache[_renderYM];
-        // ✅ ใช้ค่า override เฉพาะสายที่กำลังดูอยู่ (ถ้ามี) แทนค่า default ของศูนย์
-        const _routeForCfg = (App.isSupervisor() && SupervisorUI._selectedRoute) ? SupervisorUI._selectedRoute : State.myRoute;
-        const _routeOverride = _renderPlan?.routeOverrides?.[_routeForCfg];
-        const _renderCfg   = _routeOverride || (_renderPlan !== undefined ? _renderPlan?.calendarConfig : cfg);
-        const _renderStores = _renderPlan?.stores || State.allStores;
 
         for (let d = 1; d <= daysInMonth; d++) {
             const dayLabel   = CalendarCtrl.getDayLabelForCfg(d, _renderCfg, _renderStores, year, month);
@@ -2168,7 +2188,8 @@ const CalendarCtrl = {
         // seed cache ด้วยข้อมูลปัจจุบัน
         const _curYM = State.activePlanYM || '';
         if (_curYM && State.allStores.length > 0 && !State.planCache[_curYM]?._ok) {
-            State.planCache[_curYM] = { stores: State.allStores, calendarConfig: State.calendarConfig, ym: _curYM, _ok: true };
+            // ✅ FIX (2026-09-05): ใส่ routeOverrides ที่เก็บไว้ตอนโหลดแอปด้วย (เช่นเดียวกับ 2 จุดข้างบน)
+            State.planCache[_curYM] = { stores: State.allStores, calendarConfig: State.calendarConfig, ym: _curYM, _ok: true, routeOverrides: State.activeRouteOverrides || {} };
         }
         CalendarCtrl.render();
         popup.style.display = 'block';
