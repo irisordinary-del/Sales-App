@@ -33,8 +33,9 @@ const AI = {
         // แล้วจัดแบบเดิม (เส้นตรงล้วน) ไม่ทำให้ทั้งฟีเจอร์พังเพราะจุดนี้จุดเดียว
         const proceed = () => {
             UI.showLoader('AI กำลังวิเคราะห์...', 'กำลังตรวจสอบความสูงพื้นที่...');
+            UI.setLoaderProgress(2);
             AI._fetchElevations(State.stores).finally(() => {
-                UI.showLoader('AI กำลังวิเคราะห์...', 'จับกลุ่มร้านค้าที่อยู่ใกล้กัน');
+                UI.setLoaderProgress(10, 'จับกลุ่มร้านค้าที่อยู่ใกล้กัน');
                 setTimeout(() => AI.calc(k, lock, limit, mxD), 150);
             });
         };
@@ -293,7 +294,7 @@ const AI = {
     // (มีถนนอ้อมภูเขาได้จริงแบบไม่ไกลมาก แต่ค่าความสูงต่างเยอะจนโดนปรับระยะไปแล้ว)
     // ย้ายจริงเฉพาะร้านที่เส้นทางจริงยืนยันว่าโดดจริง — ถ้า API ล้มเหลว/เกินโควตา ข้ามร้านนั้นไปเงียบๆ
     // ไม่กระทบร้านอื่น ไม่ทำให้ทั้งฟีเจอร์พัง
-    _verifyJumpersWithRoad: async (k) => {
+    _verifyJumpersWithRoad: async (k, onProgress) => {
         const { allDays, cents } = AI._buildDayState(k);
         const distKm = (a, b) => {
             const R = 6371, dLat = (b.lat-a.lat)*Math.PI/180, dLng = (b.lng-a.lng)*Math.PI/180;
@@ -317,7 +318,8 @@ const AI = {
         if (!candidates.length) return 0;
 
         let verified = 0;
-        for (const c of candidates) {
+        for (let ci = 0; ci < candidates.length; ci++) {
+            const c = candidates[ci];
             try {
                 const s = State.stores[c.idx];
                 const own = cents[c.cur], cand = cents[c.candDay];
@@ -336,8 +338,54 @@ const AI = {
                     verified++;
                 }
             } catch (e) { /* เช็คร้านนี้ไม่ได้ ข้ามไป ไม่กระทบร้านอื่น */ }
+            if (onProgress) onProgress(ci + 1, candidates.length);
         }
         return verified;
+    },
+
+    // ✅ NEW (2026-09-05): จัดลำดับการเยี่ยมภายในแต่ละวันให้อัตโนมัติ ต่อจากขั้นจัดกลุ่มเลย
+    // (เดิมแอดมินต้องมากดปุ่ม "🧭 จัดลำดับการเยี่ยมอัตโนมัติ" เองทีละวัน — 24 วันก็ต้องกด 24 ครั้ง)
+    // ใช้ /api/optimize-route ตัวเดียวกับปุ่มเดิมทุกประการ (ดู App.optimizeDayOrder ใน admin-data.js)
+    // เพื่อให้พฤติกรรม/ผลลัพธ์เหมือนกันเป๊ะ ต่างกันแค่ "ใครเป็นคนเรียก" — เขียนผลลง s.seqs[day] เหมือนกัน
+    // ต้องมีจุดเริ่มต้นของสาย (ปุ่ม "📍 จุดเริ่ม-จุดจบ") ตั้งไว้ก่อนแล้วเท่านั้น ถ้ายังไม่ตั้ง จะข้ามทั้งหมด
+    // แล้วรายงานกลับให้แอดมินรู้ผ่าน toast สุดท้าย (ไม่ทำให้ทั้ง flow ล้มเหลว)
+    _sequenceAllDays: async (k, onProgress) => {
+        const cfg = (typeof App !== 'undefined' && App.getRouteStartConfig)
+            ? App.getRouteStartConfig(State.localActiveRoute)
+            : { mode: 'none', point: null };
+        if (cfg.mode === 'none' || !cfg.point) return { skipped: true };
+
+        let done = 0, failed = 0;
+        for (let d = 1; d <= k; d++) {
+            const day = `Day ${d}`;
+            if (onProgress) onProgress(d, k, day);
+
+            const stores = State.stores.filter(s => s.days && s.days.includes(day) && !s.inactive
+                && typeof s.lat === 'number' && typeof s.lng === 'number' && !isNaN(s.lat) && !isNaN(s.lng));
+            if (stores.length < 2) continue; // ไม่ต้องจัดลำดับ (เหมือนเงื่อนไขในปุ่มเดิม)
+            if (stores.length > 48) { failed++; continue; } // เกินลิมิตแผนฟรี ORS ต่อ request — ข้าม ให้แอดมินจัดมือ
+
+            try {
+                const res = await fetch('/api/optimize-route', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        start: cfg.point,
+                        end:   cfg.returnToStart ? cfg.point : null,
+                        jobs:  stores.map(s => ({ id: s.id, lat: s.lat, lng: s.lng })),
+                    }),
+                });
+                const result = await res.json().catch(() => ({}));
+                if (res.ok && Array.isArray(result.order)) {
+                    result.order.forEach((storeId, idx) => {
+                        const s = State.stores.find(x => String(x.id) === String(storeId));
+                        if (s) { if (!s.seqs) s.seqs = {}; s.seqs[day] = idx + 1; }
+                    });
+                    done++;
+                } else { failed++; }
+            } catch (e) { failed++; }
+        }
+        return { skipped: false, done, failed };
     },
 
     // ─── Main Calc ──────────────────────────────────────────────────────
@@ -412,21 +460,41 @@ const AI = {
                 f2.forEach(id=>{ State.stores[tIdx[id]].days=hasPair?[`Day ${d1}`,`Day ${d2}`]:[`Day ${d1}`]; });
             }
 
+            UI.setLoaderProgress(18, 'กำลังปรับสมดุลจำนวนร้าน/วัน...');
+
             // ── Pass 1: Geo-Aware Balance ──
             const bal = AI._balanceDays(k);
+            UI.setLoaderProgress(22, 'กำลังแก้ร้านที่จัดผิดกลุ่ม...');
 
             // ── Pass 2: Fix Jumpers (Voronoi Reassignment) ──
             const fixed = AI._fixJumpers(k);
+            UI.setLoaderProgress(26, 'กำลังตรวจสอบเส้นทางจริงของร้านที่ดูโดด...');
 
             // ── Pass 3: ตรวจสอบร้านโดดที่เหลือด้วยเส้นทางจริง (ยิง API เท่าที่จำเป็น) ──
-            UI.showLoader('AI กำลังวิเคราะห์...', 'กำลังตรวจสอบเส้นทางจริงของร้านที่ดูโดด...');
             let roadVerified = 0;
-            try { roadVerified = await AI._verifyJumpersWithRoad(k); }
-            catch (e) { console.warn('[AI] ตรวจสอบเส้นทางจริงไม่สำเร็จ ข้ามขั้นตอนนี้:', e.message); }
+            try {
+                roadVerified = await AI._verifyJumpersWithRoad(k, (i, total) => {
+                    UI.setLoaderProgress(26 + (i / total) * 14, `กำลังตรวจสอบเส้นทางจริง ${i}/${total}`);
+                });
+            } catch (e) { console.warn('[AI] ตรวจสอบเส้นทางจริงไม่สำเร็จ ข้ามขั้นตอนนี้:', e.message); }
+
+            UI.setLoaderProgress(42, 'กำลังปรับให้อยู่ในช่วง 18-30 ร้าน/วัน...');
 
             // ── Pass 4: บังคับขอบเขตจำนวนร้าน/วัน (18-30) — รันหลังสุดเสมอ ──
             const boundMoved = AI._enforceMinMax(k, AI.MIN_PER_DAY, AI.MAX_PER_DAY);
 
+            // ── Pass 5: จัดลำดับการเยี่ยมภายในแต่ละวันอัตโนมัติ ต่อจากการจัดกลุ่มเลย ──
+            // ✅ NEW (2026-09-05): ทำให้ "งานจบที่ AI" — แอดมินไม่ต้องไปกดปุ่ม "🧭 จัดลำดับการเยี่ยมอัตโนมัติ"
+            // เองทีละวันอีก 24 ครั้ง (ถ้ายังไม่ได้ตั้งจุดเริ่มต้นของสายไว้ จะข้ามขั้นนี้ไปเงียบๆ แล้วบอกในข้อความสรุปแทน)
+            UI.setLoaderProgress(48, 'เตรียมจัดลำดับการเยี่ยมรายวัน...');
+            let seqResult = { skipped: true };
+            try {
+                seqResult = await AI._sequenceAllDays(k, (d, total, day) => {
+                    UI.setLoaderProgress(50 + (d / total) * 48, `กำลังจัดลำดับการเยี่ยม วันที่ ${d}/${total}`);
+                });
+            } catch (e) { console.warn('[AI] จัดลำดับการเยี่ยมอัตโนมัติไม่สำเร็จ:', e.message); }
+
+            UI.setLoaderProgress(100, 'เสร็จสิ้น!');
             MapCtrl.clearRoad(true); UI.hideLoader(); UI.render(); App.saveDB();
 
             if (limit&&drop===tgts.length) {
@@ -437,7 +505,22 @@ const AI = {
                 if (fixed>0) msg+=` | แก้ร้านกระโดด ${fixed} ร้าน`;
                 if (roadVerified>0) msg+=` | ยืนยันด้วยเส้นทางจริง ${roadVerified} ร้าน`;
                 if (boundMoved>0) msg+=` | ปรับให้อยู่ในช่วง ${AI.MIN_PER_DAY}-${AI.MAX_PER_DAY} ร้าน/วัน ${boundMoved} ครั้ง`;
+                if (seqResult.skipped) {
+                    msg += ` | ⚠️ ยังไม่ได้จัดลำดับการเยี่ยม (ยังไม่ได้ตั้งจุดเริ่มต้นของสาย — กด "📍 จุดเริ่ม-จุดจบ" แล้วกด AI ใหม่)`;
+                } else {
+                    msg += ` | จัดลำดับการเยี่ยมอัตโนมัติแล้ว ${seqResult.done}/${k} วัน`;
+                    if (seqResult.failed > 0) msg += ` (${seqResult.failed} วันจัดลำดับไม่สำเร็จ — ลองกด "🧭 จัดลำดับการเยี่ยมอัตโนมัติ" ในวันนั้นด้วยมืออีกที)`;
+                }
                 UI.showSaveToast(msg);
+
+                if (typeof App !== 'undefined' && App.writeAuditLog) {
+                    App.writeAuditLog('ai_route_build', {
+                        route: State.localActiveRoute, days: k, storeCount: tgts.length,
+                        fixedJumpers: fixed, roadVerified, boundMoved,
+                        sequencedDays: seqResult.skipped ? 0 : seqResult.done,
+                        sequenceSkipped: !!seqResult.skipped,
+                    });
+                }
             }
 
         } catch(err) {

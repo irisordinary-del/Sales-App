@@ -820,24 +820,30 @@ const App = {
         UI.hideLoader();
     },
 
+    // ✅ FIX (2026-09-05 — พบจากรายงานจริงของ user): เดิมใช้ confirm() แบบ native ของเบราว์เซอร์
+    // ซึ่งไม่ยอมเด้งขึ้นมาให้กดยืนยันเลย (กดปุ่มแล้วไม่มีอะไรเกิดขึ้น เพราะ confirm() คืนค่า false/
+    // ไม่เคย resolve แล้วโค้ดก็ return ตั้งแต่บรรทัดแรก) เปลี่ยนไปใช้ UI.showConfirm() ซึ่งเป็น dialog
+    // แบบกำหนดเองของระบบเอง (ตัวเดียวกับที่ปุ่มลบสาย/ลบ Plan อื่นๆ ใช้อยู่แล้ว ทำงานได้จริง)
     clearAllAssignments: () => {
-        if (!confirm('🗑️ ยืนยันการเคลียร์การจัดสายทั้งหมด?')) return;
         if (!State.stores?.length) return UI.showErrorToast('⚠️ ไม่มีข้อมูลร้านค้า');
-        // ✅ UX: เก็บ snapshot ไว้ก่อนลบ เผื่อกดพลาด — undo ได้ภายใน 8 วิ
-        App._undoSnapshot = { route: State.localActiveRoute, stores: JSON.parse(JSON.stringify(State.stores)) };
-        State.stores.forEach(s => { s.days = []; s.seqs = {}; s.selected = false; });
-        MapCtrl?.clearRoad?.(true);
-        MapCtrl?.clearAll?.();
-        UI?.render?.();
-        App?.saveDB?.();
-        UI.showUndoBanner(`✅ เคลียร์การจัดสายเสร็จ (${App._undoSnapshot.stores.length} ร้าน)`);
+        UI.showConfirm('🗑️ ยืนยันการเคลียร์การจัดสายทั้งหมด?', () => {
+            // ✅ UX: เก็บ snapshot ไว้ก่อนลบ เผื่อกดพลาด — undo ได้ภายใน 8 วิ
+            App._undoSnapshot = { route: State.localActiveRoute, stores: JSON.parse(JSON.stringify(State.stores)) };
+            State.stores.forEach(s => { s.days = []; s.seqs = {}; s.selected = false; });
+            MapCtrl?.clearRoad?.(true);
+            MapCtrl?.clearAll?.();
+            UI?.render?.();
+            App?.saveDB?.();
+            UI.showUndoBanner(`✅ เคลียร์การจัดสายเสร็จ (${App._undoSnapshot.stores.length} ร้าน)`);
+        });
     },
 
     // ✅ FIX: เดิมปุ่ม "ล้างสายนี้" ใน Tab 1 เรียกฟังก์ชันนี้ แต่ไม่เคยมีอยู่จริง (บั๊ก — กดแล้วไม่มีอะไรเกิดขึ้น)
     // ลบร้านค้าทั้งหมดออกจากสายที่กำลังเลือกอยู่ (ต่างจาก clearAllAssignments ที่แค่ล้างวันที่จัด แต่ร้านยังอยู่)
+    // ✅ FIX (2026-09-05): confirm() แบบ native เหมือนกัน — ดู comment เดียวกันใน clearAllAssignments
     clearStores: () => {
         if (!State.stores?.length) return UI.showErrorToast('⚠️ สายนี้ไม่มีร้านค้าอยู่แล้ว');
-        if (!confirm(`🗑️ ยืนยันลบร้านค้าทั้งหมด (${State.stores.length} ร้าน) ออกจากสาย "${State.localActiveRoute}"?\nการกระทำนี้ลบร้านทิ้งทั้งหมด ไม่ใช่แค่ล้างวันที่จัด`)) return;
+        UI.showConfirm(`🗑️ ยืนยันลบร้านค้าทั้งหมด (${State.stores.length} ร้าน) ออกจากสาย "${State.localActiveRoute}"?\nการกระทำนี้ลบร้านทิ้งทั้งหมด ไม่ใช่แค่ล้างวันที่จัด`, () => {
         // ✅ UX: เก็บ snapshot ไว้ก่อนลบ เผื่อกดพลาด — undo ได้ภายใน 8 วิ
         App._undoSnapshot = { route: State.localActiveRoute, stores: JSON.parse(JSON.stringify(State.stores)) };
         State.stores = [];
@@ -847,6 +853,7 @@ const App = {
         UI?.render?.();
         App?.saveDB?.();
         UI.showUndoBanner(`✅ ลบร้านค้าออกจากสายนี้เรียบร้อย (${App._undoSnapshot.stores.length} ร้าน)`);
+        });
     },
 
     // ✅ UX: ย้อนกลับการลบล่าสุด (ใช้ได้ครั้งเดียว ภายใน 8 วิหลังลบ)
