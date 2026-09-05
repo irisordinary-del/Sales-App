@@ -1336,6 +1336,13 @@
                                 class="w-16 border border-gray-200 rounded-lg px-2 py-1.5 text-sm font-bold text-center outline-none focus:ring-2 focus:ring-indigo-300">
                         </div>
                     </div>
+                </div>
+
+                <!-- ✅ FIX (2026-09-05): วันหยุดเป็นแนวคิดที่ผูกกับ "วันที่" ไม่ได้ผูกกับโหมด cycle เท่านั้น
+                     ย้ายออกมาจาก cal-cycle-section ให้ใช้ได้ทั้งโหมด cycle และ date (เดิมซ่อนไว้ในโหมด
+                     date ทำให้แก้ไม่ได้ + save() เขียนทับ calendarConfig ทั้งก้อนแบบไม่มี holidays เลย
+                     ทำให้วันหยุดที่เคยตั้งไว้หายถาวรทันทีที่สลับมาโหมด date แล้วกดบันทึก) -->
+                <div id="cal-holidays-section" class="space-y-3">
                     <div>
                         <label class="block text-xs font-bold text-gray-700 mb-2">วันหยุดประจำสัปดาห์ (ซ้ำทุกเดือนอัตโนมัติ ไม่ต้องมาร์คใหม่ทุกเดือน):</label>
                         <div id="cal-weekly-holiday-grid" class="grid grid-cols-7 gap-1"></div>
@@ -1621,6 +1628,10 @@
                 if (cfg && cfg.mode) {
                     CalendarAdmin._originalMode = cfg.mode;
                     CalendarAdmin.setMode(cfg.mode);
+                    // ✅ FIX (2026-09-05): โหลด holidays/weeklyHolidays ทุกโหมดที่รองรับ (cycle + date)
+                    // ไม่ใช่แค่ cycle เดิม — วันหยุดผูกกับ "วันที่" ไม่ได้ผูกกับโหมดใดโหมดหนึ่งเท่านั้น
+                    CalendarAdmin._holidays       = cfg.holidays       || [];
+                    CalendarAdmin._weeklyHolidays = cfg.weeklyHolidays || [];
                     if (cfg.mode === 'cycle') {
                         CalendarAdmin._anchorType    = cfg.anchorType || 'date';
                         CalendarAdmin._anchorWeekday = (cfg.anchorWeekday !== undefined) ? cfg.anchorWeekday : 1;
@@ -1633,8 +1644,6 @@
                         document.getElementById('cal-cycle-days').value     = cfg.cycleDays   || 24;
                         const rollingDateEl = document.getElementById('cal-anchor-rolling-date');
                         if (rollingDateEl) rollingDateEl.value = cfg.anchorDate || '';
-                        CalendarAdmin._holidays       = cfg.holidays       || [];
-                        CalendarAdmin._weeklyHolidays = cfg.weeklyHolidays || [];
                         CalendarAdmin.setAnchorType(CalendarAdmin._anchorType);
                     } else if (cfg.mode === 'fixed') {
                         const mapping = cfg.mapping || {};
@@ -1646,7 +1655,6 @@
                             .map(([day, wd]) => ({ day, weekday: wd }));
                         if (!CalendarAdmin._weekdayRows.length) CalendarAdmin._weekdayRows = CalendarAdmin._defaultWeekdayRows();
                     }
-                    // date mode ไม่ต้องโหลดอะไรเพิ่ม
                 } else {
                     // ✅ UX: ศูนย์ใหม่ยังไม่เคยตั้งค่า — ไม่ default เงียบๆ ให้เตือนเลือกเองก่อน
                     CalendarAdmin.setMode('date');
@@ -1706,17 +1714,20 @@
                 const cycleSec   = document.getElementById('cal-cycle-section');
                 const fixedSec   = document.getElementById('cal-fixed-section');
                 const weekdaySec = document.getElementById('cal-weekday-section');
+                // ✅ FIX (2026-09-05): วันหยุดใช้ได้ทั้งโหมด cycle และ date (ดูคอมเมนต์ตรง HTML)
+                const holidaysSec = document.getElementById('cal-holidays-section');
 
                 // reset
                 [cycleBtn, dateBtn, fixedBtn, weekdayBtn].forEach(b => { if (b) b.className = inactive; });
-                [cycleSec, fixedSec, weekdaySec].forEach(s => { if (s) s.classList.add('hidden'); });
+                [cycleSec, fixedSec, weekdaySec, holidaysSec].forEach(s => { if (s) s.classList.add('hidden'); });
 
                 if (mode === 'cycle') {
                     if (cycleBtn) cycleBtn.className = active;
                     if (cycleSec) cycleSec.classList.remove('hidden');
+                    if (holidaysSec) holidaysSec.classList.remove('hidden');
                 } else if (mode === 'date') {
                     if (dateBtn) dateBtn.className = active;
-                    // ไม่มี section พิเศษ
+                    if (holidaysSec) holidaysSec.classList.remove('hidden');
                 } else if (mode === 'fixed') {
                     if (fixedBtn) fixedBtn.className = active;
                     if (fixedSec) fixedSec.classList.remove('hidden');
@@ -1806,7 +1817,8 @@
                 for (let d = 1; d <= daysInMonth; d++) {
                     const label    = CalendarAdmin._computeDayLabel(d);
                     const isToday  = isCurMonth && now.getDate() === d;
-                    const isHol    = CalendarAdmin._mode === 'cycle' && (
+                    // ✅ FIX (2026-09-05): วันหยุดใช้ได้ทั้งโหมด cycle และ date (ดูคอมเมนต์เดียวกันที่ setMode/save)
+                    const isHol    = (CalendarAdmin._mode === 'cycle' || CalendarAdmin._mode === 'date') && (
                         (CalendarAdmin._holidays || []).includes(d) ||
                         (CalendarAdmin._weeklyHolidays || []).includes(new Date(y, m - 1, d).getDay())
                     );
@@ -2062,7 +2074,14 @@
                         };
                     }
                 } else if (CalendarAdmin._mode === 'date') {
-                    cfg = { mode: 'date' };
+                    // ✅ FIX (2026-09-05): เดิมเขียนแค่ { mode: 'date' } ตายตัว ทับ calendarConfig ทั้งก้อน
+                    // (save ใช้ mergeFields ระดับบนสุด ไม่ merge ลึก) ทำให้ holidays/weeklyHolidays ที่เคย
+                    // ตั้งไว้ (เช่นตอนอยู่โหมด cycle) หายถาวรทันทีที่สลับมาโหมดนี้แล้วกดบันทึก
+                    cfg = {
+                        mode:           'date',
+                        holidays:       [...CalendarAdmin._holidays].sort((a,b) => a-b),
+                        weeklyHolidays: [...CalendarAdmin._weeklyHolidays].sort((a,b) => a-b),
+                    };
                 } else if (CalendarAdmin._mode === 'weekday') {
                     // ✅ VALIDATION: กัน Day label ซ้ำ และกัน weekday เดียวกันถูกใช้ซ้ำหลาย Day
                     // เดิมไม่มีการเช็คเลย — ถ้าพิมพ์ผิดจนชื่อ Day ซ้ำกัน แถวหลังจะทับแถวแรกแบบเงียบๆ
