@@ -143,7 +143,8 @@ const SkuDist = {
                         <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
                     </svg>
                 </button>
-                <span class="text-base font-black text-indigo-400">Route<span class="text-white">Plan</span></span>
+                <button onclick="location.href='center-select.html'" title="กลับไปหน้าเลือกศูนย์"
+                    class="text-base font-black text-indigo-400 hover:opacity-75 transition">Route<span class="text-white">Plan</span></button>
             </div>
             <span class="text-xs text-gray-400 font-bold">🎯 ติดตามการกระจายสินค้า</span>
         </div>
