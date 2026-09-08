@@ -158,7 +158,13 @@ self.addEventListener('fetch', (event) => {
 /** Cache First: เปิดจาก cache ถ้ามี มิฉะนั้น network แล้ว cache ไว้ */
 async function cacheFirst(request, cacheName) {
     const cache    = await caches.open(cacheName);
-    const cached   = await cache.match(request);
+    // ✅ FIX: ต้อง ignoreSearch เพราะตอน precache ตอนติดตั้ง SW เก็บแค่ path เปล่าๆ
+    // (เช่น "/index.html" ไม่มี query) แต่หน้าเว็บจริงถูกเปิดพร้อม query string เสมอ
+    // (เช่น "/index.html?center=402") ถ้า match แบบเป๊ะรวม query ด้วย จะไม่เจอ cache เลย
+    // ต้อง fetch จาก network ทุกครั้งที่เปลี่ยนไปดูศูนย์ที่ยังไม่เคยโหลดในเซสชันนั้น —
+    // เน็ตกระตุกแป๊บเดียวก็พอจะ error แล้วโชว์หน้า "ไม่มีอินเทอร์เน็ต" ทั้งที่จริงๆ ออนไลน์อยู่
+    // (query string แค่บอก JS ว่าจะโหลดศูนย์ไหน ไม่ได้ทำให้ต้อง serve ไฟล์ HTML/JS คนละตัวกัน)
+    const cached   = await cache.match(request, { ignoreSearch: true });
     if (cached) return cached;
 
     try {
