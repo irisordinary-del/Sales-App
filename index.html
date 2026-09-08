@@ -339,6 +339,10 @@
                     📦 อัปโหลดพิกัด
                 </button>
                 <input type="file" id="bulkUpload" accept=".xlsx,.xls" class="hidden" onchange="FileManager.bulkImport(event)">
+                <!-- ✅ NEW: นำเข้าจากไฟล์บริษัท (Customer Master / RoutePlan Detail) — ศูนย์ใหม่หรืออัปเดตร้าน -->
+                <button onclick="MasterImportCtrl.open()" class="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 whitespace-nowrap transition" title="นำเข้าจากไฟล์ Customer Master / RoutePlan Detail ของบริษัท">
+                    📄 นำเข้า Master
+                </button>
                 <div class="flex-1"></div>
                 <!-- Plan Selector -->
                 <div class="flex items-center gap-1.5">
@@ -2442,6 +2446,110 @@
                 } catch(e) {
                     UI.hideLoader();
                     UI.showErrorToast('❌ บันทึกไม่สำเร็จ: ' + ErrorMsg.translate(e));
+                }
+            },
+        };
+    </script>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         📄 Master Import — นำเข้าจากไฟล์ SAP ของบริษัท (Customer Master /
+         RoutePlan Detail) — ตั้งศูนย์ใหม่ทั้งชุด หรืออัปเดตร้านใหม่/แก้ไขข้อมูล
+         จาก Master เพียงไฟล์เดียวโดยไม่แตะวัน/ชื่อตลาดเดิม
+         ═══════════════════════════════════════════════════════════════ -->
+    <div id="master-import-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden" style="max-height:90dvh;display:flex;flex-direction:column;">
+            <div class="p-5 border-b flex justify-between items-center bg-gray-50 flex-shrink-0">
+                <div>
+                    <h2 class="text-base font-black text-gray-900">📄 นำเข้าจากไฟล์บริษัท</h2>
+                    <p class="text-xs text-gray-500 mt-0.5">ไฟล์ Customer Master / RoutePlan Detail ที่โหลดจากระบบบริษัทได้เลย ไม่ต้องแก้ไขคอลัมน์เอง</p>
+                </div>
+                <button onclick="MasterImportCtrl.close()" class="w-8 h-8 rounded-full border border-gray-200 text-gray-400 hover:bg-gray-100 font-bold flex-shrink-0">✕</button>
+            </div>
+            <div class="p-5 overflow-y-auto flex-1">
+                <div class="flex gap-2 mb-4">
+                    <button id="mi-tab-full" onclick="MasterImportCtrl.setMode('full')" class="flex-1 py-2 rounded-lg text-xs font-bold transition">ตั้งศูนย์ใหม่ / จัดใหม่ทั้งชุด</button>
+                    <button id="mi-tab-masteronly" onclick="MasterImportCtrl.setMode('masterOnly')" class="flex-1 py-2 rounded-lg text-xs font-bold transition">อัปเดตจาก Master เท่านั้น</button>
+                </div>
+
+                <div id="mi-full-section">
+                    <p class="text-xs text-gray-500 mb-3">ใช้ตอนศูนย์ใหม่ยังไม่มีข้อมูลเลย หรือต้องการแทนที่วัน/ชื่อตลาดทั้งชุดด้วยข้อมูลล่าสุด — ระบบจับคู่ 2 ไฟล์ด้วยรหัสร้านค้าให้เอง (พิกัด/ที่อยู่มาจาก Master, วัน/ชื่อตลาดมาจาก RoutePlan Detail)</p>
+                    <label class="block text-xs font-bold text-gray-700 mb-1">1) ไฟล์ Customer Master</label>
+                    <input id="mi-master-file" type="file" accept=".xlsx,.xls" onchange="MasterImportCtrl.pickMaster(this)"
+                        class="w-full text-xs border border-gray-200 rounded-lg p-2 mb-3">
+                    <label class="block text-xs font-bold text-gray-700 mb-1">2) ไฟล์ RoutePlan Detail</label>
+                    <input id="mi-detail-file" type="file" accept=".xlsx,.xls" onchange="MasterImportCtrl.pickDetail(this)"
+                        class="w-full text-xs border border-gray-200 rounded-lg p-2">
+                </div>
+
+                <div id="mi-masteronly-section" class="hidden">
+                    <p class="text-xs text-gray-500 mb-3">ใช้ตอนข้อมูลในระบบครบอยู่แล้ว แค่มีร้านใหม่เพิ่มเข้ามา หรือแก้ไขข้อมูลร้านเดิม (เช่น เปลี่ยนชื่อร้าน/ย้ายเซลล์) — <b>จะไม่แตะวัน/ชื่อตลาดที่จัดไว้แล้วเลย</b> ร้านใหม่จะถูกเพิ่มแบบยังไม่มีวัน รอจัดสายทีหลัง (เช่น ผ่าน AI Route Builder)</p>
+                    <label class="block text-xs font-bold text-gray-700 mb-1">ไฟล์ Customer Master</label>
+                    <input id="mi-master-only-file" type="file" accept=".xlsx,.xls" onchange="MasterImportCtrl.pickMaster(this)"
+                        class="w-full text-xs border border-gray-200 rounded-lg p-2">
+                </div>
+            </div>
+            <div class="p-5 border-t flex gap-3 flex-shrink-0">
+                <button onclick="MasterImportCtrl.close()" class="flex-1 border border-gray-200 rounded-xl py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-50 transition">ยกเลิก</button>
+                <button onclick="MasterImportCtrl.run()" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl py-2.5 text-sm font-bold transition shadow-sm">🚀 เริ่มนำเข้า</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const MasterImportCtrl = {
+            _mode: 'full', // 'full' | 'masterOnly'
+            _masterFile: null,
+            _detailFile: null,
+
+            open: () => {
+                MasterImportCtrl._mode = 'full';
+                MasterImportCtrl._masterFile = null;
+                MasterImportCtrl._detailFile = null;
+                ['mi-master-file', 'mi-detail-file', 'mi-master-only-file'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) el.value = '';
+                });
+                MasterImportCtrl._render();
+                document.getElementById('master-import-modal').classList.remove('hidden');
+            },
+            close: () => document.getElementById('master-import-modal').classList.add('hidden'),
+
+            setMode: (mode) => {
+                MasterImportCtrl._mode = mode;
+                // ✅ บังคับเลือกไฟล์ใหม่ทุกครั้งที่สลับโหมด กันไฟล์เก่าจากอีกโหมดค้างอยู่แบบไม่รู้ตัว
+                MasterImportCtrl._masterFile = null;
+                MasterImportCtrl._detailFile = null;
+                ['mi-master-file', 'mi-detail-file', 'mi-master-only-file'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) el.value = '';
+                });
+                MasterImportCtrl._render();
+            },
+
+            _render: () => {
+                const isFull = MasterImportCtrl._mode === 'full';
+                const activeCls   = 'flex-1 py-2 rounded-lg text-xs font-bold transition bg-indigo-600 text-white';
+                const inactiveCls = 'flex-1 py-2 rounded-lg text-xs font-bold transition bg-gray-100 text-gray-500';
+                document.getElementById('mi-tab-full').className       = isFull ? activeCls : inactiveCls;
+                document.getElementById('mi-tab-masteronly').className = !isFull ? activeCls : inactiveCls;
+                document.getElementById('mi-full-section').classList.toggle('hidden', !isFull);
+                document.getElementById('mi-masteronly-section').classList.toggle('hidden', isFull);
+            },
+
+            pickMaster: (input) => { MasterImportCtrl._masterFile = input.files[0] || null; },
+            pickDetail: (input) => { MasterImportCtrl._detailFile = input.files[0] || null; },
+
+            run: () => {
+                if (MasterImportCtrl._mode === 'full') {
+                    if (!MasterImportCtrl._masterFile || !MasterImportCtrl._detailFile)
+                        return UI.showErrorToast('⚠️ กรุณาเลือกไฟล์ให้ครบทั้ง 2 ไฟล์');
+                    MasterImportCtrl.close();
+                    FileManager.importMasterDetail(MasterImportCtrl._masterFile, MasterImportCtrl._detailFile);
+                } else {
+                    if (!MasterImportCtrl._masterFile)
+                        return UI.showErrorToast('⚠️ กรุณาเลือกไฟล์ Customer Master ก่อน');
+                    MasterImportCtrl.close();
+                    FileManager.importMasterOnly(MasterImportCtrl._masterFile);
                 }
             },
         };
