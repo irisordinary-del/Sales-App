@@ -253,21 +253,135 @@ const CellSplitApp = {
     _result: null,
     _map: null,
 
+    // ── ภาพรวมพื้นที่ทั้งศูนย์ (ขั้น 1) ──
+    _overviewMap: null,
+    _overviewMarkers: {},        // { routeName: [L.CircleMarker, ...] }
+    _overviewStoresByRoute: {},  // { routeName: [store, ...] } เฉพาะร้านที่มีพิกัดจริง
+    _routeColors: {},            // { routeName: '#hex' }
+
     init: () => {
-        CellSplitApp._renderRouteChecklist();
+        CellSplitApp._renderOverview();
         CellSplitApp._showStep(1);
     },
 
-    _renderRouteChecklist: () => {
-        const el = document.getElementById('cellsplit-route-list');
-        if (!el) return;
-        const routes = (State.db.routeList || []).slice().sort((a, b) => a.localeCompare(b, 'th', { numeric: true }));
-        el.innerHTML = routes.map(r => `
-            <label class="flex items-center gap-2 py-1.5 px-2 hover:bg-gray-50 rounded cursor-pointer text-sm">
-                <input type="checkbox" value="${r}" class="cellsplit-route-chk w-4 h-4 accent-indigo-600">
-                <span>${r}</span>
-            </label>
-        `).join('') || '<p class="text-xs text-gray-400 p-2">ยังไม่มีสายในเดือนนี้</p>';
+    // ✅ NEW: แยกรหัสสาย (เช่น "402C01" → "C", "402V01" → "V") — รองรับรหัสอื่นๆ ที่ไม่ใช่แค่ C/V
+    // ด้วย โดยจับกลุ่มตัวอักษรที่ตามหลังตัวเลขนำหน้า (ถ้าไม่มีตัวเลขนำหน้าเลยก็ยังจับได้ปกติ)
+    _detectRoutePrefix: (name) => {
+        const m = String(name || '').match(/^\d*([A-Za-z]+)/);
+        return m ? m[1].toUpperCase() : 'อื่นๆ';
+    },
+
+    // ── ขั้น 1: โหลดร้านทุกสายในเดือนปัจจุบันมาวาดเป็นภาพรวม (1 สาย = 1 สี) ──
+    _renderOverview: async () => {
+        const routeList = (State.db.routeList || []).slice().sort((a, b) => a.localeCompare(b, 'th', { numeric: true }));
+
+        const colorOf = {};
+        routeList.forEach((r, i) => { colorOf[r] = Config.hexColors[i % Config.hexColors.length]; });
+        CellSplitApp._routeColors = colorOf;
+
+        // จัดกลุ่มตามรหัสสาย (C, V, อื่นๆ ตามที่เจอจริง)
+        const groups = {};
+        routeList.forEach(r => {
+            const prefix = CellSplitApp._detectRoutePrefix(r);
+            (groups[prefix] = groups[prefix] || []).push(r);
+        });
+
+        const el = document.getElementById('cellsplit-route-groups');
+        if (el) {
+            const order = Object.keys(groups).sort();
+            el.innerHTML = order.map(prefix => `
+                <div>
+                    <div class="text-[11px] font-black text-gray-400 uppercase tracking-wide mb-1 px-1">สาย ${prefix} (${groups[prefix].length})</div>
+                    ${groups[prefix].map(r => `
+                        <label class="flex items-center gap-2 py-1.5 px-2 hover:bg-gray-50 rounded cursor-pointer text-sm">
+                            <input type="checkbox" value="${r}" class="cellsplit-route-chk w-4 h-4 accent-indigo-600" onchange="CellSplitApp._onRouteToggle()">
+                            <span class="w-3 h-3 rounded-full shrink-0" style="background:${colorOf[r]}"></span>
+                            <span class="flex-1">${r}</span>
+                        </label>
+                    `).join('')}
+                </div>
+            `).join('') || '<p class="text-xs text-gray-400 p-2">ยังไม่มีสายในเดือนนี้</p>';
+        }
+
+        await CellSplitApp._renderOverviewMap();
+    },
+
+    // โหลด stores ของทุกสาย (ใช้ State.db.routes ที่มีอยู่แล้วก่อน ถ้าไม่มีค่อยดึงจาก Firestore)
+    // กรองเก็บเฉพาะร้านที่มีพิกัดจริง — ใช้แค่วาดภาพรวม ไม่เกี่ยวกับ validation ตอนกด "ดูตัวอย่างการแบ่ง"
+    _loadAllRouteStores: async () => {
+        const ym = App._currentPlanYM;
+        const routeList = State.db.routeList || [];
+        const result = {};
+        await Promise.all(routeList.map(async name => {
+            let stores = State.db.routes[name];
+            if (!Array.isArray(stores)) {
+                try {
+                    const doc = await App.planRoutesCol(ym).doc(name).get();
+                    stores = doc.exists ? (doc.data().stores || []) : [];
+                } catch (e) { stores = []; }
+            }
+            result[name] = stores.filter(s => typeof s.lat === 'number' && typeof s.lng === 'number' && !isNaN(s.lat) && !isNaN(s.lng));
+        }));
+        CellSplitApp._overviewStoresByRoute = result;
+    },
+
+    _renderOverviewMap: async () => {
+        if (!CellSplitApp._overviewMap) {
+            CellSplitApp._overviewMap = L.map('cellsplit-overview-map');
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(CellSplitApp._overviewMap);
+        }
+
+        UI.showLoader('กำลังโหลดภาพรวมพื้นที่...', '');
+        await CellSplitApp._loadAllRouteStores();
+        UI.hideLoader();
+
+        Object.values(CellSplitApp._overviewMarkers).flat().forEach(m => CellSplitApp._overviewMap.removeLayer(m));
+        CellSplitApp._overviewMarkers = {};
+
+        const colorOf = CellSplitApp._routeColors || {};
+        const allPts = [];
+        Object.entries(CellSplitApp._overviewStoresByRoute).forEach(([route, stores]) => {
+            const color = colorOf[route] || '#94a3b8';
+            CellSplitApp._overviewMarkers[route] = stores.map(s => {
+                const marker = L.circleMarker([s.lat, s.lng], { radius: 3, color, fillColor: color, fillOpacity: 0.75, weight: 1 })
+                    .addTo(CellSplitApp._overviewMap);
+                allPts.push([s.lat, s.lng]);
+                return marker;
+            });
+        });
+
+        // ✅ invalidateSize() ก่อน fitBounds() เสมอ กัน container ที่เพิ่งโผล่ถูก Leaflet measure ผิดขนาด
+        setTimeout(() => {
+            CellSplitApp._overviewMap.invalidateSize();
+            if (allPts.length) CellSplitApp._overviewMap.fitBounds(allPts, { padding: [20, 20] });
+        }, 50);
+    },
+
+    // ✅ NEW: ติ๊ก/ยกเลิกสาย → ไฮไลต์สายนั้นบนแผนที่ (เข้ม + มาอยู่บนสุด) สายอื่นจางลง แล้วซูมไปหาสาย
+    // ที่ติ๊กไว้ทั้งหมด — ถ้าไม่ได้ติ๊กสายไหนเลย กลับไปแสดงภาพรวมทั้งหมดตามปกติ
+    _onRouteToggle: () => {
+        if (!CellSplitApp._overviewMap) return;
+        const checked = Array.from(document.querySelectorAll('.cellsplit-route-chk:checked')).map(el => el.value);
+        const hasSelection = checked.length > 0;
+
+        Object.entries(CellSplitApp._overviewMarkers).forEach(([route, markers]) => {
+            const isSel = checked.includes(route);
+            markers.forEach(m => {
+                if (!hasSelection) {
+                    m.setStyle({ opacity: 1, fillOpacity: 0.75, weight: 1 });
+                } else if (isSel) {
+                    m.setStyle({ opacity: 1, fillOpacity: 0.9, weight: 2 });
+                    m.bringToFront();
+                } else {
+                    m.setStyle({ opacity: 0.25, fillOpacity: 0.15, weight: 1 });
+                }
+            });
+        });
+
+        const pts = [];
+        const sourceRoutes = hasSelection ? checked : Object.keys(CellSplitApp._overviewStoresByRoute);
+        sourceRoutes.forEach(route => (CellSplitApp._overviewStoresByRoute[route] || []).forEach(s => pts.push([s.lat, s.lng])));
+        if (pts.length) CellSplitApp._overviewMap.fitBounds(pts, { padding: [30, 30] });
     },
 
     _showStep: (n) => {
@@ -275,6 +389,10 @@ const CellSplitApp = {
             const el = document.getElementById('cellsplit-step' + i);
             if (el) el.classList.toggle('hidden', i !== n);
         });
+        // ✅ กลับมาขั้น 1 ต้อง invalidateSize แผนที่ภาพรวมใหม่ เผื่อ container ถูกซ่อนไปตอนอยู่ขั้น 2
+        if (n === 1 && CellSplitApp._overviewMap) {
+            setTimeout(() => CellSplitApp._overviewMap.invalidateSize(), 50);
+        }
     },
 
     // ── ขั้น 1 → 2: โหลดร้านจากสายที่เลือก แล้วรัน CellSplit.preview() ──
@@ -444,8 +562,7 @@ const CellSplitApp = {
             UI.hideLoader();
             UI.showSaveToast(`✅ แบ่งเซลล์สำเร็จ! สร้าง ${names.length} สายใหม่เรียบร้อย`);
             CellSplitApp._showStep(1);
-            CellSplitApp._renderRouteChecklist();
-            document.querySelectorAll('.cellsplit-route-chk').forEach(el => { el.checked = false; });
+            await CellSplitApp._renderOverview(); // รีเฟรชภาพรวม — สายต้นทางหายไป สายใหม่โผล่มาแทน
 
             if (typeof App.sync === 'function') App.sync();
         } catch (e) {

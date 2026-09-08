@@ -236,23 +236,32 @@
                 <span class="text-xs text-gray-500 font-bold">🗂️ แบ่งเซลล์</span>
             </div>
 
-            <div class="flex-1 overflow-y-auto p-4 bg-gray-50">
-
-                <!-- ── ขั้น 1: เลือกสายต้นทาง + จำนวนเซลล์ ── -->
-                <div id="cellsplit-step1" class="max-w-2xl mx-auto">
-                    <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-5">
-                        <h2 class="text-lg font-black text-gray-800 mb-1">🗂️ แบ่งเซลล์ใหม่</h2>
-                        <p class="text-xs text-gray-500 mb-4">
-                            เลือกสายที่มีร้านค้าอยู่แล้ว (เช่น สายที่เพิ่งอัปโหลดพิกัดร้านทั้งพื้นที่ไว้ ยังไม่กำหนดเซลล์ หรือสายที่เกินภาระ)
-                            ระบบจะแบ่งร้านทั้งหมดออกเป็นเซลล์ใหม่ตามจำนวนที่ระบุ — ไม่ข้ามจังหวัดเด็ดขาด พยายามไม่ข้ามอำเภอ
+            <!-- ── ขั้น 1: ภาพรวมพื้นที่ทั้งศูนย์ + เลือกสายต้นทาง + จำนวนเซลล์ ──
+                 เลย์เอาต์เดียวกับหน้า "วางแผนคิวงาน" — แผนที่เต็มพื้นที่ฝั่งซ้าย + panel ควบคุมฝั่งขวา -->
+            <div id="cellsplit-step1" class="flex-1 flex flex-col md:flex-row overflow-hidden">
+                <!-- Map Area -->
+                <div class="relative h-[45vh] md:h-full md:flex-1">
+                    <div id="cellsplit-overview-map" class="w-full h-full"></div>
+                </div>
+                <!-- Right Panel -->
+                <div class="flex-1 md:w-80 lg:w-96 md:flex-none bg-white shadow-[-5px_0_15px_rgba(0,0,0,0.05)] flex flex-col overflow-hidden z-10 border-t md:border-t-0 md:border-l border-gray-200">
+                    <div class="p-4 border-b border-gray-100 shrink-0">
+                        <h2 class="text-base font-black text-gray-800 mb-1">🗂️ แบ่งเซลล์ใหม่</h2>
+                        <p class="text-[11px] text-gray-500">
+                            ภาพรวมพื้นที่ทั้งหมดของศูนย์ (ตามแผนเดือนปัจจุบัน) แต่ละสายคนละสี — ติ๊กเลือกสายต้นทาง
+                            ที่ต้องการนำมาแบ่งใหม่ (เช่น สายที่เพิ่งอัปโหลดพิกัดร้านทั้งพื้นที่ไว้ ยังไม่กำหนดเซลล์
+                            หรือสายที่เกินภาระ) — ระบบจะแบ่งร้านทั้งหมดออกเป็นเซลล์ใหม่ตามจำนวนที่ระบุ ไม่ข้าม
+                            จังหวัดเด็ดขาด พยายามไม่ข้ามอำเภอ
                         </p>
-
-                        <label class="text-xs font-bold text-gray-600 mb-1.5 block">เลือกสายต้นทาง (เลือกได้หลายสาย)</label>
-                        <div id="cellsplit-route-list" class="border border-gray-200 rounded-xl max-h-48 overflow-y-auto mb-4 p-1"></div>
-
+                    </div>
+                    <div class="flex-1 overflow-y-auto p-4">
+                        <label class="text-xs font-bold text-gray-600 mb-1.5 block">เลือกสายต้นทาง (เลือกได้หลายสาย — ติ๊กเพื่อซูมดูสายนั้นบนแผนที่)</label>
+                        <div id="cellsplit-route-groups" class="space-y-3"></div>
+                    </div>
+                    <div class="p-4 border-t border-gray-100 shrink-0">
                         <label class="text-xs font-bold text-gray-600 mb-1.5 block">จำนวนเซลล์ที่ต้องการ (K)</label>
                         <input type="number" id="cellsplit-k" min="1" placeholder="เช่น 7" value="7"
-                            class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500 mb-4">
+                            class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500 mb-3">
 
                         <button onclick="CellSplitApp.run()"
                             class="w-full bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl py-2.5 text-sm font-bold transition shadow-sm">
@@ -260,9 +269,11 @@
                         </button>
                     </div>
                 </div>
+            </div>
 
-                <!-- ── ขั้น 2: Preview จังหวัด/อำเภอ + แผนที่ + ตั้งชื่อเซลล์ ── -->
-                <div id="cellsplit-step2" class="hidden max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <!-- ── ขั้น 2: Preview จังหวัด/อำเภอ + แผนที่ + ตั้งชื่อเซลล์ ── -->
+            <div id="cellsplit-step2" class="hidden flex-1 overflow-y-auto p-4 bg-gray-50">
+                <div class="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-4">
                     <div>
                         <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 mb-4">
                             <h3 class="text-sm font-black text-gray-800 mb-2">📍 การจัดสรรจังหวัด</h3>
