@@ -1004,6 +1004,9 @@ const App = {
                     });
                 }
 
+                // ✅ NEW: เติมชื่อตลาดที่ขาด (ก็อปจากร้านวันเดียวกันในไฟล์ ถ้าไม่มีเลยก็ generate จากตำบล/อำเภอ/จังหวัด)
+                FileManager._autoFillMarketNames(finalArray);
+
                 MapCtrl.clearAll();
                 State.stores = finalArray;
                 App.sync(); App.saveDB(); MapCtrl.fitToStores();

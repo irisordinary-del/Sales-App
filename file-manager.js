@@ -165,6 +165,9 @@ const FileManager = {
                 return UI.showErrorToast('⚠️ ไม่พบข้อมูลร้านค้า');
             }
 
+            // ✅ NEW: เติมชื่อตลาดที่ขาด (ไฟล์นี้ไม่มี days กำหนดแล้ว ใช้ dayOriginal จัดกลุ่มแทน)
+            FileManager._autoFillMarketNames(stores);
+
             // ✅ FIX BUG-02: save rawData เพื่อให้ ExcelIO.export() ใช้ได้
             // แปลง header: 'A' format → header name format
             const rawWithHeaders = rows.slice(1).map(row => ({
@@ -237,6 +240,9 @@ const FileManager = {
                 } catch (e) { console.warn('exportTemplate: โหลด override ไม่สำเร็จ', e); }
             }
             const [expYear, expMonth] = ym ? ym.split('_').map(Number) : [null, null];
+
+            // ✅ NEW: กันชื่อตลาดว่างหลุดออกไปในไฟล์ export (เช่น ร้านที่เพิ่มเองในแอดมิน ไม่เคยผ่าน import)
+            FileManager._autoFillMarketNames(State.stores);
 
             const exportData = State.stores.map(store => ({
                 'A': store.cy || '',
@@ -373,6 +379,9 @@ const FileManager = {
                 ? FileManager._dayColumnValue(store, routeCfgs[routeName], expYear, expMonth)
                 : (store.days?.length > 0 ? store.days[0] : (store.dayOriginal || ''));
 
+            // ✅ NEW: กันชื่อตลาดว่างหลุดออกไปในไฟล์ export ทุกสาย
+            routeKeys.forEach(routeName => FileManager._autoFillMarketNames(routes[routeName] || []));
+
             const wb = XLSX.utils.book_new();
             const allStores = [];
 
@@ -487,6 +496,68 @@ const FileManager = {
             console.error('❌ Export All error:', err);
             UI.showErrorToast('❌ Export ไม่สำเร็จ: ' + err.message);
         }
+    },
+
+    // ✅ NEW: เติม marketName อัตโนมัติให้ร้านที่ไม่มีชื่อตลาด (ช่องว่างในไฟล์ หรือไฟล์ไม่มีคอลัมน์นี้เลย)
+    // กรณี 1: มีร้านอื่นในสาย+วันเดียวกัน (route+day) ที่มีชื่อตลาดอยู่แล้ว → copy มาใช้เลย
+    // กรณี 2: ไม่มีใครในกลุ่มวันนั้นมีชื่อตลาดเลย → generate จาก
+    //   {salesCode} D{เลขวัน 2 หลัก} + ตำบล 2 อันดับที่มีร้านเยอะสุดในกลุ่ม + อำเภอ/จังหวัดที่มีร้านเยอะสุด
+    // (ตัด "ต./อ./จ." ออกก่อนเสมอ ให้ตรงกับ pattern ชื่อตลาดจริงที่ใช้อยู่)
+    _autoFillMarketNames: (stores) => {
+        // ข้อมูลจริงในระบบใช้ทั้งแบบย่อมีจุด ("ต.", "อ.", "จ.") และแบบเต็มคำ ("ตำบล", "อำเภอ",
+        // "จังหวัด") ปนกันไปตามไฟล์ต้นทาง — ต้องตัดทั้ง 2 แบบ ไม่งั้นชื่อตลาดจะโผล่คำนำหน้าไม่ตรงกัน
+        const stripPrefix = (v) => String(v || '').replace(/^(ตำบล|ต\.|อำเภอ|อ\.|จังหวัด|จ\.)\s*/, '').trim();
+        // ปกติจัดกลุ่มตาม s.days (เช่นจาก bulkImport/handleMapUpload ที่ผ่านการกำหนดวันแล้ว)
+        // แต่บาง import path (เช่น uploadRouteFile) ยังไม่กำหนด days เลย — fallback ไปใช้
+        // dayOriginal (ค่า Day/Cycle Name ดิบจากไฟล์) เป็น key จัดกลุ่มแทน
+        const dayKeysOf = (s) => (s.days && s.days.length > 0)
+            ? s.days
+            : (s.dayOriginal ? [String(s.dayOriginal).trim()] : []);
+
+        // จัดกลุ่มร้านตามวัน — ร้าน F2 อยู่ได้หลายกลุ่ม (นับทุกวันที่มันอยู่)
+        const byDay = {};
+        stores.forEach(s => {
+            dayKeysOf(s).forEach(d => {
+                if (!d) return;
+                if (!byDay[d]) byDay[d] = [];
+                byDay[d].push(s);
+            });
+        });
+
+        Object.entries(byDay).forEach(([day, group]) => {
+            const needFill = group.filter(s => !s.marketName || !s.marketName.trim());
+            if (needFill.length === 0) return;
+
+            // กรณี 1: มีร้านอื่นในกลุ่มวันนี้ที่มีชื่อตลาดอยู่แล้ว → copy
+            const existingName = group.find(s => s.marketName && s.marketName.trim());
+            if (existingName) {
+                needFill.forEach(s => { s.marketName = existingName.marketName; });
+                return;
+            }
+
+            // กรณี 2: ไม่มีใครในกลุ่มมีชื่อตลาดเลย → generate จากตำบล/อำเภอ/จังหวัดของสมาชิกกลุ่ม
+            // (นับความถี่ของแต่ละค่า เรียงมากไปน้อย — เท่ากันแล้วใช้ลำดับที่เจอก่อน)
+            const rankByFreq = (field) => {
+                const counts = {}, order = [];
+                group.forEach(s => {
+                    const v = stripPrefix(s[field]);
+                    if (!v) return;
+                    if (!(v in counts)) { counts[v] = 0; order.push(v); }
+                    counts[v]++;
+                });
+                return order.sort((a, b) => counts[b] - counts[a]);
+            };
+
+            const tambons  = rankByFreq('subDistrict').slice(0, 2);
+            const amphoe   = rankByFreq('district')[0]  || '';
+            const province = rankByFreq('province')[0]  || '';
+            const dayDigits = String(day).replace(/[^0-9]/g, '');
+            const dToken    = dayDigits ? 'D' + dayDigits.padStart(2, '0') : '';
+            const generated = [group[0].salesCode || '', dToken, ...tambons, amphoe, province]
+                .filter(Boolean).join(' ');
+
+            needFill.forEach(s => { s.marketName = generated; });
+        });
     },
 
     // ─── bulkImport: อัปโหลดทุกสายพร้อมกัน ─────────────────────────────
@@ -679,7 +750,10 @@ const FileManager = {
                         const wasInactive = s.inactive === true;
                         const updated = {
                             ...s,
-                            days:       inc.days       || s.days,
+                            // ✅ FIX: เดิมใช้ inc.days || s.days — แต่ [] (array ว่าง) เป็น truthy ใน JS
+                            // ทำให้ไฟล์ที่ไม่มีข้อมูลวัน/Cycle Name ของร้านนั้น (aDay ว่าง) เขียนทับ
+                            // ตารางวันจริงเดิมด้วยค่าว่างไปเลยโดยไม่ตั้งใจ — ต้องเช็ค length ก่อน
+                            days:       (inc.days && inc.days.length > 0) ? inc.days : s.days,
                             seqs:       (inc.seqs && Object.keys(inc.seqs).length > 0) ? inc.seqs : s.seqs,
                             marketName: inc.marketName || s.marketName,
                             lat:        inc.lat        || s.lat,
@@ -697,6 +771,7 @@ const FileManager = {
 
                     const newStores = incoming.filter(s => !existing.some(e => e.id === s.id));
                     State.db.routes[routeKey] = [...updatedExisting, ...newStores];
+                    FileManager._autoFillMarketNames(State.db.routes[routeKey]);
                     totalNew += newStores.length;
                     savedRoutes.push(routeKey);
                 }
