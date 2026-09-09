@@ -2509,6 +2509,7 @@
                 <div class="flex gap-2 mb-4">
                     <button id="mi-tab-full" onclick="MasterImportCtrl.setMode('full')" class="flex-1 py-2 rounded-lg text-xs font-bold transition">ตั้งศูนย์ใหม่ / จัดใหม่ทั้งชุด</button>
                     <button id="mi-tab-masteronly" onclick="MasterImportCtrl.setMode('masterOnly')" class="flex-1 py-2 rounded-lg text-xs font-bold transition">อัปเดตจาก Master เท่านั้น</button>
+                    <button id="mi-tab-salesroute" onclick="MasterImportCtrl.setMode('salesRoute')" class="flex-1 py-2 rounded-lg text-xs font-bold transition">ไฟล์เดียว (Sales Route)</button>
                 </div>
 
                 <div id="mi-full-section">
@@ -2527,6 +2528,13 @@
                     <input id="mi-master-only-file" type="file" accept=".xlsx,.xls" onchange="MasterImportCtrl.pickMaster(this)"
                         class="w-full text-xs border border-gray-200 rounded-lg p-2">
                 </div>
+
+                <div id="mi-salesroute-section" class="hidden">
+                    <p class="text-xs text-gray-500 mb-3">สำหรับไฟล์ที่รวมทุกอย่างไว้ในไฟล์เดียว (คอลัมน์ Sales Code, ชื่อตลาด, Customer Code, Customer Name, Cycle name, Province, Latitude, Longitude) — ใช้ตั้งศูนย์ใหม่/แทนที่ทั้งชุดเหมือนโหมด "ตั้งศูนย์ใหม่" แต่ไม่ต้องแยก 2 ไฟล์</p>
+                    <label class="block text-xs font-bold text-gray-700 mb-1">ไฟล์ Sales Route</label>
+                    <input id="mi-salesroute-file" type="file" accept=".xlsx,.xls" onchange="MasterImportCtrl.pickSalesRoute(this)"
+                        class="w-full text-xs border border-gray-200 rounded-lg p-2">
+                </div>
             </div>
             <div class="p-5 border-t flex gap-3 flex-shrink-0">
                 <button onclick="MasterImportCtrl.close()" class="flex-1 border border-gray-200 rounded-xl py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-50 transition">ยกเลิก</button>
@@ -2537,15 +2545,17 @@
 
     <script>
         const MasterImportCtrl = {
-            _mode: 'full', // 'full' | 'masterOnly'
+            _mode: 'full', // 'full' | 'masterOnly' | 'salesRoute'
             _masterFile: null,
             _detailFile: null,
+            _salesRouteFile: null,
 
             open: () => {
                 MasterImportCtrl._mode = 'full';
                 MasterImportCtrl._masterFile = null;
                 MasterImportCtrl._detailFile = null;
-                ['mi-master-file', 'mi-detail-file', 'mi-master-only-file'].forEach(id => {
+                MasterImportCtrl._salesRouteFile = null;
+                ['mi-master-file', 'mi-detail-file', 'mi-master-only-file', 'mi-salesroute-file'].forEach(id => {
                     const el = document.getElementById(id);
                     if (el) el.value = '';
                 });
@@ -2559,7 +2569,8 @@
                 // ✅ บังคับเลือกไฟล์ใหม่ทุกครั้งที่สลับโหมด กันไฟล์เก่าจากอีกโหมดค้างอยู่แบบไม่รู้ตัว
                 MasterImportCtrl._masterFile = null;
                 MasterImportCtrl._detailFile = null;
-                ['mi-master-file', 'mi-detail-file', 'mi-master-only-file'].forEach(id => {
+                MasterImportCtrl._salesRouteFile = null;
+                ['mi-master-file', 'mi-detail-file', 'mi-master-only-file', 'mi-salesroute-file'].forEach(id => {
                     const el = document.getElementById(id);
                     if (el) el.value = '';
                 });
@@ -2567,17 +2578,20 @@
             },
 
             _render: () => {
-                const isFull = MasterImportCtrl._mode === 'full';
+                const mode = MasterImportCtrl._mode;
                 const activeCls   = 'flex-1 py-2 rounded-lg text-xs font-bold transition bg-indigo-600 text-white';
                 const inactiveCls = 'flex-1 py-2 rounded-lg text-xs font-bold transition bg-gray-100 text-gray-500';
-                document.getElementById('mi-tab-full').className       = isFull ? activeCls : inactiveCls;
-                document.getElementById('mi-tab-masteronly').className = !isFull ? activeCls : inactiveCls;
-                document.getElementById('mi-full-section').classList.toggle('hidden', !isFull);
-                document.getElementById('mi-masteronly-section').classList.toggle('hidden', isFull);
+                document.getElementById('mi-tab-full').className       = mode === 'full'       ? activeCls : inactiveCls;
+                document.getElementById('mi-tab-masteronly').className = mode === 'masterOnly' ? activeCls : inactiveCls;
+                document.getElementById('mi-tab-salesroute').className = mode === 'salesRoute' ? activeCls : inactiveCls;
+                document.getElementById('mi-full-section').classList.toggle('hidden', mode !== 'full');
+                document.getElementById('mi-masteronly-section').classList.toggle('hidden', mode !== 'masterOnly');
+                document.getElementById('mi-salesroute-section').classList.toggle('hidden', mode !== 'salesRoute');
             },
 
             pickMaster: (input) => { MasterImportCtrl._masterFile = input.files[0] || null; },
             pickDetail: (input) => { MasterImportCtrl._detailFile = input.files[0] || null; },
+            pickSalesRoute: (input) => { MasterImportCtrl._salesRouteFile = input.files[0] || null; },
 
             run: () => {
                 if (MasterImportCtrl._mode === 'full') {
@@ -2585,11 +2599,16 @@
                         return UI.showErrorToast('⚠️ กรุณาเลือกไฟล์ให้ครบทั้ง 2 ไฟล์');
                     MasterImportCtrl.close();
                     FileManager.importMasterDetail(MasterImportCtrl._masterFile, MasterImportCtrl._detailFile);
-                } else {
+                } else if (MasterImportCtrl._mode === 'masterOnly') {
                     if (!MasterImportCtrl._masterFile)
                         return UI.showErrorToast('⚠️ กรุณาเลือกไฟล์ Customer Master ก่อน');
                     MasterImportCtrl.close();
                     FileManager.importMasterOnly(MasterImportCtrl._masterFile);
+                } else {
+                    if (!MasterImportCtrl._salesRouteFile)
+                        return UI.showErrorToast('⚠️ กรุณาเลือกไฟล์ Sales Route ก่อน');
+                    MasterImportCtrl.close();
+                    FileManager.importSalesRouteFile(MasterImportCtrl._salesRouteFile);
                 }
             },
         };

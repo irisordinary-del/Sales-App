@@ -111,6 +111,23 @@ const FileManager = {
         return label || (store.dayOriginal || '');
     },
 
+    // ✅ NEW: เรียงร้านสำหรับ export ตามลำดับ Day (จากเลขใน "Day N" ไม่ใช่วันที่ปฏิทินที่โชว์
+    // ในคอลัมน์ Day เพราะบางโหมดปฏิทินแปลงเป็นวันที่จริงไปแล้ว ต้องอิงเลข cycle เดิมเสมอ)
+    // แล้วตามด้วยลำดับที่จัดไว้ในวันนั้น (seqs) — คืน array ใหม่ ไม่แก้ของเดิม
+    _sortStoresForExport: (stores) => {
+        const dayNumOf = (s) => {
+            const label = (s.days && s.days[0]) ? s.days[0] : (s.dayOriginal || '');
+            const m = String(label).match(/(\d+)/);
+            return m ? parseInt(m[1]) : Infinity;
+        };
+        const seqNumOf = (s) => {
+            const day = (s.days && s.days[0]) ? s.days[0] : null;
+            const v = day && s.seqs ? s.seqs[day] : undefined;
+            return (typeof v === 'number' && !isNaN(v)) ? v : Infinity;
+        };
+        return stores.slice().sort((a, b) => dayNumOf(a) - dayNumOf(b) || seqNumOf(a) - seqNumOf(b));
+    },
+
     // ─── uploadRouteFile: Single-route upload ────────────────────────────
     uploadRouteFile: async (file) => {
         try {
@@ -244,7 +261,11 @@ const FileManager = {
             // ✅ NEW: กันชื่อตลาดว่างหลุดออกไปในไฟล์ export (เช่น ร้านที่เพิ่มเองในแอดมิน ไม่เคยผ่าน import)
             FileManager._autoFillMarketNames(State.stores);
 
-            const exportData = State.stores.map(store => ({
+            // ✅ NEW: เรียงตามวัน (Day) แล้วตามด้วยลำดับที่จัดไว้ในวันนั้น — เดิม export ตามลำดับ
+            // ในอาเรย์ดิบ (เช่น ลำดับ import) ทำให้ไฟล์ที่ได้ไม่เรียงตามคิวจริงที่เซลจะวิ่ง
+            const sortedStores = FileManager._sortStoresForExport(State.stores);
+
+            const exportData = sortedStores.map(store => ({
                 'A': store.cy || '',
                 'B': store.code || store.id,
                 'C': store.name,
@@ -353,6 +374,10 @@ const FileManager = {
             if (routeKeys.length === 0)
                 return UI.showErrorToast('⚠️ ไม่มีข้อมูลสายวิ่งในระบบ');
 
+            // ✅ NEW: เรียงสายตามชื่อ (เช่น 402C01, 402C02, 402V01, ... ) — เดิมเรียงตามลำดับที่
+            // Object.keys() คืนมา (ไม่รับประกันลำดับ) ทำให้ชีท "ทุกสาย" สลับสายมั่วไม่เป็นระเบียบ
+            routeKeys.sort((a, b) => a.localeCompare(b, 'th', { numeric: true }));
+
             UI.showLoader('💾 กำลังรวมข้อมูลทุกสาย...', `รวม ${routeKeys.length} สาย เดือน ${planLabel}`);
 
             // ✅ NEW: โหลด override เฉพาะสาย (ถ้ามี) ของทุกสายที่จะ export — ใช้คำนวณวันที่จริง
@@ -386,8 +411,9 @@ const FileManager = {
             const allStores = [];
 
             routeKeys.forEach(routeName => {
-                (routes[routeName] || []).forEach(store => {
-                    if (store.inactive) return; // ✅ ข้าม inactive
+                // ✅ NEW: เรียงตามวัน+ลำดับก่อน push — เดิม push ตามลำดับในอาเรย์ดิบ (เช่น ลำดับ
+                // import) ทำให้ชีท "ทุกสาย" ไม่ได้เรียงตามคิววิ่งจริงของแต่ละสาย
+                FileManager._sortStoresForExport((routes[routeName] || []).filter(s => !s.inactive)).forEach(store => {
                     allStores.push({
                         'A': routeName,
                         'B': store.code || store.id,
@@ -435,7 +461,7 @@ const FileManager = {
 
             // Sheet ต่อสาย
             routeKeys.forEach(routeName => {
-                const stores = (routes[routeName] || []).filter(s => !s.inactive);
+                const stores = FileManager._sortStoresForExport((routes[routeName] || []).filter(s => !s.inactive));
                 if (!stores.length) return;
 
                 const exportData = stores.map(store => ({
@@ -1017,6 +1043,86 @@ const FileManager = {
                 UI.showErrorToast('❌ อัปเดตไม่สำเร็จ: ' + err.message);
             }
         };
+        reader.readAsArrayBuffer(file);
+    },
+
+    // ══════════════════════════════════════════════════════════════════
+    // ✅ NEW: นำเข้าจากไฟล์ "Sales Route" ไฟล์เดียว — คนละ schema กับ Customer
+    // Master + RoutePlan Detail (บาง Sub-center ส่งออกมาเป็นไฟล์เดียวรวมทุกอย่าง
+    // แทนที่จะแยก 2 ไฟล์) หัวคอลัมน์: "Sales Code","ชื่อตลาด","CYCodeNew",
+    // "Customer Code","Customer Name","Day","Cycle name","Province","Latitude","Longitude"
+    // หมายเหตุ: คอลัมน์ "Day" ในไฟล์นี้คือวันที่ปฏิทินจริงของรอบนั้น (Excel serial) ไม่ใช่เลขรอบ
+    // — ไม่ใช้เลย ใช้ "Cycle name" (เช่น "D01") แกะเลขรอบแทนเหมือน _parseSapRoutePlanDetail
+    // ไม่มีคอลัมน์ตำบล/อำเภอในไฟล์นี้ เก็บได้แค่ province ส่วน "ชื่อตลาด" มีมาให้ครบทุกแถวอยู่แล้ว
+    // ใช้ตรงๆ ไม่ต้อง generate ใหม่
+    // ══════════════════════════════════════════════════════════════════
+    _parseSalesRouteFile: (rows) => {
+        const hIdx = FileManager._findHeaderRowIndex(rows, 'Customer Code');
+        if (hIdx === -1) return null;
+        const h = rows[hIdx];
+        const idx = (name) => h.indexOf(name);
+        const byRoute = {};
+        for (let r = hIdx + 1; r < rows.length; r++) {
+            const row = rows[r];
+            if (!row) continue;
+            const code = row[idx('Customer Code')] ? String(row[idx('Customer Code')]).trim() : '';
+            if (!code) continue;
+            const routeKey = row[idx('Sales Code')] ? String(row[idx('Sales Code')]).trim() : '';
+            if (!routeKey) continue;
+            const lat = parseFloat(String(row[idx('Latitude')]  || '').replace(/[^0-9.-]/g, ''));
+            const lng = parseFloat(String(row[idx('Longitude')] || '').replace(/[^0-9.-]/g, ''));
+            if (isNaN(lat) || isNaN(lng)) continue;
+            const cycleName = row[idx('Cycle name')] ? String(row[idx('Cycle name')]).trim() : '';
+            const dMatch = cycleName.match(/D(\d+)/i);
+            if (!dMatch) continue; // ไม่รู้ว่าเป็นวันไหน ข้ามแถวนี้ไปเลย
+            const aDay = 'Day ' + parseInt(dMatch[1]);
+
+            if (!byRoute[routeKey]) byRoute[routeKey] = {};
+            if (byRoute[routeKey][code]) {
+                // ร้านเดิมในกลุ่มนี้แล้ว — ถ้าเป็นวันใหม่ (ยังไม่มีในลิสต์) คือร้าน F2 (เยี่ยม 2 รอบ)
+                // ถ้าเป็นวันเดิมซ้ำ คือแถวซ้ำเป๊ะในไฟล์ต้นทาง ข้ามไปเฉยๆ ไม่ต้องทำอะไรเพิ่ม
+                const existing = byRoute[routeKey][code];
+                if (!existing.days.includes(aDay)) {
+                    existing.days.push(aDay);
+                    existing.freq = 2;
+                }
+            } else {
+                byRoute[routeKey][code] = {
+                    id: code, code,
+                    name: row[idx('Customer Name')] ? String(row[idx('Customer Name')]).trim() : ('Store_' + code),
+                    lat, lng, freq: 1, days: [aDay], seqs: {}, selected: false,
+                    salesCode: routeKey, shopType: '',
+                    subDistrict: '', district: '',
+                    province: row[idx('Province')] ? String(row[idx('Province')]).trim() : '',
+                    marketName: row[idx('ชื่อตลาด')] ? String(row[idx('ชื่อตลาด')]).trim() : '',
+                    cy: row[idx('CYCodeNew')] ? String(row[idx('CYCodeNew')]).trim() : '',
+                    dayOriginal: cycleName,
+                };
+            }
+        }
+        return byRoute;
+    },
+
+    importSalesRouteFile: (file) => {
+        if (!file) return;
+        if (file.size > 20 * 1024 * 1024) return UI.showErrorToast('⚠️ ไฟล์ใหญ่เกิน 20MB');
+
+        UI.showLoader('📄 กำลังอ่านไฟล์...', file.name);
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+            try {
+                const wb   = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+                const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' });
+                const byRoute = FileManager._parseSalesRouteFile(rows);
+                if (!byRoute) { UI.hideLoader(); return UI.showErrorToast('⚠️ ไม่พบคอลัมน์ "Customer Code" ในไฟล์ — เลือกไฟล์ถูกไหมครับ?'); }
+                await FileManager._commitByRouteImport(byRoute, 'นำเข้าไฟล์ Sales Route');
+            } catch (err) {
+                UI.hideLoader();
+                console.error('importSalesRouteFile error:', err);
+                UI.showErrorToast('❌ นำเข้าไม่สำเร็จ: ' + err.message);
+            }
+        };
+        reader.onerror = () => { UI.hideLoader(); UI.showErrorToast('❌ อ่านไฟล์ไม่สำเร็จ'); };
         reader.readAsArrayBuffer(file);
     },
 
