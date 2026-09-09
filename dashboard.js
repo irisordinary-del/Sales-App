@@ -69,6 +69,20 @@ const Dashboard = {
     // ── ยกเว้น brand ที่ไม่นับในยอดหลัก ──────────────────────────────────
     EXCLUDED_BRANDS: new Set(['อื่นๆ', 'กระเช้าของขวัญ']),
 
+    // ─── Icon set (inline SVG, no external deps) — calmer replacement for emoji in the dashboard chrome ───
+    _ICONS: {
+        chart:    (c='') => `<svg class="${c}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg>`,
+        calendar: (c='') => `<svg class="${c}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>`,
+        upload:   (c='') => `<svg class="${c}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>`,
+        target:   (c='') => `<svg class="${c}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.3" fill="currentColor" stroke="none"/></svg>`,
+        store:    (c='') => `<svg class="${c}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9.5 4 4h16l1 5.5"/><path d="M4 9.5V19a1 1 0 0 0 1 1h5v-6h4v6h5a1 1 0 0 0 1-1V9.5"/><line x1="3" y1="9.5" x2="21" y2="9.5"/></svg>`,
+        box:      (c='') => `<svg class="${c}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8 12 3 3 8l9 5 9-5Z"/><path d="M3 8v8l9 5 9-5V8"/><line x1="12" y1="13" x2="12" y2="21"/></svg>`,
+        compare:  (c='') => `<svg class="${c}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3 4 7l4 4"/><path d="M4 7h16"/><path d="M16 21l4-4-4-4"/><path d="M20 17H4"/></svg>`,
+        list:     (c='') => `<svg class="${c}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>`,
+        tag:      (c='') => `<svg class="${c}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41 11 3.83A2 2 0 0 0 9.59 3.24L4 3a1 1 0 0 0-1 1l.24 5.59a2 2 0 0 0 .59 1.41l9.58 9.58a2 2 0 0 0 2.83 0l4.35-4.35a2 2 0 0 0 0-2.83Z"/><circle cx="7.5" cy="7.5" r="1" fill="currentColor" stroke="none"/></svg>`,
+        coin:     (c='') => `<svg class="${c}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.3 15c.3 1 1.3 1.7 2.7 1.7 1.7 0 2.8-.8 2.8-2s-1.1-1.7-2.8-2-2.8-.8-2.8-2 1.1-2 2.8-2c1.4 0 2.4.7 2.7 1.7"/><line x1="12" y1="6.3" x2="12" y2="7.7"/><line x1="12" y1="16.3" x2="12" y2="17.7"/></svg>`,
+    },
+
     // ยอดขาย / SKU เฉลี่ยต่อร้าน แยก V-route และ C-route
     // outlet = custCode ที่มียอดในเดือน
     _calcOutletMetrics: (rows, useMainOnly = true) => {
@@ -139,7 +153,7 @@ const Dashboard = {
 
         container.innerHTML = `
         <!-- Header: ชื่อระบบ + ศูนย์ -->
-        <div class="h-12 bg-gray-900 text-white flex items-center justify-between px-3 md:px-4 shadow-md shrink-0 border-b-2 border-emerald-600 z-10">
+        <div class="h-12 bg-gray-900 text-white flex items-center justify-between px-3 md:px-4 shadow-md shrink-0 border-b border-slate-800 z-10">
             <div class="flex items-center gap-3">
                 <button type="button" onclick="SidebarCtrl.toggle()" class="w-8 h-8 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white flex items-center justify-center transition shrink-0" title="เมนู">
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
@@ -150,37 +164,44 @@ const Dashboard = {
                     class="text-base font-black text-indigo-400 tracking-wide hover:opacity-75 transition">Route<span class="text-white">Plan</span></button>
                 <span id="header-center-label-db" class="text-xs text-gray-400 font-bold hidden sm:block"></span>
             </div>
-            <span class="text-xs text-gray-500 font-bold">📊 Dashboard</span>
+            <span class="text-xs text-gray-500 font-bold flex items-center gap-1.5">${Dashboard._ICONS.chart('w-3.5 h-3.5')}Dashboard</span>
         </div>
 
-        <!-- Filter bar -->
-        <div class="bg-white border-b border-gray-200 px-3 py-2 flex flex-wrap items-center gap-2 shrink-0 shadow-sm z-[9]">
+        <!-- Toolbar -->
+        <div class="bg-white border-b border-gray-200 px-3 md:px-4 py-2.5 flex flex-wrap items-center gap-2.5 shrink-0 shadow-sm z-[9]">
+            <!-- Page context -->
+            <div class="flex items-center gap-1.5 text-slate-500 text-xs font-extrabold pr-1 shrink-0">
+                ${Dashboard._ICONS.chart('w-4 h-4')}
+                <span class="hidden sm:inline">สรุปยอดขาย</span>
+            </div>
+
             <!-- Month selector -->
             <select id="db-month-select" onchange="Dashboard._onMonthChange(this.value)"
-                class="bg-gray-50 border border-gray-200 text-gray-800 text-sm font-bold rounded-lg px-3 py-1.5 outline-none focus:ring-2 focus:ring-emerald-400">
+                class="bg-gray-50 border border-gray-200 text-gray-800 text-sm font-bold rounded-lg px-3 py-1.5 outline-none focus:ring-2 focus:ring-indigo-300">
                 <option value="">-- เลือกเดือน --</option>
             </select>
 
             <!-- ✅ Toggle: รายเดือน / รวมทุกเดือน -->
-            <div id="db-view-toggle" class="flex bg-gray-100 rounded-lg border border-gray-200 overflow-hidden">
-                <button class="db-view-btn px-3 py-1.5 text-xs font-bold transition bg-emerald-600 text-white" data-mode="month"
-                    onclick="Dashboard.setViewMode('month')">📅 รายเดือน</button>
-                <button class="db-view-btn px-3 py-1.5 text-xs font-bold transition text-gray-500 hover:text-gray-800" data-mode="all"
-                    onclick="Dashboard.setViewMode('all')">📊 รวมทุกเดือน</button>
+            <div id="db-view-toggle" class="db-pill-group">
+                <button class="db-pill-btn active" data-mode="month"
+                    onclick="Dashboard.setViewMode('month')">${Dashboard._ICONS.calendar('w-3.5 h-3.5')}<span>รายเดือน</span></button>
+                <button class="db-pill-btn" data-mode="all"
+                    onclick="Dashboard.setViewMode('all')">${Dashboard._ICONS.chart('w-3.5 h-3.5')}<span>รวมทุกเดือน</span></button>
             </div>
 
             <!-- Amount mode toggle -->
-            <div class="flex bg-gray-100 rounded-lg border border-gray-200 overflow-hidden">
+            <div class="db-pill-group">
                 <button id="db-btn-gross" onclick="Dashboard._setAmountMode('gross')"
-                    class="px-3 py-1.5 text-xs font-bold transition bg-emerald-600 text-white">Gross</button>
+                    class="db-pill-btn active">Gross</button>
                 <button id="db-btn-net" onclick="Dashboard._setAmountMode('net')"
-                    class="px-3 py-1.5 text-xs font-bold transition text-gray-500 hover:text-gray-800">Net</button>
+                    class="db-pill-btn">Net</button>
             </div>
 
-            <!-- Upload button (admin/supervisor only) -->
+            <!-- Upload (secondary action, admin/supervisor only) -->
             ${isAdmin ? `
-            <label class="cursor-pointer bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition shadow-sm">
-                📂 อัปโหลด Sellout
+            <label class="db-upload-btn">
+                ${Dashboard._ICONS.upload('w-3.5 h-3.5')}
+                <span>อัปโหลด Sellout</span>
                 <input type="file" id="db-file-input" accept=".xlsx,.xls" class="hidden" onchange="Dashboard._onFileUpload(event)">
             </label>
             ` : ''}
@@ -206,18 +227,18 @@ const Dashboard = {
         <div class="flex-1 overflow-y-auto bg-slate-50 p-4 space-y-4" id="db-content">
 
             <!-- KPI Cards row -->
-            <div id="db-kpi-row" class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3"></div>
+            <div id="db-kpi-row" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3"></div>
 
             <!-- Active Campaign Coverage (โหลดจาก SkuDist) -->
             <div id="db-campaign-section" class="hidden"></div>
 
             <!-- Middle row: By-Route table + ShopType -->
-            <div class="grid grid-cols-1 lg:grid-cols-5 gap-4">
+            <div class="grid grid-cols-1 lg:grid-cols-10 gap-4">
                 <!-- Route table -->
-                <div class="lg:col-span-3 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden" id="db-route-panel">
+                <div class="lg:col-span-7 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden" id="db-route-panel">
                     <div class="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gray-50">
-                        <span class="text-sm font-black text-gray-700">📋 รายสาย</span>
-                        ${isAdmin ? `<button onclick="Dashboard._openTargetModal()" class="text-xs bg-amber-100 hover:bg-amber-200 text-amber-800 px-3 py-1 rounded-lg font-bold transition">🎯 ตั้ง Target</button>` : ''}
+                        <span class="db-panel-title"><span class="db-kpi-icon">${Dashboard._ICONS.list('w-3.5 h-3.5')}</span>รายสาย</span>
+                        ${isAdmin ? `<button onclick="Dashboard._openTargetModal()" class="db-action-btn">${Dashboard._ICONS.target('w-3.5 h-3.5')}<span>ตั้ง Target</span></button>` : ''}
                     </div>
                     <div class="overflow-x-auto">
                         <table class="w-full text-sm" id="db-route-table">
@@ -241,9 +262,9 @@ const Dashboard = {
                 </div>
 
                 <!-- ShopType bars -->
-                <div class="lg:col-span-2 bg-white rounded-2xl shadow-sm border border-gray-100" id="db-shoptype-panel">
+                <div class="lg:col-span-3 bg-white rounded-2xl shadow-sm border border-gray-100" id="db-shoptype-panel">
                     <div class="px-4 py-3 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
-                        <span class="text-sm font-black text-gray-700">🏪 ประเภทร้าน</span>
+                        <span class="db-panel-title"><span class="db-kpi-icon">${Dashboard._ICONS.store('w-3.5 h-3.5')}</span>ประเภทร้าน</span>
                         <span class="text-xs text-gray-400" id="db-shoptype-hint">กดเพื่อกรอง</span>
                     </div>
                     <div class="p-4 space-y-2.5" id="db-shoptype-body">
@@ -253,7 +274,7 @@ const Dashboard = {
             </div>
             <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
                 <div class="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gray-50">
-                    <span class="text-sm font-black text-gray-700">🏷️ Brand Breakdown</span>
+                    <span class="db-panel-title"><span class="db-kpi-icon">${Dashboard._ICONS.tag('w-3.5 h-3.5')}</span>Brand Breakdown</span>
                     <span class="text-xs text-gray-400">แยกตาม Brand</span>
                 </div>
                 <div class="p-4" id="db-category-body">
@@ -389,11 +410,8 @@ const Dashboard = {
     },
 
     _updateViewToggleUI: () => {
-        document.querySelectorAll('#db-view-toggle .db-view-btn').forEach(b => {
-            const active = b.dataset.mode === Dashboard._viewMode;
-            b.classList.toggle('bg-emerald-600', active);
-            b.classList.toggle('text-white', active);
-            b.classList.toggle('text-gray-500', !active);
+        document.querySelectorAll('#db-view-toggle .db-pill-btn').forEach(b => {
+            b.classList.toggle('active', b.dataset.mode === Dashboard._viewMode);
         });
     },
 
@@ -843,8 +861,8 @@ const Dashboard = {
 
     _setAmountMode: (mode) => {
         Dashboard._amountMode = mode;
-        document.getElementById('db-btn-gross').className = `px-3 py-1.5 text-xs font-bold transition ${mode==='gross' ? 'bg-emerald-700 text-white' : 'text-gray-400'}`;
-        document.getElementById('db-btn-net').className   = `px-3 py-1.5 text-xs font-bold transition ${mode==='net'   ? 'bg-emerald-700 text-white' : 'text-gray-400'}`;
+        document.getElementById('db-btn-gross').classList.toggle('active', mode === 'gross');
+        document.getElementById('db-btn-net').classList.toggle('active', mode === 'net');
         Dashboard._render();
     },
 
@@ -916,33 +934,74 @@ const Dashboard = {
         const modeLabel = Dashboard._amountMode === 'gross' ? 'Gross' : 'Net';
 
         const fmtFull = (n) => Math.round(n || 0).toLocaleString('th-TH');
-        const volVsub = outletM.v.outletCount > 0
-            ? `V: ${fmtFull(outletM.v.avgVol)} (${outletM.v.outletCount} ร้าน)`
-            : 'ไม่มีสาย V';
-        const volCsub = outletM.c.outletCount > 0
-            ? `C: ${fmtFull(outletM.c.avgVol)} (${outletM.c.outletCount} ร้าน)`
-            : 'ไม่มีสาย C';
 
-        el.innerHTML = [
-            { icon:'💰', label: `ยอด ${modeLabel} (หลัก)`, val: Dashboard._fmt(total), sub: '', color:'emerald' },
-            { icon:'🎯', label: 'MTD vs Target', val: pct !== null ? Dashboard._pctBadge(pct) : '—', sub: targetAmt > 0 ? `Target: ${Dashboard._fmt(targetAmt)}` : 'ยังไม่ตั้ง Target', color:'amber', raw:true },
-            { icon:'🏪', label: 'ร้านค้าทั้งหมด', val: outletM.outletCount.toLocaleString(), sub:'ร้านที่มียอด', color:'blue' },
-            { icon:'📦', label: 'SKU เฉลี่ย/ร้าน', val: Dashboard._fmtSku(outletM.avgSku),
-              sub: Dashboard._skuWhitelist ? `กรอง ${Dashboard._skuWhitelist.size} SKU · <span style="color:#6366f1;cursor:pointer;font-weight:800;" onclick="Dashboard.openSkuWhitelistModal()">⚙️ แก้ไข</span>` : `ทุก SKU · <span style="color:#6366f1;cursor:pointer;font-weight:800;" onclick="Dashboard.openSkuWhitelistModal()">⚙️ ตั้งค่า</span>`,
-              color:'cyan', rawSub: true },
-            { icon:'🚐', label: 'ยอด/ร้าน สาย V', val: fmtFull(outletM.v.avgVol), sub: volVsub, color:'pink' },
-            { icon:'🏪', label: 'ยอด/ร้าน สาย C', val: fmtFull(outletM.c.avgVol), sub: volCsub, color:'orange' },
-            { icon:'📄', label: 'Invoice', val: invCount.toLocaleString(), sub:'ใบ', color:'violet' },
-        ].map(k => `
-            <div class="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
-                <div class="flex items-center gap-2 mb-1.5">
-                    <span class="text-xl">${k.icon}</span>
-                    <span class="text-xs font-bold text-gray-500 uppercase tracking-wide">${k.label}</span>
+        // Revenue progress indicator — semantic color only (green/amber/red), neutral otherwise
+        const progressPct   = pct !== null ? Math.max(0, Math.min(100, pct)) : 0;
+        const progressColor = pct === null ? 'bg-slate-200' : pct >= 100 ? 'bg-emerald-500' : pct >= 80 ? 'bg-amber-500' : 'bg-red-500';
+
+        const skuIcon = Dashboard._ICONS.box('w-4 h-4');
+        const skuSettingsLink = Dashboard._skuWhitelist
+            ? `กรอง ${Dashboard._skuWhitelist.size} SKU · <span class="db-kpi-link" onclick="Dashboard.openSkuWhitelistModal()">แก้ไข</span>`
+            : `ทุก SKU · <span class="db-kpi-link" onclick="Dashboard.openSkuWhitelistModal()">ตั้งค่า</span>`;
+
+        el.innerHTML = `
+            <div class="db-kpi-card">
+                <div class="db-kpi-card-head">
+                    <span class="db-kpi-icon">${Dashboard._ICONS.coin('w-4 h-4')}</span>
+                    <span class="db-kpi-label">ยอด ${modeLabel} (หลัก)</span>
                 </div>
-                <div class="text-2xl font-black text-gray-800">${k.raw ? k.val : k.val}</div>
-                ${k.sub ? `<div class="text-xs text-gray-400 mt-0.5">${k.rawSub ? k.sub : k.sub}</div>` : ''}
+                <div class="db-kpi-value">${Dashboard._fmt(total)}</div>
+                <div class="flex items-center justify-between text-[11px] text-gray-400">
+                    <span>${targetAmt > 0 ? `Target ${Dashboard._fmt(targetAmt)}` : 'ยังไม่ตั้ง Target'}</span>
+                    ${pct !== null ? Dashboard._pctBadge(pct) : '<span class="text-gray-300">—</span>'}
+                </div>
+                <div class="db-progress-track"><div class="db-progress-fill ${progressColor}" style="width:${progressPct}%"></div></div>
             </div>
-        `).join('');
+
+            <div class="db-kpi-card">
+                <div class="db-kpi-card-head">
+                    <span class="db-kpi-icon">${Dashboard._ICONS.store('w-4 h-4')}</span>
+                    <span class="db-kpi-label">ร้านค้า</span>
+                </div>
+                <div class="db-kpi-value">${outletM.outletCount.toLocaleString()}</div>
+                <div class="db-kpi-sub">ร้านที่มียอดขายเดือนนี้</div>
+            </div>
+
+            <div class="db-kpi-card">
+                <div class="db-kpi-card-head">
+                    <span class="db-kpi-icon">${skuIcon}</span>
+                    <span class="db-kpi-label">Productivity</span>
+                </div>
+                <div class="db-kpi-split">
+                    <div>
+                        <div class="db-kpi-value db-kpi-value--sm">${Dashboard._fmtSku(outletM.avgSku)}</div>
+                        <div class="db-kpi-sub">SKU เฉลี่ย/ร้าน</div>
+                    </div>
+                    <div>
+                        <div class="db-kpi-value db-kpi-value--sm">${invCount.toLocaleString()}</div>
+                        <div class="db-kpi-sub">Invoice</div>
+                    </div>
+                </div>
+                <div class="db-kpi-sub">${skuSettingsLink}</div>
+            </div>
+
+            <div class="db-kpi-card">
+                <div class="db-kpi-card-head">
+                    <span class="db-kpi-icon">${Dashboard._ICONS.compare('w-4 h-4')}</span>
+                    <span class="db-kpi-label">ยอด/ร้าน ตามสาย</span>
+                </div>
+                <div class="db-kpi-split">
+                    <div>
+                        <div class="db-kpi-value db-kpi-value--sm">${outletM.v.avgVol > 0 ? fmtFull(outletM.v.avgVol) : '—'}</div>
+                        <div class="db-kpi-sub">สาย V${outletM.v.outletCount > 0 ? ` · ${outletM.v.outletCount} ร้าน` : ''}</div>
+                    </div>
+                    <div>
+                        <div class="db-kpi-value db-kpi-value--sm">${outletM.c.avgVol > 0 ? fmtFull(outletM.c.avgVol) : '—'}</div>
+                        <div class="db-kpi-sub">สาย C${outletM.c.outletCount > 0 ? ` · ${outletM.c.outletCount} ร้าน` : ''}</div>
+                    </div>
+                </div>
+            </div>
+        `;
     },
 
     _pctBadge: (pct) => {

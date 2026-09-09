@@ -55,7 +55,11 @@
         @media (max-width: 767px) {
             #sidebar { position: fixed; top:0; left:0; height:100dvh; z-index:7000; }
             #sidebar.collapsed { width: 0 !important; }
-            #sidebar-overlay { display:block; }
+            /* ⚠️ FIX: must stay ":not(.hidden)" — a bare "#sidebar-overlay{display:block}" here
+               (ID selector) beats the ".hidden{display:none}" Tailwind utility (class selector)
+               on specificity, so the overlay would render on EVERY mobile load regardless of
+               whether the drawer is open, permanently dimming the page. */
+            #sidebar-overlay:not(.hidden) { display:block; }
         }
 
         /* หน้าหลักเต็มพื้นที่ main-wrap (sidebar จัด layout ผ่าน flex แล้ว ไม่ต้องดัน left ซ้ำ) */
@@ -202,6 +206,16 @@
 
     <!-- Sidebar overlay (mobile) -->
     <div id="sidebar-overlay" class="fixed inset-0 bg-black/40 z-[6999] hidden" onclick="SidebarCtrl.toggle()"></div>
+
+    <!-- ⚠️ Runs synchronously right here (before the rest of the page parses/paints) so the mobile
+         icon rail never flashes open while the full SidebarCtrl script (bottom of file) is still
+         waiting on DOMContentLoaded. Only sets the initial DOM class; SidebarCtrl.restore() still
+         runs later and owns the real state (_collapsed, hamburger sync, desktop persistence). -->
+    <script>
+        if (window.innerWidth < 768) {
+            document.getElementById('sidebar').classList.add('collapsed');
+        }
+    </script>
 
     <!-- Main Content -->
     <!-- Global hamburger — แสดงทุก page ไม่หายตาม page switch -->
@@ -1092,6 +1106,8 @@
             if (page === 'auditlog' && typeof AuditLog !== 'undefined') AuditLog.renderPage();
             // sync hamburger ทุกครั้งที่เปลี่ยน page
             if (typeof SidebarCtrl !== 'undefined') {
+                // มือถือ: ปิด drawer อัตโนมัติเมื่อเลือกเมนู (ถ้าเปิดอยู่) — desktop ไม่แตะต้อง
+                if (window.innerWidth < 768 && !SidebarCtrl._collapsed) SidebarCtrl.toggle();
                 SidebarCtrl._clearPageOffset();
                 SidebarCtrl._syncHamburger(SidebarCtrl._collapsed);
             }
