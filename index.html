@@ -1551,6 +1551,7 @@
             _targetRoute: '',   // ✅ '' = ตั้งค่า default ของทั้งศูนย์ | 'V01' ฯลฯ = override เฉพาะสายนั้น
             _hasOverride: false,
             _ym:        '',
+            _overrideStatusToken: 0, // ✅ กันผลลัพธ์เก่าเขียนทับ ถ้าผู้ใช้เปลี่ยนเดือน/ปิด modal ระหว่างรอโหลด
 
             // ── เปิด modal ──────────────────────────────────────────────────
             open: async (ym) => {
@@ -1578,9 +1579,30 @@
                     sel.innerHTML = '<option value="">🏢 ทั้งศูนย์ (default)</option>' +
                         routes.map(r => `<option value="${r}">🚚 ${r}</option>`).join('');
                     sel.value = '';
+                    CalendarAdmin._markOverrideRoutes(_ym, routes);
                 }
 
                 await CalendarAdmin._loadConfig();
+            },
+
+            // ── ทำเครื่องหมาย ⚡ ในดรอปดาวน์ให้สายที่มี override เฉพาะของเดือนนี้อยู่แล้ว
+            // ให้เห็นได้ทันทีว่าสายไหนตั้งค่าต่างจากสายอื่น โดยไม่ต้องคลิกเข้าไปทีละสาย
+            _markOverrideRoutes: async (ym, routes) => {
+                if (!ym || !routes.length) return;
+                const myToken = ++CalendarAdmin._overrideStatusToken;
+                try {
+                    const docs = await Promise.all(routes.map(r => App.planRoutesCol(ym).doc(r).get()));
+                    if (myToken !== CalendarAdmin._overrideStatusToken) return; // เปลี่ยนเดือน/ปิด modal ไปแล้วระหว่างรอ
+                    const sel2 = document.getElementById('cal-target-select');
+                    if (!sel2) return;
+                    docs.forEach((d, i) => {
+                        const hasOverride = d.exists && !!d.data().calendarOverride;
+                        const opt = sel2.querySelector(`option[value="${routes[i]}"]`);
+                        if (opt) opt.textContent = hasOverride ? `⚡ ${routes[i]} (ตั้งค่าเฉพาะ)` : `🚚 ${routes[i]}`;
+                    });
+                } catch (e) {
+                    console.error('โหลดสถานะ override ไม่สำเร็จ:', e);
+                }
             },
 
             // ── เลื่อนดูเดือนก่อนหน้า/ถัดไป (delta = -1 หรือ +1) โดยไม่ต้องปิด modal ─────
@@ -1599,6 +1621,8 @@
                     CalendarAdmin._targetRef = App.plansCol().doc(newYm);
                     const lbl = document.getElementById('cal-modal-plan-label');
                     if (lbl) lbl.textContent = d.toLocaleDateString('th-TH', { year: 'numeric', month: 'long' });
+                    const routes = (State.db.routeList || []).slice().sort((a,b) => a.localeCompare(b, 'th', {numeric:true}));
+                    CalendarAdmin._markOverrideRoutes(newYm, routes); // เดือนเปลี่ยน สถานะ override ของแต่ละสายก็เปลี่ยนได้
                     await CalendarAdmin._loadConfig();
                 } finally {
                     CalendarAdmin._shiftBusy = false;
@@ -1711,6 +1735,8 @@
                 // ไปด้วยเสมอ ไม่งั้นถ้าเลื่อนดูเดือนอื่นด้วย shiftMonth() ก่อนกดปุ่มนี้ จะไปลบ
                 // override ของเดือนที่หน้า Admin หลักเปิดอยู่แทน (คนละเดือนกับที่กำลังดู)
                 await App.saveRouteCalendarOverride(CalendarAdmin._targetRoute, null, CalendarAdmin._ym);
+                const opt = document.querySelector(`#cal-target-select option[value="${CalendarAdmin._targetRoute}"]`);
+                if (opt) opt.textContent = `🚚 ${CalendarAdmin._targetRoute}`;
                 await CalendarAdmin._loadConfig();
             },
 
