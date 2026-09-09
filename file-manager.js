@@ -113,7 +113,8 @@ const FileManager = {
 
     // ✅ NEW: เรียงร้านสำหรับ export ตามลำดับ Day (จากเลขใน "Day N" ไม่ใช่วันที่ปฏิทินที่โชว์
     // ในคอลัมน์ Day เพราะบางโหมดปฏิทินแปลงเป็นวันที่จริงไปแล้ว ต้องอิงเลข cycle เดิมเสมอ)
-    // แล้วตามด้วยลำดับที่จัดไว้ในวันนั้น (seqs) — คืน array ใหม่ ไม่แก้ของเดิม
+    // ตามด้วยชื่อตลาด (กันเคสที่วันเดียวกันมีมากกว่า 1 ชื่อตลาดปนกัน ให้จับกลุ่มติดกัน) แล้วปิดท้าย
+    // ด้วยลำดับที่จัดไว้ในวันนั้น (seqs) — คืน array ใหม่ ไม่แก้ของเดิม
     _sortStoresForExport: (stores) => {
         const dayNumOf = (s) => {
             const label = (s.days && s.days[0]) ? s.days[0] : (s.dayOriginal || '');
@@ -125,7 +126,11 @@ const FileManager = {
             const v = day && s.seqs ? s.seqs[day] : undefined;
             return (typeof v === 'number' && !isNaN(v)) ? v : Infinity;
         };
-        return stores.slice().sort((a, b) => dayNumOf(a) - dayNumOf(b) || seqNumOf(a) - seqNumOf(b));
+        return stores.slice().sort((a, b) =>
+            dayNumOf(a) - dayNumOf(b)
+            || String(a.marketName || '').localeCompare(String(b.marketName || ''), 'th')
+            || seqNumOf(a) - seqNumOf(b)
+        );
     },
 
     // ─── uploadRouteFile: Single-route upload ────────────────────────────
