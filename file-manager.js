@@ -165,6 +165,9 @@ const FileManager = {
                 return UI.showErrorToast('⚠️ ไม่พบข้อมูลร้านค้า');
             }
 
+            // ✅ NEW: เติมชื่อตลาดที่ขาด (ไฟล์นี้ไม่มี days กำหนดแล้ว ใช้ dayOriginal จัดกลุ่มแทน)
+            FileManager._autoFillMarketNames(stores);
+
             // ✅ FIX BUG-02: save rawData เพื่อให้ ExcelIO.export() ใช้ได้
             // แปลง header: 'A' format → header name format
             const rawWithHeaders = rows.slice(1).map(row => ({
@@ -237,6 +240,9 @@ const FileManager = {
                 } catch (e) { console.warn('exportTemplate: โหลด override ไม่สำเร็จ', e); }
             }
             const [expYear, expMonth] = ym ? ym.split('_').map(Number) : [null, null];
+
+            // ✅ NEW: กันชื่อตลาดว่างหลุดออกไปในไฟล์ export (เช่น ร้านที่เพิ่มเองในแอดมิน ไม่เคยผ่าน import)
+            FileManager._autoFillMarketNames(State.stores);
 
             const exportData = State.stores.map(store => ({
                 'A': store.cy || '',
@@ -373,6 +379,9 @@ const FileManager = {
                 ? FileManager._dayColumnValue(store, routeCfgs[routeName], expYear, expMonth)
                 : (store.days?.length > 0 ? store.days[0] : (store.dayOriginal || ''));
 
+            // ✅ NEW: กันชื่อตลาดว่างหลุดออกไปในไฟล์ export ทุกสาย
+            routeKeys.forEach(routeName => FileManager._autoFillMarketNames(routes[routeName] || []));
+
             const wb = XLSX.utils.book_new();
             const allStores = [];
 
@@ -487,6 +496,528 @@ const FileManager = {
             console.error('❌ Export All error:', err);
             UI.showErrorToast('❌ Export ไม่สำเร็จ: ' + err.message);
         }
+    },
+
+    // ✅ NEW: เติม marketName อัตโนมัติให้ร้านที่ไม่มีชื่อตลาด (ช่องว่างในไฟล์ หรือไฟล์ไม่มีคอลัมน์นี้เลย)
+    // กรณี 1: มีร้านอื่นในสาย+วันเดียวกัน (route+day) ที่มีชื่อตลาดอยู่แล้ว → copy มาใช้เลย
+    // กรณี 2: ไม่มีใครในกลุ่มวันนั้นมีชื่อตลาดเลย → generate จาก
+    //   {salesCode} D{เลขวัน 2 หลัก} + ตำบล 2 อันดับที่มีร้านเยอะสุดในกลุ่ม + อำเภอ/จังหวัดที่มีร้านเยอะสุด
+    // (ตัด "ต./อ./จ." ออกก่อนเสมอ ให้ตรงกับ pattern ชื่อตลาดจริงที่ใช้อยู่)
+    _autoFillMarketNames: (stores) => {
+        // ข้อมูลจริงในระบบใช้ทั้งแบบย่อมีจุด ("ต.", "อ.", "จ.") และแบบเต็มคำ ("ตำบล", "อำเภอ",
+        // "จังหวัด") ปนกันไปตามไฟล์ต้นทาง — ต้องตัดทั้ง 2 แบบ ไม่งั้นชื่อตลาดจะโผล่คำนำหน้าไม่ตรงกัน
+        const stripPrefix = (v) => String(v || '').replace(/^(ตำบล|ต\.|อำเภอ|อ\.|จังหวัด|จ\.)\s*/, '').trim();
+        // ปกติจัดกลุ่มตาม s.days (เช่นจาก bulkImport/handleMapUpload ที่ผ่านการกำหนดวันแล้ว)
+        // แต่บาง import path (เช่น uploadRouteFile) ยังไม่กำหนด days เลย — fallback ไปใช้
+        // dayOriginal (ค่า Day/Cycle Name ดิบจากไฟล์) เป็น key จัดกลุ่มแทน
+        const dayKeysOf = (s) => (s.days && s.days.length > 0)
+            ? s.days
+            : (s.dayOriginal ? [String(s.dayOriginal).trim()] : []);
+
+        // จัดกลุ่มร้านตามวัน — ร้าน F2 อยู่ได้หลายกลุ่ม (นับทุกวันที่มันอยู่)
+        const byDay = {};
+        stores.forEach(s => {
+            dayKeysOf(s).forEach(d => {
+                if (!d) return;
+                if (!byDay[d]) byDay[d] = [];
+                byDay[d].push(s);
+            });
+        });
+
+        Object.entries(byDay).forEach(([day, group]) => {
+            const needFill = group.filter(s => !s.marketName || !s.marketName.trim());
+            if (needFill.length === 0) return;
+
+            // กรณี 1: มีร้านอื่นในกลุ่มวันนี้ที่มีชื่อตลาดอยู่แล้ว → copy
+            const existingName = group.find(s => s.marketName && s.marketName.trim());
+            if (existingName) {
+                needFill.forEach(s => { s.marketName = existingName.marketName; });
+                return;
+            }
+
+            // กรณี 2: ไม่มีใครในกลุ่มมีชื่อตลาดเลย → generate จากตำบล/อำเภอ/จังหวัดของสมาชิกกลุ่ม
+            // (นับความถี่ของแต่ละค่า เรียงมากไปน้อย — เท่ากันแล้วใช้ลำดับที่เจอก่อน)
+            const rankByFreq = (field) => {
+                const counts = {}, order = [];
+                group.forEach(s => {
+                    const v = stripPrefix(s[field]);
+                    if (!v) return;
+                    if (!(v in counts)) { counts[v] = 0; order.push(v); }
+                    counts[v]++;
+                });
+                return order.sort((a, b) => counts[b] - counts[a]);
+            };
+
+            const tambons  = rankByFreq('subDistrict').slice(0, 2);
+            const amphoe   = rankByFreq('district')[0]  || '';
+            const province = rankByFreq('province')[0]  || '';
+            const dayDigits = String(day).replace(/[^0-9]/g, '');
+            const dToken    = dayDigits ? 'D' + dayDigits.padStart(2, '0') : '';
+            const generated = [group[0].salesCode || '', dToken, ...tambons, amphoe, province]
+                .filter(Boolean).join(' ');
+
+            needFill.forEach(s => { s.marketName = generated; });
+        });
+    },
+
+    // ══════════════════════════════════════════════════════════════════
+    // ✅ NEW: นำเข้าจากไฟล์ SAP มาตรฐานของบริษัท (Customer Master + RoutePlan
+    // Detail) — สำหรับศูนย์ใหม่ที่ยังไม่เคยมีข้อมูลในระบบ หรืออัปเดตร้านใหม่/
+    // แก้ไขข้อมูลร้านจากไฟล์ Master เพียงไฟล์เดียว โดยไม่แตะวัน/ชื่อตลาดเดิม
+    // ══════════════════════════════════════════════════════════════════
+
+    // หา index แถวที่เป็น header จริง — ไฟล์ SAP export มักมีแถวหัวเรื่อง/แถวว่าง
+    // นำหน้า header จริงอยู่ 1-2 แถวเสมอ ต้องหาแถวที่มีคอลัมน์ mustHave ก่อนเชื่อถือ
+    _findHeaderRowIndex: (rows, mustHave) => {
+        for (let i = 0; i < Math.min(5, rows.length); i++) {
+            if (rows[i] && rows[i].some(c => String(c).trim() === mustHave)) return i;
+        }
+        return -1;
+    },
+
+    // Parse ไฟล์ "MST - Customer Master" → { customerCode: {name, status, subDistrict, ...} }
+    _parseSapCustomerMaster: (rows) => {
+        const hIdx = FileManager._findHeaderRowIndex(rows, 'Customer Code');
+        if (hIdx === -1) return null;
+        const h = rows[hIdx];
+        const idx = (name) => h.indexOf(name);
+        const byCode = {};
+        for (let r = hIdx + 1; r < rows.length; r++) {
+            const row = rows[r];
+            if (!row) continue;
+            const code = row[idx('Customer Code')] ? String(row[idx('Customer Code')]).trim() : '';
+            if (!code) continue;
+            byCode[code] = {
+                name:        row[idx('Customer Name')]     ? String(row[idx('Customer Name')]).trim()     : '',
+                status:      row[idx('Customer Status')]   ? String(row[idx('Customer Status')]).trim()   : '',
+                subDistrict: row[idx('City')]              ? String(row[idx('City')]).trim()              : '',
+                district:    row[idx('District')]          ? String(row[idx('District')]).trim()          : '',
+                province:    row[idx('State')]             ? String(row[idx('State')]).trim()             : '',
+                lat:         parseFloat(String(row[idx('Master Latitude')]  || '').replace(/[^0-9.-]/g, '')),
+                lng:         parseFloat(String(row[idx('Master Longitude')] || '').replace(/[^0-9.-]/g, '')),
+                shopType:    row[idx('Outlet Category')]   ? String(row[idx('Outlet Category')]).trim()   : '',
+                salesCode:   row[idx('Salesman Code')]     ? String(row[idx('Salesman Code')]).trim()     : '',
+            };
+        }
+        return byCode;
+    },
+
+    // Parse ไฟล์ "MST - RoutePlan Detail" → [{code, routeCode, cy, marketName, dayNum}, ...]
+    // หมายเหตุ: "Cycle Name" ในไฟล์นี้คือชื่อตลาดที่คิวรีตี้ทำไว้แล้ว (เช่น "402C01 D01 บ่อพลอย
+    // ลาดหญ้า หนองปรือ") ใช้ตรงๆ เป็น marketName ได้เลย ไม่ต้อง generate ใหม่ — ส่วนเลขวันต้อง
+    // แกะจากคำว่า "D01" ที่ฝังอยู่ในข้อความนั้น (ห้ามเอาทั้งสตริงไป parseInt/replace ตัวอักษรทิ้ง
+    // ตรงๆ เพราะจะได้ตัวเลขมั่วจากการเอาหลายตัวเลขในข้อความมาต่อกัน)
+    _parseSapRoutePlanDetail: (rows) => {
+        const hIdx = FileManager._findHeaderRowIndex(rows, 'Customer Code');
+        if (hIdx === -1) return null;
+        const h = rows[hIdx];
+        const idx = (name) => h.indexOf(name);
+        const list = [];
+        for (let r = hIdx + 1; r < rows.length; r++) {
+            const row = rows[r];
+            if (!row) continue;
+            const code = row[idx('Customer Code')] ? String(row[idx('Customer Code')]).trim() : '';
+            if (!code) continue;
+            const cycleName = row[idx('Cycle Name')] ? String(row[idx('Cycle Name')]).trim() : '';
+            const dMatch = cycleName.match(/D(\d+)/);
+            list.push({
+                code,
+                routeCode:  row[idx('Route Code')]  ? String(row[idx('Route Code')]).trim()  : '',
+                cy:         row[idx('Cycle Code')]  ? String(row[idx('Cycle Code')]).trim()  : '',
+                marketName: cycleName,
+                dayNum:     dMatch ? parseInt(dMatch[1]) : NaN,
+                name:       row[idx('Customer Name')]    ? String(row[idx('Customer Name')]).trim()    : '',
+                shopType:   row[idx('Outlet Category')]  ? String(row[idx('Outlet Category')]).trim()  : '',
+            });
+        }
+        return list;
+    },
+
+    // รวม Master + RoutePlan Detail เข้าด้วยกันเป็น byRoute { routeKey: { customerCode: store } }
+    // รูปแบบเดียวกับที่ bulkImport ใช้ — ร้านที่มีอยู่ใน Detail ได้วัน/ชื่อตลาดจาก Detail +
+    // พิกัด/ที่อยู่จาก Master ส่วนร้านที่มีแค่ใน Master (ยังไม่เคยจัดสาย) ใส่เข้าไปแบบไม่มีวัน
+    // รอ AI Route Builder หรือจัดมือทีหลัง
+    _buildByRouteFromMasterDetail: (masterByCode, detailList) => {
+        const byRoute = {};
+        const detailCodes = new Set();
+
+        detailList.forEach(row => {
+            const m = masterByCode[row.code] || {};
+            const routeKey = row.routeCode || m.salesCode;
+            if (!routeKey) return;
+            detailCodes.add(row.code);
+            if (!byRoute[routeKey]) byRoute[routeKey] = {};
+            const aDay = !isNaN(row.dayNum) ? 'Day ' + row.dayNum : '';
+
+            if (byRoute[routeKey][row.code]) {
+                if (aDay && !byRoute[routeKey][row.code].days.includes(aDay)) {
+                    byRoute[routeKey][row.code].days.push(aDay);
+                }
+                byRoute[routeKey][row.code].freq = 2;
+            } else {
+                const lat = m.lat, lng = m.lng;
+                if (m.lat === undefined || isNaN(lat) || isNaN(lng)) return; // ไม่มีพิกัดใน Master ข้ามร้านนี้
+                byRoute[routeKey][row.code] = {
+                    id: row.code, code: row.code,
+                    name: row.name || m.name || ('Store_' + row.code),
+                    lat, lng, freq: 1, days: aDay ? [aDay] : [], seqs: {}, selected: false,
+                    salesCode: routeKey,
+                    shopType: row.shopType || m.shopType || '',
+                    subDistrict: m.subDistrict || '', district: m.district || '', province: m.province || '',
+                    marketName: row.marketName || '', cy: row.cy || '',
+                    dayOriginal: !isNaN(row.dayNum) ? String(row.dayNum) : '',
+                };
+            }
+        });
+
+        // ร้านที่มีแค่ใน Master (Active + มีรหัสเซลล์ + มีพิกัด) แต่ไม่เคยอยู่ใน Detail เลย
+        Object.entries(masterByCode).forEach(([code, m]) => {
+            if (detailCodes.has(code)) return;
+            if (m.status !== 'Active') return;
+            if (!m.salesCode) return;
+            if (isNaN(m.lat) || isNaN(m.lng)) return;
+            const routeKey = m.salesCode;
+            if (!byRoute[routeKey]) byRoute[routeKey] = {};
+            byRoute[routeKey][code] = {
+                id: code, code, name: m.name || ('Store_' + code),
+                lat: m.lat, lng: m.lng, freq: 1, days: [], seqs: {}, selected: false,
+                salesCode: routeKey, shopType: m.shopType || '',
+                subDistrict: m.subDistrict || '', district: m.district || '', province: m.province || '',
+                marketName: '', cy: '', dayOriginal: '',
+            };
+        });
+
+        return byRoute;
+    },
+
+    // ✅ ขั้นตอนสุดท้ายที่ bulkImport และ importMasterDetail ใช้ร่วมกัน: เอา byRoute
+    // { routeKey: { customerCode: store } } ที่ parse เสร็จแล้วมา merge เข้า State.db.routes
+    // (ร้านเดิมอัปเดต/reactivate, ร้านใหม่เพิ่ม, ร้านที่หายไปเปิด popup ให้เลือกพัก/ลบ) แล้วบันทึก
+    // ทุกสายที่เปลี่ยนแปลงลง Firestore — toastLabel ใช้แค่ปรับข้อความ toast ตอนจบให้ตรงกับ
+    // ฟีเจอร์ที่เรียกมา (เช่น "Bulk Import" หรือ "นำเข้า Master + RoutePlan")
+    _commitByRouteImport: async (byRoute, toastLabel) => {
+        const routeKeys = Object.keys(byRoute);
+        if (routeKeys.length === 0) {
+            UI.hideLoader();
+            UI.showErrorToast('⚠️ ไม่พบข้อมูลที่นำเข้าได้ — เช็คว่าร้านมีพิกัด/รหัสเซลล์ครบไหม');
+            return;
+        }
+
+        let totalNew = 0, totalReactivated = 0;
+        const savedRoutes = [];
+        const missingByRoute = {}; // { routeKey: [store, ...] }
+
+        for (const routeKey of routeKeys) {
+            const incoming    = Object.values(byRoute[routeKey]);
+            const existing    = State.db.routes[routeKey] || [];
+            const incomingMap = {};
+            incoming.forEach(s => { incomingMap[s.id] = s; });
+
+            // อัปเดตร้านเดิมที่มี ID ตรงกัน + reactivate ร้านที่กลับมา
+            const updatedExisting = existing.map(s => {
+                const inc = incomingMap[s.id];
+                if (!inc) return s; // จัดการในขั้นถัดไป
+                const wasInactive = s.inactive === true;
+                const updated = {
+                    ...s,
+                    // ✅ FIX: เดิมใช้ inc.days || s.days — แต่ [] (array ว่าง) เป็น truthy ใน JS
+                    // ทำให้ไฟล์ที่ไม่มีข้อมูลวัน/Cycle Name ของร้านนั้น (aDay ว่าง) เขียนทับ
+                    // ตารางวันจริงเดิมด้วยค่าว่างไปเลยโดยไม่ตั้งใจ — ต้องเช็ค length ก่อน
+                    days:       (inc.days && inc.days.length > 0) ? inc.days : s.days,
+                    seqs:       (inc.seqs && Object.keys(inc.seqs).length > 0) ? inc.seqs : s.seqs,
+                    marketName: inc.marketName || s.marketName,
+                    lat:        inc.lat        || s.lat,
+                    lng:        inc.lng        || s.lng,
+                    cy:         inc.cy         || s.cy || '',
+                    inactive:   false, // ✅ reactivate ถ้ากลับมาในไฟล์ใหม่
+                };
+                if (wasInactive) totalReactivated++;
+                return updated;
+            });
+
+            // หาร้านที่หายไปจากไฟล์ใหม่ (ไม่นับร้านที่ inactive อยู่แล้ว)
+            const missing = existing.filter(s => !incomingMap[s.id] && !s.inactive);
+            if (missing.length > 0) missingByRoute[routeKey] = missing;
+
+            const newStores = incoming.filter(s => !existing.some(e => e.id === s.id));
+            State.db.routes[routeKey] = [...updatedExisting, ...newStores];
+            FileManager._autoFillMarketNames(State.db.routes[routeKey]);
+            totalNew += newStores.length;
+            savedRoutes.push(routeKey);
+        }
+
+        UI.hideLoader();
+
+        // ─── Popup แจ้งร้านที่หายไป ──────────────────────────────
+        const allMissing = Object.entries(missingByRoute)
+            .flatMap(([route, stores]) => stores.map(s => ({ ...s, _route: route })));
+
+        const doSaveAll = async () => {
+            const routeList = Object.keys(State.db.routes)
+                .sort((a, b) => a.localeCompare(b, 'th', { numeric: true }));
+            for (let _si = 0; _si < savedRoutes.length; _si++) {
+                const _n = savedRoutes[_si];
+                UI.showLoader(
+                    `💾 กำลังบันทึก... (${_si+1}/${savedRoutes.length} สาย)`,
+                    `สาย ${_n} — ${(State.db.routes[_n]||[]).length} ร้าน`
+                );
+                // ✅ BUGFIX (2026-08-29): merge:true — ไม่งั้น calendarOverride ของสายนั้น
+                // จะหายไปเงียบๆ ทุกครั้งที่ bulk import ทับ (ดู comment เดียวกันใน admin-data.js)
+                // ✅ NEW: bulk import ทับร้านในสาย = รีเซ็ตสถานะ "ยืนยันรับสายวิ่ง" ด้วย
+                await App.planRoutesCol(App._currentPlanYM).doc(_n).set({
+                    stores: State.db.routes[_n] || [],
+                    confirmedBy: firebase.firestore.FieldValue.delete(),
+                    confirmedAt: firebase.firestore.FieldValue.delete(),
+                }, { merge: true });
+            }
+            const ym = App._currentPlanYM;
+            await App.planRef(ym).set(
+                { routeList, cycleDays: State.db.cycleDays || 24, updatedAt: firebase.firestore.FieldValue.serverTimestamp() },
+                { merge: true }
+            );
+            if (!State.localActiveRoute || !State.db.routes[State.localActiveRoute]) {
+                State.localActiveRoute = routeList[0];
+            }
+            State.stores = State.db.routes[State.localActiveRoute] || [];
+            UI.hideLoader();
+            App.sync();
+            MapCtrl.fitToStores();
+            let msg = `✅ ${toastLabel} เสร็จ! ${routeKeys.length} สาย | เพิ่มใหม่ ${totalNew} ร้าน`;
+            if (totalReactivated > 0) msg += ` | กลับมา ${totalReactivated} ร้าน`;
+            UI.showSaveToast(msg);
+        };
+
+        if (allMissing.length === 0) {
+            // ไม่มีร้านหายไป → บันทึกทันที
+            await doSaveAll();
+            return;
+        }
+
+        // ─── สร้าง popup รายชื่อร้านที่หายไป ────────────────────
+        // decisions: { storeId: 'inactive' | 'delete' }
+        const decisions = {};
+        allMissing.forEach(s => { decisions[s.id] = 'inactive'; }); // default = พักไว้
+
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px;font-family:Prompt,sans-serif;';
+
+        const renderRows = () => allMissing.map(s => `
+            <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:10px;background:#f9fafb;border:1px solid #f3f4f6;margin-bottom:6px;">
+                <div style="flex:1;min-width:0;">
+                    <div style="font-size:12px;font-weight:800;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${s.name}</div>
+                    <div style="font-size:10px;color:#9ca3af;font-family:monospace;">${s.id} · สาย ${s._route}</div>
+                </div>
+                <div style="display:flex;gap:4px;flex-shrink:0;">
+                    <button id="btn-inactive-${s.id}"
+                        onclick="window._bulkDecide('${s.id}','inactive')"
+                        style="padding:4px 10px;border-radius:7px;font-size:11px;font-weight:700;border:none;cursor:pointer;transition:all 0.12s;background:${decisions[s.id]==='inactive'?'#6366f1':'#e5e7eb'};color:${decisions[s.id]==='inactive'?'#fff':'#6b7280'};">
+                        💤 พัก
+                    </button>
+                    <button id="btn-delete-${s.id}"
+                        onclick="window._bulkDecide('${s.id}','delete')"
+                        style="padding:4px 10px;border-radius:7px;font-size:11px;font-weight:700;border:none;cursor:pointer;transition:all 0.12s;background:${decisions[s.id]==='delete'?'#ef4444':'#e5e7eb'};color:${decisions[s.id]==='delete'?'#fff':'#6b7280'};">
+                        🗑️ ลบ
+                    </button>
+                </div>
+            </div>`).join('');
+
+        const renderPopup = () => {
+            overlay.innerHTML = `
+            <div style="background:#fff;border-radius:20px;padding:24px;width:100%;max-width:480px;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+                <div style="font-size:16px;font-weight:900;color:#111827;margin-bottom:4px;">⚠️ ร้านที่ไม่อยู่ในไฟล์ใหม่</div>
+                <div style="font-size:12px;color:#6b7280;margin-bottom:14px;">พบ <b>${allMissing.length} ร้าน</b> ที่ไม่มีในไฟล์ที่อัปโหลด — เลือกว่าจะทำอะไรกับแต่ละร้าน</div>
+                <div style="display:flex;gap:6px;margin-bottom:10px;">
+                    <button onclick="window._bulkDecideAll('inactive')" style="flex:1;padding:6px;border-radius:8px;font-size:11px;font-weight:800;border:1.5px solid #6366f1;background:#ede9fe;color:#5b21b6;cursor:pointer;">💤 พักทั้งหมด</button>
+                    <button onclick="window._bulkDecideAll('delete')" style="flex:1;padding:6px;border-radius:8px;font-size:11px;font-weight:800;border:1.5px solid #ef4444;background:#fee2e2;color:#991b1b;cursor:pointer;">🗑️ ลบทั้งหมด</button>
+                </div>
+                <div id="_bulk-list" style="overflow-y:auto;flex:1;padding-right:4px;">${renderRows()}</div>
+                <div style="display:flex;gap:8px;margin-top:14px;">
+                    <button onclick="window._bulkConfirm()" style="flex:1;padding:12px;border-radius:12px;background:#2563eb;color:#fff;font-size:14px;font-weight:800;border:none;cursor:pointer;">✅ ยืนยัน</button>
+                    <button onclick="window._bulkCancel()" style="padding:12px 18px;border-radius:12px;background:#f3f4f6;color:#374151;font-size:14px;font-weight:700;border:none;cursor:pointer;">ยกเลิก</button>
+                </div>
+            </div>`;
+        };
+
+        window._bulkDecide = (id, action) => {
+            decisions[id] = action;
+            const li = document.getElementById('_bulk-list');
+            if (li) li.innerHTML = renderRows();
+        };
+        window._bulkDecideAll = (action) => {
+            allMissing.forEach(s => { decisions[s.id] = action; });
+            const li = document.getElementById('_bulk-list');
+            if (li) li.innerHTML = renderRows();
+        };
+        window._bulkCancel = () => {
+            document.body.removeChild(overlay);
+            delete window._bulkDecide;
+            delete window._bulkDecideAll;
+            delete window._bulkConfirm;
+            delete window._bulkCancel;
+        };
+        window._bulkConfirm = async () => {
+            document.body.removeChild(overlay);
+            delete window._bulkDecide;
+            delete window._bulkDecideAll;
+            delete window._bulkConfirm;
+            delete window._bulkCancel;
+
+            // apply decisions
+            for (const s of allMissing) {
+                const route = State.db.routes[s._route];
+                if (!route) continue;
+                const idx = route.findIndex(r => r.id === s.id);
+                if (idx === -1) continue;
+                if (decisions[s.id] === 'inactive') {
+                    // ✅ พักไว้ใน history — ซ่อนจาก Sales แต่ยังอยู่ใน Firestore
+                    route[idx] = { ...route[idx], inactive: true, days: [], seqs: {} };
+                } else {
+                    // ลบออกจาก array
+                    route.splice(idx, 1);
+                }
+            }
+
+            await doSaveAll();
+        };
+
+        renderPopup();
+        document.body.appendChild(overlay);
+    },
+
+    // ✅ นำเข้า Master + RoutePlan Detail พร้อมกัน — ใช้ตอนตั้งศูนย์ใหม่ หรือจัดสายทั้งชุดใหม่
+    importMasterDetail: (masterFile, detailFile) => {
+        if (!masterFile || !detailFile) return UI.showErrorToast('⚠️ กรุณาเลือกไฟล์ให้ครบทั้ง 2 ไฟล์ (Customer Master และ RoutePlan Detail)');
+        if (masterFile.size > 20 * 1024 * 1024 || detailFile.size > 20 * 1024 * 1024)
+            return UI.showErrorToast('⚠️ มีไฟล์ใหญ่เกิน 20MB');
+
+        UI.showLoader('📄 กำลังอ่านไฟล์ทั้ง 2 ไฟล์...', 'รอสักครู่');
+
+        const readAsRows = (file) => new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+                    resolve(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' }));
+                } catch (err) { reject(err); }
+            };
+            reader.onerror = () => reject(new Error('อ่านไฟล์ไม่สำเร็จ'));
+            reader.readAsArrayBuffer(file);
+        });
+
+        Promise.all([readAsRows(masterFile), readAsRows(detailFile)])
+            .then(async ([masterRows, detailRows]) => {
+                try {
+                    const masterByCode = FileManager._parseSapCustomerMaster(masterRows);
+                    const detailList   = FileManager._parseSapRoutePlanDetail(detailRows);
+                    if (!masterByCode) { UI.hideLoader(); return UI.showErrorToast('⚠️ ไม่พบคอลัมน์ "Customer Code" ในไฟล์ Master — เลือกไฟล์ถูกไหมครับ?'); }
+                    if (!detailList)   { UI.hideLoader(); return UI.showErrorToast('⚠️ ไม่พบคอลัมน์ "Customer Code" ในไฟล์ RoutePlan Detail — เลือกไฟล์ถูกไหมครับ?'); }
+
+                    const byRoute = FileManager._buildByRouteFromMasterDetail(masterByCode, detailList);
+                    await FileManager._commitByRouteImport(byRoute, 'นำเข้า Master + RoutePlan');
+                } catch (err) {
+                    UI.hideLoader();
+                    console.error('importMasterDetail error:', err);
+                    UI.showErrorToast('❌ นำเข้าไม่สำเร็จ: ' + err.message);
+                }
+            })
+            .catch(err => { UI.hideLoader(); UI.showErrorToast('❌ ' + err.message); });
+    },
+
+    // ✅ อัปเดตจากไฟล์ Customer Master เพียงไฟล์เดียว — ใช้ตอนมีร้านใหม่เพิ่มเข้ามา หรือแก้ไข
+    // ข้อมูลร้านเดิม (เช่น เปลี่ยนชื่อร้าน/ย้ายเซลล์) โดย "ไม่แตะ" วัน/ชื่อตลาด/ลำดับที่จัดไว้แล้ว
+    // เพราะไฟล์ Master ไม่มีข้อมูลพวกนี้อยู่แล้ว — ต่างจาก bulkImport/importMasterDetail ที่เป็น
+    // การ "แทนที่ทั้งชุด" ตัวนี้เป็นการ "แก้เฉพาะจุด" ร้านเดิมยังคงตารางวันเดิมไว้ครบ
+    importMasterOnly: (file) => {
+        if (!file) return;
+        if (file.size > 20 * 1024 * 1024) return UI.showErrorToast('⚠️ ไฟล์ใหญ่เกิน 20MB');
+
+        UI.showLoader('📄 กำลังอ่านไฟล์ Master...', 'รอสักครู่');
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+            try {
+                const wb   = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+                const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' });
+                const masterByCode = FileManager._parseSapCustomerMaster(rows);
+                if (!masterByCode) { UI.hideLoader(); return UI.showErrorToast('⚠️ ไม่พบคอลัมน์ "Customer Code" ในไฟล์ — ตรวจสอบว่าเป็นไฟล์ Customer Master จริงไหมครับ'); }
+
+                // ทำ index ร้านที่มีอยู่แล้วทุกสายในแผนปัจจุบัน: id → {routeKey, i}
+                const existingIndex = {};
+                Object.entries(State.db.routes).forEach(([routeKey, stores]) => {
+                    (stores || []).forEach((s, i) => { existingIndex[s.id] = { routeKey, i }; });
+                });
+
+                let updated = 0, moved = 0, added = 0;
+                const touchedRoutes = new Set();
+
+                Object.entries(masterByCode).forEach(([code, m]) => {
+                    if (m.status !== 'Active') return;
+                    if (!m.salesCode) return;
+                    if (isNaN(m.lat) || isNaN(m.lng)) return;
+
+                    const found = existingIndex[code];
+                    if (found) {
+                        const store = State.db.routes[found.routeKey][found.i];
+                        // อัปเดตเฉพาะข้อมูลจาก Master — ห้ามแตะ days/seqs/marketName/cy/dayOriginal เดิม
+                        store.name        = m.name || store.name;
+                        store.lat         = m.lat;
+                        store.lng         = m.lng;
+                        store.subDistrict = m.subDistrict || store.subDistrict;
+                        store.district    = m.district    || store.district;
+                        store.province    = m.province    || store.province;
+                        store.shopType    = m.shopType    || store.shopType;
+                        store.inactive    = false;
+                        touchedRoutes.add(found.routeKey);
+
+                        if (m.salesCode !== found.routeKey) {
+                            // ✅ ร้านย้ายเซลล์ — ย้ายไปสายใหม่ แต่วัน/ชื่อตลาด/ลำดับเดิมติดไปด้วยทั้งหมด
+                            State.db.routes[found.routeKey].splice(found.i, 1);
+                            if (!State.db.routes[m.salesCode]) State.db.routes[m.salesCode] = [];
+                            store.salesCode = m.salesCode;
+                            State.db.routes[m.salesCode].push(store);
+                            touchedRoutes.add(m.salesCode);
+                            moved++;
+                        }
+                        updated++;
+                    } else {
+                        // ร้านใหม่ที่ไม่เคยมีในระบบ — เพิ่มเข้าไปแบบยังไม่มีวัน รอ AI Route Builder/จัดมือ
+                        if (!State.db.routes[m.salesCode]) State.db.routes[m.salesCode] = [];
+                        State.db.routes[m.salesCode].push({
+                            id: code, code, name: m.name || ('Store_' + code),
+                            lat: m.lat, lng: m.lng, freq: 1, days: [], seqs: {}, selected: false,
+                            salesCode: m.salesCode, shopType: m.shopType || '',
+                            subDistrict: m.subDistrict || '', district: m.district || '', province: m.province || '',
+                            marketName: '', cy: '', dayOriginal: '',
+                        });
+                        touchedRoutes.add(m.salesCode);
+                        added++;
+                    }
+                });
+
+                if (touchedRoutes.size === 0) {
+                    UI.hideLoader();
+                    return UI.showErrorToast('⚠️ ไม่พบร้านที่อัปเดตได้ (เช็คคอลัมน์ Salesman Code/พิกัด/สถานะ Active ในไฟล์)');
+                }
+
+                const routeArr = [...touchedRoutes];
+                for (let i = 0; i < routeArr.length; i++) {
+                    const rk = routeArr[i];
+                    UI.showLoader(`💾 กำลังบันทึก... (${i + 1}/${routeArr.length} สาย)`, `สาย ${rk}`);
+                    await App.planRoutesCol(App._currentPlanYM).doc(rk).set({ stores: State.db.routes[rk] || [] }, { merge: true });
+                }
+                const routeList = Object.keys(State.db.routes).sort((a, b) => a.localeCompare(b, 'th', { numeric: true }));
+                await App.planRef(App._currentPlanYM).set({ routeList }, { merge: true });
+
+                State.stores = State.db.routes[State.localActiveRoute] || [];
+                UI.hideLoader();
+                App.sync();
+                UI.showSaveToast(`✅ อัปเดตจาก Master เสร็จ! แก้ไขข้อมูล ${updated} ร้าน (ย้ายสาย ${moved} ร้าน) | เพิ่มร้านใหม่ ${added} ร้าน`);
+            } catch (err) {
+                UI.hideLoader();
+                console.error('importMasterOnly error:', err);
+                UI.showErrorToast('❌ อัปเดตไม่สำเร็จ: ' + err.message);
+            }
+        };
+        reader.readAsArrayBuffer(file);
     },
 
     // ─── bulkImport: อัปโหลดทุกสายพร้อมกัน ─────────────────────────────
@@ -659,184 +1190,8 @@ const FileManager = {
                     });
                 }
 
-                // ─── Merge เข้า State.db.routes ──────────────────────────
-                let totalNew = 0, totalReactivated = 0;
-                const savedRoutes = [];
-
-                // สะสม missing stores ทุกสายก่อน แล้วค่อย popup ครั้งเดียว
-                const missingByRoute = {}; // { routeKey: [store, ...] }
-
-                for (const routeKey of routeKeys) {
-                    const incoming    = Object.values(byRoute[routeKey]);
-                    const existing    = State.db.routes[routeKey] || [];
-                    const incomingMap = {};
-                    incoming.forEach(s => { incomingMap[s.id] = s; });
-
-                    // อัปเดตร้านเดิมที่มี ID ตรงกัน + reactivate ร้านที่กลับมา
-                    const updatedExisting = existing.map(s => {
-                        const inc = incomingMap[s.id];
-                        if (!inc) return s; // จัดการในขั้นถัดไป
-                        const wasInactive = s.inactive === true;
-                        const updated = {
-                            ...s,
-                            days:       inc.days       || s.days,
-                            seqs:       (inc.seqs && Object.keys(inc.seqs).length > 0) ? inc.seqs : s.seqs,
-                            marketName: inc.marketName || s.marketName,
-                            lat:        inc.lat        || s.lat,
-                            lng:        inc.lng        || s.lng,
-                            cy:         inc.cy         || s.cy || '',
-                            inactive:   false, // ✅ reactivate ถ้ากลับมาในไฟล์ใหม่
-                        };
-                        if (wasInactive) totalReactivated++;
-                        return updated;
-                    });
-
-                    // หาร้านที่หายไปจากไฟล์ใหม่ (ไม่นับร้านที่ inactive อยู่แล้ว)
-                    const missing = existing.filter(s => !incomingMap[s.id] && !s.inactive);
-                    if (missing.length > 0) missingByRoute[routeKey] = missing;
-
-                    const newStores = incoming.filter(s => !existing.some(e => e.id === s.id));
-                    State.db.routes[routeKey] = [...updatedExisting, ...newStores];
-                    totalNew += newStores.length;
-                    savedRoutes.push(routeKey);
-                }
-
-                UI.hideLoader();
-
-                // ─── Popup แจ้งร้านที่หายไป ──────────────────────────────
-                const allMissing = Object.entries(missingByRoute)
-                    .flatMap(([route, stores]) => stores.map(s => ({ ...s, _route: route })));
-
-                const doSaveAll = async () => {
-                    const routeList = Object.keys(State.db.routes)
-                        .sort((a, b) => a.localeCompare(b, 'th', { numeric: true }));
-                    for (let _si = 0; _si < savedRoutes.length; _si++) {
-                        const _n = savedRoutes[_si];
-                        UI.showLoader(
-                            `💾 กำลังบันทึก... (${_si+1}/${savedRoutes.length} สาย)`,
-                            `สาย ${_n} — ${(State.db.routes[_n]||[]).length} ร้าน`
-                        );
-                        // ✅ BUGFIX (2026-08-29): merge:true — ไม่งั้น calendarOverride ของสายนั้น
-                        // จะหายไปเงียบๆ ทุกครั้งที่ bulk import ทับ (ดู comment เดียวกันใน admin-data.js)
-                        // ✅ NEW: bulk import ทับร้านในสาย = รีเซ็ตสถานะ "ยืนยันรับสายวิ่ง" ด้วย
-                        await App.planRoutesCol(App._currentPlanYM).doc(_n).set({
-                            stores: State.db.routes[_n] || [],
-                            confirmedBy: firebase.firestore.FieldValue.delete(),
-                            confirmedAt: firebase.firestore.FieldValue.delete(),
-                        }, { merge: true });
-                    }
-                    const ym = App._currentPlanYM;
-                    await App.planRef(ym).set(
-                        { routeList, cycleDays: State.db.cycleDays || 24, updatedAt: firebase.firestore.FieldValue.serverTimestamp() },
-                        { merge: true }
-                    );
-                    if (!State.localActiveRoute || !State.db.routes[State.localActiveRoute]) {
-                        State.localActiveRoute = routeList[0];
-                    }
-                    State.stores = State.db.routes[State.localActiveRoute] || [];
-                    UI.hideLoader();
-                    App.sync();
-                    MapCtrl.fitToStores();
-                    let msg = `✅ Bulk Import เสร็จ! ${routeKeys.length} สาย | เพิ่มใหม่ ${totalNew} ร้าน`;
-                    if (totalReactivated > 0) msg += ` | กลับมา ${totalReactivated} ร้าน`;
-                    UI.showSaveToast(msg);
-                };
-
-                if (allMissing.length === 0) {
-                    // ไม่มีร้านหายไป → บันทึกทันที
-                    await doSaveAll();
-                    return;
-                }
-
-                // ─── สร้าง popup รายชื่อร้านที่หายไป ────────────────────
-                // decisions: { storeId: 'inactive' | 'delete' }
-                const decisions = {};
-                allMissing.forEach(s => { decisions[s.id] = 'inactive'; }); // default = พักไว้
-
-                const overlay = document.createElement('div');
-                overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px;font-family:Prompt,sans-serif;';
-
-                const renderRows = () => allMissing.map(s => `
-                    <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:10px;background:#f9fafb;border:1px solid #f3f4f6;margin-bottom:6px;">
-                        <div style="flex:1;min-width:0;">
-                            <div style="font-size:12px;font-weight:800;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${s.name}</div>
-                            <div style="font-size:10px;color:#9ca3af;font-family:monospace;">${s.id} · สาย ${s._route}</div>
-                        </div>
-                        <div style="display:flex;gap:4px;flex-shrink:0;">
-                            <button id="btn-inactive-${s.id}"
-                                onclick="window._bulkDecide('${s.id}','inactive')"
-                                style="padding:4px 10px;border-radius:7px;font-size:11px;font-weight:700;border:none;cursor:pointer;transition:all 0.12s;background:${decisions[s.id]==='inactive'?'#6366f1':'#e5e7eb'};color:${decisions[s.id]==='inactive'?'#fff':'#6b7280'};">
-                                💤 พัก
-                            </button>
-                            <button id="btn-delete-${s.id}"
-                                onclick="window._bulkDecide('${s.id}','delete')"
-                                style="padding:4px 10px;border-radius:7px;font-size:11px;font-weight:700;border:none;cursor:pointer;transition:all 0.12s;background:${decisions[s.id]==='delete'?'#ef4444':'#e5e7eb'};color:${decisions[s.id]==='delete'?'#fff':'#6b7280'};">
-                                🗑️ ลบ
-                            </button>
-                        </div>
-                    </div>`).join('');
-
-                const renderPopup = () => {
-                    overlay.innerHTML = `
-                    <div style="background:#fff;border-radius:20px;padding:24px;width:100%;max-width:480px;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
-                        <div style="font-size:16px;font-weight:900;color:#111827;margin-bottom:4px;">⚠️ ร้านที่ไม่อยู่ในไฟล์ใหม่</div>
-                        <div style="font-size:12px;color:#6b7280;margin-bottom:14px;">พบ <b>${allMissing.length} ร้าน</b> ที่ไม่มีในไฟล์ที่อัปโหลด — เลือกว่าจะทำอะไรกับแต่ละร้าน</div>
-                        <div style="display:flex;gap:6px;margin-bottom:10px;">
-                            <button onclick="window._bulkDecideAll('inactive')" style="flex:1;padding:6px;border-radius:8px;font-size:11px;font-weight:800;border:1.5px solid #6366f1;background:#ede9fe;color:#5b21b6;cursor:pointer;">💤 พักทั้งหมด</button>
-                            <button onclick="window._bulkDecideAll('delete')" style="flex:1;padding:6px;border-radius:8px;font-size:11px;font-weight:800;border:1.5px solid #ef4444;background:#fee2e2;color:#991b1b;cursor:pointer;">🗑️ ลบทั้งหมด</button>
-                        </div>
-                        <div id="_bulk-list" style="overflow-y:auto;flex:1;padding-right:4px;">${renderRows()}</div>
-                        <div style="display:flex;gap:8px;margin-top:14px;">
-                            <button onclick="window._bulkConfirm()" style="flex:1;padding:12px;border-radius:12px;background:#2563eb;color:#fff;font-size:14px;font-weight:800;border:none;cursor:pointer;">✅ ยืนยัน</button>
-                            <button onclick="window._bulkCancel()" style="padding:12px 18px;border-radius:12px;background:#f3f4f6;color:#374151;font-size:14px;font-weight:700;border:none;cursor:pointer;">ยกเลิก</button>
-                        </div>
-                    </div>`;
-                };
-
-                window._bulkDecide = (id, action) => {
-                    decisions[id] = action;
-                    const li = document.getElementById('_bulk-list');
-                    if (li) li.innerHTML = renderRows();
-                };
-                window._bulkDecideAll = (action) => {
-                    allMissing.forEach(s => { decisions[s.id] = action; });
-                    const li = document.getElementById('_bulk-list');
-                    if (li) li.innerHTML = renderRows();
-                };
-                window._bulkCancel = () => {
-                    document.body.removeChild(overlay);
-                    delete window._bulkDecide;
-                    delete window._bulkDecideAll;
-                    delete window._bulkConfirm;
-                    delete window._bulkCancel;
-                };
-                window._bulkConfirm = async () => {
-                    document.body.removeChild(overlay);
-                    delete window._bulkDecide;
-                    delete window._bulkDecideAll;
-                    delete window._bulkConfirm;
-                    delete window._bulkCancel;
-
-                    // apply decisions
-                    for (const s of allMissing) {
-                        const route = State.db.routes[s._route];
-                        if (!route) continue;
-                        const idx = route.findIndex(r => r.id === s.id);
-                        if (idx === -1) continue;
-                        if (decisions[s.id] === 'inactive') {
-                            // ✅ พักไว้ใน history — ซ่อนจาก Sales แต่ยังอยู่ใน Firestore
-                            route[idx] = { ...route[idx], inactive: true, days: [], seqs: {} };
-                        } else {
-                            // ลบออกจาก array
-                            route.splice(idx, 1);
-                        }
-                    }
-
-                    await doSaveAll();
-                };
-
-                renderPopup();
-                document.body.appendChild(overlay);
+                // ─── Merge เข้า State.db.routes + บันทึก (ใช้ร่วมกับ importMasterDetail) ──
+                await FileManager._commitByRouteImport(byRoute, 'Bulk Import');
 
             } catch (err) {
                 UI.hideLoader();

@@ -520,6 +520,10 @@ const AI = {
             } catch (e) { console.warn('[AI] จัดลำดับการเยี่ยมอัตโนมัติไม่สำเร็จ:', e.message); }
 
             UI.setLoaderProgress(100, 'เสร็จสิ้น!');
+            // ✅ NEW: AI เพิ่งจัด days ให้ร้านที่ไม่เคยมีวันมาก่อนเสร็จ (เช่น ศูนย์ใหม่ที่อัปโหลด
+            // มาไม่มีชื่อตลาด/ไม่มีวันเลย) — เติมชื่อตลาดให้กลุ่มที่เพิ่งจัดเสร็จนี้ทันที ก่อน save
+            // ไม่งั้นชื่อตลาดจะว่างค้างไปจนกว่าจะมี import/export รอบถัดไปมาช่วยเติมให้
+            if (typeof FileManager !== 'undefined') FileManager._autoFillMarketNames(State.stores);
             MapCtrl.clearRoad(true); UI.hideLoader(); UI.render(); App.saveDB();
             if (typeof UI.renderDayStats === 'function') UI.renderDayStats();
 

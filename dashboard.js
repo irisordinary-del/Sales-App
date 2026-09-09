@@ -146,7 +146,8 @@ const Dashboard = {
                         <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
                     </svg>
                 </button>
-                <span class="text-base font-black text-indigo-400 tracking-wide">Route<span class="text-white">Plan</span></span>
+                <button onclick="location.href='center-select.html'" title="กลับไปหน้าเลือกศูนย์"
+                    class="text-base font-black text-indigo-400 tracking-wide hover:opacity-75 transition">Route<span class="text-white">Plan</span></button>
                 <span id="header-center-label-db" class="text-xs text-gray-400 font-bold hidden sm:block"></span>
             </div>
             <span class="text-xs text-gray-500 font-bold">📊 Dashboard</span>
@@ -300,7 +301,9 @@ const Dashboard = {
     },
 
     // ─── Load month list from Firestore ──────────────────────────────────
-    _loadMonthList: async () => {
+    // skipAutoSelect: true = แค่รีเฟรช options ในดรอปดาวน์ ไม่ต้อง auto-jump ไปเดือนล่าสุด
+    // (ใช้ตอนอัปโหลดไฟล์เสร็จ ที่ต้องการคงอยู่ที่เดือนที่เพิ่งอัปโหลด ไม่ใช่เดือนล่าสุดของระบบ)
+    _loadMonthList: async (skipAutoSelect = false) => {
         try {
             const snap = await cloudDB.collection('sellout').get();
             const cid  = (window.CENTER_ID || '').toUpperCase();
@@ -337,7 +340,7 @@ const Dashboard = {
                 }).join('');
 
             // Auto-select latest month
-            if (months.length > 0) {
+            if (months.length > 0 && !skipAutoSelect) {
                 sel.value = months[0];
                 Dashboard._onMonthChange(months[0]);
             }
@@ -483,39 +486,6 @@ const Dashboard = {
         if (!file) return;
         evt.target.value = '';
 
-        // Detect year_month from filename or ask
-        let ym = Dashboard._detectYM(file.name);
-        if (!ym) {
-            // ใช้ UI input แทน prompt/alert
-            const input = await new Promise(resolve => {
-                const overlay = document.createElement('div');
-                overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9999;display:flex;align-items:center;justify-content:center;';
-                const box = document.createElement('div');
-                box.style.cssText = 'background:#fff;border-radius:16px;padding:24px;max-width:320px;width:90%;font-family:Prompt,sans-serif;';
-                box.innerHTML = '<p style="font-size:13px;font-weight:700;color:#111827;margin-bottom:12px;">ระบุเดือน (เช่น 2026_04)</p>' +
-                    '<input id="_ym-inp" type="text" placeholder="YYYY_MM" style="width:100%;box-sizing:border-box;padding:9px 12px;border:1px solid #d1d5db;border-radius:10px;font-size:14px;font-family:inherit;outline:none;margin-bottom:14px;">' +
-                    '<div style="display:flex;gap:8px;justify-content:flex-end;">' +
-                    '<button id="_ym-cancel" style="padding:7px 16px;border-radius:8px;border:1px solid #d1d5db;background:#fff;color:#6b7280;cursor:pointer;font-size:13px;font-weight:600;">ยกเลิก</button>' +
-                    '<button id="_ym-ok" style="padding:7px 16px;border-radius:8px;border:none;background:#4f46e5;color:#fff;cursor:pointer;font-size:13px;font-weight:700;">ตกลง</button></div>';
-                overlay.appendChild(box);
-                document.body.appendChild(overlay);
-                const inp = box.querySelector('#_ym-inp');
-                inp.focus();
-                const close = (val) => { document.body.removeChild(overlay); resolve(val); };
-                box.querySelector('#_ym-cancel').onclick = () => close(null);
-                box.querySelector('#_ym-ok').onclick = () => close(inp.value.trim());
-                inp.addEventListener('keydown', e => { if (e.key === 'Enter') close(inp.value.trim()); if (e.key === 'Escape') close(null); });
-            });
-            if (!input || !/^\d{4}_\d{2}$/.test(input)) {
-                if (input) Dashboard._toast('⚠️ รูปแบบไม่ถูกต้อง ใช้ YYYY_MM', true);
-                return;
-            }
-            ym = input;
-        }
-
-        const confirm = await new Promise(r => { if (window.confirm(`อัปโหลดข้อมูล Sellout เดือน ${ym} ?\n(ไฟล์เก่าจะถูกแทนที่)`)) r(true); else r(false); });
-        if (!confirm) return;
-
         Dashboard._showUploadBar('กำลังอ่านไฟล์...', 5);
 
         try {
@@ -527,20 +497,91 @@ const Dashboard = {
             Dashboard._showUploadBar('กำลังแปลงข้อมูล...', 20);
 
             const rows = Dashboard._normalizeRows(raw);
-            if (rows.length === 0) { Dashboard._toast('⚠️ ไม่พบข้อมูลในไฟล์', true); return; }
+            if (rows.length === 0) { Dashboard._hideUploadBar(); Dashboard._toast('⚠️ ไม่พบข้อมูลในไฟล์', true); return; }
+
+            // ✅ NEW: ตรวจจับเดือนจากข้อมูลจริง ("KPI Date") ในไฟล์ก่อนเสมอ — แม่นกว่าชื่อไฟล์
+            // เพราะบางครั้งชื่อไฟล์ตั้งผิดเดือน (เช่น ชื่อไฟล์บอกเดือน 6 แต่ยอดขายจริงข้างในเป็น
+            // เดือน 4) ชื่อไฟล์ใช้เป็นแค่ตัวสำรองถ้าหาจากข้อมูลไม่เจอเท่านั้น
+            const ymFromData     = Dashboard._detectYMFromRows(rows);
+            const ymFromFilename = Dashboard._detectYM(file.name);
+            let ym = ymFromData || ymFromFilename;
+
+            Dashboard._hideUploadBar();
+
+            if (!ym) {
+                // ใช้ UI input แทน prompt/alert
+                const input = await new Promise(resolve => {
+                    const overlay = document.createElement('div');
+                    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9999;display:flex;align-items:center;justify-content:center;';
+                    const box = document.createElement('div');
+                    box.style.cssText = 'background:#fff;border-radius:16px;padding:24px;max-width:320px;width:90%;font-family:Prompt,sans-serif;';
+                    box.innerHTML = '<p style="font-size:13px;font-weight:700;color:#111827;margin-bottom:12px;">ระบุเดือน (เช่น 2026_04)</p>' +
+                        '<input id="_ym-inp" type="text" placeholder="YYYY_MM" style="width:100%;box-sizing:border-box;padding:9px 12px;border:1px solid #d1d5db;border-radius:10px;font-size:14px;font-family:inherit;outline:none;margin-bottom:14px;">' +
+                        '<div style="display:flex;gap:8px;justify-content:flex-end;">' +
+                        '<button id="_ym-cancel" style="padding:7px 16px;border-radius:8px;border:1px solid #d1d5db;background:#fff;color:#6b7280;cursor:pointer;font-size:13px;font-weight:600;">ยกเลิก</button>' +
+                        '<button id="_ym-ok" style="padding:7px 16px;border-radius:8px;border:none;background:#4f46e5;color:#fff;cursor:pointer;font-size:13px;font-weight:700;">ตกลง</button></div>';
+                    overlay.appendChild(box);
+                    document.body.appendChild(overlay);
+                    const inp = box.querySelector('#_ym-inp');
+                    inp.focus();
+                    const close = (val) => { document.body.removeChild(overlay); resolve(val); };
+                    box.querySelector('#_ym-cancel').onclick = () => close(null);
+                    box.querySelector('#_ym-ok').onclick = () => close(inp.value.trim());
+                    inp.addEventListener('keydown', e => { if (e.key === 'Enter') close(inp.value.trim()); if (e.key === 'Escape') close(null); });
+                });
+                if (!input || !/^\d{4}_\d{2}$/.test(input)) {
+                    if (input) Dashboard._toast('⚠️ รูปแบบไม่ถูกต้อง ใช้ YYYY_MM', true);
+                    return;
+                }
+                ym = input;
+            }
+
+            const fmtLabel = (v) => {
+                const [y, m] = v.split('_');
+                return new Date(+y, +m - 1, 1).toLocaleDateString('th-TH', { year: 'numeric', month: 'long' });
+            };
+
+            // ✅ NEW: เช็คว่าเดือนนี้มีข้อมูลอยู่แล้วกี่แถว — ถ้าไฟล์ใหม่มี "น้อยกว่า" ของเดิม
+            // เตือนก่อนเสมอ เพราะการอัปโหลดจะลบของเดิมทั้งเดือนแล้วแทนที่ด้วยไฟล์ใหม่ ถ้าไฟล์ใหม่
+            // เป็นแค่บางส่วน (เช่น ครึ่งเดือน) จะทำให้ข้อมูลที่เคยมีอยู่ครบแล้วหายไปโดยไม่รู้ตัว
+            const cid = (window.CENTER_ID || '').toUpperCase();
+            const key = cid ? `${cid}_${ym}` : ym;
+            const existingMeta  = await cloudDB.collection('sellout').doc(key).get();
+            const existingCount = existingMeta.exists ? (existingMeta.data().totalRows || 0) : 0;
+            const isFewerThanBefore = existingCount > 0 && rows.length < existingCount;
+
+            let msg;
+            if (ymFromData) {
+                msg = `ตรวจพบจากข้อมูลจริงในไฟล์ว่าเป็นยอดเดือน ${fmtLabel(ymFromData)}`;
+                if (ymFromFilename && ymFromFilename !== ymFromData) {
+                    msg += `\n\n⚠️ ชื่อไฟล์บ่งบอกเดือน ${fmtLabel(ymFromFilename)} แต่ข้อมูลจริงในไฟล์เป็นเดือน ${fmtLabel(ymFromData)} — ระบบจะใช้ตามข้อมูลจริง ไม่ใช่ชื่อไฟล์`;
+                }
+            } else {
+                msg = `อัปโหลดข้อมูล Sellout เดือน ${fmtLabel(ym)} ?`;
+                msg += `\n(ไม่พบวันที่ในข้อมูล ใช้${ymFromFilename ? 'ชื่อไฟล์' : 'เดือนที่ระบุ'}แทน)`;
+            }
+            if (isFewerThanBefore) {
+                msg += `\n\n🛑 เดือนนี้มีข้อมูลอยู่แล้ว ${existingCount.toLocaleString()} แถว แต่ไฟล์ที่จะอัปโหลดมีแค่ ${rows.length.toLocaleString()} แถว (น้อยกว่าเดิม) — ถ้ากดยืนยัน ข้อมูลเดิมทั้งหมดของเดือนนี้จะถูกลบแล้วแทนที่ด้วยไฟล์นี้ที่มีน้อยกว่า อาจทำให้ข้อมูลบางส่วนหายไปถ้าไฟล์นี้ไม่ใช่ข้อมูลเต็มเดือน\n\nยืนยันจะอัปโหลดทับต่อไหม?`;
+            } else {
+                msg += `\n\nยืนยันอัปโหลด? (ข้อมูลเดิมของเดือนนี้จะถูกแทนที่)`;
+            }
+            const confirm = await new Promise(r => { if (window.confirm(msg)) r(true); else r(false); });
+            if (!confirm) return;
 
             Dashboard._showUploadBar(`บันทึก ${rows.length} แถว...`, 40);
 
             await Dashboard._saveToFirestore(ym, rows);
 
-
-
-            Dashboard._rows = rows;
-            Dashboard._currentYM = ym;
-            await Dashboard._loadMonthList();
-            document.getElementById('db-month-select').value = ym;
-            await Dashboard._loadTargets(ym);
-            Dashboard._render();
+            // ✅ FIX: เดิม _loadMonthList() ไม่ได้ await การ auto-select เดือนล่าสุดของมันเอง
+            // (ยิง Dashboard._onMonthChange(months[0]) แบบไม่ await ในตัว) พอมาชนกับโค้ดด้านล่างที่
+            // set ค่า ym (เดือนที่เพิ่งอัปโหลด) เอง กลายเป็น race — ถ้าอัปโหลดเดือนที่ไม่ใช่เดือนล่าสุด
+            // (เช่น ย้อนไปแก้ข้อมูลเดือนเก่า) หน้าจอจะโชว์ dropdown เป็นเดือนที่เพิ่งอัปโหลด แต่ตัวเลข
+            // KPI ที่จริงเป็นของเดือนล่าสุดที่ระบบ auto-select ไปแทน (คนละเดือนกับที่ dropdown โชว์)
+            // แก้โดยสั่ง _loadMonthList ไม่ให้ auto-select เอง แล้วเรียก _onMonthChange(ym) ตรงๆ แทน
+            await Dashboard._loadMonthList(true);
+            const sel = document.getElementById('db-month-select');
+            if (sel) sel.value = ym;
+            await Dashboard._onMonthChange(ym);
             Dashboard._hideUploadBar();
 
         } catch (e) {
@@ -561,6 +602,23 @@ const Dashboard = {
         const numPattern = filename.match(/(\d{4})[-_](\d{2})/);
         if (numPattern) return `${numPattern[1]}_${numPattern[2]}`;
         return null;
+    },
+
+    // ✅ NEW: ตรวจจับเดือนจากข้อมูลจริงในคอลัมน์ "KPI Date" ของไฟล์ — แม่นกว่าชื่อไฟล์เสมอ เพราะ
+    // ชื่อไฟล์อาจตั้งผิดเดือนได้ (เช่น ชื่อไฟล์บอกเดือน 6 แต่ยอดขายจริงในไฟล์เป็นเดือน 4) หาเดือน
+    // ที่มีจำนวนแถวมากที่สุดในไฟล์ (โหมด) ไม่ใช่แค่ดูแถวแรก เผื่อไฟล์มีข้อมูลก้ำกึ่งข้ามเดือนปนอยู่บ้าง
+    _detectYMFromRows: (rows) => {
+        const counts = {};
+        rows.forEach(r => {
+            const m = String(r.kpiDate || '').match(/^(\d{4})-(\d{2})/);
+            if (!m) return;
+            const ym = `${m[1]}_${m[2]}`;
+            counts[ym] = (counts[ym] || 0) + 1;
+        });
+        const entries = Object.entries(counts);
+        if (!entries.length) return null;
+        entries.sort((a, b) => b[1] - a[1]);
+        return entries[0][0];
     },
 
     _normalizeRows: (raw) => {

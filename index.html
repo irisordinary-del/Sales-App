@@ -230,28 +230,38 @@
                             <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
                         </svg>
                     </button>
-                    <span class="text-base font-black text-indigo-400 tracking-wide">Route<span class="text-white">Plan</span></span>
+                    <button onclick="location.href='center-select.html'" title="กลับไปหน้าเลือกศูนย์"
+                        class="text-base font-black text-indigo-400 tracking-wide hover:opacity-75 transition">Route<span class="text-white">Plan</span></button>
                 </div>
                 <span class="text-xs text-gray-500 font-bold">🗂️ แบ่งเซลล์</span>
             </div>
 
-            <div class="flex-1 overflow-y-auto p-4 bg-gray-50">
-
-                <!-- ── ขั้น 1: เลือกสายต้นทาง + จำนวนเซลล์ ── -->
-                <div id="cellsplit-step1" class="max-w-2xl mx-auto">
-                    <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-5">
-                        <h2 class="text-lg font-black text-gray-800 mb-1">🗂️ แบ่งเซลล์ใหม่</h2>
-                        <p class="text-xs text-gray-500 mb-4">
-                            เลือกสายที่มีร้านค้าอยู่แล้ว (เช่น สายที่เพิ่งอัปโหลดพิกัดร้านทั้งพื้นที่ไว้ ยังไม่กำหนดเซลล์ หรือสายที่เกินภาระ)
-                            ระบบจะแบ่งร้านทั้งหมดออกเป็นเซลล์ใหม่ตามจำนวนที่ระบุ — ไม่ข้ามจังหวัดเด็ดขาด พยายามไม่ข้ามอำเภอ
+            <!-- ── ขั้น 1: ภาพรวมพื้นที่ทั้งศูนย์ + เลือกสายต้นทาง + จำนวนเซลล์ ──
+                 เลย์เอาต์เดียวกับหน้า "วางแผนคิวงาน" — แผนที่เต็มพื้นที่ฝั่งซ้าย + panel ควบคุมฝั่งขวา -->
+            <div id="cellsplit-step1" class="flex-1 flex flex-col md:flex-row overflow-hidden">
+                <!-- Map Area -->
+                <div class="relative h-[45vh] md:h-full md:flex-1">
+                    <div id="cellsplit-overview-map" class="w-full h-full"></div>
+                </div>
+                <!-- Right Panel -->
+                <div class="flex-1 md:w-80 lg:w-96 md:flex-none bg-white shadow-[-5px_0_15px_rgba(0,0,0,0.05)] flex flex-col overflow-hidden z-10 border-t md:border-t-0 md:border-l border-gray-200">
+                    <div class="p-4 border-b border-gray-100 shrink-0">
+                        <h2 class="text-base font-black text-gray-800 mb-1">🗂️ แบ่งเซลล์ใหม่</h2>
+                        <p class="text-[11px] text-gray-500">
+                            ภาพรวมพื้นที่ทั้งหมดของศูนย์ (ตามแผนเดือนปัจจุบัน) แต่ละสายคนละสี — ติ๊กเลือกสายต้นทาง
+                            ที่ต้องการนำมาแบ่งใหม่ (เช่น สายที่เพิ่งอัปโหลดพิกัดร้านทั้งพื้นที่ไว้ ยังไม่กำหนดเซลล์
+                            หรือสายที่เกินภาระ) — ระบบจะแบ่งร้านทั้งหมดออกเป็นเซลล์ใหม่ตามจำนวนที่ระบุ ไม่ข้าม
+                            จังหวัดเด็ดขาด พยายามไม่ข้ามอำเภอ
                         </p>
-
-                        <label class="text-xs font-bold text-gray-600 mb-1.5 block">เลือกสายต้นทาง (เลือกได้หลายสาย)</label>
-                        <div id="cellsplit-route-list" class="border border-gray-200 rounded-xl max-h-48 overflow-y-auto mb-4 p-1"></div>
-
+                    </div>
+                    <div class="flex-1 overflow-y-auto p-4">
+                        <label class="text-xs font-bold text-gray-600 mb-1.5 block">เลือกสายต้นทาง (เลือกได้หลายสาย — ติ๊กเพื่อซูมดูสายนั้นบนแผนที่)</label>
+                        <div id="cellsplit-route-groups" class="space-y-3"></div>
+                    </div>
+                    <div class="p-4 border-t border-gray-100 shrink-0">
                         <label class="text-xs font-bold text-gray-600 mb-1.5 block">จำนวนเซลล์ที่ต้องการ (K)</label>
                         <input type="number" id="cellsplit-k" min="1" placeholder="เช่น 7" value="7"
-                            class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500 mb-4">
+                            class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500 mb-3">
 
                         <button onclick="CellSplitApp.run()"
                             class="w-full bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl py-2.5 text-sm font-bold transition shadow-sm">
@@ -259,9 +269,11 @@
                         </button>
                     </div>
                 </div>
+            </div>
 
-                <!-- ── ขั้น 2: Preview จังหวัด/อำเภอ + แผนที่ + ตั้งชื่อเซลล์ ── -->
-                <div id="cellsplit-step2" class="hidden max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <!-- ── ขั้น 2: Preview จังหวัด/อำเภอ + แผนที่ + ตั้งชื่อเซลล์ ── -->
+            <div id="cellsplit-step2" class="hidden flex-1 overflow-y-auto p-4 bg-gray-50">
+                <div class="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-4">
                     <div>
                         <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 mb-4">
                             <h3 class="text-sm font-black text-gray-800 mb-2">📍 การจัดสรรจังหวัด</h3>
@@ -313,7 +325,8 @@
                             <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
                         </svg>
                     </button>
-                    <span class="text-base font-black text-indigo-400 tracking-wide">Route<span class="text-white">Plan</span></span>
+                    <button onclick="location.href='center-select.html'" title="กลับไปหน้าเลือกศูนย์"
+                        class="text-base font-black text-indigo-400 tracking-wide hover:opacity-75 transition">Route<span class="text-white">Plan</span></button>
                     <span id="header-center-label" class="text-xs text-gray-400 font-bold hidden sm:block"></span>
                 </div>
                 <span class="text-xs text-gray-500 font-bold">📍 วางแผนคิวงาน</span>
@@ -339,6 +352,10 @@
                     📦 อัปโหลดพิกัด
                 </button>
                 <input type="file" id="bulkUpload" accept=".xlsx,.xls" class="hidden" onchange="FileManager.bulkImport(event)">
+                <!-- ✅ NEW: นำเข้าจากไฟล์บริษัท (Customer Master / RoutePlan Detail) — ศูนย์ใหม่หรืออัปเดตร้าน -->
+                <button onclick="MasterImportCtrl.open()" class="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 whitespace-nowrap transition" title="นำเข้าจากไฟล์ Customer Master / RoutePlan Detail ของบริษัท">
+                    📄 นำเข้า Master
+                </button>
                 <div class="flex-1"></div>
                 <!-- Plan Selector -->
                 <div class="flex items-center gap-1.5">
@@ -758,7 +775,8 @@
                             <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
                         </svg>
                     </button>
-                    <span class="text-base font-black text-indigo-400 tracking-wide">Route<span class="text-white">Plan</span></span>
+                    <button onclick="location.href='center-select.html'" title="กลับไปหน้าเลือกศูนย์"
+                        class="text-base font-black text-indigo-400 tracking-wide hover:opacity-75 transition">Route<span class="text-white">Plan</span></button>
                     <span id="header-center-label-ar" class="text-xs text-gray-400 font-bold hidden sm:block"></span>
                 </div>
                 <span class="text-xs text-gray-500 font-bold">📦 ภาพรวมทุกสาย</span>
@@ -1336,6 +1354,13 @@
                                 class="w-16 border border-gray-200 rounded-lg px-2 py-1.5 text-sm font-bold text-center outline-none focus:ring-2 focus:ring-indigo-300">
                         </div>
                     </div>
+                </div>
+
+                <!-- ✅ FIX (2026-09-05): วันหยุดเป็นแนวคิดที่ผูกกับ "วันที่" ไม่ได้ผูกกับโหมด cycle เท่านั้น
+                     ย้ายออกมาจาก cal-cycle-section ให้ใช้ได้ทั้งโหมด cycle และ date (เดิมซ่อนไว้ในโหมด
+                     date ทำให้แก้ไม่ได้ + save() เขียนทับ calendarConfig ทั้งก้อนแบบไม่มี holidays เลย
+                     ทำให้วันหยุดที่เคยตั้งไว้หายถาวรทันทีที่สลับมาโหมด date แล้วกดบันทึก) -->
+                <div id="cal-holidays-section" class="space-y-3">
                     <div>
                         <label class="block text-xs font-bold text-gray-700 mb-2">วันหยุดประจำสัปดาห์ (ซ้ำทุกเดือนอัตโนมัติ ไม่ต้องมาร์คใหม่ทุกเดือน):</label>
                         <div id="cal-weekly-holiday-grid" class="grid grid-cols-7 gap-1"></div>
@@ -1621,6 +1646,10 @@
                 if (cfg && cfg.mode) {
                     CalendarAdmin._originalMode = cfg.mode;
                     CalendarAdmin.setMode(cfg.mode);
+                    // ✅ FIX (2026-09-05): โหลด holidays/weeklyHolidays ทุกโหมดที่รองรับ (cycle + date)
+                    // ไม่ใช่แค่ cycle เดิม — วันหยุดผูกกับ "วันที่" ไม่ได้ผูกกับโหมดใดโหมดหนึ่งเท่านั้น
+                    CalendarAdmin._holidays       = cfg.holidays       || [];
+                    CalendarAdmin._weeklyHolidays = cfg.weeklyHolidays || [];
                     if (cfg.mode === 'cycle') {
                         CalendarAdmin._anchorType    = cfg.anchorType || 'date';
                         CalendarAdmin._anchorWeekday = (cfg.anchorWeekday !== undefined) ? cfg.anchorWeekday : 1;
@@ -1633,8 +1662,6 @@
                         document.getElementById('cal-cycle-days').value     = cfg.cycleDays   || 24;
                         const rollingDateEl = document.getElementById('cal-anchor-rolling-date');
                         if (rollingDateEl) rollingDateEl.value = cfg.anchorDate || '';
-                        CalendarAdmin._holidays       = cfg.holidays       || [];
-                        CalendarAdmin._weeklyHolidays = cfg.weeklyHolidays || [];
                         CalendarAdmin.setAnchorType(CalendarAdmin._anchorType);
                     } else if (cfg.mode === 'fixed') {
                         const mapping = cfg.mapping || {};
@@ -1646,7 +1673,6 @@
                             .map(([day, wd]) => ({ day, weekday: wd }));
                         if (!CalendarAdmin._weekdayRows.length) CalendarAdmin._weekdayRows = CalendarAdmin._defaultWeekdayRows();
                     }
-                    // date mode ไม่ต้องโหลดอะไรเพิ่ม
                 } else {
                     // ✅ UX: ศูนย์ใหม่ยังไม่เคยตั้งค่า — ไม่ default เงียบๆ ให้เตือนเลือกเองก่อน
                     CalendarAdmin.setMode('date');
@@ -1706,17 +1732,20 @@
                 const cycleSec   = document.getElementById('cal-cycle-section');
                 const fixedSec   = document.getElementById('cal-fixed-section');
                 const weekdaySec = document.getElementById('cal-weekday-section');
+                // ✅ FIX (2026-09-05): วันหยุดใช้ได้ทั้งโหมด cycle และ date (ดูคอมเมนต์ตรง HTML)
+                const holidaysSec = document.getElementById('cal-holidays-section');
 
                 // reset
                 [cycleBtn, dateBtn, fixedBtn, weekdayBtn].forEach(b => { if (b) b.className = inactive; });
-                [cycleSec, fixedSec, weekdaySec].forEach(s => { if (s) s.classList.add('hidden'); });
+                [cycleSec, fixedSec, weekdaySec, holidaysSec].forEach(s => { if (s) s.classList.add('hidden'); });
 
                 if (mode === 'cycle') {
                     if (cycleBtn) cycleBtn.className = active;
                     if (cycleSec) cycleSec.classList.remove('hidden');
+                    if (holidaysSec) holidaysSec.classList.remove('hidden');
                 } else if (mode === 'date') {
                     if (dateBtn) dateBtn.className = active;
-                    // ไม่มี section พิเศษ
+                    if (holidaysSec) holidaysSec.classList.remove('hidden');
                 } else if (mode === 'fixed') {
                     if (fixedBtn) fixedBtn.className = active;
                     if (fixedSec) fixedSec.classList.remove('hidden');
@@ -1806,7 +1835,8 @@
                 for (let d = 1; d <= daysInMonth; d++) {
                     const label    = CalendarAdmin._computeDayLabel(d);
                     const isToday  = isCurMonth && now.getDate() === d;
-                    const isHol    = CalendarAdmin._mode === 'cycle' && (
+                    // ✅ FIX (2026-09-05): วันหยุดใช้ได้ทั้งโหมด cycle และ date (ดูคอมเมนต์เดียวกันที่ setMode/save)
+                    const isHol    = (CalendarAdmin._mode === 'cycle' || CalendarAdmin._mode === 'date') && (
                         (CalendarAdmin._holidays || []).includes(d) ||
                         (CalendarAdmin._weeklyHolidays || []).includes(new Date(y, m - 1, d).getDay())
                     );
@@ -2062,7 +2092,14 @@
                         };
                     }
                 } else if (CalendarAdmin._mode === 'date') {
-                    cfg = { mode: 'date' };
+                    // ✅ FIX (2026-09-05): เดิมเขียนแค่ { mode: 'date' } ตายตัว ทับ calendarConfig ทั้งก้อน
+                    // (save ใช้ mergeFields ระดับบนสุด ไม่ merge ลึก) ทำให้ holidays/weeklyHolidays ที่เคย
+                    // ตั้งไว้ (เช่นตอนอยู่โหมด cycle) หายถาวรทันทีที่สลับมาโหมดนี้แล้วกดบันทึก
+                    cfg = {
+                        mode:           'date',
+                        holidays:       [...CalendarAdmin._holidays].sort((a,b) => a-b),
+                        weeklyHolidays: [...CalendarAdmin._weeklyHolidays].sort((a,b) => a-b),
+                    };
                 } else if (CalendarAdmin._mode === 'weekday') {
                     // ✅ VALIDATION: กัน Day label ซ้ำ และกัน weekday เดียวกันถูกใช้ซ้ำหลาย Day
                     // เดิมไม่มีการเช็คเลย — ถ้าพิมพ์ผิดจนชื่อ Day ซ้ำกัน แถวหลังจะทับแถวแรกแบบเงียบๆ
@@ -2423,6 +2460,110 @@
                 } catch(e) {
                     UI.hideLoader();
                     UI.showErrorToast('❌ บันทึกไม่สำเร็จ: ' + ErrorMsg.translate(e));
+                }
+            },
+        };
+    </script>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         📄 Master Import — นำเข้าจากไฟล์ SAP ของบริษัท (Customer Master /
+         RoutePlan Detail) — ตั้งศูนย์ใหม่ทั้งชุด หรืออัปเดตร้านใหม่/แก้ไขข้อมูล
+         จาก Master เพียงไฟล์เดียวโดยไม่แตะวัน/ชื่อตลาดเดิม
+         ═══════════════════════════════════════════════════════════════ -->
+    <div id="master-import-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden" style="max-height:90dvh;display:flex;flex-direction:column;">
+            <div class="p-5 border-b flex justify-between items-center bg-gray-50 flex-shrink-0">
+                <div>
+                    <h2 class="text-base font-black text-gray-900">📄 นำเข้าจากไฟล์บริษัท</h2>
+                    <p class="text-xs text-gray-500 mt-0.5">ไฟล์ Customer Master / RoutePlan Detail ที่โหลดจากระบบบริษัทได้เลย ไม่ต้องแก้ไขคอลัมน์เอง</p>
+                </div>
+                <button onclick="MasterImportCtrl.close()" class="w-8 h-8 rounded-full border border-gray-200 text-gray-400 hover:bg-gray-100 font-bold flex-shrink-0">✕</button>
+            </div>
+            <div class="p-5 overflow-y-auto flex-1">
+                <div class="flex gap-2 mb-4">
+                    <button id="mi-tab-full" onclick="MasterImportCtrl.setMode('full')" class="flex-1 py-2 rounded-lg text-xs font-bold transition">ตั้งศูนย์ใหม่ / จัดใหม่ทั้งชุด</button>
+                    <button id="mi-tab-masteronly" onclick="MasterImportCtrl.setMode('masterOnly')" class="flex-1 py-2 rounded-lg text-xs font-bold transition">อัปเดตจาก Master เท่านั้น</button>
+                </div>
+
+                <div id="mi-full-section">
+                    <p class="text-xs text-gray-500 mb-3">ใช้ตอนศูนย์ใหม่ยังไม่มีข้อมูลเลย หรือต้องการแทนที่วัน/ชื่อตลาดทั้งชุดด้วยข้อมูลล่าสุด — ระบบจับคู่ 2 ไฟล์ด้วยรหัสร้านค้าให้เอง (พิกัด/ที่อยู่มาจาก Master, วัน/ชื่อตลาดมาจาก RoutePlan Detail)</p>
+                    <label class="block text-xs font-bold text-gray-700 mb-1">1) ไฟล์ Customer Master</label>
+                    <input id="mi-master-file" type="file" accept=".xlsx,.xls" onchange="MasterImportCtrl.pickMaster(this)"
+                        class="w-full text-xs border border-gray-200 rounded-lg p-2 mb-3">
+                    <label class="block text-xs font-bold text-gray-700 mb-1">2) ไฟล์ RoutePlan Detail</label>
+                    <input id="mi-detail-file" type="file" accept=".xlsx,.xls" onchange="MasterImportCtrl.pickDetail(this)"
+                        class="w-full text-xs border border-gray-200 rounded-lg p-2">
+                </div>
+
+                <div id="mi-masteronly-section" class="hidden">
+                    <p class="text-xs text-gray-500 mb-3">ใช้ตอนข้อมูลในระบบครบอยู่แล้ว แค่มีร้านใหม่เพิ่มเข้ามา หรือแก้ไขข้อมูลร้านเดิม (เช่น เปลี่ยนชื่อร้าน/ย้ายเซลล์) — <b>จะไม่แตะวัน/ชื่อตลาดที่จัดไว้แล้วเลย</b> ร้านใหม่จะถูกเพิ่มแบบยังไม่มีวัน รอจัดสายทีหลัง (เช่น ผ่าน AI Route Builder)</p>
+                    <label class="block text-xs font-bold text-gray-700 mb-1">ไฟล์ Customer Master</label>
+                    <input id="mi-master-only-file" type="file" accept=".xlsx,.xls" onchange="MasterImportCtrl.pickMaster(this)"
+                        class="w-full text-xs border border-gray-200 rounded-lg p-2">
+                </div>
+            </div>
+            <div class="p-5 border-t flex gap-3 flex-shrink-0">
+                <button onclick="MasterImportCtrl.close()" class="flex-1 border border-gray-200 rounded-xl py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-50 transition">ยกเลิก</button>
+                <button onclick="MasterImportCtrl.run()" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl py-2.5 text-sm font-bold transition shadow-sm">🚀 เริ่มนำเข้า</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const MasterImportCtrl = {
+            _mode: 'full', // 'full' | 'masterOnly'
+            _masterFile: null,
+            _detailFile: null,
+
+            open: () => {
+                MasterImportCtrl._mode = 'full';
+                MasterImportCtrl._masterFile = null;
+                MasterImportCtrl._detailFile = null;
+                ['mi-master-file', 'mi-detail-file', 'mi-master-only-file'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) el.value = '';
+                });
+                MasterImportCtrl._render();
+                document.getElementById('master-import-modal').classList.remove('hidden');
+            },
+            close: () => document.getElementById('master-import-modal').classList.add('hidden'),
+
+            setMode: (mode) => {
+                MasterImportCtrl._mode = mode;
+                // ✅ บังคับเลือกไฟล์ใหม่ทุกครั้งที่สลับโหมด กันไฟล์เก่าจากอีกโหมดค้างอยู่แบบไม่รู้ตัว
+                MasterImportCtrl._masterFile = null;
+                MasterImportCtrl._detailFile = null;
+                ['mi-master-file', 'mi-detail-file', 'mi-master-only-file'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) el.value = '';
+                });
+                MasterImportCtrl._render();
+            },
+
+            _render: () => {
+                const isFull = MasterImportCtrl._mode === 'full';
+                const activeCls   = 'flex-1 py-2 rounded-lg text-xs font-bold transition bg-indigo-600 text-white';
+                const inactiveCls = 'flex-1 py-2 rounded-lg text-xs font-bold transition bg-gray-100 text-gray-500';
+                document.getElementById('mi-tab-full').className       = isFull ? activeCls : inactiveCls;
+                document.getElementById('mi-tab-masteronly').className = !isFull ? activeCls : inactiveCls;
+                document.getElementById('mi-full-section').classList.toggle('hidden', !isFull);
+                document.getElementById('mi-masteronly-section').classList.toggle('hidden', isFull);
+            },
+
+            pickMaster: (input) => { MasterImportCtrl._masterFile = input.files[0] || null; },
+            pickDetail: (input) => { MasterImportCtrl._detailFile = input.files[0] || null; },
+
+            run: () => {
+                if (MasterImportCtrl._mode === 'full') {
+                    if (!MasterImportCtrl._masterFile || !MasterImportCtrl._detailFile)
+                        return UI.showErrorToast('⚠️ กรุณาเลือกไฟล์ให้ครบทั้ง 2 ไฟล์');
+                    MasterImportCtrl.close();
+                    FileManager.importMasterDetail(MasterImportCtrl._masterFile, MasterImportCtrl._detailFile);
+                } else {
+                    if (!MasterImportCtrl._masterFile)
+                        return UI.showErrorToast('⚠️ กรุณาเลือกไฟล์ Customer Master ก่อน');
+                    MasterImportCtrl.close();
+                    FileManager.importMasterOnly(MasterImportCtrl._masterFile);
                 }
             },
         };
