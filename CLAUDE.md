@@ -45,7 +45,7 @@ There is no build tool, package manager, linter, or test suite in this repo (no 
 | `sales-app.js` | Sales-facing app: `State`, `App.start`/`App.startSupervisor`, `CalendarCtrl`, `SupervisorUI` |
 | `sales.html` | Sales-facing shell (loads `sales-app.js`) |
 | `sales-dashboard.js` | `SalesDashboard` / `SupervisorDashboard` — sales KPI views |
-| `dashboard.js` | Admin-side `Dashboard` — org-wide sales analytics, targets, "อัปโหลด Sellout" (sellout Excel upload: auto-detects month from actual `kpiDate` rows rather than trusting the filename, warns if a re-upload has fewer rows than what's already stored) |
+| `dashboard.js` | Admin-side `Dashboard` — org-wide sales analytics, targets, "อัปโหลด Sellout" (sellout Excel upload: auto-detects month from actual `kpiDate` rows rather than trusting the filename, warns if a re-upload has fewer rows than what's already stored). UI is the "Clean Operations" layout — see `Dashboard` under Admin Architecture below |
 | `sku-distribution.js` | SKU Distribution campaign management |
 | `store-history.js` | Per-store purchase history |
 | `tasks.html` / `tasks.js` | "งานที่ต้องส่ง" task list feature |
@@ -210,6 +210,26 @@ CalendarAdmin._loadConfig()    // loads existing config into the form when the m
 PlanUI.refresh()  // loads planList, renders the month dropdown (shows month names only, no "Draft" language)
 ```
 
+### `Dashboard` (`dashboard.js` — "Clean Operations" UI, shipped 2026-09-09 in commit `ddfd1e1`)
+```js
+Dashboard._renderShell()   // single wrapping toolbar, 4-col KPI grid, ~70/30 route-table/insights layout, inline SVG icon set Dashboard._ICONS
+Dashboard._renderKPIs()    // groups the old 7 KPI cards into 4: revenue+target progress, stores, productivity (SKU/store + invoice), V/C route comparison
+```
+- Dashboard-specific styling lives in the component classes appended to `admin-style.css`: `.db-pill-*`, `.db-upload-btn`/`.db-action-btn`, `.db-kpi-*`, `.db-progress-*`, `.db-panel-title`.
+- **Compatibility requirement**: when touching the Dashboard, keep every existing `db-*` element ID and all `onclick`/`data-*` wiring exactly as-is — this redesign only changed markup/CSS/icons; calculations and Firestore read/write behavior were intentionally left untouched.
+- Responsive KPI grid: 4 columns desktop → 2 tablet → 1 mobile; the route table stays horizontally scrollable at every width.
+- Pushed to `staging2` and verified served live at sales-app-7ids.vercel.app (see the Branch/deploy note above — `main` is not what's live).
+- Verified via: desktop render, 390×844 mobile render, Gross/Net toggle, mobile menu open/overlay-close, `node --check dashboard.js`, `git diff --check`.
+
+### Main admin tabs — shared "Clean Operations" UI (2026-09-10)
+
+The same restrained visual language now covers the six main sidebar tabs: Route Analysis, Cell Split, Planning, All Routes, SKU Distribution, and Audit Log. Shared primitives live in `admin-style.css`: `.page-header-bar` / `.page-hamburger-btn`, `.db-panel` / `.db-panel-head`, `.db-table` / `.db-table-wrap`, `.db-state`, and `.db-toolbar-btn*`. `admin-ui.js` exposes the shared `AdminIcons` inline-SVG helper used by these views.
+
+- This was a cosmetic refactor only. Preserve existing IDs, handlers, Firestore reads/writes, calculations, map interactions, exports, and route-planning behavior when extending it.
+- In particular, keep the incremental/batched rendering behavior in All Routes intact; do not replace it with a single synchronous render of all rows.
+- Semantic success/warning/danger colors remain meaningful; indigo is the common page/action accent.
+- Users and Tasks are intentionally outside this migration. They use the separate `AdminTheme` dark-mode design system and do not load `admin-style.css`; migrate them only as a separate, explicitly scoped change.
+
 ---
 
 ## 📤 Importing Store Data (`file-manager.js`)
@@ -257,6 +277,7 @@ Both `exportTemplate` (single route) and `exportAllRoutes` (all routes) sort thr
 | Bulk merge silently wiped real schedules | `days: inc.days \|\| s.days` — an empty array from the incoming file is truthy in JS, so a file with no day info for a store overwrote its real existing schedule with nothing | `file-manager.js` (`_commitByRouteImport`) |
 | Exported files not sorted at all | `exportTemplate`/`exportAllRoutes` mapped `State.stores`/`routes[name]` straight into the sheet in raw array order — no sort by day, market, or sequence at all | `file-manager.js` (fixed via `_sortStoresForExport`) |
 | AI Route Builder gave outlier stores a fake market name | see the `_autoFillMarketNames` gotcha above — a store AI dropped as a geographic outlier (`days: []`) still had a stale `dayOriginal`, so it got grouped and named as if it belonged to that old day (e.g. `"403V01 D02 นราธิวาส"` for a store with no day at all) | `admin-ai.js` |
+| Mobile sidebar overlay dimmed the whole screen on every load | `#sidebar-overlay { display:block; }` inside the `≤767px` media query is an **ID selector**, which beats Tailwind's `.hidden { display:none }` (a class selector) on specificity — so the overlay rendered regardless of whether the drawer was actually open. Fixed as `#sidebar-overlay:not(.hidden) { display:block; }`. **Don't revert to the bare ID rule** — it silently reintroduces this. Paired with an early inline `<script>` (runs right after the sidebar markup, before the rest of the page parses) that collapses `#sidebar` on load at `≤767px`, and a mobile-only check in the `Nav.go` wrapper that closes an open drawer after a menu item is picked | `index.html` |
 
 ---
 

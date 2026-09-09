@@ -1,4 +1,22 @@
 // ==========================================
+// 🎨 AdminIcons — shared inline-SVG icon set (no CDN, no dependency)
+// Used to replace prominent page-chrome emoji (tab headers/sidebar nav) with the same
+// calm SVG style Dashboard._ICONS introduced. Loaded before dashboard.js/sku-distribution.js/
+// audit-log.js so every page can call it. Purely additive — does not touch Dashboard._ICONS
+// or any of its existing call sites.
+// ==========================================
+const AdminIcons = {
+    menu:      (c='') => `<svg class="${c}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>`,
+    chart:     (c='') => `<svg class="${c}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg>`,
+    split:     (c='') => `<svg class="${c}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>`,
+    mapPin:    (c='') => `<svg class="${c}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s7-7.58 7-12.5A7 7 0 0 0 5 9.5C5 14.42 12 22 12 22Z"/><circle cx="12" cy="9.5" r="2.3"/></svg>`,
+    box:       (c='') => `<svg class="${c}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8 12 3 3 8l9 5 9-5Z"/><path d="M3 8v8l9 5 9-5V8"/><line x1="12" y1="13" x2="12" y2="21"/></svg>`,
+    target:    (c='') => `<svg class="${c}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.3" fill="currentColor" stroke="none"/></svg>`,
+    clipboard: (c='') => `<svg class="${c}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M9 4H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-3"/><line x1="8" y1="11" x2="16" y2="11"/><line x1="8" y1="15" x2="14" y2="15"/></svg>`,
+    refresh:   (c='') => `<svg class="${c}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 15.3-6.4L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.3 6.4L3 16"/><path d="M3 21v-5h5"/></svg>`,
+};
+
+// ==========================================
 // 🧭 Navigation
 // ==========================================
 const Nav = {
@@ -701,18 +719,18 @@ const UI = {
         const totalStores = routeKeys.reduce((sum, r) => sum + (routes[r] || []).length, 0);
         if (summaryEl) {
             let summaryHTML = `
-                <div class="bg-white rounded-xl shadow-sm p-4 flex flex-col items-center">
+                <div class="db-panel p-4 flex flex-col items-center">
                     <div class="text-2xl font-black text-indigo-600">${routeKeys.length}</div>
                     <div class="text-sm text-gray-500 mt-1">สายวิ่งทั้งหมด</div>
                 </div>
-                <div class="bg-white rounded-xl shadow-sm p-4 flex flex-col items-center">
+                <div class="db-panel p-4 flex flex-col items-center">
                     <div class="text-2xl font-black text-emerald-600">${totalStores}</div>
                     <div class="text-sm text-gray-500 mt-1">ร้านค้าทั้งหมด</div>
                 </div>`;
             routeKeys.forEach(r => {
                 const storeCount = (routes[r] || []).length;
                 const assigned = (routes[r] || []).filter(s => s.days && s.days.length > 0).length;
-                summaryHTML += `<div class="bg-white rounded-xl shadow-sm p-4 flex flex-col border-l-4 border-indigo-400">
+                summaryHTML += `<div class="db-panel p-4 flex flex-col border-l-4 border-indigo-400">
                     <div class="text-sm font-black text-gray-800">${r}</div>
                     <div class="text-xl font-black text-indigo-500 mt-1">${storeCount}</div>
                     <div class="text-xs text-gray-400">ร้านค้า / จัดแล้ว: ${assigned}</div>
@@ -731,11 +749,11 @@ const UI = {
         routeKeys.forEach(routeName => {
             (routes[routeName] || []).forEach(store => {
                 const dayText = store.days && store.days.length > 0 ? store.days.join(',') : (store.dayOriginal || '-');
-                allRows.push('<tr><td class="px-3 py-2 text-indigo-700 font-bold text-xs">' + routeName + '</td>' +
-                    '<td class="px-3 py-2 text-xs text-gray-600">' + (store.code || '') + '</td>' +
-                    '<td class="px-3 py-2 text-gray-800">' + (store.name || '') + '</td>' +
-                    '<td class="px-3 py-2 text-xs text-gray-500">' + (store.salesCode || '') + '</td>' +
-                    '<td class="px-3 py-2 text-center text-xs text-blue-600">' + dayText + '</td></tr>');
+                allRows.push('<tr><td class="text-indigo-700 font-bold text-xs">' + routeName + '</td>' +
+                    '<td class="text-xs text-gray-600">' + (store.code || '') + '</td>' +
+                    '<td class="text-gray-800">' + (store.name || '') + '</td>' +
+                    '<td class="text-xs text-gray-500">' + (store.salesCode || '') + '</td>' +
+                    '<td class="text-center text-xs text-indigo-600">' + dayText + '</td></tr>');
             });
         });
 

@@ -250,3 +250,131 @@ body {
     color: #334155;
 }
 .db-panel-title .db-kpi-icon { width: 24px; height: 24px; }
+
+/* ==========================================
+   🧩 Shared "Clean Operations" page chrome — reused by every Admin tab
+   (RouteAnalysis, Cell Split, Planning, All Routes, SKU Distribution, Audit Log)
+   ========================================== */
+
+/* Dark top bar used by the map-heavy / full-page tabs (hamburger + RoutePlan logo + title) */
+.page-header-bar {
+    height: 3rem;
+    background: #111827; /* gray-900 */
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    box-shadow: 0 1px 3px rgba(0,0,0,.3);
+    border-bottom: 2px solid #4f46e5; /* indigo-600 — one shared accent, no more per-page pink/amber */
+    position: relative;
+    z-index: 5000;
+    flex-shrink: 0;
+}
+.page-hamburger-btn {
+    width: 2rem;
+    height: 2rem;
+    border-radius: .5rem;
+    background: #1f2937; /* gray-800 */
+    color: #d1d5db; /* gray-300 */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: background .15s, color .15s;
+}
+.page-hamburger-btn:hover { background: #374151; color: #fff; } /* gray-700 */
+.page-hamburger-btn:focus-visible {
+    outline: 2px solid #6366f1;
+    outline-offset: 2px;
+}
+
+/* Generic white card / panel — formalizes the bg-white + rounded-2xl + border-gray-100 combo
+   already used ad-hoc across RouteAnalysis/SkuDist/AuditLog/AllRoutes */
+.db-panel {
+    background: #fff;
+    border-radius: 1rem;
+    box-shadow: 0 1px 2px rgba(0,0,0,.05);
+    border: 1px solid #f3f4f6; /* gray-100 */
+}
+.db-panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: .75rem 1rem;
+    border-bottom: 1px solid #f3f4f6;
+    background: #f9fafb; /* gray-50 */
+}
+
+/* Table styling shared by RouteAnalysis / All Routes / Audit Log / SKU Distribution.
+   Padding/text rules use :where() so they contribute zero specificity — any page that still
+   sets its own horizontal/vertical padding utility on a th/td (e.g. Audit Log) keeps winning over this default,
+   so adopting .db-table never silently overrides an existing cell's explicit spacing. */
+.db-table { width: 100%; font-size: .875rem; }
+.db-table thead { background: #f9fafb; border-bottom: 1px solid #f3f4f6; }
+:where(.db-table) th {
+    padding: .625rem .75rem;
+    text-align: left;
+    font-size: .75rem;
+    font-weight: 700;
+    color: #6b7280; /* gray-500 */
+}
+:where(.db-table) td { padding: .625rem .75rem; }
+.db-table tbody tr { border-bottom: 1px solid #f3f4f6; }
+.db-table tbody tr:hover { background: #f9fafb; }
+
+/* Empty / loading / error state placeholder — one shared block instead of each page
+   repeating its own inline text-align/padding/color string */
+.db-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: #9ca3af; /* gray-400 */
+    font-size: 13px;
+}
+.db-state--error { color: #dc2626; } /* red-600 — semantic, only for real error states */
+
+/* Shared toolbar action buttons (soft indigo pill + solid indigo) reused instead of
+   page-specific solid colors (e.g. the old amber "โหลดใหม่" button on Audit Log) */
+.db-toolbar-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 700;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: background .15s, color .15s, opacity .15s;
+    white-space: nowrap;
+}
+.db-toolbar-btn--soft {
+    color: #4338ca; /* indigo-700 */
+    background: #eef2ff; /* indigo-50 */
+    border: 1px solid #e0e7ff; /* indigo-100 */
+}
+.db-toolbar-btn--soft:hover { background: #e0e7ff; }
+.db-toolbar-btn--solid {
+    color: #fff;
+    background: #4f46e5; /* indigo-600 */
+    border: 1px solid transparent;
+}
+.db-toolbar-btn--solid:hover { background: #4338ca; } /* indigo-700 */
+
+/* Disabled + focus-visible states shared across the new toolbar/panel controls */
+.db-toolbar-btn:disabled,
+.db-action-btn:disabled,
+.db-upload-btn:disabled,
+.db-pill-btn:disabled {
+    opacity: .5;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+.db-toolbar-btn:focus-visible,
+.db-action-btn:focus-visible,
+.db-upload-btn:focus-visible,
+.db-pill-btn:focus-visible {
+    outline: 2px solid #6366f1;
+    outline-offset: 2px;
+}
+
+/* Mobile: keep any .db-table-wrap horizontally scrollable instead of squeezing columns */
+.db-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }

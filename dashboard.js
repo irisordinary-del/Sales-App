@@ -2024,13 +2024,13 @@ const RouteAnalysis = {
         el.innerHTML = `
         <div class="h-14 bg-white border-b border-gray-100 flex items-center justify-between px-5 shrink-0 shadow-sm">
             <div>
-                <h1 class="text-base font-black text-gray-900">📈 วิเคราะห์สายวิ่ง</h1>
+                <h1 class="text-base font-black text-gray-900 flex items-center gap-2">${AdminIcons.chart('w-4 h-4 text-indigo-600')}วิเคราะห์สายวิ่ง</h1>
                 <p class="text-[11px] text-gray-400">ยอดขาย + จำนวนร้านต่อสาย ย้อนหลังหลายเดือน</p>
             </div>
             <div id="ra-controls" class="flex items-center gap-2"></div>
         </div>
         <div class="flex-1 overflow-y-auto p-5" id="ra-body">
-            <div style="text-align:center;padding:60px;color:#9ca3af;font-size:13px;">⏳ กำลังโหลดข้อมูล...</div>
+            <div class="db-state">⏳ กำลังโหลดข้อมูล...</div>
         </div>`;
         RouteAnalysis._renderControls();
     },
@@ -2145,7 +2145,7 @@ const RouteAnalysis = {
         RouteAnalysis._view = 'overview';
         RouteAnalysis._renderControls();
         const body = document.getElementById('ra-body');
-        if (body) body.innerHTML = '<div style="text-align:center;padding:60px;color:#9ca3af;font-size:13px;">⏳ กำลังโหลดข้อมูล...</div>';
+        if (body) body.innerHTML = '<div class="db-state">⏳ กำลังโหลดข้อมูล...</div>';
 
         if (force) RouteAnalysis._monthCache = {}; // ✅ รีเฟรช = ล้าง cache ทั้งหมด
 
@@ -2165,7 +2165,7 @@ const RouteAnalysis = {
         if (!body) return;
 
         if (!routes.length) {
-            body.innerHTML = '<div style="text-align:center;padding:60px;color:#9ca3af;font-size:13px;">📭 ไม่พบข้อมูลแผน/ยอดขายในช่วงที่เลือก</div>';
+            body.innerHTML = '<div class="db-state">📭 ไม่พบข้อมูลแผน/ยอดขายในช่วงที่เลือก</div>';
             return;
         }
 
@@ -2222,7 +2222,7 @@ const RouteAnalysis = {
 
         body.innerHTML = `
             <p class="text-[11px] text-gray-400 mb-3">💡 คลิกที่ cell เดือนไหนก็ได้ เพื่อดูรายละเอียดแยกตาม Day ของเดือนนั้น</p>
-            <div class="overflow-x-auto rounded-2xl border border-gray-100 shadow-sm">
+            <div class="db-panel db-table-wrap">
                 <table class="w-full text-sm">
                     <thead>${thead}</thead>
                     <tbody>${tbody}</tbody>
@@ -2242,11 +2242,11 @@ const RouteAnalysis = {
         RouteAnalysis._activeYM = ym;
         RouteAnalysis._renderControls();
         const body = document.getElementById('ra-body');
-        if (body) body.innerHTML = '<div style="text-align:center;padding:60px;color:#9ca3af;font-size:13px;">⏳ กำลังคำนวณ...</div>';
+        if (body) body.innerHTML = '<div class="db-state">⏳ กำลังคำนวณ...</div>';
 
         const data = await RouteAnalysis._loadMonthData(ym);
         if (!data) {
-            if (body) body.innerHTML = '<div style="text-align:center;padding:60px;color:#9ca3af;font-size:13px;">📭 ไม่พบข้อมูลเดือนนี้</div>';
+            if (body) body.innerHTML = '<div class="db-state">📭 ไม่พบข้อมูลเดือนนี้</div>';
             return;
         }
         RouteAnalysis._renderDayMatrix(data);
