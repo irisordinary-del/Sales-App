@@ -534,10 +534,14 @@ const FileManager = {
     },
 
     // ✅ NEW: เติม marketName อัตโนมัติให้ร้านที่ไม่มีชื่อตลาด (ช่องว่างในไฟล์ หรือไฟล์ไม่มีคอลัมน์นี้เลย)
-    // กรณี 1: มีร้านอื่นในสาย+วันเดียวกัน (route+day) ที่มีชื่อตลาดอยู่แล้ว → copy มาใช้เลย
-    // กรณี 2: ไม่มีใครในกลุ่มวันนั้นมีชื่อตลาดเลย → generate จาก
+    // หรือมีชื่อตลาดอยู่แล้วแต่ "เลขวันฝังในชื่อ" ไม่ตรงกับวันปัจจุบันของร้าน (เช่นเพิ่งถูก AI Route
+    // Builder/ลากมือ/อนุมัติคำขอย้ายวัน ย้ายไปวันอื่นแล้ว ชื่อตลาดเดิมเลยพูดถึงคนละวัน/คนละกลุ่ม)
+    // กรณี 1: มีร้านอื่นในสาย+วันเดียวกัน (route+day) ที่ชื่อตลาด "ตรงกับวันปัจจุบัน" อยู่แล้ว → copy มาใช้เลย
+    // กรณี 2: ไม่มีใครในกลุ่มวันนั้นมีชื่อตลาดที่ตรงกันเลย → generate จาก
     //   {salesCode} D{เลขวัน 2 หลัก} + ตำบล 2 อันดับที่มีร้านเยอะสุดในกลุ่ม + อำเภอ/จังหวัดที่มีร้านเยอะสุด
     // (ตัด "ต./อ./จ." ออกก่อนเสมอ ให้ตรงกับ pattern ชื่อตลาดจริงที่ใช้อยู่)
+    // ✅ NEW: sync "Cycle Id" (dayOriginal) ให้ตรงกับวันปัจจุบันเสมอด้วย (เดิมค้างค่าดิบจากตอน
+    // import ครั้งแรก ทำให้หลังย้ายวัน export ออกมาคอลัมน์ "Cycle Id" ไม่ตรงกับคอลัมน์ "Day" จริง)
     _autoFillMarketNames: (stores) => {
         // ข้อมูลจริงในระบบใช้ทั้งแบบย่อมีจุด ("ต.", "อ.", "จ.") และแบบเต็มคำ ("ตำบล", "อำเภอ",
         // "จังหวัด") ปนกันไปตามไฟล์ต้นทาง — ต้องตัดทั้ง 2 แบบ ไม่งั้นชื่อตลาดจะโผล่คำนำหน้าไม่ตรงกัน
@@ -548,6 +552,23 @@ const FileManager = {
         const dayKeysOf = (s) => (s.days && s.days.length > 0)
             ? s.days
             : (s.dayOriginal ? [String(s.dayOriginal).trim()] : []);
+
+        // ดึงเลขวันที่ฝังอยู่ในชื่อตลาด (รองรับทั้งแบบเว้นวรรค "402C01 D02 ..." และแบบติดกัน
+        // "403V01D02 ...") — ถ้าจับไม่ได้เลยคืน null (เช่นแอดมินพิมพ์ชื่อเองไม่ตาม pattern นี้
+        // ถือว่าเช็คไม่ได้ ไม่แตะ ปลอดภัยไว้ก่อนดีกว่าเผลอไปทับชื่อที่ตั้งใจพิมพ์เอง)
+        const embeddedDayNum = (marketName) => {
+            const m = String(marketName || '').match(/D(\d{2})(?!\d)/);
+            return m ? parseInt(m[1], 10) : null;
+        };
+
+        // sync Cycle Id (dayOriginal) ให้ตรงวันปัจจุบันก่อนเสมอ — เฉพาะร้านที่มี days จริงแล้ว
+        // (ร้านที่ AI ตัดทิ้งเป็นร้านโดด days=[] ถูกจัดการแยกไว้แล้วใน admin-ai.js)
+        stores.forEach(s => {
+            if (s.days && s.days.length > 0) {
+                const digits = String(s.days[0]).replace(/[^0-9]/g, '');
+                if (digits) s.dayOriginal = digits;
+            }
+        });
 
         // จัดกลุ่มร้านตามวัน — ร้าน F2 อยู่ได้หลายกลุ่ม (นับทุกวันที่มันอยู่)
         const byDay = {};
@@ -560,17 +581,26 @@ const FileManager = {
         });
 
         Object.entries(byDay).forEach(([day, group]) => {
-            const needFill = group.filter(s => !s.marketName || !s.marketName.trim());
+            const dayDigits = String(day).replace(/[^0-9]/g, '');
+            const dayNum = dayDigits ? parseInt(dayDigits, 10) : null;
+            // "ค้าง/ผิด" ได้ 2 แบบ: ไม่มีชื่อตลาดเลย หรือมีแต่เลขวันฝังในชื่อไม่ตรงกับวันปัจจุบัน
+            const isStale = (s) => {
+                if (!s.marketName || !s.marketName.trim()) return true;
+                if (dayNum === null) return false;
+                const embedded = embeddedDayNum(s.marketName);
+                return embedded !== null && embedded !== dayNum;
+            };
+            const needFill = group.filter(isStale);
             if (needFill.length === 0) return;
 
-            // กรณี 1: มีร้านอื่นในกลุ่มวันนี้ที่มีชื่อตลาดอยู่แล้ว → copy
-            const existingName = group.find(s => s.marketName && s.marketName.trim());
+            // กรณี 1: มีร้านอื่นในกลุ่มวันนี้ที่ชื่อตลาด "ตรงกับวันปัจจุบัน" อยู่แล้ว → copy
+            const existingName = group.find(s => !isStale(s));
             if (existingName) {
                 needFill.forEach(s => { s.marketName = existingName.marketName; });
                 return;
             }
 
-            // กรณี 2: ไม่มีใครในกลุ่มมีชื่อตลาดเลย → generate จากตำบล/อำเภอ/จังหวัดของสมาชิกกลุ่ม
+            // กรณี 2: ไม่มีใครในกลุ่มมีชื่อตลาดที่ตรงกันเลย → generate จากตำบล/อำเภอ/จังหวัดของสมาชิกกลุ่ม
             // (นับความถี่ของแต่ละค่า เรียงมากไปน้อย — เท่ากันแล้วใช้ลำดับที่เจอก่อน)
             const rankByFreq = (field) => {
                 const counts = {}, order = [];
@@ -586,7 +616,6 @@ const FileManager = {
             const tambons  = rankByFreq('subDistrict').slice(0, 2);
             const amphoe   = rankByFreq('district')[0]  || '';
             const province = rankByFreq('province')[0]  || '';
-            const dayDigits = String(day).replace(/[^0-9]/g, '');
             const dToken    = dayDigits ? 'D' + dayDigits.padStart(2, '0') : '';
             const generated = [group[0].salesCode || '', dToken, ...tambons, amphoe, province]
                 .filter(Boolean).join(' ');

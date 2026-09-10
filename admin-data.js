@@ -45,6 +45,9 @@ const StoreMgr = {
             s.days = [d, `Day ${pair}`];
         } else { s.days = [d]; }
         s.seqs = {};
+        // ✅ NEW (2026-09-10): ย้ายวันด้วยมือแล้ว sync ชื่อตลาด/Cycle Id ให้ตรงกับวันใหม่ทันที
+        // ไม่ต้องรอจนกว่าจะกด export ถึงจะเห็นค่าที่ถูกต้อง
+        if (typeof FileManager !== 'undefined') FileManager._autoFillMarketNames(State.stores);
         MapCtrl.closePopups();
         UI.render(); App.saveDB();
     },
@@ -64,7 +67,11 @@ const StoreMgr = {
             s.selected = false; s.seqs = {}; changed = true;
         });
         if (!changed) UI.showErrorToast('กรุณาเลือกร้านค้าก่อนครับ');
-        else { UI.render(); App.saveDB(); }
+        else {
+            // ✅ NEW (2026-09-10): ดู comment เดียวกันใน changeDay ข้างบน
+            if (typeof FileManager !== 'undefined') FileManager._autoFillMarketNames(State.stores);
+            UI.render(); App.saveDB();
+        }
     },
     getDistSq: (a, b) => Math.pow(a.lat - b.lat, 2) + Math.pow(a.lng - b.lng, 2),
 };
@@ -771,6 +778,11 @@ const App = {
             delete store.seqs[req.fromDay];
             store.seqs[req.toDay] = maxSeq + 1;
             store.days = [req.toDay]; // ระบบนี้ถือว่า 1 ร้าน = 1 Day ต่อเดือน (ตาม pattern ที่ใช้อยู่ทั้งระบบ)
+
+            // ✅ NEW (2026-09-10): อนุมัติย้ายวันแล้ว sync ชื่อตลาด/Cycle Id ของทั้งสาย (ไม่ใช่แค่ร้าน
+            // นี้) ให้ตรงกับวันปัจจุบัน — route นี้อาจไม่ใช่ route ที่แอดมินกำลังเปิดดูอยู่ตอนนี้เลย
+            // (ดึงตรงจาก Firestore) เลยต้อง sync ที่นี่ ไม่ใช่รอ export หรือ UI.render ของหน้าปัจจุบัน
+            if (typeof FileManager !== 'undefined') FileManager._autoFillMarketNames(stores);
 
             await routeRef.set({
                 stores,
