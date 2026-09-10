@@ -6,18 +6,45 @@
 const AI = {
 
     // ✅ NEW (2026-09-05): ขอบเขตจำนวนร้าน/วันบังคับ (กฎธุรกิจ — ไม่ใช่แค่ "พยายามให้ใกล้เคียงกัน" เหมือนเดิม)
+    // ✅ CHANGE: MIN_PER_DAY ไม่ตายตัวอีกต่อไป — เป็นแค่ fallback เริ่มต้นตอนยังคำนวณเฉลี่ยไม่ได้
+    // (ดู _autoMinPerDay/refreshMinHint) ค่าจริงที่ใช้คำนวณแต่ละครั้งมาจาก run() แทน
     MIN_PER_DAY: 18,
     MAX_PER_DAY: 30,
+
+    // ✅ NEW: ค่าเฉลี่ยร้านที่ยังไม่จัดวัน ÷ จำนวนวัน — ใช้เป็นค่าเริ่มต้นของ "ขั้นต่ำร้าน/วัน"
+    // ปัดลง (floor) เพราะเป็นค่า "ขั้นต่ำ" ควรระมัดระวังไว้ก่อน ไม่ใช่ปัดขึ้นจนเข้มงวดเกินจริง
+    _autoMinPerDay: (k) => {
+        if (!State || !State.stores || !k || k < 1) return AI.MIN_PER_DAY;
+        const unassigned = State.stores.filter(s => !s.inactive && (!s.days || !s.days.length)).length;
+        if (!unassigned) return AI.MIN_PER_DAY;
+        return Math.max(1, Math.floor(unassigned / k));
+    },
+
+    // ✅ NEW: อัปเดตตัวเลขคำแนะนำ "ขั้นต่ำร้าน/วัน" ให้สดอยู่เสมอ — เรียกจาก UI.render() ทุกครั้ง
+    // ที่ข้อมูลร้าน/สายเปลี่ยน และจาก oninput ของ "จำนวนวันทั้งหมด" ด้วย
+    refreshMinHint: () => {
+        const elDays = document.getElementById('ai-days');
+        const elHint = document.getElementById('ai-min-hint');
+        const elMin  = document.getElementById('ai-min');
+        const elCustom = document.getElementById('ai-min-custom');
+        if (!elDays || !elHint || !elMin || !elCustom) return;
+        const k = parseInt(elDays.value) || 24;
+        const auto = AI._autoMinPerDay(k);
+        elHint.textContent = auto;
+        if (!elCustom.checked) elMin.value = auto; // ยังไม่ได้กำหนดเอง — ให้ตัวเลขในช่องตามเฉลี่ยไปด้วย
+    },
 
     run: () => {
         if (!State || !State.stores) return UI.showErrorToast('⚠️ ระบบยังโหลดข้อมูลไม่เสร็จ กรุณารอสักครู่');
         if (State.stores.length === 0) return UI.showErrorToast('⚠️ ยังไม่มีข้อมูลร้านค้า กรุณาอัปโหลดไฟล์พิกัดก่อน');
 
-        const elDays  = document.getElementById('ai-days');
-        const elLock  = document.getElementById('ai-lock');
-        const elLimit = document.getElementById('ai-outlier');
-        const elDist  = document.getElementById('ai-dist');
-        if (!elDays || !elLock || !elLimit || !elDist)
+        const elDays   = document.getElementById('ai-days');
+        const elLock   = document.getElementById('ai-lock');
+        const elLimit  = document.getElementById('ai-outlier');
+        const elDist   = document.getElementById('ai-dist');
+        const elMin    = document.getElementById('ai-min');
+        const elMinCustom = document.getElementById('ai-min-custom');
+        if (!elDays || !elLock || !elLimit || !elDist || !elMin || !elMinCustom)
             return UI.showErrorToast('❌ หาปุ่มตั้งค่า AI ไม่เจอ');
 
         const k     = parseInt(elDays.value);
@@ -26,6 +53,11 @@ const AI = {
         const mxD   = parseFloat(elDist.value);
 
         if (isNaN(k) || k < 2) return UI.showErrorToast('⚠️ จำนวนวันต้องมีอย่างน้อย 2 วัน');
+
+        // ✅ NEW: ขั้นต่ำร้าน/วัน — ใช้ค่าที่กำหนดเองถ้าติ๊กไว้ ไม่งั้นส่ง null ให้ calc() คำนวณเฉลี่ยจริง
+        // เองอีกที "หลัง" ขั้นตอนล้าง days เดิม (ถ้าไม่ได้ล็อค) เพื่อให้เฉลี่ยตรงกับกลุ่มที่จัดจริงรอบนี้
+        // เป๊ะ ไม่ใช้ตัวเลขที่แคชไว้ตอนเปิด panel ซึ่งอาจไม่ตรงกับจำนวนร้านที่ AI จะจัดจริง
+        const minPerDay = elMinCustom.checked ? (parseInt(elMin.value) || AI.MIN_PER_DAY) : null;
 
         // ✅ NEW (2026-09-05): ดึงความสูงร้านทั้งหมดก่อนเริ่มจัดกลุ่ม (ใช้ตรวจจับพื้นที่ภูเขา)
         // ยิงแค่ 1 request/สาย (สูงสุด 2,000 จุด/request ตามข้อจำกัดของ ORS) และแคชผลไว้กับร้าน
@@ -36,7 +68,7 @@ const AI = {
             UI.setLoaderProgress(2);
             AI._fetchElevations(State.stores).finally(() => {
                 UI.setLoaderProgress(10, 'จับกลุ่มร้านค้าที่อยู่ใกล้กัน');
-                setTimeout(() => AI.calc(k, lock, limit, mxD), 150);
+                setTimeout(() => AI.calc(k, lock, limit, mxD, minPerDay), 150);
             });
         };
 
@@ -415,7 +447,7 @@ const AI = {
     // ─── Main Calc ──────────────────────────────────────────────────────
     // ✅ CHANGE (2026-09-05): เปลี่ยนเป็น async เพราะต้อง await ขั้นตอนตรวจสอบเส้นทางจริง
     // (_verifyJumpersWithRoad) ก่อนบันทึกจริง
-    calc: async (k, lock, limit, mxD) => {
+    calc: async (k, lock, limit, mxD, minPerDay) => {
         try {
             State.db.cycleDays = k;
             // ✅ NEW: จัดวันใหม่ทั้งหมด = ระยะทางจริงต่อวันเดิม (routeDayStats) ใช้ไม่ได้แล้ว เคลียร์ทิ้งด้วย
@@ -425,6 +457,10 @@ const AI = {
             const tgts = State.stores.filter((s, i) => {
                 if (!s.days || !s.days.length) { tIdx.push(i); return true; } return false;
             });
+
+            // ✅ NEW: minPerDay=null (โหมดอัตโนมัติ) — คำนวณเฉลี่ยตรงนี้ "หลัง" ล้าง days แล้ว ให้ตรงกับ
+            // กลุ่มร้านที่ AI กำลังจัดจริงรอบนี้เป๊ะ (ไม่ใช้ตัวเลขที่แคชไว้ตอนเปิด panel)
+            const resolvedMinPerDay = (minPerDay != null) ? minPerDay : Math.max(1, Math.floor(tgts.length / k));
 
             if (!tgts.length) { UI.hideLoader(); return UI.showSaveToast('✅ ไม่มีร้านที่รอจัดสายแล้ว'); }
 
@@ -503,10 +539,12 @@ const AI = {
                 });
             } catch (e) { console.warn('[AI] ตรวจสอบเส้นทางจริงไม่สำเร็จ ข้ามขั้นตอนนี้:', e.message); }
 
-            UI.setLoaderProgress(42, 'กำลังปรับให้อยู่ในช่วง 18-30 ร้าน/วัน...');
+            UI.setLoaderProgress(42, `กำลังปรับให้อยู่ในช่วง ${resolvedMinPerDay}-${AI.MAX_PER_DAY} ร้าน/วัน...`);
 
-            // ── Pass 4: บังคับขอบเขตจำนวนร้าน/วัน (18-30) — รันหลังสุดเสมอ ──
-            const boundMoved = AI._enforceMinMax(k, AI.MIN_PER_DAY, AI.MAX_PER_DAY);
+            // ── Pass 4: บังคับขอบเขตจำนวนร้าน/วัน — รันหลังสุดเสมอ ──
+            // ✅ CHANGE: ขั้นต่ำ (resolvedMinPerDay) ไม่ตายตัวที่ 18 อีกแล้ว — มาจากค่าที่แอดมินกำหนดเอง
+            // หรือเฉลี่ยร้านที่จัดจริงรอบนี้ ÷ จำนวนวัน (ดู run()/calc() ด้านบน) ส่วน max ยังคงตายตัวเดิม
+            const boundMoved = AI._enforceMinMax(k, resolvedMinPerDay, AI.MAX_PER_DAY);
 
             // ── Pass 5: จัดลำดับการเยี่ยมภายในแต่ละวันอัตโนมัติ ต่อจากการจัดกลุ่มเลย ──
             // ✅ NEW (2026-09-05): ทำให้ "งานจบที่ AI" — แอดมินไม่ต้องไปกดปุ่ม "🧭 จัดลำดับการเยี่ยมอัตโนมัติ"
@@ -542,7 +580,7 @@ const AI = {
                 msg+=` | min:${bal.min} max:${bal.max} avg:${bal.avg}`;
                 if (fixed>0) msg+=` | แก้ร้านกระโดด ${fixed} ร้าน`;
                 if (roadVerified>0) msg+=` | ยืนยันด้วยเส้นทางจริง ${roadVerified} ร้าน`;
-                if (boundMoved>0) msg+=` | ปรับให้อยู่ในช่วง ${AI.MIN_PER_DAY}-${AI.MAX_PER_DAY} ร้าน/วัน ${boundMoved} ครั้ง`;
+                if (boundMoved>0) msg+=` | ปรับให้อยู่ในช่วง ${resolvedMinPerDay}-${AI.MAX_PER_DAY} ร้าน/วัน ${boundMoved} ครั้ง`;
                 if (seqResult.skipped) {
                     msg += ` | ⚠️ ยังไม่ได้จัดลำดับการเยี่ยม (ยังไม่ได้ตั้งจุดเริ่มต้นของสาย — กด "📍 จุดเริ่ม-จุดจบ" แล้วกด AI ใหม่)`;
                 } else {
@@ -554,7 +592,7 @@ const AI = {
                 if (typeof App !== 'undefined' && App.writeAuditLog) {
                     App.writeAuditLog('ai_route_build', {
                         route: State.localActiveRoute, days: k, storeCount: tgts.length,
-                        fixedJumpers: fixed, roadVerified, boundMoved,
+                        fixedJumpers: fixed, roadVerified, boundMoved, minPerDay: resolvedMinPerDay,
                         sequencedDays: seqResult.skipped ? 0 : seqResult.done,
                         sequenceSkipped: !!seqResult.skipped,
                     });

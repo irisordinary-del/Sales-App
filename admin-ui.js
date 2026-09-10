@@ -648,6 +648,9 @@ const UI = {
         if (el('stat-pending')) el('stat-pending').innerText = wait;
         if (el('progress-bar')) el('progress-bar').style.width = tot ? `${Math.round(((tot - wait) / tot) * 100)}%` : '0%';
 
+        // ✅ NEW: อัปเดตคำแนะนำ "ขั้นต่ำร้าน/วัน" ของ AI Route Builder ให้ตรงกับจำนวนร้านที่ยังไม่จัดวันเสมอ
+        if (typeof AI !== 'undefined' && AI.refreshMinHint) AI.refreshMinHint();
+
         MapCtrl.renderMarkers();
         MapCtrl.drawLines();
     },

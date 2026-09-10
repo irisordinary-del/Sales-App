@@ -610,7 +610,7 @@
 
                                         <label class="text-xs font-bold text-gray-700">จำนวนวันทั้งหมด:</label>
 
-                                        <input type="number" id="ai-days" value="24" min="4" step="1" class="w-16 p-1 border border-indigo-200 rounded-lg text-center font-bold text-indigo-800 bg-white">
+                                        <input type="number" id="ai-days" value="24" min="4" step="1" oninput="AI.refreshMinHint()" class="w-16 p-1 border border-indigo-200 rounded-lg text-center font-bold text-indigo-800 bg-white">
 
                                     </div>
 
@@ -639,6 +639,30 @@
                                     </div>
 
                                     <p class="text-[10px] text-gray-400 mt-1">ร้านที่อยู่ไกลจากกลุ่มเกินระยะนี้จะไม่ถูกจัดวันให้ (ต้องมาจัดเองทีหลัง) — ยกเลิกติ๊กถ้าไม่ต้องการกันร้านโดดออก</p>
+
+                                </div>
+
+                                <div class="mb-3 border-t border-indigo-200 pt-2">
+
+                                    <div class="flex justify-between items-center">
+
+                                        <label class="text-xs font-bold text-gray-700 flex items-center gap-2">
+
+                                            <input type="checkbox" id="ai-min-custom" class="w-3.5 h-3.5" onchange="document.getElementById('ai-min').disabled = !this.checked; document.getElementById('ai-min-wrap').classList.toggle('opacity-40', !this.checked);">
+
+                                            ขั้นต่ำร้าน/วัน:
+
+                                        </label>
+
+                                        <div id="ai-min-wrap" class="opacity-40">
+
+                                            <input type="number" id="ai-min" value="18" min="1" disabled class="w-16 p-1 border border-indigo-200 rounded-lg text-center font-bold text-indigo-800 bg-white disabled:bg-gray-100">
+
+                                        </div>
+
+                                    </div>
+
+                                    <p class="text-[10px] text-gray-400 mt-1">ค่าเริ่มต้น = เฉลี่ยร้านที่ยังไม่จัดวัน ÷ จำนวนวัน (ตอนนี้เฉลี่ย <span id="ai-min-hint" class="font-bold text-indigo-600">—</span> ร้าน/วัน) — ติ๊กถ้าต้องการกำหนดขั้นต่ำเอง</p>
 
                                 </div>
 
