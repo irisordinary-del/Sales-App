@@ -68,9 +68,16 @@ service cloud.firestore {
       allow read: if centerDoc.matches('[0-9a-zA-Z_]+_main')
                   || centerDoc == 'v1_main';
 
-      // 🔒 write: ตรวจ format + field whitelist
-      allow write: if (centerDoc.matches('[0-9a-zA-Z_]+_main') || centerDoc == 'v1_main')
+      // 🔒 create/update: ตรวจ format + field whitelist (request.resource มีข้อมูลจริงให้เช็ค)
+      allow create, update: if (centerDoc.matches('[0-9a-zA-Z_]+_main') || centerDoc == 'v1_main')
                    && validCenterDoc(request.resource.data);
+
+      // ✅ BUGFIX (2026-09-10): เดิมรวม delete ไว้ใน "allow write" เดียวกับ create/update —
+      // ตอน delete request.resource เป็น null เรียก validCenterDoc(request.resource.data) ไม่ได้
+      // เลย error ปฏิเสธการลบเอกสารระดับศูนย์นี้เสมอไม่ว่ากรณีไหน (เช่นตอนลบศูนย์ทดสอบทิ้ง)
+      // แยกออกมาเป็นเงื่อนไขของตัวเอง เช็คแค่รูปแบบชื่อเอกสารเหมือน read — สอดคล้องกับ
+      // subcollection อื่นๆ ในไฟล์นี้ (plans, routes, drafts ฯลฯ) ที่ล้วน allow delete: if true อยู่แล้ว
+      allow delete: if centerDoc.matches('[0-9a-zA-Z_]+_main') || centerDoc == 'v1_main';
 
       // ─── plans/{ym} — ระบบใหม่ (แทน routes + drafts) ────────────
       match /plans/{yearMonth} {

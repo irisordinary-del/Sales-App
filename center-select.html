@@ -428,7 +428,14 @@ const App = {
         try {
             const docId = App.centers[id].docId || (id + '_main');
             const snap  = await db.collection('appData').doc(docId).get();
-            const count = snap.exists ? (snap.data().routeList || []).length : 0;
+            // ✅ BUGFIX: routeList ตัวจริงอยู่ใน plans/{ym}.routeList ไม่ใช่ field บนตัว centerDoc เอง
+            // (field นั้นตั้งครั้งเดียวตอนสร้างศูนย์แล้วไม่เคยอัปเดตอีก — ศูนย์ที่สร้างหลังย้ายระบบ
+            // Plan รายเดือนจึงโชว์ 0 สายวิ่งตลอด ทั้งที่มีสายจริงอยู่)
+            const now = new Date();
+            const ym  = (snap.exists && snap.data().currentPlanYM)
+                || `${now.getFullYear()}_${String(now.getMonth()+1).padStart(2,'0')}`;
+            const planSnap = await db.collection('appData').doc(docId).collection('plans').doc(ym).get();
+            const count = planSnap.exists ? (planSnap.data().routeList || []).length : 0;
             const el = document.getElementById('rc-' + id);
             if (el) { el.textContent = count + ' สายวิ่ง'; el.classList.add('loaded'); }
             App.centers[id].routeCount = count;

@@ -21,12 +21,17 @@ const AdminTheme = {
         document.dispatchEvent(new CustomEvent('admin-theme-change', { detail: { theme: next } }));
     },
 
+    // ไอคอนพระอาทิตย์/พระจันทร์แบบ inline SVG — แทน emoji ☀️/🌙 เดิม ให้ตรงกับสไตล์
+    // "Clean Operations" ที่เลิกใช้ emoji ในหน้า chrome แล้ว (ดู admin-ui.js AdminIcons)
+    _ICON_SUN:  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/></svg>',
+    _ICON_MOON: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>',
+
     // อัปเดตหน้าตาปุ่มสวิตช์ให้ตรงกับโหมดปัจจุบัน — เรียกอีกทีหลัง AdminNav render ปุ่มเสร็จ
     syncButton: () => {
         const btn = document.getElementById('admin-theme-btn');
         if (!btn) return;
         const isDark = document.documentElement.classList.contains('dark');
-        btn.textContent = isDark ? '☀️' : '🌙';
+        btn.innerHTML = isDark ? AdminTheme._ICON_SUN : AdminTheme._ICON_MOON;
         btn.title = isDark ? 'สลับเป็นโหมดสว่าง' : 'สลับเป็นโหมดมืด';
     },
 };

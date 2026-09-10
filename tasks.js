@@ -61,14 +61,20 @@ const TasksApp = {
         const grid = document.getElementById('task-calendar-grid');
         if (grid) grid.innerHTML = '<div class="col-span-7 text-center py-10 text-gray-400 dark:text-slate-500 text-sm">กำลังโหลด...</div>';
         try {
-            const centerDoc = TasksApp._centerId + '_main';
-            const [taskSnap, centerSnap] = await Promise.all([
+            const centerDoc  = TasksApp._centerId + '_main';
+            const centerSnap = await TasksApp._db().collection('appData').doc(centerDoc).get();
+            // ✅ BUGFIX: routeList ตัวจริงอยู่ใน plans/{ym}.routeList ไม่ใช่ field บนตัว centerDoc เอง
+            // (field นั้นตั้งครั้งเดียวตอนสร้างศูนย์แล้วไม่เคยอัปเดตอีก — ดู users.js ที่เจอบั๊กเดียวกัน)
+            const now = new Date();
+            const ym  = (centerSnap.exists && centerSnap.data().currentPlanYM)
+                || `${now.getFullYear()}_${String(now.getMonth()+1).padStart(2,'0')}`;
+            const [taskSnap, planSnap] = await Promise.all([
                 TasksApp._db().collection('appData').doc(centerDoc).collection('tasks').get(),
-                TasksApp._db().collection('appData').doc(centerDoc).get(),
+                TasksApp._db().collection('appData').doc(centerDoc).collection('plans').doc(ym).get(),
             ]);
             TasksApp._tasks = taskSnap.docs.map(d => ({ id: d.id, ...d.data() }))
                 .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
-            TasksApp._routeList = (centerSnap.exists ? (centerSnap.data().routeList || []) : [])
+            TasksApp._routeList = (planSnap.exists ? (planSnap.data().routeList || []) : [])
                 .sort((a, b) => a.localeCompare(b, 'th', { numeric: true }));
             TasksApp.renderCalendar();
         } catch (err) {
@@ -135,7 +141,7 @@ const TasksApp = {
             // ✅ แสดงทุกงานเป็นรายบรรทัด แทนการยุบรวมเป็น "N งาน"
             const taskLines = dayTasks.map(t => `
                 <div title="${t.title}" style="font-size:9px;font-weight:800;line-height:1.35;color:${t.active ? taskColorOn : taskColorOff};
-                            white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:100%;">📌 ${t.title}</div>
+                            white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:100%;">${t.title}</div>
             `).join('');
 
             html += `
@@ -168,9 +174,9 @@ const TasksApp = {
                         ${t.desc ? `<div class="text-xs text-gray-400 dark:text-slate-500 mt-0.5">${t.desc}</div>` : ''}
                         <div class="flex flex-wrap gap-1 mt-1.5">
                             <span class="${t.scope === 'routes' ? 'scope-routes' : 'scope-center'} px-2 py-0.5 rounded-full text-[10px] font-bold">
-                                ${t.scope === 'routes' ? '🚚 เจาะจงสาย' : '🏢 ทั้งศูนย์'}
+                                ${t.scope === 'routes' ? 'เจาะจงสาย' : 'ทั้งศูนย์'}
                             </span>
-                            ${t.dateType === 'monthly' ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-600">🔁 ทุกเดือน</span>' : ''}
+                            ${t.dateType === 'monthly' ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-300">ทุกเดือน</span>' : ''}
                             <span class="${t.active ? 'badge-active' : 'badge-inactive'} px-2 py-0.5 rounded-full text-[10px] font-bold">${t.active ? 'Active' : 'Inactive'}</span>
                         </div>
                         ${t.scope === 'routes' ? `<div class="flex flex-wrap gap-1 mt-1.5">${(t.routes || []).map(r => `<span class="route-chip">${r}</span>`).join('')}</div>` : ''}
@@ -193,18 +199,18 @@ const TasksApp = {
     // ─── Modal: Scope / DateType toggles ─────────────────────────────────
     setScope: (scope) => {
         TasksApp._scope = scope;
-        document.getElementById('scope-btn-center').className = 'flex-1 py-2 rounded-xl text-sm font-bold border transition ' +
+        document.getElementById('scope-btn-center').className = 'flex-1 py-2 rounded-xl text-sm font-bold border transition flex items-center justify-center gap-1.5 ' +
             (scope === 'center' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white dark:bg-slate-900 text-gray-600 dark:text-slate-300 border-gray-200 dark:border-slate-600');
-        document.getElementById('scope-btn-routes').className = 'flex-1 py-2 rounded-xl text-sm font-bold border transition ' +
+        document.getElementById('scope-btn-routes').className = 'flex-1 py-2 rounded-xl text-sm font-bold border transition flex items-center justify-center gap-1.5 ' +
             (scope === 'routes' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white dark:bg-slate-900 text-gray-600 dark:text-slate-300 border-gray-200 dark:border-slate-600');
         document.getElementById('routes-picker').classList.toggle('hidden', scope !== 'routes');
     },
 
     setDateType: (type) => {
         TasksApp._dateType = type;
-        document.getElementById('date-btn-once').className = 'flex-1 py-2 rounded-xl text-sm font-bold border transition ' +
+        document.getElementById('date-btn-once').className = 'flex-1 py-2 rounded-xl text-sm font-bold border transition flex items-center justify-center gap-1.5 ' +
             (type === 'once' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white dark:bg-slate-900 text-gray-600 dark:text-slate-300 border-gray-200 dark:border-slate-600');
-        document.getElementById('date-btn-monthly').className = 'flex-1 py-2 rounded-xl text-sm font-bold border transition ' +
+        document.getElementById('date-btn-monthly').className = 'flex-1 py-2 rounded-xl text-sm font-bold border transition flex items-center justify-center gap-1.5 ' +
             (type === 'monthly' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white dark:bg-slate-900 text-gray-600 dark:text-slate-300 border-gray-200 dark:border-slate-600');
         document.getElementById('f-date-once').classList.toggle('hidden', type !== 'once');
         document.getElementById('f-date-monthly-wrap').classList.toggle('hidden', type !== 'monthly');

@@ -136,9 +136,9 @@ const SkuDist = {
         const container = document.getElementById('page-skudist');
         if (!container) return;
         container.innerHTML = `
-        <div class="h-12 bg-gray-900 text-white flex items-center justify-between px-4 shrink-0 border-b-2 border-pink-500">
+        <div class="page-header-bar px-4">
             <div class="flex items-center gap-3">
-                <button onclick="SidebarCtrl.toggle()" class="w-8 h-8 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 flex items-center justify-center transition">
+                <button onclick="SidebarCtrl.toggle()" class="page-hamburger-btn">
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
                         <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
                     </svg>
@@ -146,17 +146,17 @@ const SkuDist = {
                 <button onclick="location.href='center-select.html'" title="กลับไปหน้าเลือกศูนย์"
                     class="text-base font-black text-indigo-400 hover:opacity-75 transition">Route<span class="text-white">Plan</span></button>
             </div>
-            <span class="text-xs text-gray-400 font-bold">🎯 ติดตามการกระจายสินค้า</span>
+            <span class="text-xs text-gray-400 font-bold flex items-center gap-1.5">${AdminIcons.target('w-3.5 h-3.5')}ติดตามการกระจายสินค้า</span>
         </div>
 
         <div class="flex-1 overflow-y-auto bg-slate-50 p-4 space-y-4">
 
             <!-- Campaign list -->
-            <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-                <div class="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gray-50">
+            <div class="db-panel overflow-hidden">
+                <div class="db-panel-head">
                     <span class="text-sm font-black text-gray-800">📋 Campaign ทั้งหมด</span>
                     <button onclick="SkuDist.openCreateCampaign()"
-                        class="bg-pink-600 hover:bg-pink-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition shadow-sm">
+                        class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition shadow-sm">
                         + สร้าง Campaign
                     </button>
                 </div>
@@ -168,8 +168,8 @@ const SkuDist = {
             <!-- Result panel -->
             <div id="skudist-result-panel" class="hidden">
                 <!-- Result header -->
-                <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden mb-4">
-                    <div class="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gray-50">
+                <div class="db-panel overflow-hidden mb-4">
+                    <div class="db-panel-head">
                         <span id="skudist-result-title" class="text-sm font-black text-gray-800">📊 ผลการกระจาย</span>
                         <div class="flex gap-2">
                             <select id="skudist-group-filter" onchange="SkuDist._renderResult()"
@@ -204,17 +204,17 @@ const SkuDist = {
                         <div class="sm:col-span-2">
                             <label class="block text-xs font-bold text-gray-500 uppercase mb-1.5">ชื่อ Campaign *</label>
                             <input id="skudist-c-name" type="text" placeholder="เช่น Campaign กระจายน้ำดื่ม Q2/2568"
-                                class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-pink-300 font-medium">
+                                class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-300 font-medium">
                         </div>
                         <div>
                             <label class="block text-xs font-bold text-gray-500 uppercase mb-1.5">เดือนเริ่ม (YYYY_MM)</label>
                             <input id="skudist-c-start" type="text" placeholder="เช่น 2025_01"
-                                class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-pink-300 font-mono">
+                                class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-300 font-mono">
                         </div>
                         <div>
                             <label class="block text-xs font-bold text-gray-500 uppercase mb-1.5">เดือนสิ้นสุด (YYYY_MM)</label>
                             <input id="skudist-c-end" type="text" placeholder="เช่น 2025_03"
-                                class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-pink-300 font-mono">
+                                class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-300 font-mono">
                         </div>
                         <div class="sm:col-span-2">
                             <label class="block text-xs font-bold text-gray-500 uppercase mb-1.5">🖼️ รูปสินค้า <span class="text-gray-400 font-normal normal-case">(แสดงข้าง KPI ในแอป Sales)</span></label>
@@ -282,7 +282,7 @@ const SkuDist = {
                                 <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Default target (ทุกสาย)</label>
                                 <div class="flex items-center gap-1.5">
                                     <input id="skudist-c-default-target" type="number" min="0" placeholder="80"
-                                        class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold outline-none focus:ring-2 focus:ring-pink-200">
+                                        class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-200">
                                     <span id="skudist-unit-label" class="text-sm text-gray-400 font-bold w-10">%</span>
                                 </div>
                             </div>
@@ -311,7 +311,7 @@ const SkuDist = {
                 </div>
                 <div class="px-5 py-4 border-t flex gap-3 flex-shrink-0 bg-gray-50">
                     <button onclick="SkuDist.closeModal()" class="flex-1 border border-gray-200 rounded-xl py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-50 transition">ยกเลิก</button>
-                    <button onclick="SkuDist.saveCampaign()" class="flex-1 bg-pink-600 hover:bg-pink-700 text-white rounded-xl py-2.5 text-sm font-bold transition shadow-sm">💾 บันทึก Campaign</button>
+                    <button onclick="SkuDist.saveCampaign()" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl py-2.5 text-sm font-bold transition shadow-sm">💾 บันทึก Campaign</button>
                 </div>
             </div>
         </div>
@@ -347,14 +347,14 @@ const SkuDist = {
                 ? `<span class="bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded font-bold">📋 ${(c.participantStores||[]).length} ร้าน (ระบุเอง)</span>`
                 : `<span class="bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded font-bold">🛣️ ตามสาย</span>`;
             return `
-            <div class="flex items-center gap-3 p-3 rounded-xl border ${isActive ? 'border-pink-300 bg-pink-50' : 'border-gray-100 bg-gray-50'} mb-2">
+            <div class="flex items-center gap-3 p-3 rounded-xl border ${isActive ? 'border-indigo-300 bg-indigo-50' : 'border-gray-100 bg-gray-50'} mb-2">
                 <div class="flex-1 min-w-0">
                     <p class="font-bold text-sm text-gray-800 truncate">${c.name}</p>
                     <p class="text-xs text-gray-400 mt-0.5">📅 ${startLbl} → ${endLbl} &nbsp;|&nbsp; 🎯 ${groups} กลุ่ม SKU &nbsp;|&nbsp; ${scopeBadge}</p>
                 </div>
                 <div class="flex gap-1.5 flex-shrink-0">
                     <button onclick="SkuDist.calc('${c.id}')"
-                        class="bg-pink-600 hover:bg-pink-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition">
+                        class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition">
                         📊 คำนวณ
                     </button>
                     <button onclick="SkuDist.openEdit('${c.id}')"
@@ -602,7 +602,7 @@ const SkuDist = {
                     value="${val}"
                     placeholder="${ph}"
                     oninput="SkuDist._setRouteTarget('${r}', this.value)"
-                    class="w-32 bg-gray-50 border border-gray-200 rounded-lg px-2 py-1 text-xs font-bold outline-none focus:ring-2 focus:ring-pink-200">
+                    class="w-32 bg-gray-50 border border-gray-200 rounded-lg px-2 py-1 text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-200">
                 <span class="text-xs text-gray-400">${unitLbl}</span>
             </div>`;
         }).join('');
@@ -658,10 +658,10 @@ const SkuDist = {
         el.innerHTML = SkuDist._groups.map((g, gi) => `
             <div class="border border-gray-200 rounded-2xl p-4 bg-white" id="group-card-${g.id}">
                 <div class="flex items-center gap-2 mb-3">
-                    <span class="bg-pink-100 text-pink-700 text-xs font-black px-2 py-0.5 rounded-full">SKU Target ${gi+1}</span>
+                    <span class="bg-indigo-100 text-indigo-700 text-xs font-black px-2 py-0.5 rounded-full">SKU Target ${gi+1}</span>
                     <input type="text" value="${g.name}" placeholder="ชื่อกลุ่ม เช่น น้ำดื่ม"
                         onchange="SkuDist._updateGroupName('${g.id}', this.value)"
-                        class="flex-1 bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-sm font-bold outline-none focus:ring-2 focus:ring-pink-200">
+                        class="flex-1 bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-200">
                     <button onclick="SkuDist.removeGroup('${g.id}')" class="text-red-400 hover:text-red-600 font-bold text-lg leading-none px-1">✕</button>
                 </div>
 
@@ -1220,7 +1220,7 @@ const SkuDist = {
             <th class="px-3 py-2 text-left text-xs font-bold text-gray-500 sticky left-0 bg-gray-50">สาย</th>
             <th class="px-3 py-2 text-center text-xs font-bold text-gray-500">ร้าน</th>
             ${groups.map(g => `
-                <th class="px-3 py-2 text-center text-xs font-bold text-pink-700 bg-pink-50" colspan="3">${g.name}</th>
+                <th class="px-3 py-2 text-center text-xs font-bold text-indigo-700 bg-indigo-50" colspan="3">${g.name}</th>
             `).join('')}
         </tr>
         <tr class="bg-gray-50 border-b border-gray-200">
@@ -1267,7 +1267,7 @@ const SkuDist = {
 
             const anyBelowTarget = groups.some(g => (rd.groups?.[g.id]?.vsTarget ?? 0) < 0);
             return `
-            <tr class="border-b border-gray-100 hover:bg-pink-50/30 transition ${anyBelowTarget ? 'bg-red-50/20' : ''}">
+            <tr class="border-b border-gray-100 hover:bg-gray-50 transition ${anyBelowTarget ? 'bg-red-50/20' : ''}">
                 <td class="px-3 py-2.5 font-bold text-xs text-indigo-700 sticky left-0 bg-white">${route}</td>
                 <td class="px-2 py-2.5 text-center text-xs text-gray-500">${rd.totalStores}</td>
                 ${rowCells}
@@ -1327,7 +1327,7 @@ const SkuDist = {
         <tr class="bg-gray-50">
             <th class="px-3 py-2 text-left text-xs font-bold text-gray-500 sticky left-0 bg-gray-50">ร้าน</th>
             ${groups.map(g => `
-                <th class="px-3 py-2 text-center text-xs font-bold text-pink-700 bg-pink-50" colspan="3">${g.name}</th>
+                <th class="px-3 py-2 text-center text-xs font-bold text-indigo-700 bg-indigo-50" colspan="3">${g.name}</th>
             `).join('')}
             <th class="px-3 py-2 text-center text-xs font-bold text-gray-700 bg-gray-100">รวมทุกกลุ่ม</th>
         </tr>
@@ -1355,7 +1355,7 @@ const SkuDist = {
             }).join('');
             const anyBought = Object.values(s.groups).some(g => g.bought);
             return `
-            <tr class="border-b border-gray-100 hover:bg-pink-50/30 transition ${!anyBought ? 'bg-red-50/20' : ''}">
+            <tr class="border-b border-gray-100 hover:bg-gray-50 transition ${!anyBought ? 'bg-red-50/20' : ''}">
                 <td class="px-3 py-2.5 sticky left-0 bg-white">
                     <div class="font-bold text-xs text-gray-800">${s.name}</div>
                     <div class="text-[10px] text-gray-400 font-mono">${s.custCode}</div>

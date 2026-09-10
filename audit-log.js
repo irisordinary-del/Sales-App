@@ -44,6 +44,7 @@ const AuditLog = {
         STORE_REMOVE:        { icon: '❌', label: 'ยกเลิกจัดสาย' },
         STORE_SELECT:        { icon: '☑️', label: 'เลือกร้านค้า' },
         STORE_TRANSFER:      { icon: '🔄', label: 'ย้ายร้านระหว่างสาย' },
+        SWAP_DAYS:           { icon: '🔀', label: 'สลับวัน' },
         ROUTE_ADD:           { icon: '➕', label: 'เพิ่มสายวิ่ง' },
         ROUTE_RENAME:        { icon: '✏️', label: 'เปลี่ยนชื่อสาย' },
         ROUTE_DELETE:        { icon: '🗑️', label: 'ลบสายวิ่ง' },
@@ -192,9 +193,9 @@ const AuditLog = {
     _renderShell: (container) => {
         container.innerHTML = `
         <!-- Header -->
-        <div class="h-12 bg-gray-900 text-white flex items-center justify-between px-4 shrink-0 border-b-2 border-amber-500">
+        <div class="page-header-bar px-4">
             <div class="flex items-center gap-3">
-                <button onclick="SidebarCtrl.toggle()" class="w-8 h-8 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 flex items-center justify-center transition">
+                <button onclick="SidebarCtrl.toggle()" class="page-hamburger-btn">
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
                         <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
                     </svg>
@@ -202,7 +203,7 @@ const AuditLog = {
                 <button onclick="location.href='center-select.html'" title="กลับไปหน้าเลือกศูนย์"
                     class="text-base font-black text-indigo-400 hover:opacity-75 transition">Route<span class="text-white">Plan</span></button>
             </div>
-            <span class="text-xs text-gray-400 font-bold">📋 Audit Log</span>
+            <span class="text-xs text-gray-400 font-bold flex items-center gap-1.5">${AdminIcons.clipboard('w-3.5 h-3.5')}Audit Log</span>
         </div>
 
         <!-- Toolbar -->
@@ -210,11 +211,11 @@ const AuditLog = {
             <!-- User filter -->
             <input type="text" id="auditlog-filter-user" placeholder="🔍 กรองตาม user..."
                 oninput="AuditLog._filterUser=this.value;AuditLog._renderTable()"
-                class="bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-amber-300 w-40 font-medium">
+                class="bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-indigo-300 w-40 font-medium">
 
             <!-- Action filter -->
             <select id="auditlog-filter-action" onchange="AuditLog._filterAction=this.value;AuditLog._renderTable()"
-                class="bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-amber-300 font-medium">
+                class="bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-indigo-300 font-medium">
                 <option value="">ทุก Action</option>
                 ${Object.entries(AuditLog.ACTIONS).map(([k, v]) =>
                     `<option value="${k}">${v.icon} ${v.label}</option>`
@@ -222,8 +223,8 @@ const AuditLog = {
             </select>
 
             <button onclick="AuditLog.load(true)"
-                class="bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition shadow-sm">
-                🔄 โหลดใหม่
+                class="db-toolbar-btn db-toolbar-btn--soft">
+                ${AdminIcons.refresh('w-3.5 h-3.5')}โหลดใหม่
             </button>
 
             <button onclick="AuditLog.exportCsv()"
@@ -236,18 +237,18 @@ const AuditLog = {
 
         <!-- Table -->
         <div class="flex-1 overflow-y-auto bg-slate-50 p-4">
-            <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-                <table class="w-full text-sm">
-                    <thead class="bg-gray-50 border-b border-gray-100 sticky top-0">
+            <div class="db-panel db-table-wrap">
+                <table class="db-table">
+                    <thead class="sticky top-0">
                         <tr>
-                            <th class="px-4 py-3 text-left text-xs font-bold text-gray-500">เวลา</th>
-                            <th class="px-4 py-3 text-left text-xs font-bold text-gray-500">User</th>
-                            <th class="px-4 py-3 text-left text-xs font-bold text-gray-500">Action</th>
-                            <th class="px-4 py-3 text-left text-xs font-bold text-gray-500">รายละเอียด</th>
+                            <th class="text-left">เวลา</th>
+                            <th class="text-left">User</th>
+                            <th class="text-left">Action</th>
+                            <th class="text-left">รายละเอียด</th>
                         </tr>
                     </thead>
                     <tbody id="auditlog-tbody">
-                        <tr><td colspan="4" class="text-center py-10 text-gray-400">กำลังโหลด...</td></tr>
+                        <tr><td colspan="4" class="db-state">กำลังโหลด...</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -284,7 +285,7 @@ const AuditLog = {
         if (countEl) countEl.textContent = `แสดง ${filtered.length} รายการ`;
 
         if (!filtered.length) {
-            tbody.innerHTML = '<tr><td colspan="4" class="text-center py-10 text-gray-400 text-sm">ไม่พบรายการที่ตรงกัน</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="4" class="db-state">ไม่พบรายการที่ตรงกัน</td></tr>';
             return;
         }
 
@@ -304,7 +305,7 @@ const AuditLog = {
             const detailStr = AuditLog._formatDetails(log.details || {});
 
             return `
-            <tr class="border-b border-gray-50 hover:bg-amber-50/30 transition ${i % 2 === 0 ? '' : 'bg-gray-50/50'}">
+            <tr class="border-b border-gray-50 hover:bg-gray-50 transition ${i % 2 === 0 ? '' : 'bg-gray-50/50'}">
                 <td class="px-4 py-3 text-xs text-gray-500 whitespace-nowrap font-mono">${timeStr}</td>
                 <td class="px-4 py-3">
                     <div class="font-bold text-gray-800 text-xs">${log.displayName || log.username}</div>
@@ -337,7 +338,7 @@ const AuditLog = {
                     oldName: 'ชื่อเดิม', newName: 'ชื่อใหม่',
                     username: 'username', role: 'role', centerId: 'ศูนย์',
                     routeCount: 'สาย', totalStores: 'ร้าน', storeId: 'ID',
-                    mode: 'mode',
+                    mode: 'mode', mapping: 'สลับ',
                 };
                 const label = labels[k] || k;
                 return `${label}: ${Array.isArray(v) ? v.join(', ') : v}`;

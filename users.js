@@ -54,17 +54,17 @@ const UsersApp = {
         const roleClass = { admin: 'role-admin', supervisor: 'role-supervisor', sales: 'role-sales' };
 
         tbody.innerHTML = users.map(u => `
-            <tr class="border-b border-gray-50 hover:bg-gray-50/60 transition">
+            <tr class="border-b border-gray-50 dark:border-slate-700 hover:bg-gray-50/60 dark:hover:bg-slate-700/40 transition">
                 <td class="px-4 py-3">
-                    <span class="font-black text-gray-800 text-sm font-mono">${u.username}</span>
+                    <span class="font-black text-gray-800 dark:text-slate-100 text-sm font-mono">${u.username}</span>
                 </td>
-                <td class="px-4 py-3 text-sm text-gray-600">${u.displayName || '—'}</td>
+                <td class="px-4 py-3 text-sm text-gray-600 dark:text-slate-300">${u.displayName || '—'}</td>
                 <td class="px-4 py-3">
-                    <span class="px-2.5 py-1 rounded-full text-xs font-bold ${roleClass[u.role] || 'bg-gray-100 text-gray-600'}">
+                    <span class="px-2.5 py-1 rounded-full text-xs font-bold ${roleClass[u.role] || 'bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-slate-300'}">
                         ${roleLabel[u.role] || u.role}
                     </span>
                 </td>
-                <td class="px-4 py-3 text-sm text-gray-500 font-mono">${u.centerId || '—'}</td>
+                <td class="px-4 py-3 text-sm text-gray-500 dark:text-slate-400 font-mono">${u.centerId || '—'}</td>
                 <td class="px-4 py-3 text-center">
                     <span class="px-2.5 py-1 rounded-full text-xs font-bold ${u.active ? 'badge-active' : 'badge-inactive'}">
                         ${u.active ? 'Active' : 'Inactive'}
@@ -73,12 +73,13 @@ const UsersApp = {
                 <td class="px-4 py-3 text-right">
                     <div class="flex justify-end gap-2">
                         <button onclick="UsersApp.openEdit('${u.username}')"
-                            class="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 px-3 py-1.5 rounded-lg text-xs font-bold transition border border-indigo-100">
-                            ✏️ แก้ไข
+                            class="bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950 dark:hover:bg-indigo-900 text-indigo-700 dark:text-indigo-300 px-3 py-1.5 rounded-lg text-xs font-bold transition border border-indigo-100 dark:border-indigo-800 flex items-center gap-1.5">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z"/></svg>
+                            แก้ไข
                         </button>
                         <button onclick="UsersApp.confirmDelete('${u.username}')"
-                            class="bg-red-50 hover:bg-red-100 text-red-600 px-3 py-1.5 rounded-lg text-xs font-bold transition border border-red-100">
-                            🗑️
+                            class="bg-red-50 hover:bg-red-100 dark:bg-red-950 dark:hover:bg-red-900 text-red-600 dark:text-red-300 px-3 py-1.5 rounded-lg text-xs font-bold transition border border-red-100 dark:border-red-800 flex items-center">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
                         </button>
                     </div>
                 </td>
@@ -110,7 +111,7 @@ const UsersApp = {
     // ─── Modal: Create ────────────────────────────────────────────────────
     openCreate: () => {
         UsersApp._editingUsername = null;
-        document.getElementById('modal-title').textContent = '➕ เพิ่ม User';
+        document.getElementById('modal-title').textContent = 'เพิ่ม User';
         document.getElementById('f-username').value     = '';
         document.getElementById('f-username').disabled  = false;
         document.getElementById('f-displayname').value  = '';
@@ -128,7 +129,7 @@ const UsersApp = {
         const u = UsersApp._allUsers.find(x => x.username === username);
         if (!u) return;
         UsersApp._editingUsername = username;
-        document.getElementById('modal-title').textContent = '✏️ แก้ไข User: ' + username;
+        document.getElementById('modal-title').textContent = 'แก้ไข User: ' + username;
         document.getElementById('f-username').value     = u.username;
         document.getElementById('f-username').disabled  = true;
         document.getElementById('f-displayname').value  = u.displayName || '';
@@ -239,11 +240,19 @@ const UsersApp = {
         document.getElementById('gen-modal').classList.add('hidden');
     },
 
+    // ✅ BUGFIX: เดิมอ่าน routeList จาก centerDoc ตรงๆ (appData/{docId}.routeList) — field นี้ตั้งเป็น
+    // [] ตอนสร้างศูนย์ครั้งแรก (center-select.html) แล้วไม่เคยมีที่ไหนอัปเดตอีกเลยหลังย้ายมาใช้ระบบ
+    // Plan รายเดือน (routeList ตัวจริงอยู่ใน plans/{ym}.routeList) — ศูนย์ที่สร้างหลังย้ายระบบ
+    // (เช่น 403) จึงมี routeList ว่างตลอดกาล ทำให้ gen user จากสายวิ่งไม่ได้เลยแม้จะมีสายจริงอยู่
     _getRoutesForCenter: async (centerId) => {
-        const db     = firebase.firestore();
-        const docId  = UsersApp._centers[centerId]?.docId || (centerId + '_main');
-        const snap   = await db.collection('appData').doc(docId).get();
-        return snap.exists ? (snap.data().routeList || []) : [];
+        const db          = firebase.firestore();
+        const docId       = UsersApp._centers[centerId]?.docId || (centerId + '_main');
+        const centerSnap  = await db.collection('appData').doc(docId).get();
+        if (!centerSnap.exists) return [];
+        const now = new Date();
+        const ym  = centerSnap.data().currentPlanYM || `${now.getFullYear()}_${String(now.getMonth()+1).padStart(2,'0')}`;
+        const planSnap = await db.collection('appData').doc(docId).collection('plans').doc(ym).get();
+        return planSnap.exists ? (planSnap.data().routeList || []) : [];
     },
 
     previewGen: async () => {

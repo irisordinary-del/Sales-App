@@ -1,4 +1,22 @@
 // ==========================================
+// 🎨 AdminIcons — shared inline-SVG icon set (no CDN, no dependency)
+// Used to replace prominent page-chrome emoji (tab headers/sidebar nav) with the same
+// calm SVG style Dashboard._ICONS introduced. Loaded before dashboard.js/sku-distribution.js/
+// audit-log.js so every page can call it. Purely additive — does not touch Dashboard._ICONS
+// or any of its existing call sites.
+// ==========================================
+const AdminIcons = {
+    menu:      (c='') => `<svg class="${c}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>`,
+    chart:     (c='') => `<svg class="${c}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg>`,
+    split:     (c='') => `<svg class="${c}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>`,
+    mapPin:    (c='') => `<svg class="${c}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s7-7.58 7-12.5A7 7 0 0 0 5 9.5C5 14.42 12 22 12 22Z"/><circle cx="12" cy="9.5" r="2.3"/></svg>`,
+    box:       (c='') => `<svg class="${c}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8 12 3 3 8l9 5 9-5Z"/><path d="M3 8v8l9 5 9-5V8"/><line x1="12" y1="13" x2="12" y2="21"/></svg>`,
+    target:    (c='') => `<svg class="${c}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.3" fill="currentColor" stroke="none"/></svg>`,
+    clipboard: (c='') => `<svg class="${c}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M9 4H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-3"/><line x1="8" y1="11" x2="16" y2="11"/><line x1="8" y1="15" x2="14" y2="15"/></svg>`,
+    refresh:   (c='') => `<svg class="${c}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 15.3-6.4L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.3 6.4L3 16"/><path d="M3 21v-5h5"/></svg>`,
+};
+
+// ==========================================
 // 🧭 Navigation
 // ==========================================
 const Nav = {
@@ -497,12 +515,16 @@ const UI = {
             }
 
             htmlP.push(`
-                <div class="p-3 bg-white border border-gray-200 rounded-xl shadow-sm">
-                    <div class="flex justify-between items-start">
-                        <span class="font-bold text-sm text-gray-800">${s.name} ${b}</span>
-                        ${kpiBadge}
+                <div class="p-3 bg-white border border-gray-200 rounded-xl shadow-sm flex items-start gap-2">
+                    <div class="flex-1 min-w-0">
+                        <div class="flex justify-between items-start">
+                            <span class="font-bold text-sm text-gray-800">${s.name} ${b}</span>
+                            ${kpiBadge}
+                        </div>
+                        <span class="block text-[10px] text-gray-400 font-mono mt-1">${s.marketName ? `<span class="block text-[10px] text-blue-400 font-mono mt-0.5">${s.marketName}</span>` : ''}ID: ${s.id}</span>
                     </div>
-                    <span class="block text-[10px] text-gray-400 font-mono mt-1">${s.marketName ? `<span class="block text-[10px] text-blue-400 font-mono mt-0.5">${s.marketName}</span>` : ''}ID: ${s.id}</span>
+                    <button onclick="StoreMgr.permanentDelete('${s.id}')" title="ลบร้านนี้ถาวร"
+                        class="shrink-0 w-7 h-7 flex items-center justify-center rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 transition">🗑️</button>
                 </div>`);
 
             if (!s.days || !s.days.length) {
@@ -516,6 +538,8 @@ const UI = {
                             </div>
                             <p class="text-[10px] text-gray-400 font-mono mt-0.5">ID: ${s.id}</p>
                         </div>
+                        <button onclick="event.preventDefault(); event.stopPropagation(); StoreMgr.permanentDelete('${s.id}')" title="ลบร้านนี้ถาวร"
+                            class="shrink-0 self-start w-7 h-7 flex items-center justify-center rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 transition">🗑️</button>
                     </label>`);
             } else {
                 const dTxt = s.days.join(' & ');
@@ -537,7 +561,8 @@ const UI = {
                             <select onchange="StoreMgr.changeDay('${s.id}', this.value)" class="text-xs p-1.5 border border-gray-200 rounded-lg shadow-sm outline-none bg-gray-50">
                                 ${selOpts}
                             </select>
-                            <button onclick="StoreMgr.changeDay('${s.id}','remove')" class="bg-red-50 text-red-500 px-2.5 rounded-lg font-bold hover:bg-red-100 border border-red-100">✕</button>
+                            <button onclick="StoreMgr.changeDay('${s.id}','remove')" title="เอาร้านออกจากวันนี้ (ยังไม่ลบร้าน)" class="bg-red-50 text-red-500 px-2.5 rounded-lg font-bold hover:bg-red-100 border border-red-100">✕</button>
+                            <button onclick="StoreMgr.permanentDelete('${s.id}')" title="ลบร้านนี้ถาวร" class="bg-gray-50 text-gray-400 px-2.5 rounded-lg font-bold hover:bg-red-100 hover:text-red-500 border border-gray-200">🗑️</button>
                         </div>
                     </div>`);
             }
@@ -589,10 +614,20 @@ const UI = {
             if (sums[d] > 0) {
                 const c = DAY_COLORS[d].hex;
                 const act = State.activeRoadDay === d;
+                // ✅ NEW: แสดง Cycle Name (ชื่อตลาด รวม D{N} ในตัว) แทนป้าย "วันที่ N" เดิม — เฉพาะแท็บ
+                // "4. สรุป" นี้จุดเดียว (ไม่แตะ DAY_COLORS ที่ใช้ร่วมกับ dropdown/legend จุดอื่น เพราะ
+                // ชื่อตลาดผูกกับสาย/เดือนนี้เท่านั้น ไม่ใช่ค่าคงที่ระดับระบบ)
+                const storesInDay = State.stores.filter(s => !s.inactive && s.days && s.days.includes(d));
+                // ✅ ตัดแค่ "รหัสเซลล์" (token แรก เช่น "402V05") ออก — เก็บ D{N} ไว้ เพราะยังบอกลำดับ Day ได้
+                const stripRouteCode = (n) => (n || '').replace(/^\S+\s+/, '').trim();
+                const marketNames = [...new Set(storesInDay.map(s => stripRouteCode(s.marketName)).filter(Boolean))];
+                const cycleNameLabel = marketNames.length
+                    ? marketNames[0] + (marketNames.length > 1 ? ` +${marketNames.length - 1} ชื่ออื่น` : '')
+                    : DAY_COLORS[d].name;
                 sumH.push(`
                     <div onclick="UI.showDayModal('${d}')" class="p-4 bg-white border ${act ? 'border-indigo-500 ring-2 ring-indigo-200' : 'border-gray-200'} rounded-2xl flex flex-col items-center cursor-pointer relative shadow-sm hover:shadow-md transition">
                         <div class="absolute top-0 left-0 w-full h-1.5 rounded-t-2xl" style="background:${c}"></div>
-                        <p class="text-xs font-bold mt-1 text-gray-500">${DAY_COLORS[d].name}</p>
+                        <p class="text-xs font-bold text-gray-500 text-center truncate w-full px-1 mt-1" title="${cycleNameLabel}">${cycleNameLabel}</p>
                         <p class="text-3xl font-black mt-1" style="color:${c}">${sums[d]}</p>
                     </div>`);
             }
@@ -701,18 +736,18 @@ const UI = {
         const totalStores = routeKeys.reduce((sum, r) => sum + (routes[r] || []).length, 0);
         if (summaryEl) {
             let summaryHTML = `
-                <div class="bg-white rounded-xl shadow-sm p-4 flex flex-col items-center">
+                <div class="db-panel p-4 flex flex-col items-center">
                     <div class="text-2xl font-black text-indigo-600">${routeKeys.length}</div>
                     <div class="text-sm text-gray-500 mt-1">สายวิ่งทั้งหมด</div>
                 </div>
-                <div class="bg-white rounded-xl shadow-sm p-4 flex flex-col items-center">
+                <div class="db-panel p-4 flex flex-col items-center">
                     <div class="text-2xl font-black text-emerald-600">${totalStores}</div>
                     <div class="text-sm text-gray-500 mt-1">ร้านค้าทั้งหมด</div>
                 </div>`;
             routeKeys.forEach(r => {
                 const storeCount = (routes[r] || []).length;
                 const assigned = (routes[r] || []).filter(s => s.days && s.days.length > 0).length;
-                summaryHTML += `<div class="bg-white rounded-xl shadow-sm p-4 flex flex-col border-l-4 border-indigo-400">
+                summaryHTML += `<div class="db-panel p-4 flex flex-col border-l-4 border-indigo-400">
                     <div class="text-sm font-black text-gray-800">${r}</div>
                     <div class="text-xl font-black text-indigo-500 mt-1">${storeCount}</div>
                     <div class="text-xs text-gray-400">ร้านค้า / จัดแล้ว: ${assigned}</div>
@@ -731,11 +766,11 @@ const UI = {
         routeKeys.forEach(routeName => {
             (routes[routeName] || []).forEach(store => {
                 const dayText = store.days && store.days.length > 0 ? store.days.join(',') : (store.dayOriginal || '-');
-                allRows.push('<tr><td class="px-3 py-2 text-indigo-700 font-bold text-xs">' + routeName + '</td>' +
-                    '<td class="px-3 py-2 text-xs text-gray-600">' + (store.code || '') + '</td>' +
-                    '<td class="px-3 py-2 text-gray-800">' + (store.name || '') + '</td>' +
-                    '<td class="px-3 py-2 text-xs text-gray-500">' + (store.salesCode || '') + '</td>' +
-                    '<td class="px-3 py-2 text-center text-xs text-blue-600">' + dayText + '</td></tr>');
+                allRows.push('<tr><td class="text-indigo-700 font-bold text-xs">' + routeName + '</td>' +
+                    '<td class="text-xs text-gray-600">' + (store.code || '') + '</td>' +
+                    '<td class="text-gray-800">' + (store.name || '') + '</td>' +
+                    '<td class="text-xs text-gray-500">' + (store.salesCode || '') + '</td>' +
+                    '<td class="text-center text-xs text-indigo-600">' + dayText + '</td></tr>');
             });
         });
 

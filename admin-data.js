@@ -27,6 +27,7 @@ const StoreMgr = {
             () => {
                 State.stores = State.stores.filter(x => x.id !== String(id));
                 State.db.routes[State.localActiveRoute] = State.stores;
+                if (typeof AuditLog !== 'undefined') AuditLog.storeRemove(State.localActiveRoute, id);
                 UI.render();
                 App.saveDB();
                 UI.showSaveToast(`🗑️ ลบ "${s.name}" ออกแล้ว`);
@@ -45,6 +46,9 @@ const StoreMgr = {
             s.days = [d, `Day ${pair}`];
         } else { s.days = [d]; }
         s.seqs = {};
+        // ✅ NEW (2026-09-10): ย้ายวันด้วยมือแล้ว sync ชื่อตลาด/Cycle Id ให้ตรงกับวันใหม่ทันที
+        // ไม่ต้องรอจนกว่าจะกด export ถึงจะเห็นค่าที่ถูกต้อง
+        if (typeof FileManager !== 'undefined') FileManager._autoFillMarketNames(State.stores);
         MapCtrl.closePopups();
         UI.render(); App.saveDB();
     },
@@ -64,7 +68,11 @@ const StoreMgr = {
             s.selected = false; s.seqs = {}; changed = true;
         });
         if (!changed) UI.showErrorToast('กรุณาเลือกร้านค้าก่อนครับ');
-        else { UI.render(); App.saveDB(); }
+        else {
+            // ✅ NEW (2026-09-10): ดู comment เดียวกันใน changeDay ข้างบน
+            if (typeof FileManager !== 'undefined') FileManager._autoFillMarketNames(State.stores);
+            UI.render(); App.saveDB();
+        }
     },
     getDistSq: (a, b) => Math.pow(a.lat - b.lat, 2) + Math.pow(a.lng - b.lng, 2),
 };
@@ -261,6 +269,15 @@ const App = {
                     cycleDays:  State.db.cycleDays,
                     updatedAt:  firebase.firestore.FieldValue.serverTimestamp(),
                 });
+                // ✅ BUGFIX: เดิม auto-สร้าง plan doc ตรงนี้เฉยๆ โดยไม่เพิ่ม ym เข้า planList ของ
+                // centerDoc — แผนใช้งานได้จริง (Sales เห็นปกติถ้าเป็น currentPlanYM) แต่แอดมินจะหา
+                // เดือนนี้ใน dropdown เลือกเดือนไม่เจอไปตลอด (เกิดกับศูนย์ใหม่ที่ยังไม่มี plan เลย
+                // ตอนเปิดหน้าแอดมินครั้งแรก — ดู "New center defaults" ใน CLAUDE.md)
+                if (!(State.db.planList || []).includes(ym)) {
+                    const planList = [...new Set([...(State.db.planList || []), ym])].sort().reverse();
+                    await App.dbRef.set({ planList }, { merge: true });
+                    State.db.planList = planList;
+                }
             } else {
                 State.db.routeList = routeList;
             }
@@ -356,6 +373,10 @@ const App = {
         if (!ym) return;
         State.db.routes[State.localActiveRoute] = State.stores;
         const routeList = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
+        // ✅ BUGFIX: เดิมเขียน routeList ลง Firestore แต่ไม่เคย sync กลับเข้า State.db.routeList เลย
+        // ทำให้หน้าอื่นที่อ่าน State.db.routeList ตรงๆ (SKU Distribution, Dashboard) เห็นค่าค้าง
+        // จนกว่าจะ reload หน้า — เกิดชัดสุดตอนเพิ่ม/ลบ/import สายใหม่ในเซสชันเดียวกัน
+        State.db.routeList = routeList;
 
         Promise.all([
             // ✅ BUGFIX (2026-08-29): เดิม .set({stores}) ไม่มี merge:true — Firestore จะแทนที่
@@ -621,6 +642,7 @@ const App = {
             State.localActiveRoute = newName;
             App.sync();
             const routeList = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
+            State.db.routeList = routeList; // ✅ BUGFIX: ดู comment เดียวกันใน saveDB()
             Promise.all([
                 App.planRoutesCol(ym).doc(oldName).delete(),
                 // ✅ BUGFIX (2026-08-29): merge:true — ดู comment เดียวกันใน saveDB() ข้างบน
@@ -645,6 +667,7 @@ const App = {
             const deletedName = State.localActiveRoute;
             delete State.db.routes[deletedName];
             const sortedKeys = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
+            State.db.routeList = sortedKeys; // ✅ BUGFIX: ดู comment เดียวกันใน saveDB()
             State.localActiveRoute = sortedKeys[0];
             State.stores = State.db.routes[State.localActiveRoute] || [];
             App.sync(); MapCtrl.fitToStores();
@@ -772,6 +795,11 @@ const App = {
             store.seqs[req.toDay] = maxSeq + 1;
             store.days = [req.toDay]; // ระบบนี้ถือว่า 1 ร้าน = 1 Day ต่อเดือน (ตาม pattern ที่ใช้อยู่ทั้งระบบ)
 
+            // ✅ NEW (2026-09-10): อนุมัติย้ายวันแล้ว sync ชื่อตลาด/Cycle Id ของทั้งสาย (ไม่ใช่แค่ร้าน
+            // นี้) ให้ตรงกับวันปัจจุบัน — route นี้อาจไม่ใช่ route ที่แอดมินกำลังเปิดดูอยู่ตอนนี้เลย
+            // (ดึงตรงจาก Firestore) เลยต้อง sync ที่นี่ ไม่ใช่รอ export หรือ UI.render ของหน้าปัจจุบัน
+            if (typeof FileManager !== 'undefined') FileManager._autoFillMarketNames(stores);
+
             await routeRef.set({
                 stores,
                 confirmedBy: firebase.firestore.FieldValue.delete(),
@@ -895,9 +923,15 @@ const App = {
                 let idCol=-1, nameCol=-1, latCol=-1, lngCol=-1, freqCol=-1, dayCol=-1, seqCol=-1, salesCodeCol=-1, shopTypeCol=-1, subDistrictCol=-1, districtCol=-1, provinceCol=-1, marketNameCol=-1, cyCol=-1, cycleNameCol=-1;
                 for (let i = 0; i < headers.length; i++) {
                     const h = String(headers[i]).toLowerCase();
-                    if      (h.includes('รหัส') && !h.includes('เซลล์'))                         idCol = i;
-                    // ✅ FIX: ต้องเช็คก่อน nameCol เสมอ เพราะ "Cycle Name" มีคำว่า "name" ซ้อนอยู่
-                    // ถ้าเช็ค nameCol ก่อน จะโดนตีความเป็นคอลัมน์ชื่อร้านไปเลย ไม่มีทางถึง cycleNameCol
+                    // ✅ NEW (2026-09-10): "Customer Code" คือชื่อคอลัมน์รหัสร้านจริงในไฟล์บริษัท
+                    // (MST - Customer Master / RoutePlan Detail) — เก็บ "รหัส" (Thai) ไว้ด้วยเพื่อ
+                    // รองรับไฟล์เก่า/เทมเพลตของเราเอง
+                    if      ((h.includes('รหัส') && !h.includes('เซลล์')) || h.includes('customer code')) idCol = i;
+                    // ✅ FIX: ต้องเช็คคอลัมน์ "Cycle Code"/"Cycle Id" (รหัสรอบ) ก่อน "Cycle Name"/
+                    // "cycle" เฉยๆ (ชื่อตลาด) เสมอ ไม่งั้นโดนดักเป็น cycleNameCol ไปหมดเพราะมีคำว่า
+                    // "cycle" ซ้อนอยู่เหมือนกัน — ต้องเช็คก่อน nameCol ด้วยเพราะ "Cycle Name" มีคำว่า
+                    // "name" ซ้อนอยู่ ถ้าเช็ค nameCol ก่อนจะโดนตีความเป็นคอลัมน์ชื่อร้านไปเลย
+                    else if (h.includes('cycle code') || h.includes('cycle id'))                  cyCol = i;
                     else if (h.includes('cycle'))                                                 cycleNameCol = i;
                     else if ((h.includes('ชื่อ') && !h.includes('ตลาด')) || h.includes('name'))  nameCol = i;
                     else if (h.includes('lat') || h.includes('ละติจูด'))                         latCol = i;
@@ -907,12 +941,20 @@ const App = {
                     // เดิม column ชื่อ "สายวิ่ง" ถูก dayCol ดักไปก่อน จับรหัสสายไม่ได้เลย
                     else if (h === 'route' || h === 'สายวิ่ง')                                    salesCodeCol = i;
                     else if (h.includes('day') || h.includes('สายวิ่ง'))                         dayCol = i;
-                    else if (h.includes('คิว') || h.includes('seq'))                              seqCol = i;
-                    else if ((h.includes('salescode') || h.includes('รหัสเซลล์') || h === 'sales') && salesCodeCol === -1) salesCodeCol = i;
-                    else if (h.includes('ประเภท') || h.includes('type'))                         shopTypeCol = i;
-                    else if (h.includes('sold to city') || h.includes('ตำบล'))                   subDistrictCol = i;
-                    else if (h.includes('sold to state') || h.includes('อำเภอ'))                 districtCol = i;
-                    else if (h.includes('address 5') || h.includes('จังหวัด'))                   provinceCol = i;
+                    // ✅ BUGFIX (2026-09-10): "ลำดับ" (คนละคำกับ "คิว") คือหัวคอลัมน์ที่ exportTemplate/
+                    // exportAllRoutes ใช้จริงมาตลอด แต่ไม่เคยอยู่ใน keyword ที่เช็คเลย ทำให้ไฟล์ที่เรา
+                    // export ออกไปเอง พอเอากลับมาอัปโหลดใหม่ผ่าน "อัปโหลดพิกัด" ลำดับที่จัดไว้หายทุกครั้ง
+                    else if (h.includes('คิว') || h.includes('ลำดับ') || h.includes('seq'))       seqCol = i;
+                    // ✅ NEW (2026-09-10): "Salesman Code" คือชื่อคอลัมน์จริงในไฟล์ Customer Master
+                    else if ((h.includes('salescode') || h.includes('salesman') || h.includes('รหัสเซลล์') || h === 'sales') && salesCodeCol === -1) salesCodeCol = i;
+                    // ✅ NEW (2026-09-10): "Outlet Category" คือชื่อคอลัมน์ประเภทร้านจริงในไฟล์บริษัท
+                    else if (h.includes('ประเภท') || h.includes('type') || h.includes('category'))  shopTypeCol = i;
+                    // ✅ NEW (2026-09-10): ไฟล์บริษัทปัจจุบันใช้หัวคอลัมน์เปล่าๆ "City"/"District"/
+                    // "State" (ไม่มี "Sold To"/"Address 5" นำหน้าแบบไฟล์ SAP เก่า) — เก็บของเก่าไว้
+                    // รองรับไฟล์รุ่นก่อนหน้าด้วย
+                    else if (h.includes('sold to city') || h.includes('city') || h.includes('ตำบล'))     subDistrictCol = i;
+                    else if (h.includes('sold to state') || h.includes('district') || h.includes('อำเภอ')) districtCol = i;
+                    else if (h.includes('address 5') || h.includes('state') || h.includes('จังหวัด'))    provinceCol = i;
                     else if (h.includes('ตลาด') || h.includes('market'))                          marketNameCol = i;
                     else if (h === 'cy' || h.startsWith('cy'))                                    cyCol = i;
                 }
