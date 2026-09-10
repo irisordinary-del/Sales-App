@@ -895,9 +895,15 @@ const App = {
                 let idCol=-1, nameCol=-1, latCol=-1, lngCol=-1, freqCol=-1, dayCol=-1, seqCol=-1, salesCodeCol=-1, shopTypeCol=-1, subDistrictCol=-1, districtCol=-1, provinceCol=-1, marketNameCol=-1, cyCol=-1, cycleNameCol=-1;
                 for (let i = 0; i < headers.length; i++) {
                     const h = String(headers[i]).toLowerCase();
-                    if      (h.includes('รหัส') && !h.includes('เซลล์'))                         idCol = i;
-                    // ✅ FIX: ต้องเช็คก่อน nameCol เสมอ เพราะ "Cycle Name" มีคำว่า "name" ซ้อนอยู่
-                    // ถ้าเช็ค nameCol ก่อน จะโดนตีความเป็นคอลัมน์ชื่อร้านไปเลย ไม่มีทางถึง cycleNameCol
+                    // ✅ NEW (2026-09-10): "Customer Code" คือชื่อคอลัมน์รหัสร้านจริงในไฟล์บริษัท
+                    // (MST - Customer Master / RoutePlan Detail) — เก็บ "รหัส" (Thai) ไว้ด้วยเพื่อ
+                    // รองรับไฟล์เก่า/เทมเพลตของเราเอง
+                    if      ((h.includes('รหัส') && !h.includes('เซลล์')) || h.includes('customer code')) idCol = i;
+                    // ✅ FIX: ต้องเช็คคอลัมน์ "Cycle Code"/"Cycle Id" (รหัสรอบ) ก่อน "Cycle Name"/
+                    // "cycle" เฉยๆ (ชื่อตลาด) เสมอ ไม่งั้นโดนดักเป็น cycleNameCol ไปหมดเพราะมีคำว่า
+                    // "cycle" ซ้อนอยู่เหมือนกัน — ต้องเช็คก่อน nameCol ด้วยเพราะ "Cycle Name" มีคำว่า
+                    // "name" ซ้อนอยู่ ถ้าเช็ค nameCol ก่อนจะโดนตีความเป็นคอลัมน์ชื่อร้านไปเลย
+                    else if (h.includes('cycle code') || h.includes('cycle id'))                  cyCol = i;
                     else if (h.includes('cycle'))                                                 cycleNameCol = i;
                     else if ((h.includes('ชื่อ') && !h.includes('ตลาด')) || h.includes('name'))  nameCol = i;
                     else if (h.includes('lat') || h.includes('ละติจูด'))                         latCol = i;
@@ -907,12 +913,20 @@ const App = {
                     // เดิม column ชื่อ "สายวิ่ง" ถูก dayCol ดักไปก่อน จับรหัสสายไม่ได้เลย
                     else if (h === 'route' || h === 'สายวิ่ง')                                    salesCodeCol = i;
                     else if (h.includes('day') || h.includes('สายวิ่ง'))                         dayCol = i;
-                    else if (h.includes('คิว') || h.includes('seq'))                              seqCol = i;
-                    else if ((h.includes('salescode') || h.includes('รหัสเซลล์') || h === 'sales') && salesCodeCol === -1) salesCodeCol = i;
-                    else if (h.includes('ประเภท') || h.includes('type'))                         shopTypeCol = i;
-                    else if (h.includes('sold to city') || h.includes('ตำบล'))                   subDistrictCol = i;
-                    else if (h.includes('sold to state') || h.includes('อำเภอ'))                 districtCol = i;
-                    else if (h.includes('address 5') || h.includes('จังหวัด'))                   provinceCol = i;
+                    // ✅ BUGFIX (2026-09-10): "ลำดับ" (คนละคำกับ "คิว") คือหัวคอลัมน์ที่ exportTemplate/
+                    // exportAllRoutes ใช้จริงมาตลอด แต่ไม่เคยอยู่ใน keyword ที่เช็คเลย ทำให้ไฟล์ที่เรา
+                    // export ออกไปเอง พอเอากลับมาอัปโหลดใหม่ผ่าน "อัปโหลดพิกัด" ลำดับที่จัดไว้หายทุกครั้ง
+                    else if (h.includes('คิว') || h.includes('ลำดับ') || h.includes('seq'))       seqCol = i;
+                    // ✅ NEW (2026-09-10): "Salesman Code" คือชื่อคอลัมน์จริงในไฟล์ Customer Master
+                    else if ((h.includes('salescode') || h.includes('salesman') || h.includes('รหัสเซลล์') || h === 'sales') && salesCodeCol === -1) salesCodeCol = i;
+                    // ✅ NEW (2026-09-10): "Outlet Category" คือชื่อคอลัมน์ประเภทร้านจริงในไฟล์บริษัท
+                    else if (h.includes('ประเภท') || h.includes('type') || h.includes('category'))  shopTypeCol = i;
+                    // ✅ NEW (2026-09-10): ไฟล์บริษัทปัจจุบันใช้หัวคอลัมน์เปล่าๆ "City"/"District"/
+                    // "State" (ไม่มี "Sold To"/"Address 5" นำหน้าแบบไฟล์ SAP เก่า) — เก็บของเก่าไว้
+                    // รองรับไฟล์รุ่นก่อนหน้าด้วย
+                    else if (h.includes('sold to city') || h.includes('city') || h.includes('ตำบล'))     subDistrictCol = i;
+                    else if (h.includes('sold to state') || h.includes('district') || h.includes('อำเภอ')) districtCol = i;
+                    else if (h.includes('address 5') || h.includes('state') || h.includes('จังหวัด'))    provinceCol = i;
                     else if (h.includes('ตลาด') || h.includes('market'))                          marketNameCol = i;
                     else if (h === 'cy' || h.startsWith('cy'))                                    cyCol = i;
                 }

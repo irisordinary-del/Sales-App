@@ -193,18 +193,18 @@ const FileManager = {
             // ✅ FIX BUG-02: save rawData เพื่อให้ ExcelIO.export() ใช้ได้
             // แปลง header: 'A' format → header name format
             const rawWithHeaders = rows.slice(1).map(row => ({
-                'CY':           row.A || '',
-                'รหัส':         row.B || '',
-                'ชื่อ':         row.C || '',
-                'Sales':        row.D || '',
-                'ประเภทร้านค้า1': row.E || '',
-                'Sold To City': row.F || '',
-                'Sold To State': row.G || '',
-                'Address 5':    row.H || '',
-                'Latitude':     row.I || '',
-                'Longtitude':   row.J || '',
-                'ชื่อตลาด':    row.K || '',
-                'Day':          row.L || '',
+                'Cycle Code':      row.A || '',
+                'Customer Code':   row.B || '',
+                'Customer Name':   row.C || '',
+                'Salesman Code':   row.D || '',
+                'Outlet Category': row.E || '',
+                'City':            row.F || '',
+                'District':        row.G || '',
+                'State':           row.H || '',
+                'Master Latitude':  row.I || '',
+                'Master Longitude': row.J || '',
+                'ชื่อตลาด':        row.K || '',
+                'Day':             row.L || '',
             }));
             State.rawData = rawWithHeaders;
 
@@ -293,20 +293,24 @@ const FileManager = {
                 header: ['A','B','C','D','E','F','G','H','I','J','K','L','M','N'],
             });
 
-            ws['A1'] = { v: 'CY', t: 's' };
-            ws['B1'] = { v: 'รหัส', t: 's' };
-            ws['C1'] = { v: 'ชื่อ', t: 's' };
-            ws['D1'] = { v: 'Sales', t: 's' };
-            ws['E1'] = { v: 'ประเภทร้านค้า1', t: 's' };
-            ws['F1'] = { v: 'Sold To City', t: 's' };
-            ws['G1'] = { v: 'Sold To State', t: 's' };
-            ws['H1'] = { v: 'Address 5', t: 's' };
-            ws['I1'] = { v: 'Latitude', t: 's' };
-            ws['J1'] = { v: 'Longtitude', t: 's' };
+            // ✅ NEW (2026-09-10): เปลี่ยนชื่อคอลัมน์ให้ตรงกับไฟล์จริงของบริษัท (MST - Customer
+            // Master / MST - RoutePlan Detail) — "Cycle Name" ของบริษัทคือชื่อตลาด (คอลัมน์ K ของ
+            // เรา) ส่วนคอลัมน์ N เดิมที่เราเรียก "Cycle Name" ผิดๆ (จริงๆ เก็บแค่เลขรอบดิบ ไม่ใช่ชื่อ)
+            // เปลี่ยนเป็น "Cycle Id" กันชนความหมายกับของบริษัท
+            ws['A1'] = { v: 'Cycle Code', t: 's' };
+            ws['B1'] = { v: 'Customer Code', t: 's' };
+            ws['C1'] = { v: 'Customer Name', t: 's' };
+            ws['D1'] = { v: 'Salesman Code', t: 's' };
+            ws['E1'] = { v: 'Outlet Category', t: 's' };
+            ws['F1'] = { v: 'City', t: 's' };
+            ws['G1'] = { v: 'District', t: 's' };
+            ws['H1'] = { v: 'State', t: 's' };
+            ws['I1'] = { v: 'Master Latitude', t: 's' };
+            ws['J1'] = { v: 'Master Longitude', t: 's' };
             ws['K1'] = { v: 'ชื่อตลาด', t: 's' };
             ws['L1'] = { v: 'Day', t: 's' };
             ws['M1'] = { v: 'ลำดับ', t: 's' };
-            ws['N1'] = { v: 'Cycle Name', t: 's' };
+            ws['N1'] = { v: 'Cycle Id', t: 's' };
 
             ws['!cols'] = [
                 { wch: 14 }, { wch: 12 }, { wch: 40 }, { wch: 10 },
@@ -443,19 +447,19 @@ const FileManager = {
                 header: ['A','B','C','D','E','F','G','H','I','J','K','L','M','N'],
             });
             wsAll['A1'] = { v: 'สายวิ่ง', t: 's' };
-            wsAll['B1'] = { v: 'รหัส', t: 's' };
-            wsAll['C1'] = { v: 'ชื่อ', t: 's' };
-            wsAll['D1'] = { v: 'Sales', t: 's' };
-            wsAll['E1'] = { v: 'ประเภทร้านค้า1', t: 's' };
-            wsAll['F1'] = { v: 'Sold To City', t: 's' };
-            wsAll['G1'] = { v: 'Sold To State', t: 's' };
-            wsAll['H1'] = { v: 'Address 5', t: 's' };
-            wsAll['I1'] = { v: 'Latitude', t: 's' };
-            wsAll['J1'] = { v: 'Longtitude', t: 's' };
+            wsAll['B1'] = { v: 'Customer Code', t: 's' };
+            wsAll['C1'] = { v: 'Customer Name', t: 's' };
+            wsAll['D1'] = { v: 'Salesman Code', t: 's' };
+            wsAll['E1'] = { v: 'Outlet Category', t: 's' };
+            wsAll['F1'] = { v: 'City', t: 's' };
+            wsAll['G1'] = { v: 'District', t: 's' };
+            wsAll['H1'] = { v: 'State', t: 's' };
+            wsAll['I1'] = { v: 'Master Latitude', t: 's' };
+            wsAll['J1'] = { v: 'Master Longitude', t: 's' };
             wsAll['K1'] = { v: 'ชื่อตลาด', t: 's' };
             wsAll['L1'] = { v: 'Day', t: 's' };
             wsAll['M1'] = { v: 'ลำดับ', t: 's' };
-            wsAll['N1'] = { v: 'Cycle Name', t: 's' };
+            wsAll['N1'] = { v: 'Cycle Id', t: 's' };
             wsAll['!cols'] = [
                 { wch: 18 }, { wch: 12 }, { wch: 40 }, { wch: 10 },
                 { wch: 8  }, { wch: 18 }, { wch: 18 }, { wch: 14 },
@@ -490,20 +494,20 @@ const FileManager = {
                 const ws = XLSX.utils.json_to_sheet(exportData, {
                     header: ['A','B','C','D','E','F','G','H','I','J','K','L','M','N'],
                 });
-                ws['A1'] = { v: 'CY', t: 's' };
-                ws['B1'] = { v: 'รหัส', t: 's' };
-                ws['C1'] = { v: 'ชื่อ', t: 's' };
-                ws['D1'] = { v: 'Sales', t: 's' };
-                ws['E1'] = { v: 'ประเภทร้านค้า1', t: 's' };
-                ws['F1'] = { v: 'Sold To City', t: 's' };
-                ws['G1'] = { v: 'Sold To State', t: 's' };
-                ws['H1'] = { v: 'Address 5', t: 's' };
-                ws['I1'] = { v: 'Latitude', t: 's' };
-                ws['J1'] = { v: 'Longtitude', t: 's' };
+                ws['A1'] = { v: 'Cycle Code', t: 's' };
+                ws['B1'] = { v: 'Customer Code', t: 's' };
+                ws['C1'] = { v: 'Customer Name', t: 's' };
+                ws['D1'] = { v: 'Salesman Code', t: 's' };
+                ws['E1'] = { v: 'Outlet Category', t: 's' };
+                ws['F1'] = { v: 'City', t: 's' };
+                ws['G1'] = { v: 'District', t: 's' };
+                ws['H1'] = { v: 'State', t: 's' };
+                ws['I1'] = { v: 'Master Latitude', t: 's' };
+                ws['J1'] = { v: 'Master Longitude', t: 's' };
                 ws['K1'] = { v: 'ชื่อตลาด', t: 's' };
                 ws['L1'] = { v: 'Day', t: 's' };
                 ws['M1'] = { v: 'ลำดับ', t: 's' };
-                ws['N1'] = { v: 'Cycle Name', t: 's' };
+                ws['N1'] = { v: 'Cycle Id', t: 's' };
                 ws['!cols'] = [
                     { wch: 14 }, { wch: 12 }, { wch: 40 }, { wch: 10 },
                     { wch: 8  }, { wch: 18 }, { wch: 18 }, { wch: 14 },
