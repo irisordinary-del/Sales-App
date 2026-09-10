@@ -44,6 +44,7 @@ const AuditLog = {
         STORE_REMOVE:        { icon: '❌', label: 'ยกเลิกจัดสาย' },
         STORE_SELECT:        { icon: '☑️', label: 'เลือกร้านค้า' },
         STORE_TRANSFER:      { icon: '🔄', label: 'ย้ายร้านระหว่างสาย' },
+        SWAP_DAYS:           { icon: '🔀', label: 'สลับวัน' },
         ROUTE_ADD:           { icon: '➕', label: 'เพิ่มสายวิ่ง' },
         ROUTE_RENAME:        { icon: '✏️', label: 'เปลี่ยนชื่อสาย' },
         ROUTE_DELETE:        { icon: '🗑️', label: 'ลบสายวิ่ง' },
@@ -337,7 +338,7 @@ const AuditLog = {
                     oldName: 'ชื่อเดิม', newName: 'ชื่อใหม่',
                     username: 'username', role: 'role', centerId: 'ศูนย์',
                     routeCount: 'สาย', totalStores: 'ร้าน', storeId: 'ID',
-                    mode: 'mode',
+                    mode: 'mode', mapping: 'สลับ',
                 };
                 const label = labels[k] || k;
                 return `${label}: ${Array.isArray(v) ? v.join(', ') : v}`;

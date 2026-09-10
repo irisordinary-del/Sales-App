@@ -718,6 +718,11 @@
 
                         <div id="tab4" class="hidden space-y-4">
 
+                            <button onclick="SwapDaysCtrl.open()"
+                                class="w-full bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5">
+                                🔄 สลับวัน
+                            </button>
+
                             <div id="list-summary" class="grid grid-cols-2 gap-3 mt-2 pb-10"></div>
 
                         </div>
@@ -2266,6 +2271,230 @@
             </div>
         </div>
     </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         ✅ NEW: สลับวัน (Swap Days) — สลับ/เลื่อน Day ของร้านค้าทั้งหมดในสายเดียวกัน
+         ═══════════════════════════════════════════════════════════════ -->
+    <div id="swap-days-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden" style="max-height:90dvh;display:flex;flex-direction:column;">
+            <div class="p-5 border-b flex justify-between items-center bg-gray-50 flex-shrink-0">
+                <div>
+                    <h2 class="text-base font-black text-gray-900">🔄 สลับวัน</h2>
+                    <p class="text-xs text-gray-500 mt-0.5">สาย <span id="swap-days-route" class="font-bold text-indigo-600"></span> — สลับได้เฉพาะภายในสายนี้เท่านั้น</p>
+                </div>
+                <button onclick="SwapDaysCtrl.close()" class="w-8 h-8 rounded-full border border-gray-200 text-gray-400 hover:bg-gray-100 font-bold">✕</button>
+            </div>
+            <div class="p-5 overflow-y-auto flex-1">
+                <div class="flex gap-2 mb-4">
+                    <button id="swap-tab-custom" onclick="SwapDaysCtrl.setMode('custom')" class="flex-1 py-2 rounded-lg text-xs font-bold transition">กำหนดเอง</button>
+                    <button id="swap-tab-shift" onclick="SwapDaysCtrl.setMode('shift')" class="flex-1 py-2 rounded-lg text-xs font-bold transition">เลื่อนทั้งรอบ</button>
+                </div>
+
+                <!-- โหมดกำหนดเอง -->
+                <div id="swap-custom-section">
+                    <p class="text-xs text-gray-500 mb-3">เพิ่มคู่ "จาก Day → ไป Day" เองได้หลายคู่ — ต้องครบวง (ทุก Day ที่แตะต้องเป็นทั้งต้นทางและปลายทางในชุดเดียวกัน ไม่ซ้ำ/ไม่ขาด)</p>
+                    <div id="swap-custom-rows" class="space-y-2"></div>
+                    <button onclick="SwapDaysCtrl.addRow()" class="mt-3 w-full border border-dashed border-gray-300 text-gray-500 hover:bg-gray-50 rounded-xl py-2 text-xs font-bold transition">+ เพิ่มคู่</button>
+                </div>
+
+                <!-- โหมดเลื่อนทั้งรอบ -->
+                <div id="swap-shift-section" class="hidden">
+                    <p class="text-xs text-gray-500 mb-3">เลื่อนทุก Day ในรอบ (1 – <span id="swap-cycle-days-label"></span>) พร้อมกันทีเดียว ใส่ค่าลบให้เลื่อนถอยหลัง ใส่ค่าบวกให้เลื่อนไปข้างหน้า วนรอบอัตโนมัติ</p>
+                    <label class="block text-xs font-bold text-gray-700 mb-1">เลื่อนกี่ตำแหน่ง</label>
+                    <input id="swap-shift-amount" type="number" value="-2" onchange="SwapDaysCtrl.renderPreview()" oninput="SwapDaysCtrl.renderPreview()"
+                        class="w-full border border-gray-200 rounded-xl p-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-300">
+                </div>
+
+                <div class="mt-4">
+                    <div class="text-[11px] font-bold text-gray-400 uppercase tracking-wide mb-2">ตัวอย่างผลลัพธ์</div>
+                    <div id="swap-preview" class="space-y-1.5 max-h-56 overflow-y-auto"></div>
+                    <div id="swap-warning" class="hidden mt-2 bg-red-50 border border-red-100 text-red-600 text-xs font-bold rounded-xl p-3"></div>
+                </div>
+            </div>
+            <div class="p-5 border-t flex gap-3 flex-shrink-0">
+                <button onclick="SwapDaysCtrl.close()" class="flex-1 border border-gray-200 rounded-xl py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-50 transition">ยกเลิก</button>
+                <button id="swap-confirm-btn" onclick="SwapDaysCtrl.confirm()" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl py-2.5 text-sm font-bold transition shadow-sm disabled:opacity-40 disabled:cursor-not-allowed">
+                    🔄 ยืนยันสลับ
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ═════════════════════════════════════════════════════════════════
+        // ✅ NEW: SwapDaysCtrl — สลับ/เลื่อน Day ของร้านค้าทั้งหมดในสายเดียวกัน
+        // ═════════════════════════════════════════════════════════════════
+        const SwapDaysCtrl = {
+            _mode: 'custom',   // 'custom' | 'shift'
+            _rows: [],         // [{from:'Day 1', to:'Day 2'}, ...] สำหรับโหมด custom
+
+            open: () => {
+                SwapDaysCtrl._mode = 'custom';
+                SwapDaysCtrl._rows = [{ from: '', to: '' }, { from: '', to: '' }];
+                const routeEl = document.getElementById('swap-days-route');
+                if (routeEl) routeEl.textContent = State.localActiveRoute || '—';
+                const cd = State.db.cycleDays || 24;
+                const cdLabel = document.getElementById('swap-cycle-days-label');
+                if (cdLabel) cdLabel.textContent = cd;
+                document.getElementById('swap-shift-amount').value = -2;
+                SwapDaysCtrl._render();
+                document.getElementById('swap-days-modal').classList.remove('hidden');
+            },
+            close: () => document.getElementById('swap-days-modal').classList.add('hidden'),
+
+            setMode: (mode) => {
+                SwapDaysCtrl._mode = mode;
+                SwapDaysCtrl._render();
+            },
+
+            addRow: () => {
+                SwapDaysCtrl._rows.push({ from: '', to: '' });
+                SwapDaysCtrl._render();
+            },
+            removeRow: (idx) => {
+                SwapDaysCtrl._rows.splice(idx, 1);
+                SwapDaysCtrl._render();
+            },
+            setRowVal: (idx, key, val) => {
+                SwapDaysCtrl._rows[idx][key] = val;
+                SwapDaysCtrl.renderPreview();
+            },
+
+            _dayOptions: (cycleDays) => {
+                let opts = '<option value="">-- เลือก --</option>';
+                for (let i = 1; i <= cycleDays; i++) opts += `<option value="Day ${i}">Day ${i}</option>`;
+                return opts;
+            },
+
+            _render: () => {
+                const mode = SwapDaysCtrl._mode;
+                const activeCls   = 'flex-1 py-2 rounded-lg text-xs font-bold transition bg-indigo-600 text-white';
+                const inactiveCls = 'flex-1 py-2 rounded-lg text-xs font-bold transition bg-gray-100 text-gray-500';
+                document.getElementById('swap-tab-custom').className = mode === 'custom' ? activeCls : inactiveCls;
+                document.getElementById('swap-tab-shift').className  = mode === 'shift'  ? activeCls : inactiveCls;
+                document.getElementById('swap-custom-section').classList.toggle('hidden', mode !== 'custom');
+                document.getElementById('swap-shift-section').classList.toggle('hidden', mode !== 'shift');
+
+                if (mode === 'custom') {
+                    const cycleDays = State.db.cycleDays || 24;
+                    const opts = SwapDaysCtrl._dayOptions(cycleDays);
+                    const rowsEl = document.getElementById('swap-custom-rows');
+                    rowsEl.innerHTML = SwapDaysCtrl._rows.map((r, i) => `
+                        <div class="flex items-center gap-2">
+                            <select onchange="SwapDaysCtrl.setRowVal(${i}, 'from', this.value)" class="flex-1 border border-gray-200 rounded-lg p-2 text-xs outline-none">
+                                ${opts.replace(`value="${r.from}"`, `value="${r.from}" selected`)}
+                            </select>
+                            <span class="text-gray-400 text-xs">→</span>
+                            <select onchange="SwapDaysCtrl.setRowVal(${i}, 'to', this.value)" class="flex-1 border border-gray-200 rounded-lg p-2 text-xs outline-none">
+                                ${opts.replace(`value="${r.to}"`, `value="${r.to}" selected`)}
+                            </select>
+                            <button onclick="SwapDaysCtrl.removeRow(${i})" class="w-8 h-8 flex-shrink-0 rounded-lg bg-red-50 text-red-500 hover:bg-red-100 font-bold">✕</button>
+                        </div>`).join('');
+                }
+                SwapDaysCtrl.renderPreview();
+            },
+
+            // ✅ คืน { mapping: {fromDay: toDay}, error: string|null }
+            _computeMapping: () => {
+                if (SwapDaysCtrl._mode === 'shift') {
+                    const cycleDays = State.db.cycleDays || 24;
+                    const raw = document.getElementById('swap-shift-amount').value;
+                    const offset = parseInt(raw);
+                    if (isNaN(offset) || offset === 0) return { mapping: {}, error: 'ใส่จำนวนตำแหน่งที่จะเลื่อน (ไม่ใช่ 0)' };
+                    const mapping = {};
+                    for (let n = 1; n <= cycleDays; n++) {
+                        const target = ((((n - 1 + offset) % cycleDays) + cycleDays) % cycleDays) + 1;
+                        mapping[`Day ${n}`] = `Day ${target}`;
+                    }
+                    return { mapping, error: null };
+                }
+
+                // โหมด custom — ต้องครบวง (from-set === to-set, ไม่ซ้ำ)
+                const rows = SwapDaysCtrl._rows.filter(r => r.from && r.to);
+                if (rows.length === 0) return { mapping: {}, error: 'ยังไม่ได้เพิ่มคู่สลับเลย' };
+                const froms = rows.map(r => r.from);
+                const tos   = rows.map(r => r.to);
+                if (new Set(froms).size !== froms.length) return { mapping: {}, error: '⚠️ มี Day ต้นทางซ้ำกัน — ต้นทางแต่ละ Day เลือกได้แค่ครั้งเดียว' };
+                if (new Set(tos).size !== tos.length) return { mapping: {}, error: '⚠️ มี Day ปลายทางซ้ำกัน — ปลายทางแต่ละ Day รับได้แค่ครั้งเดียว' };
+                const fromSet = new Set(froms), toSet = new Set(tos);
+                const missing = [...fromSet].filter(d => !toSet.has(d));
+                if (missing.length > 0) return { mapping: {}, error: `⚠️ ต้องครบวง — ${missing.join(', ')} เป็นต้นทางแต่ไม่มีใครสลับมาลง ทำให้ร้านเดิมของ ${missing.join(', ')} หายไป` };
+                const mapping = {};
+                rows.forEach(r => { mapping[r.from] = r.to; });
+                return { mapping, error: null };
+            },
+
+            renderPreview: () => {
+                const { mapping, error } = SwapDaysCtrl._computeMapping();
+                const previewEl = document.getElementById('swap-preview');
+                const warnEl    = document.getElementById('swap-warning');
+                const confirmBtn = document.getElementById('swap-confirm-btn');
+
+                if (error) {
+                    warnEl.textContent = error;
+                    warnEl.classList.remove('hidden');
+                    previewEl.innerHTML = '';
+                    confirmBtn.disabled = true;
+                    return;
+                }
+                warnEl.classList.add('hidden');
+
+                const entries = Object.entries(mapping).filter(([from]) => {
+                    // โหมด shift โชว์ทั้งรอบเยอะเกิน — โชว์เฉพาะ Day ที่มีร้านจริงในสายนี้ก็พอ
+                    return State.stores.some(s => !s.inactive && s.days && s.days.includes(from));
+                });
+
+                if (entries.length === 0) {
+                    previewEl.innerHTML = '<p class="text-xs text-gray-400 text-center py-3">ไม่มีร้านในสายนี้อยู่ใน Day ที่เลือกเลย</p>';
+                    confirmBtn.disabled = true;
+                    return;
+                }
+
+                previewEl.innerHTML = entries.map(([from, to]) => {
+                    const n = State.stores.filter(s => !s.inactive && s.days && s.days.includes(from)).length;
+                    return `
+                        <div class="flex items-center justify-between bg-gray-50 border border-gray-100 rounded-lg px-3 py-2 text-xs">
+                            <span class="font-bold text-gray-700">${from} <span class="text-gray-400 font-normal">(${n} ร้าน)</span></span>
+                            <span class="text-indigo-500">→</span>
+                            <span class="font-bold text-indigo-600">${to}</span>
+                        </div>`;
+                }).join('');
+                confirmBtn.disabled = false;
+            },
+
+            confirm: () => {
+                const { mapping, error } = SwapDaysCtrl._computeMapping();
+                if (error) return UI.showErrorToast(error);
+
+                const affected = State.stores.filter(s => !s.inactive && s.days && s.days.some(d => mapping[d]));
+                if (affected.length === 0) return UI.showErrorToast('⚠️ ไม่มีร้านที่ได้รับผลกระทบ');
+
+                UI.showConfirm(`ยืนยันสลับวัน — จะกระทบร้านทั้งหมด ${affected.length} ร้านในสาย "${State.localActiveRoute}"?`, () => {
+                    State.stores.forEach(s => {
+                        if (!s.days || !s.days.length) return;
+                        // ✅ map แต่ละ token อิสระจากค่าดั้งเดิม (ไม่ mutate ระหว่างทาง) — ปลอดภัยแม้สลับพร้อมกันหลายคู่
+                        s.days = s.days.map(d => mapping[d] || d);
+                        if (s.seqs) {
+                            const newSeqs = {};
+                            Object.entries(s.seqs).forEach(([d, seq]) => { newSeqs[mapping[d] || d] = seq; });
+                            s.seqs = newSeqs;
+                        }
+                    });
+                    // ✅ ชื่อตลาด/Cycle Id เดิมผูกกับ Day เก่า — ต้อง sync ใหม่ทันทีเหมือนจุดอื่นที่เปลี่ยนวัน (ดู admin-data.js)
+                    if (typeof FileManager !== 'undefined') FileManager._autoFillMarketNames(State.stores);
+                    MapCtrl.closePopups();
+                    UI.render();
+                    App.saveDB();
+                    if (typeof AuditLog !== 'undefined') {
+                        const mappingSummary = Object.entries(mapping).map(([f, t]) => `${f}→${t}`).join(', ');
+                        AuditLog.write('SWAP_DAYS', { route: State.localActiveRoute, mapping: mappingSummary, storeCount: affected.length });
+                    }
+                    SwapDaysCtrl.close();
+                    UI.showSaveToast(`🔄 สลับวันเรียบร้อย — กระทบ ${affected.length} ร้าน`);
+                });
+            },
+        };
+    </script>
 
     <script>
         // ═════════════════════════════════════════════════════════════════
