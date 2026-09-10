@@ -373,6 +373,10 @@ const App = {
         if (!ym) return;
         State.db.routes[State.localActiveRoute] = State.stores;
         const routeList = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
+        // ✅ BUGFIX: เดิมเขียน routeList ลง Firestore แต่ไม่เคย sync กลับเข้า State.db.routeList เลย
+        // ทำให้หน้าอื่นที่อ่าน State.db.routeList ตรงๆ (SKU Distribution, Dashboard) เห็นค่าค้าง
+        // จนกว่าจะ reload หน้า — เกิดชัดสุดตอนเพิ่ม/ลบ/import สายใหม่ในเซสชันเดียวกัน
+        State.db.routeList = routeList;
 
         Promise.all([
             // ✅ BUGFIX (2026-08-29): เดิม .set({stores}) ไม่มี merge:true — Firestore จะแทนที่
@@ -638,6 +642,7 @@ const App = {
             State.localActiveRoute = newName;
             App.sync();
             const routeList = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
+            State.db.routeList = routeList; // ✅ BUGFIX: ดู comment เดียวกันใน saveDB()
             Promise.all([
                 App.planRoutesCol(ym).doc(oldName).delete(),
                 // ✅ BUGFIX (2026-08-29): merge:true — ดู comment เดียวกันใน saveDB() ข้างบน
@@ -662,6 +667,7 @@ const App = {
             const deletedName = State.localActiveRoute;
             delete State.db.routes[deletedName];
             const sortedKeys = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
+            State.db.routeList = sortedKeys; // ✅ BUGFIX: ดู comment เดียวกันใน saveDB()
             State.localActiveRoute = sortedKeys[0];
             State.stores = State.db.routes[State.localActiveRoute] || [];
             App.sync(); MapCtrl.fitToStores();

@@ -819,6 +819,7 @@ const FileManager = {
         const doSaveAll = async () => {
             const routeList = Object.keys(State.db.routes)
                 .sort((a, b) => a.localeCompare(b, 'th', { numeric: true }));
+            State.db.routeList = routeList; // ✅ BUGFIX: ดู comment เดียวกันใน admin-data.js saveDB()
             for (let _si = 0; _si < savedRoutes.length; _si++) {
                 const _n = savedRoutes[_si];
                 UI.showLoader(
@@ -1111,6 +1112,7 @@ const FileManager = {
                         await App.planRoutesCol(App._currentPlanYM).doc(rk).set({ stores: State.db.routes[rk] || [] }, { merge: true });
                     }
                     const routeList = Object.keys(State.db.routes).sort((a, b) => a.localeCompare(b, 'th', { numeric: true }));
+                    State.db.routeList = routeList; // ✅ BUGFIX: ดู comment เดียวกันใน admin-data.js saveDB()
                     await App.planRef(App._currentPlanYM).set({ routeList }, { merge: true });
 
                     State.stores = State.db.routes[State.localActiveRoute] || [];

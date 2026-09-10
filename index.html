@@ -2494,6 +2494,7 @@
                     }
 
                     const routeList = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
+                    State.db.routeList = routeList; // ✅ BUGFIX: ดู comment เดียวกันใน admin-data.js saveDB()
                     await App.planRef(ym).set({ routeList }, { merge: true });
 
                     // ถ้าสายที่กำลังเลือกอยู่ถูกลบ/เปลี่ยนชื่อไป ต้องสลับไปสายอื่นที่ยังอยู่จริง
