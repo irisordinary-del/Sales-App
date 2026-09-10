@@ -717,7 +717,12 @@ const UI = {
 
     renderAllRoutes: () => {
         const routes = State.db.routes;
-        const routeKeys = Object.keys(routes);
+        // ✅ BUGFIX: เดิมใช้ Object.keys(routes) ตรงๆ — ถ้ามี key แปลกปลอมหลุดเข้ามาใน State.db.routes
+        // จากที่ไหนก็ตาม (เช่น localStorage "last route" ข้ามศูนย์ปนกัน — ดู _lastRouteKey ใน
+        // admin-data.js) จะโผล่เป็น "สายผี" ในหน้านี้ด้วย ทั้งที่ไม่มีอยู่จริงในศูนย์นี้เลย กรองด้วย
+        // State.db.routeList (รายชื่อสายจริงที่ยืนยันจาก Firestore) ให้เหลือแต่สายที่มีอยู่จริงเท่านั้น
+        const validRoutes = new Set(State.db.routeList || []);
+        const routeKeys = Object.keys(routes).filter(r => validRoutes.has(r));
 
         // ✅ Populate month dropdown จาก planList
         const sel = document.getElementById('export-month-sel');

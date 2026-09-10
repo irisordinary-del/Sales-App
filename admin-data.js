@@ -87,6 +87,14 @@ const App = {
     planRef:      (ym) => App.plansCol().doc(ym),
     planRoutesCol:(ym) => App.plansCol().doc(ym).collection('routes'),
 
+    // ✅ BUGFIX: เดิม localStorage key "last_route_{ym}" ไม่ผูกกับศูนย์เลย มีแค่เดือน — ถ้าแอดมิน/
+    // supervisor เคยดูศูนย์อื่นที่ใช้เดือนเดียวกัน (เกิดขึ้นแทบทุกครั้งเพราะส่วนใหญ่อยู่เดือนปัจจุบัน
+    // เหมือนกันหมด) แล้วสลับมาศูนย์นี้ จะไปอ่านชื่อสายของศูนย์เก่ามาใช้ — สายนั้นไม่มีจริงในศูนย์นี้
+    // (Firestore get() คืน exists:false) แต่ code ก็ยัง set State.db.routes[ชื่อสายนั้น] = [] ไว้อยู่ดี
+    // กลายเป็นสายผีว่างเปล่าโผล่ในหน้า "ภาพรวมทุกสาย" (Object.keys(State.db.routes) เห็นมันด้วย)
+    // แก้โดยผูก key กับศูนย์ (window.CENTER_DOC) ด้วยเสมอ กันข้ามศูนย์ปนกัน
+    _lastRouteKey: (ym) => `last_route_${window.CENTER_DOC || 'v1_main'}_${ym}`,
+
     // ─── State ───────────────────────────────────────────────────────────
     _currentPlanYM:  '',   // YYYY_MM ที่แอดมิน "กำลังดู/แก้ไข" อยู่ (local view เท่านั้น)
     _livePlanYM:     '',   // ✅ YYYY_MM ที่ "Live" จริงให้ Sales เห็น (มาจาก centerDoc.currentPlanYM)
@@ -114,7 +122,7 @@ const App = {
         const total = routeList.length;
 
         // ── Step 1: โหลด active route ก่อน → แสดงผลทันที ────────────────
-        const activeRoute = localStorage.getItem(`last_route_${ym}`) || routeList[0];
+        const activeRoute = localStorage.getItem(App._lastRouteKey(ym)) || routeList[0];
         UI.showRouteLoadPopup(0, total);
         try {
             const d = await col.doc(activeRoute).get();
@@ -286,7 +294,7 @@ const App = {
             App.log(`✅ โหลด plan ${ym} เสร็จ — ${State.db.routeList.length} สาย`);
 
             if (!State.localActiveRoute || !State.db.routes[State.localActiveRoute]) {
-                State.localActiveRoute = localStorage.getItem(`last_route_${ym}`) || State.db.routeList[0];
+                State.localActiveRoute = localStorage.getItem(App._lastRouteKey(ym)) || State.db.routeList[0];
             }
             State.stores = State.db.routes[State.localActiveRoute] || [];
 
@@ -416,7 +424,7 @@ const App = {
     // ─── Switch plan (แค่ "ดู/แก้ไข" ฝั่งแอดมิน — ไม่กระทบ Sales) ──────────
     switchPlan: async (ym) => {
         if (App._currentPlanYM === ym) return;
-        State.localActiveRoute = localStorage.getItem(`last_route_${ym}`) || '';
+        State.localActiveRoute = localStorage.getItem(App._lastRouteKey(ym)) || '';
         await App._loadPlan(ym);
         // ✅ BUGFIX: เดิมเขียน currentPlanYM ลง centerDoc ทันทีทุกครั้งที่แอดมินสลับดูเดือน
         // ทำให้ Sales ทุกคนเห็นเดือนเปลี่ยนตามไปด้วยทั้งที่แอดมินแค่ "ดู" ไม่ได้ตั้งใจให้ live
@@ -568,7 +576,7 @@ const App = {
     switchRoute: (name) => {
         if (State.localActiveRoute === name) return;
         State.localActiveRoute = name;
-        localStorage.setItem(`last_route_${App._currentPlanYM}`, name);
+        localStorage.setItem(App._lastRouteKey(App._currentPlanYM), name);
         // null = failed ระหว่าง background load, undefined = ยังไม่โหลด → ทั้งคู่ fetch ใหม่
         const needFetch = State.db.routes[name] === undefined || State.db.routes[name] === null;
         if (needFetch) {
