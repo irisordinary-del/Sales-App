@@ -1,0 +1,27 @@
+name: Deploy Firestore Rules
+
+# ทำงานอัตโนมัติทุกครั้งที่ push ไฟล์ firestore.rules ขึ้น staging2 (สาขาที่ production ใช้จริง)
+# ต้องมี GitHub secret ชื่อ FIREBASE_SERVICE_ACCOUNT (JSON key ของ Service Account) ตั้งไว้ก่อน
+# ไม่งั้น job นี้จะ fail ที่ขั้นตอน auth — ดูวิธีสร้าง secret ในคำอธิบายที่แอดมินให้มา
+on:
+  push:
+    branches: [staging2]
+    paths:
+      - 'firestore.rules'
+  workflow_dispatch: {} # กดรันเองได้จากแท็บ Actions เผื่ออยาก deploy โดยไม่ต้อง push ไฟล์ใหม่
+
+jobs:
+  deploy-rules:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}'
+
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools
+
+      - name: Deploy Firestore rules
+        run: firebase deploy --only firestore:rules --project route-plan-71e2e
