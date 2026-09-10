@@ -269,6 +269,15 @@ const App = {
                     cycleDays:  State.db.cycleDays,
                     updatedAt:  firebase.firestore.FieldValue.serverTimestamp(),
                 });
+                // ✅ BUGFIX: เดิม auto-สร้าง plan doc ตรงนี้เฉยๆ โดยไม่เพิ่ม ym เข้า planList ของ
+                // centerDoc — แผนใช้งานได้จริง (Sales เห็นปกติถ้าเป็น currentPlanYM) แต่แอดมินจะหา
+                // เดือนนี้ใน dropdown เลือกเดือนไม่เจอไปตลอด (เกิดกับศูนย์ใหม่ที่ยังไม่มี plan เลย
+                // ตอนเปิดหน้าแอดมินครั้งแรก — ดู "New center defaults" ใน CLAUDE.md)
+                if (!(State.db.planList || []).includes(ym)) {
+                    const planList = [...new Set([...(State.db.planList || []), ym])].sort().reverse();
+                    await App.dbRef.set({ planList }, { merge: true });
+                    State.db.planList = planList;
+                }
             } else {
                 State.db.routeList = routeList;
             }
