@@ -614,10 +614,20 @@ const UI = {
             if (sums[d] > 0) {
                 const c = DAY_COLORS[d].hex;
                 const act = State.activeRoadDay === d;
+                // ✅ NEW: แสดง Cycle Name (ชื่อตลาด รวม D{N} ในตัว) แทนป้าย "วันที่ N" เดิม — เฉพาะแท็บ
+                // "4. สรุป" นี้จุดเดียว (ไม่แตะ DAY_COLORS ที่ใช้ร่วมกับ dropdown/legend จุดอื่น เพราะ
+                // ชื่อตลาดผูกกับสาย/เดือนนี้เท่านั้น ไม่ใช่ค่าคงที่ระดับระบบ)
+                const storesInDay = State.stores.filter(s => !s.inactive && s.days && s.days.includes(d));
+                // ✅ ตัดแค่ "รหัสเซลล์" (token แรก เช่น "402V05") ออก — เก็บ D{N} ไว้ เพราะยังบอกลำดับ Day ได้
+                const stripRouteCode = (n) => (n || '').replace(/^\S+\s+/, '').trim();
+                const marketNames = [...new Set(storesInDay.map(s => stripRouteCode(s.marketName)).filter(Boolean))];
+                const cycleNameLabel = marketNames.length
+                    ? marketNames[0] + (marketNames.length > 1 ? ` +${marketNames.length - 1} ชื่ออื่น` : '')
+                    : DAY_COLORS[d].name;
                 sumH.push(`
                     <div onclick="UI.showDayModal('${d}')" class="p-4 bg-white border ${act ? 'border-indigo-500 ring-2 ring-indigo-200' : 'border-gray-200'} rounded-2xl flex flex-col items-center cursor-pointer relative shadow-sm hover:shadow-md transition">
                         <div class="absolute top-0 left-0 w-full h-1.5 rounded-t-2xl" style="background:${c}"></div>
-                        <p class="text-xs font-bold mt-1 text-gray-500">${DAY_COLORS[d].name}</p>
+                        <p class="text-xs font-bold text-gray-500 text-center truncate w-full px-1 mt-1" title="${cycleNameLabel}">${cycleNameLabel}</p>
                         <p class="text-3xl font-black mt-1" style="color:${c}">${sums[d]}</p>
                     </div>`);
             }
