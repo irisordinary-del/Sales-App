@@ -61,14 +61,20 @@ const TasksApp = {
         const grid = document.getElementById('task-calendar-grid');
         if (grid) grid.innerHTML = '<div class="col-span-7 text-center py-10 text-gray-400 dark:text-slate-500 text-sm">กำลังโหลด...</div>';
         try {
-            const centerDoc = TasksApp._centerId + '_main';
-            const [taskSnap, centerSnap] = await Promise.all([
+            const centerDoc  = TasksApp._centerId + '_main';
+            const centerSnap = await TasksApp._db().collection('appData').doc(centerDoc).get();
+            // ✅ BUGFIX: routeList ตัวจริงอยู่ใน plans/{ym}.routeList ไม่ใช่ field บนตัว centerDoc เอง
+            // (field นั้นตั้งครั้งเดียวตอนสร้างศูนย์แล้วไม่เคยอัปเดตอีก — ดู users.js ที่เจอบั๊กเดียวกัน)
+            const now = new Date();
+            const ym  = (centerSnap.exists && centerSnap.data().currentPlanYM)
+                || `${now.getFullYear()}_${String(now.getMonth()+1).padStart(2,'0')}`;
+            const [taskSnap, planSnap] = await Promise.all([
                 TasksApp._db().collection('appData').doc(centerDoc).collection('tasks').get(),
-                TasksApp._db().collection('appData').doc(centerDoc).get(),
+                TasksApp._db().collection('appData').doc(centerDoc).collection('plans').doc(ym).get(),
             ]);
             TasksApp._tasks = taskSnap.docs.map(d => ({ id: d.id, ...d.data() }))
                 .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
-            TasksApp._routeList = (centerSnap.exists ? (centerSnap.data().routeList || []) : [])
+            TasksApp._routeList = (planSnap.exists ? (planSnap.data().routeList || []) : [])
                 .sort((a, b) => a.localeCompare(b, 'th', { numeric: true }));
             TasksApp.renderCalendar();
         } catch (err) {

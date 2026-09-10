@@ -240,11 +240,19 @@ const UsersApp = {
         document.getElementById('gen-modal').classList.add('hidden');
     },
 
+    // ✅ BUGFIX: เดิมอ่าน routeList จาก centerDoc ตรงๆ (appData/{docId}.routeList) — field นี้ตั้งเป็น
+    // [] ตอนสร้างศูนย์ครั้งแรก (center-select.html) แล้วไม่เคยมีที่ไหนอัปเดตอีกเลยหลังย้ายมาใช้ระบบ
+    // Plan รายเดือน (routeList ตัวจริงอยู่ใน plans/{ym}.routeList) — ศูนย์ที่สร้างหลังย้ายระบบ
+    // (เช่น 403) จึงมี routeList ว่างตลอดกาล ทำให้ gen user จากสายวิ่งไม่ได้เลยแม้จะมีสายจริงอยู่
     _getRoutesForCenter: async (centerId) => {
-        const db     = firebase.firestore();
-        const docId  = UsersApp._centers[centerId]?.docId || (centerId + '_main');
-        const snap   = await db.collection('appData').doc(docId).get();
-        return snap.exists ? (snap.data().routeList || []) : [];
+        const db          = firebase.firestore();
+        const docId       = UsersApp._centers[centerId]?.docId || (centerId + '_main');
+        const centerSnap  = await db.collection('appData').doc(docId).get();
+        if (!centerSnap.exists) return [];
+        const now = new Date();
+        const ym  = centerSnap.data().currentPlanYM || `${now.getFullYear()}_${String(now.getMonth()+1).padStart(2,'0')}`;
+        const planSnap = await db.collection('appData').doc(docId).collection('plans').doc(ym).get();
+        return planSnap.exists ? (planSnap.data().routeList || []) : [];
     },
 
     previewGen: async () => {
