@@ -851,21 +851,41 @@ const FileManager = {
             UI.showSaveToast(msg);
         };
 
-        if (allMissing.length === 0) {
-            // ไม่มีร้านหายไป → บันทึกทันที
-            await doSaveAll();
-            return;
-        }
+        await FileManager._showMissingStorePopup(allMissing, async (decisions) => {
+            // apply decisions
+            for (const s of allMissing) {
+                const route = State.db.routes[s._route];
+                if (!route) continue;
+                const idx = route.findIndex(r => r.id === s.id);
+                if (idx === -1) continue;
+                if (decisions[s.id] === 'inactive') {
+                    // ✅ พักไว้ใน history — ซ่อนจาก Sales แต่ยังอยู่ใน Firestore
+                    route[idx] = { ...route[idx], inactive: true, days: [], seqs: {} };
+                } else {
+                    // ลบออกจาก array
+                    route.splice(idx, 1);
+                }
+            }
 
-        // ─── สร้าง popup รายชื่อร้านที่หายไป ────────────────────
+            await doSaveAll();
+        });
+    },
+
+    // ✅ NEW (2026-09-10): popup ให้เลือกว่าจะ "พัก" หรือ "ลบ" ร้านที่หายไปจากไฟล์ใหม่ — แยกออกมา
+    // จาก _commitByRouteImport เดิม ให้ importMasterOnly เรียกใช้ร่วมกันได้ด้วย (เดิมมีแค่
+    // bulkImport/importMasterDetail ที่เช็คร้านหาย importMasterOnly ไม่เคยเช็คเลย)
+    // เรียกได้แม้ missingStores ว่างเปล่า — จะเรียก onConfirm({}) ทันทีโดยไม่เด้ง popup
+    _showMissingStorePopup: (missingStores, onConfirm) => {
+        if (missingStores.length === 0) return onConfirm({});
+
         // decisions: { storeId: 'inactive' | 'delete' }
         const decisions = {};
-        allMissing.forEach(s => { decisions[s.id] = 'inactive'; }); // default = พักไว้
+        missingStores.forEach(s => { decisions[s.id] = 'inactive'; }); // default = พักไว้
 
         const overlay = document.createElement('div');
         overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px;font-family:Prompt,sans-serif;';
 
-        const renderRows = () => allMissing.map(s => `
+        const renderRows = () => missingStores.map(s => `
             <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:10px;background:#f9fafb;border:1px solid #f3f4f6;margin-bottom:6px;">
                 <div style="flex:1;min-width:0;">
                     <div style="font-size:12px;font-weight:800;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${s.name}</div>
@@ -889,7 +909,7 @@ const FileManager = {
             overlay.innerHTML = `
             <div style="background:#fff;border-radius:20px;padding:24px;width:100%;max-width:480px;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
                 <div style="font-size:16px;font-weight:900;color:#111827;margin-bottom:4px;">⚠️ ร้านที่ไม่อยู่ในไฟล์ใหม่</div>
-                <div style="font-size:12px;color:#6b7280;margin-bottom:14px;">พบ <b>${allMissing.length} ร้าน</b> ที่ไม่มีในไฟล์ที่อัปโหลด — เลือกว่าจะทำอะไรกับแต่ละร้าน</div>
+                <div style="font-size:12px;color:#6b7280;margin-bottom:14px;">พบ <b>${missingStores.length} ร้าน</b> ที่ไม่มีในไฟล์ที่อัปโหลด — เลือกว่าจะทำอะไรกับแต่ละร้าน</div>
                 <div style="display:flex;gap:6px;margin-bottom:10px;">
                     <button onclick="window._bulkDecideAll('inactive')" style="flex:1;padding:6px;border-radius:8px;font-size:11px;font-weight:800;border:1.5px solid #6366f1;background:#ede9fe;color:#5b21b6;cursor:pointer;">💤 พักทั้งหมด</button>
                     <button onclick="window._bulkDecideAll('delete')" style="flex:1;padding:6px;border-radius:8px;font-size:11px;font-weight:800;border:1.5px solid #ef4444;background:#fee2e2;color:#991b1b;cursor:pointer;">🗑️ ลบทั้งหมด</button>
@@ -908,7 +928,7 @@ const FileManager = {
             if (li) li.innerHTML = renderRows();
         };
         window._bulkDecideAll = (action) => {
-            allMissing.forEach(s => { decisions[s.id] = action; });
+            missingStores.forEach(s => { decisions[s.id] = action; });
             const li = document.getElementById('_bulk-list');
             if (li) li.innerHTML = renderRows();
         };
@@ -925,23 +945,7 @@ const FileManager = {
             delete window._bulkDecideAll;
             delete window._bulkConfirm;
             delete window._bulkCancel;
-
-            // apply decisions
-            for (const s of allMissing) {
-                const route = State.db.routes[s._route];
-                if (!route) continue;
-                const idx = route.findIndex(r => r.id === s.id);
-                if (idx === -1) continue;
-                if (decisions[s.id] === 'inactive') {
-                    // ✅ พักไว้ใน history — ซ่อนจาก Sales แต่ยังอยู่ใน Firestore
-                    route[idx] = { ...route[idx], inactive: true, days: [], seqs: {} };
-                } else {
-                    // ลบออกจาก array
-                    route.splice(idx, 1);
-                }
-            }
-
-            await doSaveAll();
+            await onConfirm(decisions);
         };
 
         renderPopup();
@@ -1062,19 +1066,61 @@ const FileManager = {
                     return UI.showErrorToast('⚠️ ไม่พบร้านที่อัปเดตได้ (เช็คคอลัมน์ Salesman Code/พิกัด/สถานะ Active ในไฟล์)');
                 }
 
-                const routeArr = [...touchedRoutes];
-                for (let i = 0; i < routeArr.length; i++) {
-                    const rk = routeArr[i];
-                    UI.showLoader(`💾 กำลังบันทึก... (${i + 1}/${routeArr.length} สาย)`, `สาย ${rk}`);
-                    await App.planRoutesCol(App._currentPlanYM).doc(rk).set({ stores: State.db.routes[rk] || [] }, { merge: true });
-                }
-                const routeList = Object.keys(State.db.routes).sort((a, b) => a.localeCompare(b, 'th', { numeric: true }));
-                await App.planRef(App._currentPlanYM).set({ routeList }, { merge: true });
+                // ✅ NEW (2026-09-10): หาร้านที่ "active อยู่ในระบบเรา" แต่ไฟล์ Master รอบนี้ไม่มี
+                // (หรือมีแต่ status ไม่ใช่ Active แล้ว — เช่นถูกลบ/ปิดร้านไปจริงฝั่งบริษัท) — เดิม
+                // importMasterOnly ไม่เคยเช็คจุดนี้เลย ร้านที่หายไปจาก Master จะยังค้าง active
+                // ในระบบเราตลอดไปจนกว่าจะมีคนไปพักด้วยมือเอง
+                const activeCodesInFile = new Set(
+                    Object.entries(masterByCode).filter(([, m]) => m.status === 'Active').map(([code]) => code)
+                );
+                const missingByRoute = {};
+                Object.entries(State.db.routes).forEach(([routeKey, rStores]) => {
+                    (rStores || []).forEach(s => {
+                        if (s.inactive) return;
+                        if (activeCodesInFile.has(s.id)) return;
+                        if (!missingByRoute[routeKey]) missingByRoute[routeKey] = [];
+                        missingByRoute[routeKey].push(s);
+                    });
+                });
+                const allMissing = Object.entries(missingByRoute)
+                    .flatMap(([route, rStores]) => rStores.map(s => ({ ...s, _route: route })));
 
-                State.stores = State.db.routes[State.localActiveRoute] || [];
                 UI.hideLoader();
-                App.sync();
-                UI.showSaveToast(`✅ อัปเดตจาก Master เสร็จ! แก้ไขข้อมูล ${updated} ร้าน (ย้ายสาย ${moved} ร้าน) | เพิ่มร้านใหม่ ${added} ร้าน`);
+
+                await FileManager._showMissingStorePopup(allMissing, async (decisions) => {
+                    let paused = 0, deleted = 0;
+                    for (const s of allMissing) {
+                        const route = State.db.routes[s._route];
+                        if (!route) continue;
+                        const idx = route.findIndex(r => r.id === s.id);
+                        if (idx === -1) continue;
+                        touchedRoutes.add(s._route); // ต้อง save สายนี้ด้วย แม้ Master จะไม่ได้แก้ไขตรงๆ
+                        if (decisions[s.id] === 'inactive') {
+                            route[idx] = { ...route[idx], inactive: true, days: [], seqs: {} };
+                            paused++;
+                        } else {
+                            route.splice(idx, 1);
+                            deleted++;
+                        }
+                    }
+
+                    const routeArr = [...touchedRoutes];
+                    for (let i = 0; i < routeArr.length; i++) {
+                        const rk = routeArr[i];
+                        UI.showLoader(`💾 กำลังบันทึก... (${i + 1}/${routeArr.length} สาย)`, `สาย ${rk}`);
+                        await App.planRoutesCol(App._currentPlanYM).doc(rk).set({ stores: State.db.routes[rk] || [] }, { merge: true });
+                    }
+                    const routeList = Object.keys(State.db.routes).sort((a, b) => a.localeCompare(b, 'th', { numeric: true }));
+                    await App.planRef(App._currentPlanYM).set({ routeList }, { merge: true });
+
+                    State.stores = State.db.routes[State.localActiveRoute] || [];
+                    UI.hideLoader();
+                    App.sync();
+                    let msg = `✅ อัปเดตจาก Master เสร็จ! แก้ไขข้อมูล ${updated} ร้าน (ย้ายสาย ${moved} ร้าน) | เพิ่มร้านใหม่ ${added} ร้าน`;
+                    if (paused > 0)  msg += ` | พัก ${paused} ร้าน`;
+                    if (deleted > 0) msg += ` | ลบ ${deleted} ร้าน`;
+                    UI.showSaveToast(msg);
+                });
             } catch (err) {
                 UI.hideLoader();
                 console.error('importMasterOnly error:', err);
