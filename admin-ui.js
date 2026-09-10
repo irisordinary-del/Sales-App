@@ -515,12 +515,16 @@ const UI = {
             }
 
             htmlP.push(`
-                <div class="p-3 bg-white border border-gray-200 rounded-xl shadow-sm">
-                    <div class="flex justify-between items-start">
-                        <span class="font-bold text-sm text-gray-800">${s.name} ${b}</span>
-                        ${kpiBadge}
+                <div class="p-3 bg-white border border-gray-200 rounded-xl shadow-sm flex items-start gap-2">
+                    <div class="flex-1 min-w-0">
+                        <div class="flex justify-between items-start">
+                            <span class="font-bold text-sm text-gray-800">${s.name} ${b}</span>
+                            ${kpiBadge}
+                        </div>
+                        <span class="block text-[10px] text-gray-400 font-mono mt-1">${s.marketName ? `<span class="block text-[10px] text-blue-400 font-mono mt-0.5">${s.marketName}</span>` : ''}ID: ${s.id}</span>
                     </div>
-                    <span class="block text-[10px] text-gray-400 font-mono mt-1">${s.marketName ? `<span class="block text-[10px] text-blue-400 font-mono mt-0.5">${s.marketName}</span>` : ''}ID: ${s.id}</span>
+                    <button onclick="StoreMgr.permanentDelete('${s.id}')" title="ลบร้านนี้ถาวร"
+                        class="shrink-0 w-7 h-7 flex items-center justify-center rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 transition">🗑️</button>
                 </div>`);
 
             if (!s.days || !s.days.length) {
@@ -534,6 +538,8 @@ const UI = {
                             </div>
                             <p class="text-[10px] text-gray-400 font-mono mt-0.5">ID: ${s.id}</p>
                         </div>
+                        <button onclick="event.preventDefault(); event.stopPropagation(); StoreMgr.permanentDelete('${s.id}')" title="ลบร้านนี้ถาวร"
+                            class="shrink-0 self-start w-7 h-7 flex items-center justify-center rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 transition">🗑️</button>
                     </label>`);
             } else {
                 const dTxt = s.days.join(' & ');
@@ -555,7 +561,8 @@ const UI = {
                             <select onchange="StoreMgr.changeDay('${s.id}', this.value)" class="text-xs p-1.5 border border-gray-200 rounded-lg shadow-sm outline-none bg-gray-50">
                                 ${selOpts}
                             </select>
-                            <button onclick="StoreMgr.changeDay('${s.id}','remove')" class="bg-red-50 text-red-500 px-2.5 rounded-lg font-bold hover:bg-red-100 border border-red-100">✕</button>
+                            <button onclick="StoreMgr.changeDay('${s.id}','remove')" title="เอาร้านออกจากวันนี้ (ยังไม่ลบร้าน)" class="bg-red-50 text-red-500 px-2.5 rounded-lg font-bold hover:bg-red-100 border border-red-100">✕</button>
+                            <button onclick="StoreMgr.permanentDelete('${s.id}')" title="ลบร้านนี้ถาวร" class="bg-gray-50 text-gray-400 px-2.5 rounded-lg font-bold hover:bg-red-100 hover:text-red-500 border border-gray-200">🗑️</button>
                         </div>
                     </div>`);
             }

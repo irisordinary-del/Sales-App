@@ -27,6 +27,7 @@ const StoreMgr = {
             () => {
                 State.stores = State.stores.filter(x => x.id !== String(id));
                 State.db.routes[State.localActiveRoute] = State.stores;
+                if (typeof AuditLog !== 'undefined') AuditLog.storeRemove(State.localActiveRoute, id);
                 UI.render();
                 App.saveDB();
                 UI.showSaveToast(`🗑️ ลบ "${s.name}" ออกแล้ว`);
