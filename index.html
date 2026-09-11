@@ -2384,9 +2384,27 @@
                 SwapDaysCtrl.renderPreview();
             },
 
+            // ✅ ชื่อตลาด (ตัดรหัสสายออก) ของแต่ละ Day ในสายนี้ — ใช้ทั้ง dropdown และ preview กันสลับผิด
+            _dayLabelMap: () => {
+                const stripRouteCode = (n) => (n || '').replace(/^\S+\s+/, '').trim();
+                const map = {};
+                (State.stores || []).forEach(s => {
+                    if (s.inactive || !s.days) return;
+                    s.days.forEach(d => {
+                        if (!map[d] && s.marketName) map[d] = stripRouteCode(s.marketName);
+                    });
+                });
+                return map;
+            },
+
             _dayOptions: (cycleDays) => {
+                const dayLabelMap = SwapDaysCtrl._dayLabelMap();
                 let opts = '<option value="">-- เลือก --</option>';
-                for (let i = 1; i <= cycleDays; i++) opts += `<option value="Day ${i}">Day ${i}</option>`;
+                for (let i = 1; i <= cycleDays; i++) {
+                    const dayKey = `Day ${i}`;
+                    const label = dayLabelMap[dayKey] ? `${dayKey} — ${dayLabelMap[dayKey]}` : dayKey;
+                    opts += `<option value="${dayKey}">${label}</option>`;
+                }
                 return opts;
             },
 
@@ -2474,13 +2492,16 @@
                     return;
                 }
 
+                const dayLabelMap = SwapDaysCtrl._dayLabelMap();
                 previewEl.innerHTML = entries.map(([from, to]) => {
                     const n = State.stores.filter(s => !s.inactive && s.days && s.days.includes(from)).length;
+                    const fromLabel = dayLabelMap[from] ? `${from} — ${dayLabelMap[from]}` : from;
+                    const toLabel = dayLabelMap[to] ? `${to} — ${dayLabelMap[to]}` : to;
                     return `
-                        <div class="flex items-center justify-between bg-gray-50 border border-gray-100 rounded-lg px-3 py-2 text-xs">
-                            <span class="font-bold text-gray-700">${from} <span class="text-gray-400 font-normal">(${n} ร้าน)</span></span>
-                            <span class="text-indigo-500">→</span>
-                            <span class="font-bold text-indigo-600">${to}</span>
+                        <div class="flex items-center justify-between bg-gray-50 border border-gray-100 rounded-lg px-3 py-2 text-xs gap-2">
+                            <span class="font-bold text-gray-700">${fromLabel} <span class="text-gray-400 font-normal">(${n} ร้าน)</span></span>
+                            <span class="text-indigo-500 flex-shrink-0">→</span>
+                            <span class="font-bold text-indigo-600">${toLabel}</span>
                         </div>`;
                 }).join('');
                 confirmBtn.disabled = false;
