@@ -376,7 +376,7 @@ const App = {
     },
 
     // ─── saveDB ──────────────────────────────────────────────────────────
-    saveDB: () => {
+    saveDB: async () => {
         const ym = App._currentPlanYM;
         if (!ym) return;
         State.db.routes[State.localActiveRoute] = State.stores;
@@ -386,16 +386,38 @@ const App = {
         // จนกว่าจะ reload หน้า — เกิดชัดสุดตอนเพิ่ม/ลบ/import สายใหม่ในเซสชันเดียวกัน
         State.db.routeList = routeList;
 
+        // ✅ NEW: เดิมทุกครั้งที่กด "บันทึก" จะรีเซ็ตสถานะ "ยืนยันรับสายวิ่ง" ของเซลทิ้งเสมอ ไม่ว่า
+        // จะแก้อะไรจริงหรือไม่ (แม้แต่กดบันทึกซ้ำเฉยๆ) — เช็คก่อนว่า days/seqs/รายชื่อร้านของสายนี้
+        // เปลี่ยนจริงไหม (ไม่นับ field UI เช่น "selected" ที่ไม่ใช่ส่วนของแผนที่เซลต้องยืนยัน) ถ้าไม่
+        // เปลี่ยนเลย ไม่ต้องไปรีเซ็ตสถานะ กันเซลต้องกดยืนยันซ้ำทั้งที่ไม่มีอะไรเปลี่ยนจริง
+        const normalizeForCompare = (stores) => (stores || [])
+            .map(s => ({ id: s.id, days: [...(s.days || [])].sort(), seqs: s.seqs || {} }))
+            .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+
+        let routeChanged = true;
+        try {
+            const existing = await App.planRoutesCol(ym).doc(State.localActiveRoute).get();
+            if (existing.exists) {
+                const prevStores = existing.data().stores || [];
+                routeChanged = JSON.stringify(normalizeForCompare(prevStores)) !== JSON.stringify(normalizeForCompare(State.stores));
+            }
+        } catch (e) {
+            console.warn('saveDB: เช็คการเปลี่ยนแปลงไม่สำเร็จ ถือว่ามีการเปลี่ยนแปลงไว้ก่อน (ปลอดภัยกว่า)', e);
+        }
+
+        const routeDoc = {
+            stores: State.stores,
+            dayStats: State.db.routeDayStats[State.localActiveRoute] || {},
+        };
+        if (routeChanged) {
+            routeDoc.confirmedBy = firebase.firestore.FieldValue.delete();
+            routeDoc.confirmedAt = firebase.firestore.FieldValue.delete();
+        }
+
         Promise.all([
             // ✅ BUGFIX (2026-08-29): เดิม .set({stores}) ไม่มี merge:true — Firestore จะแทนที่
             // เอกสารทั้งก้อน ทำให้ calendarOverride ของสายนั้นหายไปเงียบๆ ทุกครั้งที่กดบันทึก
-            // ✅ NEW: แก้ไขร้าน/วันในสายนี้แล้ว = รีเซ็ตสถานะ "ยืนยันรับสายวิ่ง" ของเซลด้วย
-            App.planRoutesCol(ym).doc(State.localActiveRoute).set({
-                stores: State.stores,
-                dayStats: State.db.routeDayStats[State.localActiveRoute] || {},
-                confirmedBy: firebase.firestore.FieldValue.delete(),
-                confirmedAt: firebase.firestore.FieldValue.delete(),
-            }, { merge: true }),
+            App.planRoutesCol(ym).doc(State.localActiveRoute).set(routeDoc, { merge: true }),
             App.planRef(ym).set({ routeList, cycleDays: State.db.cycleDays || 24, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true }),
         ])
         .then(() => UI.showSaveToast(`💾 บันทึกเรียบร้อย`))
@@ -998,17 +1020,26 @@ const App = {
                     const freq = (freqCol !== -1 && String(row[freqCol]||'').trim().toUpperCase().includes('2')) ? 2 : 1;
                     const rawDay = (dayCol !== -1 && row[dayCol]) ? String(row[dayCol]).trim() : '';
                     const dayNum = rawDay ? parseInt(rawDay.replace(/[^0-9]/g,'')) : NaN;
-                    // ✅ NEW: ถ้ามีคอลัมน์ "Cycle Name" ใช้ค่านี้กำหนดลำดับ D0N แทน dayNum เดิม
-                    const rawCycle = (cycleNameCol !== -1 && row[cycleNameCol]) ? String(row[cycleNameCol]).trim() : '';
-                    const cycleNum = rawCycle ? parseInt(rawCycle.replace(/[^0-9]/g,'')) : NaN;
-                    // ✅ FIX: "Cycle Code"/"Cycle Id" (cyCol) เป็นเลขรอบ 1-24 ที่เชื่อถือได้อยู่แล้ว
-                    // (ต่างจาก "Cycle Name" ที่เป็นข้อความชื่อตลาดฝัง D-token) — ไฟล์ที่ export จาก
-                    // ระบบเราเองไม่มีคอลัมน์ "Cycle Name" เลย มีแต่ "Cycle Id" ซึ่งเดิมไม่เคยถูกใช้
-                    // กำหนดวัน (ตกไปใช้คอลัมน์ "Day" แทน ซึ่งในไฟล์ export คือวันที่ปฏิทินจริง ไม่ใช่
-                    // เลขรอบ ทำให้ได้ Day เพี้ยนเกิน cycleDays) ให้ใช้ cyCol เป็นลำดับถัดไปก่อน dayNum
+                    // ✅ FIX: ดึงเลขวันจากรูปแบบ "D{N}" โดยเฉพาะ (ไม่ใช่ strip ตัวเลขทั้งหมดในสตริง) —
+                    // "Cycle Name" มักมีรหัสสาย/ลูกค้าปนอยู่ด้วย (เช่น "40201 D01 ดำเนิน ราชบุรี")
+                    // ถ้า strip ตัวเลขทั้งหมดจะได้ "4020101" ไม่ใช่ 1 — ต้องจับเฉพาะเลขที่ตามหลัง "D"
+                    // เท่านั้น ใช้ regex เดียวกันได้ทั้ง "Cycle Id" (รูปแบบ "D01") และ "Cycle Name"
+                    const extractDayNum = (text) => {
+                        const s = String(text || '');
+                        const m = s.match(/D\s*(\d{1,2})(?!\d)/i);
+                        if (m) return parseInt(m[1], 10);
+                        const digitsOnly = s.replace(/[^0-9]/g, '');
+                        return digitsOnly ? parseInt(digitsOnly, 10) : NaN;
+                    };
+                    // ✅ ลำดับความสำคัญตัวกำหนดวัน: Cycle Id/Code ก่อน (เลขรอบ 1-24 ตรงๆ เชื่อถือ
+                    // ได้สุด) → Cycle Name (ต้องแกะจากข้อความ) → Day (สำรองสุดท้าย ใช้เฉพาะตอนไม่มี
+                    // ทั้ง 2 คอลัมน์บนเลย เพราะ Day ในไฟล์ที่ export จากระบบเราเองคือวันที่ปฏิทินจริง
+                    // ไม่ใช่เลขรอบ — ถ้าเอามาใช้ตรงๆ จะได้เลข Day เพี้ยนเกิน cycleDays)
                     const rawCyId  = (cyCol !== -1 && row[cyCol]) ? String(row[cyCol]).trim() : '';
-                    const cyIdNum  = rawCyId ? parseInt(rawCyId.replace(/[^0-9]/g,'')) : NaN;
-                    const seqNum   = !isNaN(cycleNum) ? cycleNum : (!isNaN(cyIdNum) ? cyIdNum : dayNum);
+                    const cyIdNum  = rawCyId ? extractDayNum(rawCyId) : NaN;
+                    const rawCycle = (cycleNameCol !== -1 && row[cycleNameCol]) ? String(row[cycleNameCol]).trim() : '';
+                    const cycleNum = rawCycle ? extractDayNum(rawCycle) : NaN;
+                    const seqNum   = !isNaN(cyIdNum) ? cyIdNum : (!isNaN(cycleNum) ? cycleNum : dayNum);
                     const assignedDay = !isNaN(seqNum) ? 'Day ' + seqNum : '';
                     const assignedSeq = (seqCol !== -1 && row[seqCol]) ? parseInt(String(row[seqCol]).replace(/[^0-9]/g,'')) : NaN;
                     if (storeMap[idStr]) {
@@ -1026,7 +1057,7 @@ const App = {
                             province: provinceCol !== -1 ? String(row[provinceCol]||'').trim() : '',
                             marketName: marketNameCol !== -1 ? String(row[marketNameCol]||'').trim() : '',
                             cy: cyCol !== -1 ? String(row[cyCol]||'').trim() : '',
-                            dayOriginal: !isNaN(cycleNum) ? rawCycle : (!isNaN(cyIdNum) ? rawCyId : rawDay),
+                            dayOriginal: !isNaN(cyIdNum) ? rawCyId : (!isNaN(cycleNum) ? rawCycle : rawDay),
                         };
                         if (assignedDay) { s.days.push(assignedDay); if (!isNaN(assignedSeq)) s.seqs[assignedDay] = assignedSeq; }
                         storeMap[idStr] = s;
