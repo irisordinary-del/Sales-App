@@ -969,9 +969,10 @@ const App = {
                 if (latCol === -1 || lngCol === -1 || idCol === -1)
                     return UI.showErrorToast('ไม่พบคอลัมน์ รหัส / Lat / Lng ในไฟล์ครับ');
 
-                // ✅ NEW: ไม่มีคอลัมน์ "Cycle Name" — หยุดถามยืนยันก่อน (การเรียงจากคอลัมน์ Day
-                // แทนเป็นแค่การเดา อาจไม่ตรงกับลำดับตลาดที่ตั้งใจจริงเสมอไป)
-                if (cycleNameCol === -1) {
+                // ✅ NEW: ไม่มีทั้งคอลัมน์ "Cycle Name" และ "Cycle Code"/"Cycle Id" — หยุดถามยืนยันก่อน
+                // (การเรียงจากคอลัมน์ Day แทนเป็นแค่การเดา อาจไม่ตรงกับลำดับตลาดที่ตั้งใจจริงเสมอไป —
+                // ถ้ามี Cycle Id อยู่แล้วไม่ต้องเตือน เพราะเชื่อถือได้กว่าคอลัมน์ Day)
+                if (cycleNameCol === -1 && cyCol === -1) {
                     const proceed = await new Promise(resolve => {
                         UI.showConfirm(
                             '⚠️ ไม่พบคอลัมน์ "Cycle Name" ในไฟล์นี้\n\n' +
@@ -1000,7 +1001,14 @@ const App = {
                     // ✅ NEW: ถ้ามีคอลัมน์ "Cycle Name" ใช้ค่านี้กำหนดลำดับ D0N แทน dayNum เดิม
                     const rawCycle = (cycleNameCol !== -1 && row[cycleNameCol]) ? String(row[cycleNameCol]).trim() : '';
                     const cycleNum = rawCycle ? parseInt(rawCycle.replace(/[^0-9]/g,'')) : NaN;
-                    const seqNum   = (cycleNameCol !== -1 && !isNaN(cycleNum)) ? cycleNum : dayNum;
+                    // ✅ FIX: "Cycle Code"/"Cycle Id" (cyCol) เป็นเลขรอบ 1-24 ที่เชื่อถือได้อยู่แล้ว
+                    // (ต่างจาก "Cycle Name" ที่เป็นข้อความชื่อตลาดฝัง D-token) — ไฟล์ที่ export จาก
+                    // ระบบเราเองไม่มีคอลัมน์ "Cycle Name" เลย มีแต่ "Cycle Id" ซึ่งเดิมไม่เคยถูกใช้
+                    // กำหนดวัน (ตกไปใช้คอลัมน์ "Day" แทน ซึ่งในไฟล์ export คือวันที่ปฏิทินจริง ไม่ใช่
+                    // เลขรอบ ทำให้ได้ Day เพี้ยนเกิน cycleDays) ให้ใช้ cyCol เป็นลำดับถัดไปก่อน dayNum
+                    const rawCyId  = (cyCol !== -1 && row[cyCol]) ? String(row[cyCol]).trim() : '';
+                    const cyIdNum  = rawCyId ? parseInt(rawCyId.replace(/[^0-9]/g,'')) : NaN;
+                    const seqNum   = !isNaN(cycleNum) ? cycleNum : (!isNaN(cyIdNum) ? cyIdNum : dayNum);
                     const assignedDay = !isNaN(seqNum) ? 'Day ' + seqNum : '';
                     const assignedSeq = (seqCol !== -1 && row[seqCol]) ? parseInt(String(row[seqCol]).replace(/[^0-9]/g,'')) : NaN;
                     if (storeMap[idStr]) {
@@ -1018,7 +1026,7 @@ const App = {
                             province: provinceCol !== -1 ? String(row[provinceCol]||'').trim() : '',
                             marketName: marketNameCol !== -1 ? String(row[marketNameCol]||'').trim() : '',
                             cy: cyCol !== -1 ? String(row[cyCol]||'').trim() : '',
-                            dayOriginal: cycleNameCol !== -1 ? rawCycle : rawDay,
+                            dayOriginal: !isNaN(cycleNum) ? rawCycle : (!isNaN(cyIdNum) ? rawCyId : rawDay),
                         };
                         if (assignedDay) { s.days.push(assignedDay); if (!isNaN(assignedSeq)) s.seqs[assignedDay] = assignedSeq; }
                         storeMap[idStr] = s;
@@ -1027,10 +1035,11 @@ const App = {
                 const finalArray = Object.values(storeMap);
                 if (finalArray.length === 0) return UI.showErrorToast('ไม่พบพิกัด (Lat, Lng) ในไฟล์ครับ');
 
-                // ✅ NEW: ไฟล์ไม่มีคอลัมน์ "Cycle Name" เลย — เรียงเลข Day ที่มีจริงจากน้อยไปมาก
-                // แล้วแทนที่เป็นลำดับต่อเนื่อง D01, D02, D03... (อุดช่องว่าง) หน้านี้อัปโหลดทีละสาย
-                // อยู่แล้ว เลยทำรวมทั้งก้อนได้เลย ไม่ต้องแยกตามสายแบบ bulkImport
-                if (cycleNameCol === -1) {
+                // ✅ NEW: ไฟล์ไม่มีทั้งคอลัมน์ "Cycle Name" และ "Cycle Id" เลย (เหลือแต่ Day ดิบที่
+                // เชื่อถือไม่ได้) — เรียงเลข Day ที่มีจริงจากน้อยไปมาก แล้วแทนที่เป็นลำดับต่อเนื่อง
+                // D01, D02, D03... (อุดช่องว่าง) หน้านี้อัปโหลดทีละสายอยู่แล้ว เลยทำรวมทั้งก้อนได้เลย
+                // ไม่ต้องแยกตามสายแบบ bulkImport
+                if (cycleNameCol === -1 && cyCol === -1) {
                     const usedNums = new Set();
                     finalArray.forEach(s => s.days.forEach(d => {
                         const n = parseInt(String(d).replace('Day ', ''));
