@@ -617,7 +617,11 @@ const UI = {
                 // ✅ NEW: แสดง Cycle Name (ชื่อตลาด รวม D{N} ในตัว) แทนป้าย "วันที่ N" เดิม — เฉพาะแท็บ
                 // "4. สรุป" นี้จุดเดียว (ไม่แตะ DAY_COLORS ที่ใช้ร่วมกับ dropdown/legend จุดอื่น เพราะ
                 // ชื่อตลาดผูกกับสาย/เดือนนี้เท่านั้น ไม่ใช่ค่าคงที่ระดับระบบ)
-                const storesInDay = State.stores.filter(s => !s.inactive && s.days && s.days.includes(d));
+                // ✅ FIX-F2: ตัวเลขนับร้าน (sums[d]) ต้องรวมร้าน F2 ทั้ง 2 วันของมัน (นับด้วย .includes
+                // ที่อื่นแล้ว ถูกต้องอยู่แล้ว) แต่ "ชื่อตลาด" ต้องนับเฉพาะร้านที่วันนี้เป็นวันแรก (days[0])
+                // ของมันเท่านั้น — ร้าน F2 มีช่อง marketName ได้ค่าเดียว ผูกกับวันแรก ถ้าเอา .includes(d)
+                // มากรอง จะเอาชื่อตลาดของวันแรกไปปนกับวันที่สองด้วย (ดู fix เดียวกันใน sales-app.js)
+                const storesInDay = State.stores.filter(s => !s.inactive && s.days?.[0] === d);
                 // ✅ ตัดแค่ "รหัสเซลล์" (token แรก เช่น "402V05") ออก — เก็บ D{N} ไว้ เพราะยังบอกลำดับ Day ได้
                 const stripRouteCode = (n) => (n || '').replace(/^\S+\s+/, '').trim();
                 const marketNames = [...new Set(storesInDay.map(s => stripRouteCode(s.marketName)).filter(Boolean))];
