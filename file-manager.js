@@ -115,17 +115,56 @@ const FileManager = {
     // ในคอลัมน์ Day เพราะบางโหมดปฏิทินแปลงเป็นวันที่จริงไปแล้ว ต้องอิงเลข cycle เดิมเสมอ)
     // ตามด้วยชื่อตลาด (กันเคสที่วันเดียวกันมีมากกว่า 1 ชื่อตลาดปนกัน ให้จับกลุ่มติดกัน) แล้วปิดท้าย
     // ด้วยลำดับที่จัดไว้ในวันนั้น (seqs) — คืน array ใหม่ ไม่แก้ของเดิม
+    // ✅ NEW: สร้างแผนที่ "วัน → ชื่อตลาด" ของสายนี้ (ใช้ทั้ง export และจุดอื่นที่ต้องรู้ชื่อตลาด
+    // จริงของแต่ละวัน) — เชื่อร้านที่ถือวันนั้นเป็น "วันแรก" (days[0]) ก่อนเสมอ เพราะ marketName
+    // ของร้านผูกกับวันแรกเท่านั้น (regenerate ให้ตรงแล้วจากจุดอื่น) แต่บางสายมีร้าน F2 เยอะมากจน
+    // บางวัน "ไม่มีร้านไหนถือเป็นวันแรกเลย" (มีแต่ร้านที่มาเป็นรอบสอง) กรณีนี้ไม่มีที่เก็บชื่อถาวร
+    // ให้วันนั้นได้เลย (ร้าน F2 มีช่อง marketName ได้ค่าเดียว ผูกกับวันแรกไปแล้ว) จึง generate ชื่อ
+    // สดจากตำบล/อำเภอ/จังหวัดของสมาชิกทั้งกลุ่มแทน คำนวณใหม่ทุกครั้ง ไม่บันทึกกลับ
+    _dayMarketNameMap: (stores) => {
+        const stripPrefix = (v) => String(v || '').replace(/^(ตำบล|ต\.|อำเภอ|อ\.|จังหวัด|จ\.)\s*/, '').trim();
+        const map = {};
+        const byDay = {};
+        stores.forEach(s => {
+            (s.days || []).forEach(d => {
+                if (!d) return;
+                if (!byDay[d]) byDay[d] = [];
+                byDay[d].push(s);
+                if (s.days[0] === d && s.marketName && !map[d]) map[d] = s.marketName;
+            });
+        });
+        Object.entries(byDay).forEach(([day, group]) => {
+            if (map[day]) return;
+            const dayDigits = String(day).replace(/[^0-9]/g, '');
+            if (!dayDigits) return;
+            const rankByFreq = (field) => {
+                const counts = {}, order = [];
+                group.forEach(s => {
+                    const v = stripPrefix(s[field]);
+                    if (!v) return;
+                    if (!(v in counts)) { counts[v] = 0; order.push(v); }
+                    counts[v]++;
+                });
+                return order.sort((a, b) => counts[b] - counts[a]);
+            };
+            const tambons  = rankByFreq('subDistrict').slice(0, 2);
+            const amphoe   = rankByFreq('district')[0]  || '';
+            const province = rankByFreq('province')[0]  || '';
+            const dToken   = 'D' + dayDigits.padStart(2, '0');
+            const salesCode = group[0].salesCode || '';
+            map[day] = [salesCode, dToken, ...tambons, amphoe, province].filter(Boolean).join(' ');
+        });
+        return map;
+    },
+
     // ✅ NEW: ขยายร้าน F2 (มีมากกว่า 1 วันใน days) ให้กลายเป็น "แถว" แยกต่อวัน ก่อน export —
     // เดิม export ใช้ store.days[0] ทั่วทั้งไฟล์ ทำให้ร้าน F2 หายไปจากวันที่สองในไฟล์ทั้งหมด
     // (ไม่ใช่แค่ชื่อตลาดผิด แต่ไม่โผล่มาให้เห็นเลยว่าต้องไปวันนั้นด้วย)
     // แถวที่ไม่ใช่วันแรกของร้าน ต้องใช้ marketName "ของวันนั้นจริงๆ" (จากร้านอื่นที่วันนั้นเป็น
-    // วันแรกของมัน) ไม่ใช่ marketName เดิมของร้าน F2 เอง ซึ่งผูกกับวันแรกเท่านั้น
+    // วันแรกของมัน หรือ generate สดถ้าไม่มีใครถือวันนั้นเป็นวันแรกเลย) ไม่ใช่ marketName เดิมของ
+    // ร้าน F2 เอง ซึ่งผูกกับวันแรกเท่านั้น
     _expandStoresForExport: (stores) => {
-        const dayMarketMap = {};
-        stores.forEach(s => {
-            const primaryDay = (s.days && s.days[0]) || null;
-            if (primaryDay && s.marketName && !dayMarketMap[primaryDay]) dayMarketMap[primaryDay] = s.marketName;
-        });
+        const dayMarketMap = FileManager._dayMarketNameMap(stores);
         const rows = [];
         stores.forEach(s => {
             // ร้านที่ไม่มีวันเลย (เช่นร้านโดดที่ AI ตัดทิ้ง) ต้องคงเป็น days:[] เหมือนเดิม (ไม่ใช่

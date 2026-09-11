@@ -816,6 +816,34 @@ function ymToThaiShortLocal(ym) {
     } catch(e) { return ym; }
 }
 
+// ✅ NEW: สายที่มีร้าน F2 เยอะมากบางสายมีบางวันที่ "ไม่มีร้านไหนถือเป็นวันแรกเลย" (มีแต่ร้านที่มา
+// วันนั้นเป็นรอบสอง) — วันแบบนี้ไม่มีร้านไหนเก็บชื่อตลาดที่ถูกต้องของมันไว้ถาวรได้เลย (ร้าน F2 มีช่อง
+// marketName ค่าเดียว ผูกกับวันแรกไปแล้ว) จึง generate ชื่อสดจากตำบล/อำเภอ/จังหวัดของร้านที่ไปวันนั้น
+// จริงแทน (สูตรเดียวกับ FileManager._dayMarketNameMap / _autoFillMarketNames ฝั่งแอดมิน) ไม่บันทึกกลับ
+function generateDayMarketName(stores, day) {
+    const group = stores.filter(s => s.days?.includes(day));
+    if (!group.length) return null;
+    const stripPrefix = (v) => String(v || '').replace(/^(ตำบล|ต\.|อำเภอ|อ\.|จังหวัด|จ\.)\s*/, '').trim();
+    const rankByFreq = (field) => {
+        const counts = {}, order = [];
+        group.forEach(s => {
+            const v = stripPrefix(s[field]);
+            if (!v) return;
+            if (!(v in counts)) { counts[v] = 0; order.push(v); }
+            counts[v]++;
+        });
+        return order.sort((a, b) => counts[b] - counts[a]);
+    };
+    const dayDigits = String(day).replace(/[^0-9]/g, '');
+    if (!dayDigits) return null;
+    const tambons  = rankByFreq('subDistrict').slice(0, 2);
+    const amphoe   = rankByFreq('district')[0]  || '';
+    const province = rankByFreq('province')[0]  || '';
+    const dToken   = 'D' + dayDigits.padStart(2, '0');
+    const salesCode = group[0].salesCode || '';
+    return [salesCode, dToken, ...tambons, amphoe, province].filter(Boolean).join(' ');
+}
+
 function getDayMarketList(day, forMonth, forYear) {
     if (forMonth !== undefined && forYear !== undefined) {
         const loadedYM = State.activePlanYM || (() => {
@@ -837,6 +865,11 @@ function getDayMarketList(day, forMonth, forYear) {
         if (s.days?.[0] === day && s.marketName?.trim())
             names.add(trimMarketName(s.marketName));
     });
+    // ✅ FIX-F2: สายที่มีร้าน F2 เยอะมากบางวันอาจไม่มีร้านไหนถือเป็นวันแรกเลย — generate ชื่อสดแทน
+    if (names.size === 0) {
+        const gen = generateDayMarketName(_sourceStores, day);
+        if (gen) names.add(trimMarketName(gen));
+    }
     return Array.from(names).filter(Boolean).sort();
 }
 
@@ -1962,6 +1995,10 @@ const CalendarCtrl = {
                     if (s.days?.[0] === dayLabel && s.marketName)
                         names.add(trimMarketName(s.marketName));
                 });
+                if (names.size === 0) {
+                    const gen = generateDayMarketName(_renderStores, dayLabel);
+                    if (gen) names.add(trimMarketName(gen));
+                }
                 return Array.from(names).filter(Boolean).sort();
             })() : [];
             const mktLabel = mktsInCell[0] || '';
@@ -2042,6 +2079,10 @@ const CalendarCtrl = {
                 if (s.days?.[0] === dayLabel && s.marketName)
                     names.add(trimMarketName(s.marketName));
             });
+            if (names.size === 0) {
+                const gen = generateDayMarketName(_activeStores, dayLabel);
+                if (gen) names.add(trimMarketName(gen));
+            }
             return Array.from(names).filter(Boolean).sort();
         })();
         const storeCount = _activeStores.filter(s => s.days?.includes(dayLabel)).length;

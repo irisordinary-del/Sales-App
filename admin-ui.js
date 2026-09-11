@@ -610,6 +610,12 @@ const UI = {
         }
 
         const sumH = [];
+        // ✅ FIX-F2: บางสายมีร้าน F2 เยอะมากจนบางวัน "ไม่มีร้านไหนถือเป็นวันแรกเลย" — วันแบบนี้ไม่มี
+        // ร้านไหนเก็บชื่อตลาดที่ถูกต้องของมันไว้ถาวรได้ (ร้าน F2 มีช่อง marketName ค่าเดียว ผูกกับ
+        // วันแรกไปแล้ว) ใช้ FileManager._dayMarketNameMap ซึ่งมี fallback generate สดให้กรณีนี้ด้วย
+        const dayMarketMap = (typeof FileManager !== 'undefined')
+            ? FileManager._dayMarketNameMap(State.stores.filter(s => !s.inactive))
+            : {};
         Object.keys(sums).forEach(d => {
             if (sums[d] > 0) {
                 const c = DAY_COLORS[d].hex;
@@ -617,16 +623,10 @@ const UI = {
                 // ✅ NEW: แสดง Cycle Name (ชื่อตลาด รวม D{N} ในตัว) แทนป้าย "วันที่ N" เดิม — เฉพาะแท็บ
                 // "4. สรุป" นี้จุดเดียว (ไม่แตะ DAY_COLORS ที่ใช้ร่วมกับ dropdown/legend จุดอื่น เพราะ
                 // ชื่อตลาดผูกกับสาย/เดือนนี้เท่านั้น ไม่ใช่ค่าคงที่ระดับระบบ)
-                // ✅ FIX-F2: ตัวเลขนับร้าน (sums[d]) ต้องรวมร้าน F2 ทั้ง 2 วันของมัน (นับด้วย .includes
-                // ที่อื่นแล้ว ถูกต้องอยู่แล้ว) แต่ "ชื่อตลาด" ต้องนับเฉพาะร้านที่วันนี้เป็นวันแรก (days[0])
-                // ของมันเท่านั้น — ร้าน F2 มีช่อง marketName ได้ค่าเดียว ผูกกับวันแรก ถ้าเอา .includes(d)
-                // มากรอง จะเอาชื่อตลาดของวันแรกไปปนกับวันที่สองด้วย (ดู fix เดียวกันใน sales-app.js)
-                const storesInDay = State.stores.filter(s => !s.inactive && s.days?.[0] === d);
                 // ✅ ตัดแค่ "รหัสเซลล์" (token แรก เช่น "402V05") ออก — เก็บ D{N} ไว้ เพราะยังบอกลำดับ Day ได้
                 const stripRouteCode = (n) => (n || '').replace(/^\S+\s+/, '').trim();
-                const marketNames = [...new Set(storesInDay.map(s => stripRouteCode(s.marketName)).filter(Boolean))];
-                const cycleNameLabel = marketNames.length
-                    ? marketNames[0] + (marketNames.length > 1 ? ` +${marketNames.length - 1} ชื่ออื่น` : '')
+                const cycleNameLabel = dayMarketMap[d]
+                    ? stripRouteCode(dayMarketMap[d])
                     : DAY_COLORS[d].name;
                 sumH.push(`
                     <div onclick="UI.showDayModal('${d}')" class="p-4 bg-white border ${act ? 'border-indigo-500 ring-2 ring-indigo-200' : 'border-gray-200'} rounded-2xl flex flex-col items-center cursor-pointer relative shadow-sm hover:shadow-md transition">
