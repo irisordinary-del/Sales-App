@@ -132,9 +132,13 @@ const FileManager = {
             // [null]) ไม่งั้นจุดอื่นที่เช็ค "days?.length > 0 ? days[0] : fallback" จะพังเงียบๆ
             const days = (s.days && s.days.length > 0) ? s.days : [];
             (days.length > 0 ? days : [null]).forEach(day => {
+                // Cycle Id (dayOriginal) ก็ผูกกับวันแรกของร้านเดิมเหมือน marketName — แถวที่สอง
+                // ของร้าน F2 ต้องโชว์เลขรอบของวันนั้นจริงๆ ไม่ใช่เลขรอบวันแรกซ้ำทั้ง 2 แถว
+                const dayDigits = day ? String(day).replace(/[^0-9]/g, '') : '';
                 rows.push(Object.assign({}, s, {
                     days: day ? [day] : [],
                     marketName: day ? (dayMarketMap[day] || s.marketName || '') : (s.marketName || ''),
+                    dayOriginal: day ? (dayDigits || s.dayOriginal || '') : (s.dayOriginal || ''),
                 }));
             });
         });
