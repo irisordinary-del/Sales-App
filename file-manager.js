@@ -115,6 +115,32 @@ const FileManager = {
     // ในคอลัมน์ Day เพราะบางโหมดปฏิทินแปลงเป็นวันที่จริงไปแล้ว ต้องอิงเลข cycle เดิมเสมอ)
     // ตามด้วยชื่อตลาด (กันเคสที่วันเดียวกันมีมากกว่า 1 ชื่อตลาดปนกัน ให้จับกลุ่มติดกัน) แล้วปิดท้าย
     // ด้วยลำดับที่จัดไว้ในวันนั้น (seqs) — คืน array ใหม่ ไม่แก้ของเดิม
+    // ✅ NEW: ขยายร้าน F2 (มีมากกว่า 1 วันใน days) ให้กลายเป็น "แถว" แยกต่อวัน ก่อน export —
+    // เดิม export ใช้ store.days[0] ทั่วทั้งไฟล์ ทำให้ร้าน F2 หายไปจากวันที่สองในไฟล์ทั้งหมด
+    // (ไม่ใช่แค่ชื่อตลาดผิด แต่ไม่โผล่มาให้เห็นเลยว่าต้องไปวันนั้นด้วย)
+    // แถวที่ไม่ใช่วันแรกของร้าน ต้องใช้ marketName "ของวันนั้นจริงๆ" (จากร้านอื่นที่วันนั้นเป็น
+    // วันแรกของมัน) ไม่ใช่ marketName เดิมของร้าน F2 เอง ซึ่งผูกกับวันแรกเท่านั้น
+    _expandStoresForExport: (stores) => {
+        const dayMarketMap = {};
+        stores.forEach(s => {
+            const primaryDay = (s.days && s.days[0]) || null;
+            if (primaryDay && s.marketName && !dayMarketMap[primaryDay]) dayMarketMap[primaryDay] = s.marketName;
+        });
+        const rows = [];
+        stores.forEach(s => {
+            // ร้านที่ไม่มีวันเลย (เช่นร้านโดดที่ AI ตัดทิ้ง) ต้องคงเป็น days:[] เหมือนเดิม (ไม่ใช่
+            // [null]) ไม่งั้นจุดอื่นที่เช็ค "days?.length > 0 ? days[0] : fallback" จะพังเงียบๆ
+            const days = (s.days && s.days.length > 0) ? s.days : [];
+            (days.length > 0 ? days : [null]).forEach(day => {
+                rows.push(Object.assign({}, s, {
+                    days: day ? [day] : [],
+                    marketName: day ? (dayMarketMap[day] || s.marketName || '') : (s.marketName || ''),
+                }));
+            });
+        });
+        return rows;
+    },
+
     _sortStoresForExport: (stores) => {
         const dayNumOf = (s) => {
             const label = (s.days && s.days[0]) ? s.days[0] : (s.dayOriginal || '');
@@ -268,7 +294,7 @@ const FileManager = {
 
             // ✅ NEW: เรียงตามวัน (Day) แล้วตามด้วยลำดับที่จัดไว้ในวันนั้น — เดิม export ตามลำดับ
             // ในอาเรย์ดิบ (เช่น ลำดับ import) ทำให้ไฟล์ที่ได้ไม่เรียงตามคิวจริงที่เซลจะวิ่ง
-            const sortedStores = FileManager._sortStoresForExport(State.stores);
+            const sortedStores = FileManager._sortStoresForExport(FileManager._expandStoresForExport(State.stores));
 
             const exportData = sortedStores.map(store => ({
                 'A': store.cy || '',
@@ -422,7 +448,7 @@ const FileManager = {
             routeKeys.forEach(routeName => {
                 // ✅ NEW: เรียงตามวัน+ลำดับก่อน push — เดิม push ตามลำดับในอาเรย์ดิบ (เช่น ลำดับ
                 // import) ทำให้ชีท "ทุกสาย" ไม่ได้เรียงตามคิววิ่งจริงของแต่ละสาย
-                FileManager._sortStoresForExport((routes[routeName] || []).filter(s => !s.inactive)).forEach(store => {
+                FileManager._sortStoresForExport(FileManager._expandStoresForExport((routes[routeName] || []).filter(s => !s.inactive))).forEach(store => {
                     allStores.push({
                         'A': routeName,
                         'B': store.code || store.id,
@@ -470,7 +496,7 @@ const FileManager = {
 
             // Sheet ต่อสาย
             routeKeys.forEach(routeName => {
-                const stores = FileManager._sortStoresForExport((routes[routeName] || []).filter(s => !s.inactive));
+                const stores = FileManager._sortStoresForExport(FileManager._expandStoresForExport((routes[routeName] || []).filter(s => !s.inactive)));
                 if (!stores.length) return;
 
                 const exportData = stores.map(store => ({
