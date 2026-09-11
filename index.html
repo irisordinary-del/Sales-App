@@ -2300,7 +2300,7 @@
          ✅ NEW: สลับวัน (Swap Days) — สลับ/เลื่อน Day ของร้านค้าทั้งหมดในสายเดียวกัน
          ═══════════════════════════════════════════════════════════════ -->
     <div id="swap-days-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
-        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden" style="max-height:90dvh;display:flex;flex-direction:column;">
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden" style="max-height:90dvh;display:flex;flex-direction:column;">
             <div class="p-5 border-b flex justify-between items-center bg-gray-50 flex-shrink-0">
                 <div>
                     <h2 class="text-base font-black text-gray-900">🔄 สลับวัน</h2>
@@ -2423,11 +2423,11 @@
                     const rowsEl = document.getElementById('swap-custom-rows');
                     rowsEl.innerHTML = SwapDaysCtrl._rows.map((r, i) => `
                         <div class="flex items-center gap-2">
-                            <select onchange="SwapDaysCtrl.setRowVal(${i}, 'from', this.value)" class="flex-1 border border-gray-200 rounded-lg p-2 text-xs outline-none">
+                            <select onchange="SwapDaysCtrl.setRowVal(${i}, 'from', this.value)" class="flex-1 min-w-0 border border-gray-200 rounded-lg p-2 text-xs outline-none truncate">
                                 ${opts.replace(`value="${r.from}"`, `value="${r.from}" selected`)}
                             </select>
-                            <span class="text-gray-400 text-xs">→</span>
-                            <select onchange="SwapDaysCtrl.setRowVal(${i}, 'to', this.value)" class="flex-1 border border-gray-200 rounded-lg p-2 text-xs outline-none">
+                            <span class="text-gray-400 text-xs flex-shrink-0">→</span>
+                            <select onchange="SwapDaysCtrl.setRowVal(${i}, 'to', this.value)" class="flex-1 min-w-0 border border-gray-200 rounded-lg p-2 text-xs outline-none truncate">
                                 ${opts.replace(`value="${r.to}"`, `value="${r.to}" selected`)}
                             </select>
                             <button onclick="SwapDaysCtrl.removeRow(${i})" class="w-8 h-8 flex-shrink-0 rounded-lg bg-red-50 text-red-500 hover:bg-red-100 font-bold">✕</button>
@@ -2499,9 +2499,9 @@
                     const toLabel = dayLabelMap[to] ? `${to} — ${dayLabelMap[to]}` : to;
                     return `
                         <div class="flex items-center justify-between bg-gray-50 border border-gray-100 rounded-lg px-3 py-2 text-xs gap-2">
-                            <span class="font-bold text-gray-700">${fromLabel} <span class="text-gray-400 font-normal">(${n} ร้าน)</span></span>
+                            <span class="font-bold text-gray-700 min-w-0 truncate">${fromLabel} <span class="text-gray-400 font-normal">(${n} ร้าน)</span></span>
                             <span class="text-indigo-500 flex-shrink-0">→</span>
-                            <span class="font-bold text-indigo-600">${toLabel}</span>
+                            <span class="font-bold text-indigo-600 min-w-0 truncate">${toLabel}</span>
                         </div>`;
                 }).join('');
                 confirmBtn.disabled = false;
