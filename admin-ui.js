@@ -733,6 +733,12 @@ const UI = {
         const planList = State.db?.planList || [];
         if (sel && planList.length > 0) {
             const currentVal = sel.value;
+            // ✅ BUGFIX: เดิม "จำ" ค่าที่เคยเลือกไว้ (currentVal) กลับเข้าไปเสมอทุกครั้งที่ฟังก์ชันนี้
+            // render (เรียกซ้ำบ่อยจาก UI.render()) ทำให้ export ค้างอยู่เดือนเก่าตลอดไปแม้แอดมินจะ
+            // สลับ "เดือนที่ดูอยู่" (App._currentPlanYM) ไปเดือนอื่นแล้วก็ตาม — Export กดกี่ครั้งก็ได้
+            // ข้อมูลเดือนเก่าซ้ำๆ ทั้งที่หน้าจอโชว์เดือนใหม่อยู่ ต้องเลิกจำค่าเดิมเมื่อเดือนที่ดูอยู่เปลี่ยนไป
+            const lastYm = sel.dataset.lastCurrentYm;
+            const currentYmChanged = lastYm !== undefined && lastYm !== App._currentPlanYM;
             sel.innerHTML = '<option value="">-- เดือนปัจจุบัน --</option>' +
                 planList.map(ym => {
                     const [y, m] = ym.split('_');
@@ -741,7 +747,8 @@ const UI = {
                     const isCurrent = ym === App._currentPlanYM;
                     return `<option value="${ym}"${isCurrent ? ' selected' : ''}>${label}${isCurrent ? ' (ปัจจุบัน)' : ''}</option>`;
                 }).join('');
-            if (currentVal) sel.value = currentVal;
+            if (currentVal && !currentYmChanged) sel.value = currentVal;
+            sel.dataset.lastCurrentYm = App._currentPlanYM || '';
         }
 
         const summaryEl = document.getElementById('allroutes-summary');

@@ -623,18 +623,27 @@ const FileManager = {
                 const embedded = embeddedDayNum(s.marketName);
                 return embedded !== null && embedded !== dayNum;
             };
-            const needFill = group.filter(isStale);
+            // ✅ FIX-F2: ร้าน F2 อยู่ได้ในหลายกลุ่มวัน (นับทุกวันของมันเพื่อช่วยคำนวณชื่อ generate
+            // ของกลุ่มนั้นๆ ให้สมาชิกอื่น) แต่ตัวมันเองมีช่อง marketName ได้ค่าเดียว ผูกกับ "วันแรก"
+            // (days[0]) เท่านั้น — ถ้าปล่อยให้ทุกกลุ่มที่ร้านนี้อยู่ (รวมวันที่สอง) เขียนทับ marketName
+            // ของมันได้ จะกลายเป็นว่าใครประมวลผลทีหลังชนะ (ขึ้นกับลำดับ Object.entries ที่ไม่แน่นอน)
+            // ทำให้ marketName ของร้าน F2 สลับไปมาระหว่าง 2 ชื่อทุกครั้งที่รัน ต้องจำกัดสิทธิ์เขียนไว้
+            // แค่กลุ่มที่ตรงกับวันแรกของร้านนั้นๆ เท่านั้น
+            const isPrimaryDayForStore = (s) => !s.days || s.days.length === 0 || s.days[0] === day;
+            const writable = group.filter(isPrimaryDayForStore);
+            const needFill = writable.filter(isStale);
             if (needFill.length === 0) return;
 
             // กรณี 1: มีร้านอื่นในกลุ่มวันนี้ที่ชื่อตลาด "ตรงกับวันปัจจุบัน" อยู่แล้ว → copy
-            const existingName = group.find(s => !isStale(s));
+            const existingName = writable.find(s => !isStale(s));
             if (existingName) {
                 needFill.forEach(s => { s.marketName = existingName.marketName; });
                 return;
             }
 
             // กรณี 2: ไม่มีใครในกลุ่มมีชื่อตลาดที่ตรงกันเลย → generate จากตำบล/อำเภอ/จังหวัดของสมาชิกกลุ่ม
-            // (นับความถี่ของแต่ละค่า เรียงมากไปน้อย — เท่ากันแล้วใช้ลำดับที่เจอก่อน)
+            // (นับความถี่ของแต่ละค่า เรียงมากไปน้อย — เท่ากันแล้วใช้ลำดับที่เจอก่อน — ใช้สมาชิกทั้งกลุ่ม
+            // รวมร้าน F2 ที่มาเยือนวันนี้เป็นวันที่สองด้วย เพื่อให้ภาพภูมิศาสตร์ของกลุ่มครบถ้วนที่สุด)
             const rankByFreq = (field) => {
                 const counts = {}, order = [];
                 group.forEach(s => {
