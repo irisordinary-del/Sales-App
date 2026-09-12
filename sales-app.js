@@ -976,10 +976,15 @@ const Processor = {
     },
 
     routeList: () => {
+        // ✅ FIX-F2: ร้าน F2 ที่วันนี้เป็นวันที่สองของมัน ช่อง marketName ผูกกับวันแรกเท่านั้น
+        // (ไม่ใช่ชื่อของวันนี้) ถ้าเทียบ trimMarketName(s.marketName) === _filterMarket ตรงๆ ร้าน
+        // แบบนี้จะหลุดจากรายการทั้งที่ต้องไปวันนี้จริง — วันไหนมีตลาดเดียว (กรณีส่วนใหญ่หลัง regen)
+        // ไม่ต้องกรองชื่อเลย ก็ครบทุกร้านของวันนั้นอยู่แล้ว กรองชื่อเฉพาะวันที่มีมากกว่า 1 ตลาดจริงๆ
+        const _todayMkts = getDayMarketList(State.currentDay);
         let list = State.allStores
             .filter(s => {
                 if (!s.days.includes(State.currentDay)) return false;
-                if (State._filterMarket) return trimMarketName(s.marketName) === State._filterMarket;
+                if (State._filterMarket && _todayMkts.length > 1) return trimMarketName(s.marketName) === State._filterMarket;
                 return true;
             })
             .sort((a, b) => (a.seqs?.[State.currentDay] || 999) - (b.seqs?.[State.currentDay] || 999));
