@@ -1,0 +1,13 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "moveRequests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "route", "order": "ASCENDING" },
+        { "fieldPath": "requestedAt", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}
