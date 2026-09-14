@@ -961,13 +961,15 @@
                 <button onclick="ExportCtrl.closeModal()" class="w-8 h-8 rounded-full border border-gray-200 text-gray-400 hover:bg-gray-100 font-bold transition text-sm">✕</button>
             </div>
             <div class="p-5 space-y-4">
-                <div>
-                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1.5">Export จาก Plan</label>
-                    <select id="export-plan-sel" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-bold outline-none focus:ring-2 focus:ring-emerald-300">
-                        <option value="current">📊 Plan ที่เปิดอยู่ตอนนี้</option>
-                        <option value="active">✅ Active (Sales ใช้อยู่)</option>
-                    </select>
-                </div>
+                <!-- ✅ FIX (2026-09-15): เดิมมี dropdown ให้เลือก "Plan ที่เปิดอยู่ตอนนี้" vs "Active
+                     (Sales ใช้อยู่)" แต่ ExportCtrl.doExport() ไม่เคยอ่านค่านี้เลย — export ตามเดือนที่
+                     เปิดดูอยู่เสมอไม่ว่าจะเลือกอะไร (เสี่ยง export เดือนผิดโดยไม่รู้ตัวถ้าเข้าใจว่าเลือก
+                     "Active" แล้วจะได้เดือนที่ Sales เห็นจริง) แนวคิด "Active" แยกจาก "เปิดอยู่" ก็เลิกมี
+                     ความหมายไปแล้วตั้งแต่ระบบเปลี่ยนมายึดวันที่ปฏิทินจริงแทนการกด publish (ดู Plan System
+                     ใน CLAUDE.md) — เอา dropdown ที่ไม่มีผลออก เหลือแค่บอกให้ชัดว่า export จากเดือนไหน -->
+                <p class="text-xs text-gray-500 bg-gray-50 border border-gray-100 rounded-xl px-3 py-2.5">
+                    📊 Export จากเดือนที่เปิดดูอยู่ตอนนี้ในหน้า Planning — สลับเดือนที่ตัวเลือก "Plan" ด้านบนก่อน ถ้าต้องการ export เดือนอื่น
+                </p>
                 <div>
                     <label class="block text-xs font-bold text-gray-500 uppercase mb-1.5">เลือกสาย</label>
                     <select id="export-route-sel" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-bold outline-none focus:ring-2 focus:ring-emerald-300">
@@ -1334,6 +1336,10 @@
                 <!-- โหมด -->
                 <div>
                     <label class="block text-xs font-bold text-gray-500 uppercase mb-2">โหมดปฏิทิน</label>
+                    <!-- ✅ FIX (2026-09-15): เดิมมีแค่ 2 ปุ่ม (cycle/date) ทั้งที่ CalendarAdmin.setMode/
+                         save()/_computeDayLabel รองรับ 4 โหมดครบอยู่แล้ว (fixed/weekday มี section
+                         ของตัวเองรอไว้ด้านล่างด้วย) — ศูนย์ใหม่เลยตั้งโหมด fixed/weekday จาก UI ไม่ได้เลย
+                         เพิ่ม 2 ปุ่มที่ขาดกลับเข้าไป (grid-cols-2 เดิมพอดีกลายเป็น 2x2 เมื่อมี 4 ปุ่ม) -->
                     <div class="grid grid-cols-2 gap-2">
                         <button id="cal-mode-cycle" onclick="CalendarAdmin.setMode('cycle')"
                             class="border-2 border-gray-200 bg-gray-50 rounded-xl p-3 text-center cursor-pointer transition">
@@ -1346,6 +1352,18 @@
                             <div class="text-xl mb-1">📅</div>
                             <div class="text-xs font-black text-gray-700">วันที่ = Day ตรงกัน</div>
                             <div class="text-[10px] text-gray-500 mt-0.5">1 ก.ค. = Day 1 เสมอ</div>
+                        </button>
+                        <button id="cal-mode-fixed" onclick="CalendarAdmin.setMode('fixed')"
+                            class="border-2 border-gray-200 bg-gray-50 rounded-xl p-3 text-center cursor-pointer transition">
+                            <div class="text-xl mb-1">📌</div>
+                            <div class="text-xs font-black text-gray-700">กำหนดเอง</div>
+                            <div class="text-[10px] text-gray-500 mt-0.5">เลือกวันที่ = Day เอง</div>
+                        </button>
+                        <button id="cal-mode-weekday" onclick="CalendarAdmin.setMode('weekday')"
+                            class="border-2 border-gray-200 bg-gray-50 rounded-xl p-3 text-center cursor-pointer transition">
+                            <div class="text-xl mb-1">📆</div>
+                            <div class="text-xs font-black text-gray-700">ตามวันในสัปดาห์</div>
+                            <div class="text-[10px] text-gray-500 mt-0.5">ซ้ำทุกสัปดาห์</div>
                         </button>
                     </div>
                     <!-- ✅ UX: ตัวอย่างผลลัพธ์ของโหมดที่เลือกอยู่ -->
