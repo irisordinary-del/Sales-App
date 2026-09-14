@@ -454,29 +454,6 @@ const App = {
         PlanUI.refresh();
     },
 
-    // ─── Publish plan ให้ Sales เห็นจริง (ต้องกดยืนยันชัดเจน) ──────────────
-    publishPlan: async (ym) => {
-        if (!ym) return;
-        if (ym === App._livePlanYM) {
-            UI.showErrorToast('ℹ️ เดือนนี้ Live อยู่แล้ว');
-            return;
-        }
-        if (!confirm(
-            `⚠️ ยืนยันตั้ง "${App.ymToLabel(ym)}" เป็นเดือนที่ใช้งานจริง?\n\n` +
-            `Sales ทุกคนในศูนย์นี้จะเห็นปฏิทิน/สายวิ่งของเดือนนี้ทันที ` +
-            `(เดือนที่ Live อยู่ตอนนี้คือ ${App.ymToLabel(App._livePlanYM)})`
-        )) return;
-
-        try {
-            await App.dbRef.set({ currentPlanYM: ym }, { merge: true });
-            App._livePlanYM = ym;
-            PlanUI.refresh();
-            UI.showSaveToast(`📢 ตั้ง ${App.ymToLabel(ym)} เป็นเดือนที่ใช้งานจริงแล้ว — Sales เห็นทันที`);
-        } catch(e) {
-            UI.showErrorToast('❌ ตั้งค่าไม่สำเร็จ: ' + ErrorMsg.translate(e));
-        }
-    },
-
     // ─── Create new plan ─────────────────────────────────────────────────
     // srcYM: เดือนต้นทางที่จะ copy มา — ถ้าไม่ระบุ fallback ไปใช้เดือนที่แอดมินกำลังดูอยู่ตอนนี้
     // (ระบุไว้ชัดเจนเพื่อกันเคส "เลือกเดือนสร้างจาก dropdown ที่อิงจาก Plan ล่าสุด" แต่หน้าจอ
@@ -554,46 +531,6 @@ const App = {
         }
     },
 
-    // ─── Delete plan ─────────────────────────────────────────────────────
-    deletePlan: async (ym) => {
-        if (!ym) return;
-        UI.showConfirm(`ยืนยันลบ Plan ${App.ymToLabel(ym)}?`, async () => {
-            try {
-                // ลบ routes subcollection
-                const routeDocs = await App.planRoutesCol(ym).get();
-                await Promise.all(routeDocs.docs.map(d => d.ref.delete()));
-                await App.planRef(ym).delete();
-
-                // อัปเดต planList
-                const curDoc  = await App.dbRef.get();
-                const curData = curDoc.exists ? curDoc.data() : {};
-                const planList = (curData.planList || []).filter(p => p !== ym).sort().reverse();
-
-                // ✅ BUGFIX: เดิมเขียนทับ currentPlanYM (เดือน live ของ Sales) ทุกครั้งที่ลบ plan
-                // ไม่ว่าจะลบเดือนที่ live อยู่จริงหรือแค่ลบ draft เดือนอื่นที่ไม่เกี่ยวกับ Sales เลย
-                // ตอนนี้เช็คก่อน — เขียนทับเฉพาะกรณีลบเดือนที่ live อยู่จริงเท่านั้น
-                const isDeletingLive = App._livePlanYM === ym;
-                if (isDeletingLive) {
-                    const newLiveYM = planList[0] || App.currentYM();
-                    await App.dbRef.set({ planList, currentPlanYM: newLiveYM }, { merge: true });
-                    App._livePlanYM = newLiveYM;
-                    UI.showSaveToast(`🗑️ ลบ Plan ${App.ymToLabel(ym)} เรียบร้อย (เดือนนี้เคย Live อยู่ — เปลี่ยน Live เป็น ${App.ymToLabel(newLiveYM)} อัตโนมัติ)`);
-                } else {
-                    await App.dbRef.set({ planList }, { merge: true });
-                    UI.showSaveToast(`🗑️ ลบ Plan ${App.ymToLabel(ym)} เรียบร้อย`);
-                }
-
-                if (App._currentPlanYM === ym) {
-                    const fallbackYM = planList[0] || App.currentYM();
-                    await App._loadPlan(fallbackYM);
-                }
-                PlanUI.refresh();
-            } catch(err) {
-                UI.showErrorToast('❌ ลบ Plan ไม่สำเร็จ: ' + err.message);
-            }
-        });
-    },
-
     // ─── Route management ────────────────────────────────────────────────
     switchRoute: (name) => {
         if (State.localActiveRoute === name) return;
@@ -648,66 +585,6 @@ const App = {
         overlay.onclick = e => { if (e.target === overlay) close(); };
     },
 
-    renameRoute: () => {
-        const overlay = document.createElement('div');
-        overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.55);z-index:9999;display:flex;align-items:center;justify-content:center;';
-        const box = document.createElement('div');
-        box.style.cssText = 'background:#fff;border-radius:16px;padding:24px;max-width:340px;width:90%;font-family:inherit;box-shadow:0 20px 60px rgba(0,0,0,0.3);';
-        box.innerHTML = '<p style="font-size:14px;font-weight:700;color:#111827;margin-bottom:12px;">เปลี่ยนชื่อสาย</p>'
-            + `<input id="_ren-route-inp" type="text" value="${State.localActiveRoute}" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #d1d5db;border-radius:10px;font-size:14px;font-family:inherit;outline:none;margin-bottom:16px;">`
-            + '<div style="display:flex;gap:8px;justify-content:flex-end;">'
-            + '<button id="_ren-cancel" style="padding:8px 18px;border-radius:8px;border:1px solid #d1d5db;background:#fff;color:#6b7280;cursor:pointer;font-size:13px;font-weight:600;">ยกเลิก</button>'
-            + '<button id="_ren-ok" style="padding:8px 18px;border-radius:8px;border:none;background:#4f46e5;color:#fff;cursor:pointer;font-size:13px;font-weight:700;">บันทึก</button>'
-            + '</div>';
-        overlay.appendChild(box); document.body.appendChild(overlay);
-        const inp = box.querySelector('#_ren-route-inp'); inp.focus(); inp.select();
-        const close = () => { if (document.body.contains(overlay)) document.body.removeChild(overlay); };
-        const confirm = () => {
-            const newName = inp.value.trim(); close();
-            if (!newName || newName === State.localActiveRoute) return;
-            const ym = App._currentPlanYM;
-            const oldName = State.localActiveRoute;
-            State.db.routes[newName] = State.db.routes[oldName];
-            delete State.db.routes[oldName];
-            State.localActiveRoute = newName;
-            App.sync();
-            const routeList = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
-            State.db.routeList = routeList; // ✅ BUGFIX: ดู comment เดียวกันใน saveDB()
-            Promise.all([
-                App.planRoutesCol(ym).doc(oldName).delete(),
-                // ✅ BUGFIX (2026-08-29): merge:true — ดู comment เดียวกันใน saveDB() ข้างบน
-                App.planRoutesCol(ym).doc(newName).set({ stores: State.db.routes[newName] || [] }, { merge: true }),
-                App.planRef(ym).set({ routeList }, { merge: true }),
-            ]).then(() => {
-                UI.showSaveToast('💾 เปลี่ยนชื่อสายเรียบร้อย');
-                if (typeof AuditLog !== 'undefined') AuditLog.routeRename(oldName, newName);
-            }).catch(err => UI.showErrorToast('❌ เปลี่ยนชื่อไม่สำเร็จ: ' + err.message));
-        };
-        box.querySelector('#_ren-cancel').onclick = close;
-        box.querySelector('#_ren-ok').onclick     = confirm;
-        inp.addEventListener('keydown', e => { if (e.key === 'Enter') confirm(); if (e.key === 'Escape') close(); });
-        overlay.onclick = e => { if (e.target === overlay) close(); };
-    },
-
-    deleteRoute: () => {
-        if (Object.keys(State.db.routes).length <= 1)
-            return UI.showErrorToast('ห้ามลบสายสุดท้ายครับ');
-        UI.showConfirm('ยืนยันลบสาย "' + State.localActiveRoute + '"?', () => {
-            const ym = App._currentPlanYM;
-            const deletedName = State.localActiveRoute;
-            delete State.db.routes[deletedName];
-            const sortedKeys = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
-            State.db.routeList = sortedKeys; // ✅ BUGFIX: ดู comment เดียวกันใน saveDB()
-            State.localActiveRoute = sortedKeys[0];
-            State.stores = State.db.routes[State.localActiveRoute] || [];
-            App.sync(); MapCtrl.fitToStores();
-            Promise.all([
-                App.planRoutesCol(ym).doc(deletedName).delete(),
-                App.planRef(ym).set({ routeList: sortedKeys }, { merge: true }),
-            ]).then(() => UI.showSaveToast('🗑️ ลบสายเรียบร้อย'))
-              .catch(err => UI.showErrorToast('❌ ลบไม่สำเร็จ: ' + err.message));
-        });
-    },
 
     // ─── calendarConfig เฉพาะสาย (override) ────────────────────────────────
     // cfg = null → ลบ override ทิ้ง กลับไปใช้ default ของศูนย์ตามปกติ
@@ -1425,9 +1302,7 @@ const PlanUI = {
     },
 
     updateBadge: () => {
-        const ym    = App._currentPlanYM;
-        const badge = document.getElementById('plan-mode-badge');
-        if (badge) badge.textContent = ym ? `📅 ${App.ymToLabel(ym)}` : '📅 Plan';
+        const ym  = App._currentPlanYM;
         const sel = document.getElementById('plan-selector');
         if (sel && ym) sel.value = ym;
 
@@ -1493,12 +1368,6 @@ const PlanUI = {
         // ตัวเลือกเดือน) ไม่ใช่เดือนที่แอดมินบังเอิญเปิดดูอยู่ตอนนี้ — กันข้อมูลเพี้ยนถ้าสองอย่างไม่ตรงกัน
         const latestYM = (State.db.planList && State.db.planList[0]) || App._currentPlanYM;
         await App.createPlan(ym, latestYM);
-    },
-
-    confirmDelete: () => {
-        const ym = App._currentPlanYM;
-        if (!ym) return;
-        App.deletePlan(ym);
     },
 };
 

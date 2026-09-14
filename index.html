@@ -366,8 +366,15 @@
                 <button onclick="StoreTrans.open()" class="bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm transition whitespace-nowrap" title="ย้ายร้านระหว่างสาย">
                     🔀 ย้ายร้าน
                 </button>
-                <button onclick="document.getElementById('bulkUpload').click()" class="bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 whitespace-nowrap transition">
-                    📦 อัปโหลดพิกัด
+                <!-- ✅ FIX: เดิมปุ่มนี้ชื่อ "📦 อัปโหลดพิกัด" ทำให้ดูเหมือน dropzone เดี่ยวใน Tab 1
+                     (ที่รีเฟรชพิกัดแค่สายที่เปิดอยู่ ผ่าน App.handleMapUpload) — แต่จริงๆ ปุ่มนี้เรียก
+                     FileManager.bulkImport ซึ่งมีผลกับ "ทุกสายในไฟล์" พร้อมกัน (merge ตารางเดินรถ ไม่ใช่
+                     แค่พิกัด) เสี่ยงกดพลาดคิดว่าจะแค่รีเฟรชพิกัด แต่ดันไปแก้หลายสายพร้อมกัน แก้ชื่อ+เพิ่ม
+                     title ให้ตรงกับขอบเขตจริง -->
+                <button onclick="document.getElementById('bulkUpload').click()"
+                    title="นำเข้าไฟล์ Excel ที่แก้ไข — มีผลกับทุกสายในไฟล์พร้อมกัน (ไม่ใช่แค่สายที่เปิดอยู่)"
+                    class="bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 whitespace-nowrap transition">
+                    ♻️ นำเข้าไฟล์ที่แก้ใน Excel (ทุกสาย)
                 </button>
                 <input type="file" id="bulkUpload" accept=".xlsx,.xls" class="hidden" onchange="FileManager.bulkImport(event)">
                 <!-- ✅ NEW: นำเข้าจากไฟล์บริษัท (Customer Master / RoutePlan Detail) — ศูนย์ใหม่หรืออัปเดตร้าน -->

@@ -390,20 +390,9 @@ function _patchAuditLog() {
     // ✅ FIX (ตรวจสอบ 2026-09-04): App.addRoute log ตรงใน admin-data.js เองแล้ว (ผ่าน confirm
     // callback ใน modal ที่ patch จากข้างนอกไม่ได้ตามที่ comment เดิมบอกไว้) — ไม่ต้อง patch ที่นี่ซ้ำ
     if (typeof App !== 'undefined') {
-        // ── App.deleteRoute ───────────────────────────────────────────────
-        const _origDeleteRoute = App.deleteRoute;
-        App.deleteRoute = function() {
-            const name = State.localActiveRoute;
-            const _origShowConfirm = UI.showConfirm;
-            UI.showConfirm = function(msg, onConfirm, onCancel) {
-                UI.showConfirm = _origShowConfirm; // restore ทันที
-                _origShowConfirm(msg, () => {
-                    AuditLog.routeDelete(name);
-                    if (onConfirm) onConfirm();
-                }, onCancel);
-            };
-            _origDeleteRoute.apply(this, arguments);
-        };
+        // ✅ FIX: ตัด patch ของ App.deleteRoute ออก (2026-09-14) — ฟังก์ชันนี้ถูกลบไปแล้ว
+        // (superseded โดย RouteSettingsCtrl._doSave ใน index.html ซึ่ง log ผ่าน AuditLog.routeDelete
+        // ตรงๆ อยู่แล้ว) patch เดิมไม่มีอะไรให้ wrap อีกต่อไป
 
         // ── App.createPlan ────────────────────────────────────────────────
         // ✅ FIX (2026-09-04): เดิม patch ชื่อ App.createDraft ซึ่งไม่มีอยู่จริงในโค้ดปัจจุบันแล้ว
@@ -415,13 +404,8 @@ function _patchAuditLog() {
             AuditLog.draftCreate(ym);
         };
 
-        // ── App.publishPlan ───────────────────────────────────────────────
-        // ✅ FIX (2026-09-04): เดิม patch ชื่อ App.activateDraft (renamed เป็น publishPlan) — เหตุผลเดียวกัน
-        const _origPublishPlan = App.publishPlan;
-        App.publishPlan = async function(ym) {
-            await _origPublishPlan.call(this, ym);
-            AuditLog.draftActivate(ym);
-        };
+        // ✅ ตัด patch ของ App.publishPlan ออก (2026-09-14) — ฟังก์ชันนี้ถูกลบไปแล้ว เพราะแนวคิด
+        // "ตั้งเป็นเดือนที่ใช้งานจริง" ถูกแทนที่ด้วยการยึดวันที่ปฏิทินจริงแทน (ดู comment ใน sales-app.js)
 
         // ✅ ตัด App.switchPlanMode ออก (2026-09-04) — ฟังก์ชันนี้ไม่มีอยู่จริงแล้ว (แนวคิด "โหมด draft/live"
         // เดิมถูกแทนที่ด้วยระบบ multi-month plans ทั้งหมด ไม่มี mode ให้ switch อีกต่อไป)
