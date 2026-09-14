@@ -386,17 +386,8 @@ const App = {
     _getWithTimeout: (ref, ms = 8000) =>
         Promise.race([ref.get(), new Promise((_,rej) => setTimeout(() => rej(new Error('timeout')), ms))]),
 
-    loadPlanList: async (centerDocId) => {
-        try {
-            State.planCenterDocId = centerDocId;
-            const snap = await App._getWithTimeout(db.collection('appData').doc(centerDocId), 5000);
-            const meta = snap.exists ? snap.data() : {};
-            // ✅ ระบบใหม่: ใช้ planList และ currentPlanYM โดยตรง
-            State.planList       = (meta.planList || []).sort().reverse();
-            State.currentPlanYM  = meta.currentPlanYM || '';
-            console.log('📅 planList:', State.planList, 'current:', State.currentPlanYM);
-        } catch(e) { console.warn('loadPlanList:', e); State.planList = []; }
-    },
+    // ✅ FIX (2026-09-14): ตัด loadPlanList ออก — ไม่มีจุดเรียกใช้เหลือแล้ว (App.start()/startSupervisor()
+    // เขียน logic เดียวกันนี้แบบ inline เองแทน ไม่เคยเรียกฟังก์ชันนี้จริง)
 
     loadPlanData: async (ym) => {
         if (Object.prototype.hasOwnProperty.call(State.planCache, ym) &&
@@ -968,10 +959,8 @@ const Processor = {
                 ? `Day ${_dayNum} · ${_mktNow.split(' · ')[0]}`
                 : `Day ${_dayNum}`;
         }
-        const _stEl = document.getElementById('stores-title');
-        if (_stEl) _stEl.textContent = _mktNow
-            ? 'Day ' + State.currentDay.replace('Day ','') + ' · ' + _mktNow
-            : 'รายชื่อร้านค้าทั้งหมด';
+        // ✅ FIX (2026-09-14): ตัด #stores-title lookup ออก — id นี้ไม่มีอยู่จริงใน sales.html
+        // (ซากจาก UI เก่าก่อนเปลี่ยนมาใช้ #day-label-display ข้างบนแทน)
         Processor.routeList();
     },
 
@@ -2455,26 +2444,9 @@ const MapCtrl = {
     },
 };
 
-// ─── Resizer ──────────────────────────────────────────────────────────────
-const Resizer = {
-    init: () => {
-        const handle = document.getElementById('resize-handle');
-        if (!handle) return;
-        let startY = 0, startH = 0;
-        const listEl = document.getElementById('route-store-list')?.closest('.overflow-y-auto');
-        if (!listEl) return;
-        handle.addEventListener('touchstart', e => {
-            startY = e.touches[0].clientY;
-            startH = listEl.offsetHeight;
-        }, { passive: true });
-        handle.addEventListener('touchmove', e => {
-            const dy = e.touches[0].clientY - startY;
-            const newH = Math.max(120, Math.min(window.innerHeight * 0.8, startH + dy));
-            listEl.style.height = newH + 'px';
-            if (map) map.invalidateSize();
-        }, { passive: true });
-    },
-};
+// ✅ FIX (2026-09-14): ตัด Resizer ออก — หา #resize-handle ซึ่งไม่มีอยู่จริงใน sales.html เลย
+// (ตัว resizer จริงที่ใช้งานอยู่คือ #resizer/#resizer-pill ผูกกับ initResizer() ที่ฝังใน sales.html เอง)
+// Resizer.init() เดิมจึงเป็น no-op เงียบๆ ทุกครั้งที่โหลดหน้า ไม่มีผลอะไรเลย
 
 // ─── SupervisorUI ─────────────────────────────────────────────────────────
 const SupervisorUI = {
@@ -2883,10 +2855,7 @@ const ActivityCtrl = {
 document.getElementById('day-select').addEventListener('change', (e) => {
     State.currentDay  = e.target.value;
     const _m  = getDayMarkets(State.currentDay);
-    const _sEl = document.getElementById('stores-title');
-    if (_sEl) _sEl.textContent = _m
-        ? 'สายวิ่งวันที่ ' + State.currentDay.replace('Day ','') + ' · ' + _m
-        : 'รายชื่อร้านค้าทั้งหมด';
+    // ✅ FIX (2026-09-14): ตัด #stores-title lookup ออก — id นี้ไม่มีอยู่จริงใน sales.html (ดู comment เดียวกันด้านบน)
     // ✅ ข้อ 5: sync label display
     const _lbl = document.getElementById('day-label-display');
     if (_lbl && State.currentDay) {
@@ -2898,4 +2867,4 @@ document.getElementById('day-select').addEventListener('change', (e) => {
 });
 
 window.addEventListener('resize', () => { if (map) map.invalidateSize(); });
-document.addEventListener('DOMContentLoaded', () => { App.checkAuth(); Resizer.init(); });
+document.addEventListener('DOMContentLoaded', () => { App.checkAuth(); });
