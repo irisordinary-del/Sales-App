@@ -366,8 +366,15 @@
                 <button onclick="StoreTrans.open()" class="bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm transition whitespace-nowrap" title="ย้ายร้านระหว่างสาย">
                     🔀 ย้ายร้าน
                 </button>
-                <button onclick="document.getElementById('bulkUpload').click()" class="bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 whitespace-nowrap transition">
-                    📦 อัปโหลดพิกัด
+                <!-- ✅ FIX: เดิมปุ่มนี้ชื่อ "📦 อัปโหลดพิกัด" ทำให้ดูเหมือน dropzone เดี่ยวใน Tab 1
+                     (ที่รีเฟรชพิกัดแค่สายที่เปิดอยู่ ผ่าน App.handleMapUpload) — แต่จริงๆ ปุ่มนี้เรียก
+                     FileManager.bulkImport ซึ่งมีผลกับ "ทุกสายในไฟล์" พร้อมกัน (merge ตารางเดินรถ ไม่ใช่
+                     แค่พิกัด) เสี่ยงกดพลาดคิดว่าจะแค่รีเฟรชพิกัด แต่ดันไปแก้หลายสายพร้อมกัน แก้ชื่อ+เพิ่ม
+                     title ให้ตรงกับขอบเขตจริง -->
+                <button onclick="document.getElementById('bulkUpload').click()"
+                    title="นำเข้าไฟล์ Excel ที่แก้ไข — มีผลกับทุกสายในไฟล์พร้อมกัน (ไม่ใช่แค่สายที่เปิดอยู่)"
+                    class="bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 whitespace-nowrap transition">
+                    ♻️ นำเข้าไฟล์ที่แก้ใน Excel (ทุกสาย)
                 </button>
                 <input type="file" id="bulkUpload" accept=".xlsx,.xls" class="hidden" onchange="FileManager.bulkImport(event)">
                 <!-- ✅ NEW: นำเข้าจากไฟล์บริษัท (Customer Master / RoutePlan Detail) — ศูนย์ใหม่หรืออัปเดตร้าน -->
@@ -954,13 +961,15 @@
                 <button onclick="ExportCtrl.closeModal()" class="w-8 h-8 rounded-full border border-gray-200 text-gray-400 hover:bg-gray-100 font-bold transition text-sm">✕</button>
             </div>
             <div class="p-5 space-y-4">
-                <div>
-                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1.5">Export จาก Plan</label>
-                    <select id="export-plan-sel" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-bold outline-none focus:ring-2 focus:ring-emerald-300">
-                        <option value="current">📊 Plan ที่เปิดอยู่ตอนนี้</option>
-                        <option value="active">✅ Active (Sales ใช้อยู่)</option>
-                    </select>
-                </div>
+                <!-- ✅ FIX (2026-09-15): เดิมมี dropdown ให้เลือก "Plan ที่เปิดอยู่ตอนนี้" vs "Active
+                     (Sales ใช้อยู่)" แต่ ExportCtrl.doExport() ไม่เคยอ่านค่านี้เลย — export ตามเดือนที่
+                     เปิดดูอยู่เสมอไม่ว่าจะเลือกอะไร (เสี่ยง export เดือนผิดโดยไม่รู้ตัวถ้าเข้าใจว่าเลือก
+                     "Active" แล้วจะได้เดือนที่ Sales เห็นจริง) แนวคิด "Active" แยกจาก "เปิดอยู่" ก็เลิกมี
+                     ความหมายไปแล้วตั้งแต่ระบบเปลี่ยนมายึดวันที่ปฏิทินจริงแทนการกด publish (ดู Plan System
+                     ใน CLAUDE.md) — เอา dropdown ที่ไม่มีผลออก เหลือแค่บอกให้ชัดว่า export จากเดือนไหน -->
+                <p class="text-xs text-gray-500 bg-gray-50 border border-gray-100 rounded-xl px-3 py-2.5">
+                    📊 Export จากเดือนที่เปิดดูอยู่ตอนนี้ในหน้า Planning — สลับเดือนที่ตัวเลือก "Plan" ด้านบนก่อน ถ้าต้องการ export เดือนอื่น
+                </p>
                 <div>
                     <label class="block text-xs font-bold text-gray-500 uppercase mb-1.5">เลือกสาย</label>
                     <select id="export-route-sel" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-bold outline-none focus:ring-2 focus:ring-emerald-300">
@@ -1327,6 +1336,10 @@
                 <!-- โหมด -->
                 <div>
                     <label class="block text-xs font-bold text-gray-500 uppercase mb-2">โหมดปฏิทิน</label>
+                    <!-- ✅ FIX (2026-09-15): เดิมมีแค่ 2 ปุ่ม (cycle/date) ทั้งที่ CalendarAdmin.setMode/
+                         save()/_computeDayLabel รองรับ 4 โหมดครบอยู่แล้ว (fixed/weekday มี section
+                         ของตัวเองรอไว้ด้านล่างด้วย) — ศูนย์ใหม่เลยตั้งโหมด fixed/weekday จาก UI ไม่ได้เลย
+                         เพิ่ม 2 ปุ่มที่ขาดกลับเข้าไป (grid-cols-2 เดิมพอดีกลายเป็น 2x2 เมื่อมี 4 ปุ่ม) -->
                     <div class="grid grid-cols-2 gap-2">
                         <button id="cal-mode-cycle" onclick="CalendarAdmin.setMode('cycle')"
                             class="border-2 border-gray-200 bg-gray-50 rounded-xl p-3 text-center cursor-pointer transition">
@@ -1339,6 +1352,18 @@
                             <div class="text-xl mb-1">📅</div>
                             <div class="text-xs font-black text-gray-700">วันที่ = Day ตรงกัน</div>
                             <div class="text-[10px] text-gray-500 mt-0.5">1 ก.ค. = Day 1 เสมอ</div>
+                        </button>
+                        <button id="cal-mode-fixed" onclick="CalendarAdmin.setMode('fixed')"
+                            class="border-2 border-gray-200 bg-gray-50 rounded-xl p-3 text-center cursor-pointer transition">
+                            <div class="text-xl mb-1">📌</div>
+                            <div class="text-xs font-black text-gray-700">กำหนดเอง</div>
+                            <div class="text-[10px] text-gray-500 mt-0.5">เลือกวันที่ = Day เอง</div>
+                        </button>
+                        <button id="cal-mode-weekday" onclick="CalendarAdmin.setMode('weekday')"
+                            class="border-2 border-gray-200 bg-gray-50 rounded-xl p-3 text-center cursor-pointer transition">
+                            <div class="text-xl mb-1">📆</div>
+                            <div class="text-xs font-black text-gray-700">ตามวันในสัปดาห์</div>
+                            <div class="text-[10px] text-gray-500 mt-0.5">ซ้ำทุกสัปดาห์</div>
                         </button>
                     </div>
                     <!-- ✅ UX: ตัวอย่างผลลัพธ์ของโหมดที่เลือกอยู่ -->
@@ -1421,6 +1446,24 @@
                         <label class="block text-xs font-bold text-gray-700 mb-2">วันหยุดเฉพาะกิจของเดือนนี้ (กดเลือกวันที่):</label>
                         <div id="cal-holiday-grid" class="grid grid-cols-7 gap-1"></div>
                         <p class="text-[10px] text-gray-400 mt-1">วันที่เลือกใช้เฉพาะเดือนนี้เท่านั้น — copy ไปเดือนหน้าจะไม่ติดไปด้วย (ต่างจากวันหยุดประจำสัปดาห์ด้านบน)</p>
+                    </div>
+                    <!-- ✅ NEW: "เลื่อนตลาด" (shift, ค่าเดิม) vs "ตรึงตลาด" (skip) — มีผลเฉพาะโหมด cycle
+                         และเฉพาะ "วันหยุดเฉพาะกิจ" ด้านบน (วันหยุดประจำสัปดาห์ไม่นับเข้ารอบเสมออยู่แล้ว) -->
+                    <div id="cal-holiday-mode-wrap">
+                        <label class="block text-xs font-bold text-gray-700 mb-2">เมื่อถึงวันหยุดเฉพาะกิจ (เฉพาะโหมดหมุนนับต่อเนื่อง):</label>
+                        <div class="grid grid-cols-2 gap-2">
+                            <button id="cal-holidaymode-shift" onclick="CalendarAdmin.setHolidayMode('shift')"
+                                class="rounded-xl p-2.5 text-center cursor-pointer transition">
+                                <div class="text-sm mb-0.5">↪️</div>
+                                <div class="text-xs font-black">เลื่อนตลาด</div>
+                            </button>
+                            <button id="cal-holidaymode-skip" onclick="CalendarAdmin.setHolidayMode('skip')"
+                                class="rounded-xl p-2.5 text-center cursor-pointer transition">
+                                <div class="text-sm mb-0.5">📌</div>
+                                <div class="text-xs font-black">ตรึงตลาด</div>
+                            </button>
+                        </div>
+                        <p id="cal-holidaymode-hint" class="text-[10px] text-gray-500 mt-1.5"></p>
                     </div>
                 </div>
 
@@ -1594,6 +1637,8 @@
         const CalendarAdmin = {
             _mode:      'date',   // default = วันที่จริง
             _holidays:  [],
+            _holidayMode: 'shift', // ✅ 'shift' (ค่า default) = วันหยุดเฉพาะกิจไม่นับเข้ารอบ ตลาดหลังจากนั้นเลื่อนแทน
+                                    //    'skip' (ตรึงตลาด)   = นับเข้ารอบตามปกติ ตลาดอื่นไม่ขยับ วันนั้นวันเดียวไม่วิ่ง
             _weeklyHolidays: [], // ✅ วันหยุดประจำสัปดาห์ (0=อาทิตย์..6=เสาร์) — ซ้ำทุกเดือนอัตโนมัติ ไม่ผูกกับเดือนใดเดือนหนึ่ง
             _anchorType: 'date', // ✅ 'date' | 'weekday-once' | 'weekday-rolling' — จุดเริ่มนับของโหมด cycle
             _anchorWeekday: 1,   // ใช้เมื่อ _anchorType เป็น weekday-*
@@ -1691,6 +1736,7 @@
             _loadConfig: async () => {
                 CalendarAdmin._originalMode   = null;
                 CalendarAdmin._holidays       = [];
+                CalendarAdmin._holidayMode    = 'shift';
                 CalendarAdmin._weeklyHolidays = [];
                 CalendarAdmin._fixedRows      = [];
                 CalendarAdmin._weekdayRows    = [];
@@ -1726,6 +1772,7 @@
                     // ไม่ใช่แค่ cycle เดิม — วันหยุดผูกกับ "วันที่" ไม่ได้ผูกกับโหมดใดโหมดหนึ่งเท่านั้น
                     CalendarAdmin._holidays       = cfg.holidays       || [];
                     CalendarAdmin._weeklyHolidays = cfg.weeklyHolidays || [];
+                    CalendarAdmin._holidayMode    = cfg.holidayMode    || 'shift';
                     if (cfg.mode === 'cycle') {
                         CalendarAdmin._anchorType    = cfg.anchorType || 'date';
                         CalendarAdmin._anchorWeekday = (cfg.anchorWeekday !== undefined) ? cfg.anchorWeekday : 1;
@@ -1771,6 +1818,7 @@
                 }
 
                 CalendarAdmin._renderHolidayGrid();
+                CalendarAdmin._renderHolidayModeToggle();
                 CalendarAdmin._renderWeeklyHolidayGrid();
                 CalendarAdmin._renderFixedRows();
                 CalendarAdmin._renderWeekdayRows();
@@ -1817,13 +1865,19 @@
                 [cycleBtn, dateBtn, fixedBtn, weekdayBtn].forEach(b => { if (b) b.className = inactive; });
                 [cycleSec, fixedSec, weekdaySec, holidaysSec].forEach(s => { if (s) s.classList.add('hidden'); });
 
+                // ✅ "ตรึงตลาด"/"เลื่อนตลาด" มีความหมายเฉพาะโหมด cycle เท่านั้น (โหมด date ไม่มี "รอบ"
+                // ให้นับ วันหยุดในโหมดนั้นเป็นแค่ข้อมูลแสดงผล ไม่กระทบเลข Day) — ซ่อนถ้าไม่ใช่ cycle
+                const holidayModeWrap = document.getElementById('cal-holiday-mode-wrap');
+
                 if (mode === 'cycle') {
                     if (cycleBtn) cycleBtn.className = active;
                     if (cycleSec) cycleSec.classList.remove('hidden');
                     if (holidaysSec) holidaysSec.classList.remove('hidden');
+                    if (holidayModeWrap) holidayModeWrap.classList.remove('hidden');
                 } else if (mode === 'date') {
                     if (dateBtn) dateBtn.className = active;
                     if (holidaysSec) holidaysSec.classList.remove('hidden');
+                    if (holidayModeWrap) holidayModeWrap.classList.add('hidden');
                 } else if (mode === 'fixed') {
                     if (fixedBtn) fixedBtn.className = active;
                     if (fixedSec) fixedSec.classList.remove('hidden');
@@ -1978,7 +2032,12 @@
 
                     const startNum   = parseInt(document.getElementById('cal-start-day-num')?.value) || 1;
                     const holidays   = CalendarAdmin._holidays || [];
-                    const isHol = (d) => holidays.includes(d) || weeklyHolidays.includes(new Date(y, m-1, d).getDay());
+                    // ✅ holidayMode ต้องตรงกับ CalendarCtrl._isCycleHoliday/_isCyclePinnedHoliday
+                    // ใน sales-app.js เป๊ะ (ดู comment เดียวกันที่นั่น) ไม่งั้น preview จะโกหก
+                    const hMode = CalendarAdmin._holidayMode || 'shift';
+                    const isWkHol = (d) => weeklyHolidays.includes(new Date(y, m-1, d).getDay());
+                    const isAdHol = (d) => holidays.includes(d);
+                    const isHol = (d) => isWkHol(d) || (hMode !== 'skip' && isAdHol(d));
 
                     // ✅ จุดเริ่มนับ — แบบเดิม (เลขวันที่ตายตัว) หรือ "วันในสัปดาห์ (จบเมื่อครบรอบ)" — รีเซ็ตรายเดือนทั้งคู่
                     let startDate;
@@ -2003,6 +2062,8 @@
                         count++;
                         if (d === dateNum) {
                             if (count > cycleDays) return null; // "จบเมื่อครบรอบ" — ไม่วนซ้ำ
+                            // ✅ "ตรึงตลาด": วันนี้นับเข้ารอบแล้ว (ตลาดอื่นไม่ขยับ) แต่ตัวมันเองไม่มีรอบวิ่งจริง
+                            if (hMode === 'skip' && isAdHol(d)) return null;
                             const dayNum = ((startNum - 1 + (count - 1)) % cycleDays) + 1;
                             return 'Day ' + dayNum;
                         }
@@ -2056,6 +2117,29 @@
                 else CalendarAdmin._holidays.push(d);
                 CalendarAdmin._renderHolidayGrid();
                 CalendarAdmin._renderPreview();
+            },
+
+            // ── โหมดจัดการวันหยุดเฉพาะกิจ (เฉพาะโหมด cycle): เลื่อนตลาด (shift) หรือ ตรึงตลาด (skip) ──
+            setHolidayMode: (mode) => {
+                CalendarAdmin._holidayMode = mode;
+                CalendarAdmin._renderHolidayModeToggle();
+                CalendarAdmin._renderPreview();
+            },
+
+            _renderHolidayModeToggle: () => {
+                const active   = 'border-2 border-amber-500 bg-amber-50 text-amber-800 rounded-xl p-2.5 text-center cursor-pointer transition';
+                const inactive = 'border-2 border-gray-200 bg-white text-gray-500 rounded-xl p-2.5 text-center cursor-pointer transition';
+                const shiftBtn = document.getElementById('cal-holidaymode-shift');
+                const skipBtn  = document.getElementById('cal-holidaymode-skip');
+                const mode = CalendarAdmin._holidayMode || 'shift';
+                if (shiftBtn) shiftBtn.className = (mode === 'shift') ? active : inactive;
+                if (skipBtn)  skipBtn.className  = (mode === 'skip')  ? active : inactive;
+                const hint = document.getElementById('cal-holidaymode-hint');
+                if (hint) {
+                    hint.textContent = mode === 'skip'
+                        ? '📌 ตรึงตลาด: วันหยุดยังนับเข้ารอบตามปกติ ตลาดวันอื่นไม่ขยับเลย แค่วันหยุดวันนั้นวันเดียวไม่มีรอบวิ่ง'
+                        : '📌 เลื่อนตลาด: วันหยุดไม่นับเข้ารอบ ตลาดที่อยู่หลังจากนั้นเลื่อนขึ้นมาแทนที่ทั้งแถว (ค่าเดิมของระบบ)';
+                }
             },
 
             // ── fixed mode rows ─────────────────────────────────────────────
@@ -2167,6 +2251,7 @@
                             cycleDays:   parseInt(document.getElementById('cal-cycle-days').value)    || 24,
                             holidays:       [...CalendarAdmin._holidays].sort((a,b) => a-b),
                             weeklyHolidays: [...CalendarAdmin._weeklyHolidays].sort((a,b) => a-b),
+                            holidayMode:    CalendarAdmin._holidayMode || 'shift',
                         };
                     }
                 } else if (CalendarAdmin._mode === 'date') {
@@ -2300,7 +2385,7 @@
          ✅ NEW: สลับวัน (Swap Days) — สลับ/เลื่อน Day ของร้านค้าทั้งหมดในสายเดียวกัน
          ═══════════════════════════════════════════════════════════════ -->
     <div id="swap-days-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
-        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden" style="max-height:90dvh;display:flex;flex-direction:column;">
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden" style="max-height:90dvh;display:flex;flex-direction:column;">
             <div class="p-5 border-b flex justify-between items-center bg-gray-50 flex-shrink-0">
                 <div>
                     <h2 class="text-base font-black text-gray-900">🔄 สลับวัน</h2>
@@ -2384,9 +2469,27 @@
                 SwapDaysCtrl.renderPreview();
             },
 
+            // ✅ ชื่อตลาด (ตัดรหัสสายออก) ของแต่ละ Day ในสายนี้ — ใช้ทั้ง dropdown และ preview กันสลับผิด
+            _dayLabelMap: () => {
+                const stripRouteCode = (n) => (n || '').replace(/^\S+\s+/, '').trim();
+                const map = {};
+                (State.stores || []).forEach(s => {
+                    if (s.inactive || !s.days) return;
+                    s.days.forEach(d => {
+                        if (!map[d] && s.marketName) map[d] = stripRouteCode(s.marketName);
+                    });
+                });
+                return map;
+            },
+
             _dayOptions: (cycleDays) => {
+                const dayLabelMap = SwapDaysCtrl._dayLabelMap();
                 let opts = '<option value="">-- เลือก --</option>';
-                for (let i = 1; i <= cycleDays; i++) opts += `<option value="Day ${i}">Day ${i}</option>`;
+                for (let i = 1; i <= cycleDays; i++) {
+                    const dayKey = `Day ${i}`;
+                    const label = dayLabelMap[dayKey] ? `${dayKey} — ${dayLabelMap[dayKey]}` : dayKey;
+                    opts += `<option value="${dayKey}">${label}</option>`;
+                }
                 return opts;
             },
 
@@ -2405,11 +2508,11 @@
                     const rowsEl = document.getElementById('swap-custom-rows');
                     rowsEl.innerHTML = SwapDaysCtrl._rows.map((r, i) => `
                         <div class="flex items-center gap-2">
-                            <select onchange="SwapDaysCtrl.setRowVal(${i}, 'from', this.value)" class="flex-1 border border-gray-200 rounded-lg p-2 text-xs outline-none">
+                            <select onchange="SwapDaysCtrl.setRowVal(${i}, 'from', this.value)" class="flex-1 min-w-0 border border-gray-200 rounded-lg p-2 text-xs outline-none truncate">
                                 ${opts.replace(`value="${r.from}"`, `value="${r.from}" selected`)}
                             </select>
-                            <span class="text-gray-400 text-xs">→</span>
-                            <select onchange="SwapDaysCtrl.setRowVal(${i}, 'to', this.value)" class="flex-1 border border-gray-200 rounded-lg p-2 text-xs outline-none">
+                            <span class="text-gray-400 text-xs flex-shrink-0">→</span>
+                            <select onchange="SwapDaysCtrl.setRowVal(${i}, 'to', this.value)" class="flex-1 min-w-0 border border-gray-200 rounded-lg p-2 text-xs outline-none truncate">
                                 ${opts.replace(`value="${r.to}"`, `value="${r.to}" selected`)}
                             </select>
                             <button onclick="SwapDaysCtrl.removeRow(${i})" class="w-8 h-8 flex-shrink-0 rounded-lg bg-red-50 text-red-500 hover:bg-red-100 font-bold">✕</button>
@@ -2474,13 +2577,16 @@
                     return;
                 }
 
+                const dayLabelMap = SwapDaysCtrl._dayLabelMap();
                 previewEl.innerHTML = entries.map(([from, to]) => {
                     const n = State.stores.filter(s => !s.inactive && s.days && s.days.includes(from)).length;
+                    const fromLabel = dayLabelMap[from] ? `${from} — ${dayLabelMap[from]}` : from;
+                    const toLabel = dayLabelMap[to] ? `${to} — ${dayLabelMap[to]}` : to;
                     return `
-                        <div class="flex items-center justify-between bg-gray-50 border border-gray-100 rounded-lg px-3 py-2 text-xs">
-                            <span class="font-bold text-gray-700">${from} <span class="text-gray-400 font-normal">(${n} ร้าน)</span></span>
-                            <span class="text-indigo-500">→</span>
-                            <span class="font-bold text-indigo-600">${to}</span>
+                        <div class="flex items-center justify-between bg-gray-50 border border-gray-100 rounded-lg px-3 py-2 text-xs gap-2">
+                            <span class="font-bold text-gray-700 min-w-0 truncate">${fromLabel} <span class="text-gray-400 font-normal">(${n} ร้าน)</span></span>
+                            <span class="text-indigo-500 flex-shrink-0">→</span>
+                            <span class="font-bold text-indigo-600 min-w-0 truncate">${toLabel}</span>
                         </div>`;
                 }).join('');
                 confirmBtn.disabled = false;

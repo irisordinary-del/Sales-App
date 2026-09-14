@@ -738,8 +738,11 @@ const SkuDist = {
             .filter(p => p.code.toLowerCase().includes(q) || p.name.toLowerCase().includes(q))
             .slice(0, 20);
 
-        // escape สำหรับ onclick string
-        const qEsc = val.trim().replace(/'/g, "\'");
+        // ✅ FIX (2026-09-15): เดิม "\'" ในสตริง JS คือแค่ตัวอักษร ' เฉยๆ (backslash ไม่มีผลอะไร
+        // ก่อนหน้า apostrophe ในสตริง JS ปกติ) เท่ากับไม่ได้ escape อะไรเลย — ถ้าชื่อ/รหัสสินค้ามี
+        // apostrophe จริง onclick="...('...')" จะถูกตัดตอนกลางคัน ปุ่มกดไม่ได้ (JS parse error เฉพาะ
+        // แถวนั้น) ต้องใช้ "\\'" (backslash จริง 1 ตัว ตามด้วย ') ถึงจะ escape ได้ถูกต้อง
+        const qEsc = val.trim().replace(/'/g, "\\'");
 
         if (!matches.length) {
             dropdown.innerHTML = `<div class="px-3 py-2.5 text-xs text-gray-500">
@@ -756,7 +759,8 @@ const SkuDist = {
         }
 
         dropdown.innerHTML = matches.map(p => {
-            const codeEsc = p.code.replace(/'/g, "\'");
+            // ✅ FIX (2026-09-15): ดู comment เดียวกันที่ qEsc ข้างบน — "\'" ไม่ escape อะไรเลย
+            const codeEsc = p.code.replace(/'/g, "\\'");
             return `
             <div class="px-3 py-2 hover:bg-indigo-50 cursor-pointer flex items-center gap-2 border-b border-gray-50"
                 onclick="SkuDist._addKeyword('${gId}','${codeEsc}')">
@@ -1185,7 +1189,6 @@ const SkuDist = {
             const targetPct      = totalStoreAll > 0 ? Math.round(totalTargetCnt/totalStoreAll*100) : 0;
             const aboveTarget    = vals.filter(v => (v?.vsTarget||0) >= 0).length;
             // SKU coverage รวม
-            const skuSold  = new Set(vals.flatMap(v => [])); // นับจาก result
             const avgSku   = vals.reduce((s,v) => s+(v?.skuCoveragePct||0),0) / (vals.length||1);
 
             return `

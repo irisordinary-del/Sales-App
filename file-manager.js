@@ -60,7 +60,12 @@ const FileManager = {
                 return null;
             }
             // date-anchor / weekday-once — รีเซ็ตรายเดือน ไม่วนซ้ำ
-            const isHol = (d) => (cfg.holidays || []).includes(d) || isWkHol(new Date(year, month, d));
+            // ✅ holidayMode: 'shift' (default) = วันหยุดเฉพาะกิจไม่นับเข้ารอบ ตลาดหลังจากนั้นเลื่อนแทน
+            //    'skip' (ตรึงตลาด) = วันหยุดเฉพาะกิจนับเข้ารอบตามปกติ แต่วันนั้นวันเดียวไม่มีรอบวิ่งจริง
+            //    ต้องตรงกับ CalendarCtrl._isCycleHoliday/_isCyclePinnedHoliday ใน sales-app.js เป๊ะ
+            const hMode   = cfg.holidayMode || 'shift';
+            const isAdHol = (d) => (cfg.holidays || []).includes(d);
+            const isHol   = (d) => isWkHol(new Date(year, month, d)) || (hMode !== 'skip' && isAdHol(d));
             let startDate;
             if (cfg.anchorType === 'weekday-once') {
                 const daysInMonth = new Date(year, month + 1, 0).getDate();
@@ -85,6 +90,8 @@ const FileManager = {
                 if (isHol(d)) continue;
                 count++;
                 if (count > cycleDays) return null;
+                // ✅ "ตรึงตลาด": วันนี้กินสล็อตในรอบไปแล้ว แต่ตัวมันเองไม่มีรอบวิ่งจริง ไม่ใช่คำตอบ
+                if (hMode === 'skip' && isAdHol(d)) continue;
                 const dayNum = ((startDayNum - 1 + (count - 1)) % cycleDays) + 1;
                 if (dayNum === targetNum) return new Date(year, month, d);
             }
@@ -115,6 +122,75 @@ const FileManager = {
     // ในคอลัมน์ Day เพราะบางโหมดปฏิทินแปลงเป็นวันที่จริงไปแล้ว ต้องอิงเลข cycle เดิมเสมอ)
     // ตามด้วยชื่อตลาด (กันเคสที่วันเดียวกันมีมากกว่า 1 ชื่อตลาดปนกัน ให้จับกลุ่มติดกัน) แล้วปิดท้าย
     // ด้วยลำดับที่จัดไว้ในวันนั้น (seqs) — คืน array ใหม่ ไม่แก้ของเดิม
+    // ✅ NEW: สร้างแผนที่ "วัน → ชื่อตลาด" ของสายนี้ (ใช้ทั้ง export และจุดอื่นที่ต้องรู้ชื่อตลาด
+    // จริงของแต่ละวัน) — เชื่อร้านที่ถือวันนั้นเป็น "วันแรก" (days[0]) ก่อนเสมอ เพราะ marketName
+    // ของร้านผูกกับวันแรกเท่านั้น (regenerate ให้ตรงแล้วจากจุดอื่น) แต่บางสายมีร้าน F2 เยอะมากจน
+    // บางวัน "ไม่มีร้านไหนถือเป็นวันแรกเลย" (มีแต่ร้านที่มาเป็นรอบสอง) กรณีนี้ไม่มีที่เก็บชื่อถาวร
+    // ให้วันนั้นได้เลย (ร้าน F2 มีช่อง marketName ได้ค่าเดียว ผูกกับวันแรกไปแล้ว) จึง generate ชื่อ
+    // สดจากตำบล/อำเภอ/จังหวัดของสมาชิกทั้งกลุ่มแทน คำนวณใหม่ทุกครั้ง ไม่บันทึกกลับ
+    _dayMarketNameMap: (stores) => {
+        const stripPrefix = (v) => String(v || '').replace(/^(ตำบล|ต\.|อำเภอ|อ\.|จังหวัด|จ\.)\s*/, '').trim();
+        const map = {};
+        const byDay = {};
+        stores.forEach(s => {
+            (s.days || []).forEach(d => {
+                if (!d) return;
+                if (!byDay[d]) byDay[d] = [];
+                byDay[d].push(s);
+                if (s.days[0] === d && s.marketName && !map[d]) map[d] = s.marketName;
+            });
+        });
+        Object.entries(byDay).forEach(([day, group]) => {
+            if (map[day]) return;
+            const dayDigits = String(day).replace(/[^0-9]/g, '');
+            if (!dayDigits) return;
+            const rankByFreq = (field) => {
+                const counts = {}, order = [];
+                group.forEach(s => {
+                    const v = stripPrefix(s[field]);
+                    if (!v) return;
+                    if (!(v in counts)) { counts[v] = 0; order.push(v); }
+                    counts[v]++;
+                });
+                return order.sort((a, b) => counts[b] - counts[a]);
+            };
+            const tambons  = rankByFreq('subDistrict').slice(0, 2);
+            const amphoe   = rankByFreq('district')[0]  || '';
+            const province = rankByFreq('province')[0]  || '';
+            const dToken   = 'D' + dayDigits.padStart(2, '0');
+            const salesCode = group[0].salesCode || '';
+            map[day] = [salesCode, dToken, ...tambons, amphoe, province].filter(Boolean).join(' ');
+        });
+        return map;
+    },
+
+    // ✅ NEW: ขยายร้าน F2 (มีมากกว่า 1 วันใน days) ให้กลายเป็น "แถว" แยกต่อวัน ก่อน export —
+    // เดิม export ใช้ store.days[0] ทั่วทั้งไฟล์ ทำให้ร้าน F2 หายไปจากวันที่สองในไฟล์ทั้งหมด
+    // (ไม่ใช่แค่ชื่อตลาดผิด แต่ไม่โผล่มาให้เห็นเลยว่าต้องไปวันนั้นด้วย)
+    // แถวที่ไม่ใช่วันแรกของร้าน ต้องใช้ marketName "ของวันนั้นจริงๆ" (จากร้านอื่นที่วันนั้นเป็น
+    // วันแรกของมัน หรือ generate สดถ้าไม่มีใครถือวันนั้นเป็นวันแรกเลย) ไม่ใช่ marketName เดิมของ
+    // ร้าน F2 เอง ซึ่งผูกกับวันแรกเท่านั้น
+    _expandStoresForExport: (stores) => {
+        const dayMarketMap = FileManager._dayMarketNameMap(stores);
+        const rows = [];
+        stores.forEach(s => {
+            // ร้านที่ไม่มีวันเลย (เช่นร้านโดดที่ AI ตัดทิ้ง) ต้องคงเป็น days:[] เหมือนเดิม (ไม่ใช่
+            // [null]) ไม่งั้นจุดอื่นที่เช็ค "days?.length > 0 ? days[0] : fallback" จะพังเงียบๆ
+            const days = (s.days && s.days.length > 0) ? s.days : [];
+            (days.length > 0 ? days : [null]).forEach(day => {
+                // Cycle Id (dayOriginal) ก็ผูกกับวันแรกของร้านเดิมเหมือน marketName — แถวที่สอง
+                // ของร้าน F2 ต้องโชว์เลขรอบของวันนั้นจริงๆ ไม่ใช่เลขรอบวันแรกซ้ำทั้ง 2 แถว
+                const dayDigits = day ? String(day).replace(/[^0-9]/g, '') : '';
+                rows.push(Object.assign({}, s, {
+                    days: day ? [day] : [],
+                    marketName: day ? (dayMarketMap[day] || s.marketName || '') : (s.marketName || ''),
+                    dayOriginal: day ? (dayDigits || s.dayOriginal || '') : (s.dayOriginal || ''),
+                }));
+            });
+        });
+        return rows;
+    },
+
     _sortStoresForExport: (stores) => {
         const dayNumOf = (s) => {
             const label = (s.days && s.days[0]) ? s.days[0] : (s.dayOriginal || '');
@@ -133,209 +209,11 @@ const FileManager = {
         );
     },
 
-    // ─── uploadRouteFile: Single-route upload ────────────────────────────
-    uploadRouteFile: async (file) => {
-        try {
-            if (!file) return;
-            if (file.size > 15 * 1024 * 1024)
-                return UI.showErrorToast('⚠️ ไฟล์ใหญ่เกิน 15MB กรุณาแยกไฟล์ก่อนอัปโหลด');
-
-            UI.showLoader('📂 กำลังอ่านไฟล์...', file.name);
-
-            const arrayBuffer = await file.arrayBuffer();
-            const workbook    = XLSX.read(arrayBuffer, { header: 'A' });
-            const worksheet   = workbook.Sheets[workbook.SheetNames[0]];
-            const rows        = XLSX.utils.sheet_to_json(worksheet, { header: 'A' });
-
-            // Parse Excel columns: A-L
-            // A=CY, B=Code, C=Name, D=SalesCode, E=Type, F=SubDistrict,
-            // G=District, H=Province, I=Lat, J=Lng, K=Market, L=DayHistory
-            const stores = [];
-
-            rows.forEach((row, idx) => {
-                if (!row.B || idx === 0) return; // skip header + empty
-                const lat = parseFloat(row.I);
-                const lng = parseFloat(row.J);
-                if (isNaN(lat) || isNaN(lng)) {
-                    console.warn(`Row ${idx}: Missing lat/lng for ${row.C}`);
-                    return;
-                }
-                stores.push({
-                    id:          row.B,
-                    code:        row.B || '',
-                    name:        row.C || '',
-                    salesCode:   row.D || '',
-                    shopType:    row.E || '',
-                    subDistrict: row.F || '',
-                    district:    row.G || '',
-                    province:    row.H || '',
-                    lat,
-                    lng,
-                    marketName:  row.K || '',
-                    dayOriginal: row.L || '',
-                    // ✅ FIX BUG-09: เพิ่ม cy field จาก column A
-                    cy:          row.A || '',
-                    days:        [],
-                    seqs:        {},
-                    freq:        1,
-                    selected:    false,
-                });
-            });
-
-            if (stores.length === 0) {
-                UI.hideLoader();
-                return UI.showErrorToast('⚠️ ไม่พบข้อมูลร้านค้า');
-            }
-
-            // ✅ NEW: เติมชื่อตลาดที่ขาด (ไฟล์นี้ไม่มี days กำหนดแล้ว ใช้ dayOriginal จัดกลุ่มแทน)
-            FileManager._autoFillMarketNames(stores);
-
-            // ✅ FIX BUG-02: save rawData เพื่อให้ ExcelIO.export() ใช้ได้
-            // แปลง header: 'A' format → header name format
-            const rawWithHeaders = rows.slice(1).map(row => ({
-                'Cycle Code':      row.A || '',
-                'Customer Code':   row.B || '',
-                'Customer Name':   row.C || '',
-                'Salesman Code':   row.D || '',
-                'Outlet Category': row.E || '',
-                'City':            row.F || '',
-                'District':        row.G || '',
-                'State':           row.H || '',
-                'Master Latitude':  row.I || '',
-                'Master Longitude': row.J || '',
-                'ชื่อตลาด':        row.K || '',
-                'Day':             row.L || '',
-            }));
-            State.rawData = rawWithHeaders;
-
-            // Create route name from sales code
-            const routeName = stores[0].salesCode?.trim() || `Route_NEW`;
-
-            // Store to State
-            State.db.routes[routeName] = stores;
-            State.localActiveRoute     = routeName;
-            State.stores               = stores;
-
-            // Update route selector
-            const selector = document.getElementById('routeSelector');
-            if (selector) {
-                selector.innerHTML = Object.keys(State.db.routes)
-                    .sort((a, b) => a.localeCompare(b, 'th', { numeric: true }))
-                    .map(r => `<option value="${r}" ${r === routeName ? 'selected' : ''}>${r}</option>`)
-                    .join('');
-            }
-
-            UI.hideLoader();
-            UI.showSaveToast(`✅ อัพโหลด: ${stores.length} ร้าน → สาย ${routeName}`);
-
-            UI.render();
-            if (MapCtrl?.map) setTimeout(() => MapCtrl.fitToStores(), 300);
-
-            App.saveDB();
-            if (typeof Nav !== 'undefined') Nav.go('planning');
-
-        } catch (err) {
-            UI.hideLoader();
-            console.error('❌ Upload error:', err);
-            UI.showErrorToast('❌ อ่านไฟล์ไม่สำเร็จ: ' + err.message);
-        }
-    },
-
-    // ─── exportTemplate: Export สายปัจจุบัน ─────────────────────────────
-    exportTemplate: async () => {
-        try {
-            if (!State.localActiveRoute)
-                return UI.showErrorToast('⚠️ กรุณาเลือกสายวิ่งก่อนครับ');
-            if (State.stores.length === 0)
-                return UI.showErrorToast('⚠️ ไม่มีข้อมูลร้านค้าในสายนี้');
-
-            UI.showLoader('💾 กำลังสร้างไฟล์ Excel...', 'กำลังเตรียมข้อมูล');
-
-            // ✅ NEW: เช็ค override เฉพาะสายก่อน ถ้าไม่มีใช้ default ของศูนย์ — ใช้คำนวณวันที่จริง
-            // ของคอลัมน์ Day แทนที่จะโชว์แค่ "Day N" เฉยๆ
-            const ym = App._currentPlanYM;
-            let effectiveCfg = State.db.calendarConfig || null;
-            if (ym && State.localActiveRoute) {
-                try {
-                    const rd = await App.planRoutesCol(ym).doc(State.localActiveRoute).get();
-                    if (rd.exists && rd.data().calendarOverride) effectiveCfg = rd.data().calendarOverride;
-                } catch (e) { console.warn('exportTemplate: โหลด override ไม่สำเร็จ', e); }
-            }
-            const [expYear, expMonth] = ym ? ym.split('_').map(Number) : [null, null];
-
-            // ✅ NEW: กันชื่อตลาดว่างหลุดออกไปในไฟล์ export (เช่น ร้านที่เพิ่มเองในแอดมิน ไม่เคยผ่าน import)
-            FileManager._autoFillMarketNames(State.stores);
-
-            // ✅ NEW: เรียงตามวัน (Day) แล้วตามด้วยลำดับที่จัดไว้ในวันนั้น — เดิม export ตามลำดับ
-            // ในอาเรย์ดิบ (เช่น ลำดับ import) ทำให้ไฟล์ที่ได้ไม่เรียงตามคิวจริงที่เซลจะวิ่ง
-            const sortedStores = FileManager._sortStoresForExport(State.stores);
-
-            const exportData = sortedStores.map(store => ({
-                'A': store.cy || '',
-                'B': store.code || store.id,
-                'C': store.name,
-                'D': store.salesCode || '',
-                'E': store.shopType || '',
-                'F': store.subDistrict || '',
-                'G': store.district || '',
-                'H': store.province || '',
-                'I': store.lat,
-                'J': store.lng,
-                'K': store.marketName || '',
-                'L': (expYear !== null) ? FileManager._dayColumnValue(store, effectiveCfg, expYear, expMonth - 1) : (store.days?.length > 0 ? store.days[0] : (store.dayOriginal || '')),
-                'M': (store.seqs && store.days?.length > 0) ? (store.seqs[store.days[0]] || '') : '',
-                // ✅ NEW (2026-08-29): เพิ่มคอลัมน์ "Cycle Name" กลับเข้าไปตอน export — เดิมค่าดิบที่
-                // อ่านมาจากไฟล์ upload (เก็บไว้ใน store.dayOriginal) ไม่เคยถูกเขียนกลับออกไปเลย
-                'N': store.dayOriginal || '',
-            }));
-
-            const ws = XLSX.utils.json_to_sheet(exportData, {
-                header: ['A','B','C','D','E','F','G','H','I','J','K','L','M','N'],
-            });
-
-            // ✅ NEW (2026-09-10): เปลี่ยนชื่อคอลัมน์ให้ตรงกับไฟล์จริงของบริษัท (MST - Customer
-            // Master / MST - RoutePlan Detail) — "Cycle Name" ของบริษัทคือชื่อตลาด (คอลัมน์ K ของ
-            // เรา) ส่วนคอลัมน์ N เดิมที่เราเรียก "Cycle Name" ผิดๆ (จริงๆ เก็บแค่เลขรอบดิบ ไม่ใช่ชื่อ)
-            // เปลี่ยนเป็น "Cycle Id" กันชนความหมายกับของบริษัท
-            ws['A1'] = { v: 'Cycle Code', t: 's' };
-            ws['B1'] = { v: 'Customer Code', t: 's' };
-            ws['C1'] = { v: 'Customer Name', t: 's' };
-            ws['D1'] = { v: 'Salesman Code', t: 's' };
-            ws['E1'] = { v: 'Outlet Category', t: 's' };
-            ws['F1'] = { v: 'City', t: 's' };
-            ws['G1'] = { v: 'District', t: 's' };
-            ws['H1'] = { v: 'State', t: 's' };
-            ws['I1'] = { v: 'Master Latitude', t: 's' };
-            ws['J1'] = { v: 'Master Longitude', t: 's' };
-            ws['K1'] = { v: 'ชื่อตลาด', t: 's' };
-            ws['L1'] = { v: 'Day', t: 's' };
-            ws['M1'] = { v: 'ลำดับ', t: 's' };
-            ws['N1'] = { v: 'Cycle Id', t: 's' };
-
-            ws['!cols'] = [
-                { wch: 14 }, { wch: 12 }, { wch: 40 }, { wch: 10 },
-                { wch: 8  }, { wch: 18 }, { wch: 18 }, { wch: 14 },
-                { wch: 14 }, { wch: 14 }, { wch: 30 }, { wch: 6  }, { wch: 6 },
-                { wch: 16 },
-            ];
-
-            const wb  = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(wb, ws, 'Route Plan');
-
-            const now      = new Date();
-            const dateStr  = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
-            const filename = `Route_Plan_${State.localActiveRoute}_${dateStr}.xlsx`;
-
-            XLSX.writeFile(wb, filename);
-            UI.hideLoader();
-            UI.showSaveToast(`✅ Export: ${filename}`);
-
-        } catch (err) {
-            UI.hideLoader();
-            console.error('❌ Export error:', err);
-            UI.showErrorToast('❌ Export ไม่สำเร็จ: ' + err.message);
-        }
-    },
+    // ✅ FIX (2026-09-14): ตัด uploadRouteFile + exportTemplate ออก — ทั้งสองไม่มีจุดเรียกใช้เหลือแล้ว
+    // (ยืนยันด้วย grep ทั้ง repo) uploadRouteFile ถูกแทนที่ด้วย App.handleMapUpload (ปุ่ม "📂 อัปโหลด
+    // ไฟล์แผนที่" ใน Tab 1) ซึ่งอ่าน header แบบยืดหยุ่นแทน fixed column A-L แบบนี้ — exportTemplate
+    // (export สายเดียว) ถูกแทนที่ด้วย exportAllRoutes(routeFilter) ที่รองรับ filter สายเดียวอยู่แล้ว
+    // (ปุ่ม 📊 ใน toolbar เรียก ExportCtrl.doExport() → exportAllRoutes เสมอ ไม่เคยเรียก exportTemplate)
 
     // ─── exportAllRoutes: Export ทุกสาย หรือสายที่เลือก ─────────────────
     exportAllRoutes: async (routeFilter = 'ALL') => {
@@ -422,7 +300,7 @@ const FileManager = {
             routeKeys.forEach(routeName => {
                 // ✅ NEW: เรียงตามวัน+ลำดับก่อน push — เดิม push ตามลำดับในอาเรย์ดิบ (เช่น ลำดับ
                 // import) ทำให้ชีท "ทุกสาย" ไม่ได้เรียงตามคิววิ่งจริงของแต่ละสาย
-                FileManager._sortStoresForExport((routes[routeName] || []).filter(s => !s.inactive)).forEach(store => {
+                FileManager._sortStoresForExport(FileManager._expandStoresForExport((routes[routeName] || []).filter(s => !s.inactive))).forEach(store => {
                     allStores.push({
                         'A': routeName,
                         'B': store.code || store.id,
@@ -470,7 +348,7 @@ const FileManager = {
 
             // Sheet ต่อสาย
             routeKeys.forEach(routeName => {
-                const stores = FileManager._sortStoresForExport((routes[routeName] || []).filter(s => !s.inactive));
+                const stores = FileManager._sortStoresForExport(FileManager._expandStoresForExport((routes[routeName] || []).filter(s => !s.inactive)));
                 if (!stores.length) return;
 
                 const exportData = stores.map(store => ({
@@ -593,18 +471,27 @@ const FileManager = {
                 const embedded = embeddedDayNum(s.marketName);
                 return embedded !== null && embedded !== dayNum;
             };
-            const needFill = group.filter(isStale);
+            // ✅ FIX-F2: ร้าน F2 อยู่ได้ในหลายกลุ่มวัน (นับทุกวันของมันเพื่อช่วยคำนวณชื่อ generate
+            // ของกลุ่มนั้นๆ ให้สมาชิกอื่น) แต่ตัวมันเองมีช่อง marketName ได้ค่าเดียว ผูกกับ "วันแรก"
+            // (days[0]) เท่านั้น — ถ้าปล่อยให้ทุกกลุ่มที่ร้านนี้อยู่ (รวมวันที่สอง) เขียนทับ marketName
+            // ของมันได้ จะกลายเป็นว่าใครประมวลผลทีหลังชนะ (ขึ้นกับลำดับ Object.entries ที่ไม่แน่นอน)
+            // ทำให้ marketName ของร้าน F2 สลับไปมาระหว่าง 2 ชื่อทุกครั้งที่รัน ต้องจำกัดสิทธิ์เขียนไว้
+            // แค่กลุ่มที่ตรงกับวันแรกของร้านนั้นๆ เท่านั้น
+            const isPrimaryDayForStore = (s) => !s.days || s.days.length === 0 || s.days[0] === day;
+            const writable = group.filter(isPrimaryDayForStore);
+            const needFill = writable.filter(isStale);
             if (needFill.length === 0) return;
 
             // กรณี 1: มีร้านอื่นในกลุ่มวันนี้ที่ชื่อตลาด "ตรงกับวันปัจจุบัน" อยู่แล้ว → copy
-            const existingName = group.find(s => !isStale(s));
+            const existingName = writable.find(s => !isStale(s));
             if (existingName) {
                 needFill.forEach(s => { s.marketName = existingName.marketName; });
                 return;
             }
 
             // กรณี 2: ไม่มีใครในกลุ่มมีชื่อตลาดที่ตรงกันเลย → generate จากตำบล/อำเภอ/จังหวัดของสมาชิกกลุ่ม
-            // (นับความถี่ของแต่ละค่า เรียงมากไปน้อย — เท่ากันแล้วใช้ลำดับที่เจอก่อน)
+            // (นับความถี่ของแต่ละค่า เรียงมากไปน้อย — เท่ากันแล้วใช้ลำดับที่เจอก่อน — ใช้สมาชิกทั้งกลุ่ม
+            // รวมร้าน F2 ที่มาเยือนวันนี้เป็นวันที่สองด้วย เพื่อให้ภาพภูมิศาสตร์ของกลุ่มครบถ้วนที่สุด)
             const rankByFreq = (field) => {
                 const counts = {}, order = [];
                 group.forEach(s => {

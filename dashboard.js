@@ -127,7 +127,6 @@ const Dashboard = {
     },
 
     _fmtSku: (n) => (n || 0).toLocaleString('th-TH', { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
-    _fmtVol: (n) => Math.round(n || 0).toLocaleString('th-TH'),
 
     // ─── Init ─────────────────────────────────────────────────────────────
     init: () => {
@@ -272,6 +271,11 @@ const Dashboard = {
                     </div>
                 </div>
             </div>
+            <!-- ✅ FIX (2026-09-15): container นี้ไม่เคยถูกสร้างมาก่อนเลยตั้งแต่ _renderCategories()
+                 เริ่ม inject เนื้อหาลงมา (เช็ค git blame แล้ว — พังตั้งแต่ commit แรกที่เพิ่มโค้ดนี้ ไม่ใช่
+                 ผลจากรีดีไซน์ทีหลัง) ทำให้สรุป Confirm/รอ Confirm ของสาย C และปุ่ม "ดูรายละเอียด →"
+                 ที่เปิด _showPendingInvoices() ไม่เคยแสดงผลเลยแม้แต่ครั้งเดียว -->
+            <div id="db-credit-delivery" class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden p-4" style="display:none;"></div>
             <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
                 <div class="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gray-50">
                     <span class="db-panel-title"><span class="db-kpi-icon">${Dashboard._ICONS.tag('w-3.5 h-3.5')}</span>Brand Breakdown</span>
@@ -918,7 +922,6 @@ const Dashboard = {
 
         const mainRows = rows.filter(r => !Dashboard.EXCLUDED_BRANDS.has(r.brandDesc));
         const total = mainRows.reduce((s, r) => s + Dashboard._amt(r), 0);
-        const totalAll = rows.reduce((s, r) => s + Dashboard._amt(r), 0);
 
         const routes = Dashboard._getRoutes();
         const totalTarget = routes.reduce((s, r) => s + (Dashboard._targets[r] || 0), 0);

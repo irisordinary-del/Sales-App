@@ -390,20 +390,9 @@ function _patchAuditLog() {
     // ✅ FIX (ตรวจสอบ 2026-09-04): App.addRoute log ตรงใน admin-data.js เองแล้ว (ผ่าน confirm
     // callback ใน modal ที่ patch จากข้างนอกไม่ได้ตามที่ comment เดิมบอกไว้) — ไม่ต้อง patch ที่นี่ซ้ำ
     if (typeof App !== 'undefined') {
-        // ── App.deleteRoute ───────────────────────────────────────────────
-        const _origDeleteRoute = App.deleteRoute;
-        App.deleteRoute = function() {
-            const name = State.localActiveRoute;
-            const _origShowConfirm = UI.showConfirm;
-            UI.showConfirm = function(msg, onConfirm, onCancel) {
-                UI.showConfirm = _origShowConfirm; // restore ทันที
-                _origShowConfirm(msg, () => {
-                    AuditLog.routeDelete(name);
-                    if (onConfirm) onConfirm();
-                }, onCancel);
-            };
-            _origDeleteRoute.apply(this, arguments);
-        };
+        // ✅ FIX: ตัด patch ของ App.deleteRoute ออก (2026-09-14) — ฟังก์ชันนี้ถูกลบไปแล้ว
+        // (superseded โดย RouteSettingsCtrl._doSave ใน index.html ซึ่ง log ผ่าน AuditLog.routeDelete
+        // ตรงๆ อยู่แล้ว) patch เดิมไม่มีอะไรให้ wrap อีกต่อไป
 
         // ── App.createPlan ────────────────────────────────────────────────
         // ✅ FIX (2026-09-04): เดิม patch ชื่อ App.createDraft ซึ่งไม่มีอยู่จริงในโค้ดปัจจุบันแล้ว
@@ -415,13 +404,8 @@ function _patchAuditLog() {
             AuditLog.draftCreate(ym);
         };
 
-        // ── App.publishPlan ───────────────────────────────────────────────
-        // ✅ FIX (2026-09-04): เดิม patch ชื่อ App.activateDraft (renamed เป็น publishPlan) — เหตุผลเดียวกัน
-        const _origPublishPlan = App.publishPlan;
-        App.publishPlan = async function(ym) {
-            await _origPublishPlan.call(this, ym);
-            AuditLog.draftActivate(ym);
-        };
+        // ✅ ตัด patch ของ App.publishPlan ออก (2026-09-14) — ฟังก์ชันนี้ถูกลบไปแล้ว เพราะแนวคิด
+        // "ตั้งเป็นเดือนที่ใช้งานจริง" ถูกแทนที่ด้วยการยึดวันที่ปฏิทินจริงแทน (ดู comment ใน sales-app.js)
 
         // ✅ ตัด App.switchPlanMode ออก (2026-09-04) — ฟังก์ชันนี้ไม่มีอยู่จริงแล้ว (แนวคิด "โหมด draft/live"
         // เดิมถูกแทนที่ด้วยระบบ multi-month plans ทั้งหมด ไม่มี mode ให้ switch อีกต่อไป)
@@ -485,10 +469,16 @@ function _patchAuditLog() {
     // ── AI.calc ───────────────────────────────────────────────────────────
     if (typeof AI !== 'undefined') {
         const _origCalc = AI.calc;
-        AI.calc = function(k, lock, limit, mxD) {
+        // ✅ FIX (2026-09-15): เดิม wrapper ประกาศรับแค่ 4 args และส่งต่อแค่ 4 args ไปให้ _origCalc
+        // ทำให้ arg ตัวที่ 5 (minPerDay) หายไปเงียบๆ ทุกครั้ง — ติ๊ก "ขั้นต่ำร้าน/วัน" ใน AI Route
+        // Builder แล้วกรอกเลขเอง ค่านั้นไปไม่ถึง calc() จริงเลย (admin-ai.js:463 เช็ค minPerDay != null
+        // เจอ undefined เสมอ เลย fallback ไปใช้ค่าเฉลี่ยอัตโนมัติทุกครั้ง) แก้โดยรับ+ส่งต่อครบ 5 args
+        // และ await ให้ log หลังคำนวณเสร็จจริง (เดิมไม่ await ทำให้ log ก่อน AI ทำงานเสร็จ)
+        AI.calc = async function(k, lock, limit, mxD, minPerDay) {
             const storeCount = State.stores.filter(s => !s.days || !s.days.length).length;
-            _origCalc.call(this, k, lock, limit, mxD);
+            const result = await _origCalc.call(this, k, lock, limit, mxD, minPerDay);
             AuditLog.aiRun(k, storeCount);
+            return result;
         };
     }
 
