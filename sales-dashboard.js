@@ -517,8 +517,8 @@ const SalesDashboard = {
         }
     },
 
-    // ─── Toggle Gross / Net ───────────────────────────────────────────────
-    setMode: (_) => { /* ล็อคเป็น net เสมอ */ },
+    // ✅ FIX (2026-09-14): ตัด setMode stub ออก — ไม่มีปุ่มไหนเรียกเลย (ต่างจาก SupervisorDashboard
+    // ที่มี setAmtMode ใช้งานจริง) ล็อคเป็น net เสมออยู่แล้วโดยไม่ต้องมี toggle เปล่าๆ
 
     _amt: (r) => SalesDashboard._mode === 'gross' ? (r.gross || 0) : (r.net || 0),
 
@@ -1445,8 +1445,6 @@ const SupervisorDashboard = {
         SupervisorDashboard._renderSupCampaigns();
 
 
-        // ─── Route table ─────────────────────────────────────────────────
-        SupervisorDashboard._renderRouteTable(mainRows);
         // เก็บ pendingRows ไว้ให้ modal
         SupervisorDashboard._pendingRows = cPending;
     },
@@ -1777,48 +1775,7 @@ const SupervisorDashboard = {
         }).join('');
     },
 
-    // ─── ตารางรายสายด้านล่าง ─────────────────────────────────────────────
-    _renderRouteTable: (mainRows) => {
-        const shopEl = document.getElementById('db-shop-body');
-        if (!shopEl) return; // UI ถูกเอาออกแล้ว — dead code กัน future refactor
-        const byRoute = {};
-        mainRows.forEach(r => {
-            const s = String(r.sCode||'').toUpperCase();
-            if (!s) return;
-            if (!byRoute[s]) byRoute[s] = { amt: 0, outlets: new Set(), invs: new Set() };
-            byRoute[s].amt += SupervisorDashboard._amt(r);
-            if (r.custCode) byRoute[s].outlets.add(String(r.custCode));
-            if (r.invNum)   byRoute[s].invs.add(r.invNum);
-        });
-        const sorted = Object.entries(byRoute).sort((a,b) => a[0].localeCompare(b[0],'th',{numeric:true}));
-        const targets = SupervisorDashboard._targets;
-        const maxAmt  = sorted.reduce((m,[,d]) => Math.max(m, d.amt), 0) || 1;
-
-        shopEl.innerHTML = sorted.map(([route, d]) => {
-            const tgt   = targets[route] || 0;
-            const pct   = tgt > 0 ? (d.amt / tgt * 100) : null;
-            const barW  = Math.round((d.amt / maxAmt) * 100);
-            const isL   = /L\d/.test(route);
-            const isC   = /C\d/.test(route);
-            const color = isL ? '#ea580c' : isC ? '#7c3aed' : pct === null ? '#6366f1' : pct >= 100 ? '#059669' : pct >= 80 ? '#d97706' : '#dc2626';
-            const pctBadge = pct !== null
-                ? `<span style="font-size:9px;font-weight:800;color:${color};background:${color}18;padding:1px 5px;border-radius:6px;">${pct.toFixed(0)}%</span>`
-                : '';
-            return `
-            <div style="margin-bottom:10px;">
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">
-                    <span style="font-size:12px;font-weight:800;color:#374151;">${route} ${pctBadge}</span>
-                    <span style="font-size:11px;font-weight:800;color:#111827;">${SupervisorDashboard._fmt(d.amt)}</span>
-                </div>
-                <div style="height:5px;background:#f3f4f6;border-radius:99px;overflow:hidden;margin-bottom:3px;">
-                    <div style="height:5px;background:${color};border-radius:99px;width:${barW}%;"></div>
-                </div>
-                <div style="font-size:10px;color:#9ca3af;">
-                    ${d.outlets.size} ร้าน · ${d.invs.size} บิล
-                    ${tgt > 0 ? '· tgt ' + SupervisorDashboard._fmt(tgt) : ''}
-                </div>
-            </div>`;
-        }).join('') || '<div style="text-align:center;padding:12px;color:#9ca3af;font-size:12px;">ไม่มีข้อมูล</div>';
-
-    },
+    // ✅ FIX (2026-09-14): ตัด _renderRouteTable ออกจริง — โค้ดเดิม comment บอกเองแล้วว่า
+    // "UI ถูกเอาออกแล้ว — dead code กัน future refactor" (หา #db-shop-body ที่ไม่มีอยู่จริงใน sales.html)
+    // ลบทั้งฟังก์ชันและจุดเรียกด้านบนออก แทนที่จะเก็บ no-op ไว้เฉยๆ
 };

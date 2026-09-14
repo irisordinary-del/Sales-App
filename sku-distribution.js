@@ -1185,7 +1185,6 @@ const SkuDist = {
             const targetPct      = totalStoreAll > 0 ? Math.round(totalTargetCnt/totalStoreAll*100) : 0;
             const aboveTarget    = vals.filter(v => (v?.vsTarget||0) >= 0).length;
             // SKU coverage รวม
-            const skuSold  = new Set(vals.flatMap(v => [])); // นับจาก result
             const avgSku   = vals.reduce((s,v) => s+(v?.skuCoveragePct||0),0) / (vals.length||1);
 
             return `

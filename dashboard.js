@@ -127,7 +127,6 @@ const Dashboard = {
     },
 
     _fmtSku: (n) => (n || 0).toLocaleString('th-TH', { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
-    _fmtVol: (n) => Math.round(n || 0).toLocaleString('th-TH'),
 
     // ─── Init ─────────────────────────────────────────────────────────────
     init: () => {
@@ -918,7 +917,6 @@ const Dashboard = {
 
         const mainRows = rows.filter(r => !Dashboard.EXCLUDED_BRANDS.has(r.brandDesc));
         const total = mainRows.reduce((s, r) => s + Dashboard._amt(r), 0);
-        const totalAll = rows.reduce((s, r) => s + Dashboard._amt(r), 0);
 
         const routes = Dashboard._getRoutes();
         const totalTarget = routes.reduce((s, r) => s + (Dashboard._targets[r] || 0), 0);
