@@ -60,7 +60,12 @@ const FileManager = {
                 return null;
             }
             // date-anchor / weekday-once — รีเซ็ตรายเดือน ไม่วนซ้ำ
-            const isHol = (d) => (cfg.holidays || []).includes(d) || isWkHol(new Date(year, month, d));
+            // ✅ holidayMode: 'shift' (default) = วันหยุดเฉพาะกิจไม่นับเข้ารอบ ตลาดหลังจากนั้นเลื่อนแทน
+            //    'skip' (ตรึงตลาด) = วันหยุดเฉพาะกิจนับเข้ารอบตามปกติ แต่วันนั้นวันเดียวไม่มีรอบวิ่งจริง
+            //    ต้องตรงกับ CalendarCtrl._isCycleHoliday/_isCyclePinnedHoliday ใน sales-app.js เป๊ะ
+            const hMode   = cfg.holidayMode || 'shift';
+            const isAdHol = (d) => (cfg.holidays || []).includes(d);
+            const isHol   = (d) => isWkHol(new Date(year, month, d)) || (hMode !== 'skip' && isAdHol(d));
             let startDate;
             if (cfg.anchorType === 'weekday-once') {
                 const daysInMonth = new Date(year, month + 1, 0).getDate();
@@ -85,6 +90,8 @@ const FileManager = {
                 if (isHol(d)) continue;
                 count++;
                 if (count > cycleDays) return null;
+                // ✅ "ตรึงตลาด": วันนี้กินสล็อตในรอบไปแล้ว แต่ตัวมันเองไม่มีรอบวิ่งจริง ไม่ใช่คำตอบ
+                if (hMode === 'skip' && isAdHol(d)) continue;
                 const dayNum = ((startDayNum - 1 + (count - 1)) % cycleDays) + 1;
                 if (dayNum === targetNum) return new Date(year, month, d);
             }

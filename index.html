@@ -1422,6 +1422,24 @@
                         <div id="cal-holiday-grid" class="grid grid-cols-7 gap-1"></div>
                         <p class="text-[10px] text-gray-400 mt-1">วันที่เลือกใช้เฉพาะเดือนนี้เท่านั้น — copy ไปเดือนหน้าจะไม่ติดไปด้วย (ต่างจากวันหยุดประจำสัปดาห์ด้านบน)</p>
                     </div>
+                    <!-- ✅ NEW: "เลื่อนตลาด" (shift, ค่าเดิม) vs "ตรึงตลาด" (skip) — มีผลเฉพาะโหมด cycle
+                         และเฉพาะ "วันหยุดเฉพาะกิจ" ด้านบน (วันหยุดประจำสัปดาห์ไม่นับเข้ารอบเสมออยู่แล้ว) -->
+                    <div id="cal-holiday-mode-wrap">
+                        <label class="block text-xs font-bold text-gray-700 mb-2">เมื่อถึงวันหยุดเฉพาะกิจ (เฉพาะโหมดหมุนนับต่อเนื่อง):</label>
+                        <div class="grid grid-cols-2 gap-2">
+                            <button id="cal-holidaymode-shift" onclick="CalendarAdmin.setHolidayMode('shift')"
+                                class="rounded-xl p-2.5 text-center cursor-pointer transition">
+                                <div class="text-sm mb-0.5">↪️</div>
+                                <div class="text-xs font-black">เลื่อนตลาด</div>
+                            </button>
+                            <button id="cal-holidaymode-skip" onclick="CalendarAdmin.setHolidayMode('skip')"
+                                class="rounded-xl p-2.5 text-center cursor-pointer transition">
+                                <div class="text-sm mb-0.5">📌</div>
+                                <div class="text-xs font-black">ตรึงตลาด</div>
+                            </button>
+                        </div>
+                        <p id="cal-holidaymode-hint" class="text-[10px] text-gray-500 mt-1.5"></p>
+                    </div>
                 </div>
 
                 <!-- Fixed settings -->
@@ -1594,6 +1612,8 @@
         const CalendarAdmin = {
             _mode:      'date',   // default = วันที่จริง
             _holidays:  [],
+            _holidayMode: 'shift', // ✅ 'shift' (ค่า default) = วันหยุดเฉพาะกิจไม่นับเข้ารอบ ตลาดหลังจากนั้นเลื่อนแทน
+                                    //    'skip' (ตรึงตลาด)   = นับเข้ารอบตามปกติ ตลาดอื่นไม่ขยับ วันนั้นวันเดียวไม่วิ่ง
             _weeklyHolidays: [], // ✅ วันหยุดประจำสัปดาห์ (0=อาทิตย์..6=เสาร์) — ซ้ำทุกเดือนอัตโนมัติ ไม่ผูกกับเดือนใดเดือนหนึ่ง
             _anchorType: 'date', // ✅ 'date' | 'weekday-once' | 'weekday-rolling' — จุดเริ่มนับของโหมด cycle
             _anchorWeekday: 1,   // ใช้เมื่อ _anchorType เป็น weekday-*
@@ -1691,6 +1711,7 @@
             _loadConfig: async () => {
                 CalendarAdmin._originalMode   = null;
                 CalendarAdmin._holidays       = [];
+                CalendarAdmin._holidayMode    = 'shift';
                 CalendarAdmin._weeklyHolidays = [];
                 CalendarAdmin._fixedRows      = [];
                 CalendarAdmin._weekdayRows    = [];
@@ -1726,6 +1747,7 @@
                     // ไม่ใช่แค่ cycle เดิม — วันหยุดผูกกับ "วันที่" ไม่ได้ผูกกับโหมดใดโหมดหนึ่งเท่านั้น
                     CalendarAdmin._holidays       = cfg.holidays       || [];
                     CalendarAdmin._weeklyHolidays = cfg.weeklyHolidays || [];
+                    CalendarAdmin._holidayMode    = cfg.holidayMode    || 'shift';
                     if (cfg.mode === 'cycle') {
                         CalendarAdmin._anchorType    = cfg.anchorType || 'date';
                         CalendarAdmin._anchorWeekday = (cfg.anchorWeekday !== undefined) ? cfg.anchorWeekday : 1;
@@ -1771,6 +1793,7 @@
                 }
 
                 CalendarAdmin._renderHolidayGrid();
+                CalendarAdmin._renderHolidayModeToggle();
                 CalendarAdmin._renderWeeklyHolidayGrid();
                 CalendarAdmin._renderFixedRows();
                 CalendarAdmin._renderWeekdayRows();
@@ -1817,13 +1840,19 @@
                 [cycleBtn, dateBtn, fixedBtn, weekdayBtn].forEach(b => { if (b) b.className = inactive; });
                 [cycleSec, fixedSec, weekdaySec, holidaysSec].forEach(s => { if (s) s.classList.add('hidden'); });
 
+                // ✅ "ตรึงตลาด"/"เลื่อนตลาด" มีความหมายเฉพาะโหมด cycle เท่านั้น (โหมด date ไม่มี "รอบ"
+                // ให้นับ วันหยุดในโหมดนั้นเป็นแค่ข้อมูลแสดงผล ไม่กระทบเลข Day) — ซ่อนถ้าไม่ใช่ cycle
+                const holidayModeWrap = document.getElementById('cal-holiday-mode-wrap');
+
                 if (mode === 'cycle') {
                     if (cycleBtn) cycleBtn.className = active;
                     if (cycleSec) cycleSec.classList.remove('hidden');
                     if (holidaysSec) holidaysSec.classList.remove('hidden');
+                    if (holidayModeWrap) holidayModeWrap.classList.remove('hidden');
                 } else if (mode === 'date') {
                     if (dateBtn) dateBtn.className = active;
                     if (holidaysSec) holidaysSec.classList.remove('hidden');
+                    if (holidayModeWrap) holidayModeWrap.classList.add('hidden');
                 } else if (mode === 'fixed') {
                     if (fixedBtn) fixedBtn.className = active;
                     if (fixedSec) fixedSec.classList.remove('hidden');
@@ -1978,7 +2007,12 @@
 
                     const startNum   = parseInt(document.getElementById('cal-start-day-num')?.value) || 1;
                     const holidays   = CalendarAdmin._holidays || [];
-                    const isHol = (d) => holidays.includes(d) || weeklyHolidays.includes(new Date(y, m-1, d).getDay());
+                    // ✅ holidayMode ต้องตรงกับ CalendarCtrl._isCycleHoliday/_isCyclePinnedHoliday
+                    // ใน sales-app.js เป๊ะ (ดู comment เดียวกันที่นั่น) ไม่งั้น preview จะโกหก
+                    const hMode = CalendarAdmin._holidayMode || 'shift';
+                    const isWkHol = (d) => weeklyHolidays.includes(new Date(y, m-1, d).getDay());
+                    const isAdHol = (d) => holidays.includes(d);
+                    const isHol = (d) => isWkHol(d) || (hMode !== 'skip' && isAdHol(d));
 
                     // ✅ จุดเริ่มนับ — แบบเดิม (เลขวันที่ตายตัว) หรือ "วันในสัปดาห์ (จบเมื่อครบรอบ)" — รีเซ็ตรายเดือนทั้งคู่
                     let startDate;
@@ -2003,6 +2037,8 @@
                         count++;
                         if (d === dateNum) {
                             if (count > cycleDays) return null; // "จบเมื่อครบรอบ" — ไม่วนซ้ำ
+                            // ✅ "ตรึงตลาด": วันนี้นับเข้ารอบแล้ว (ตลาดอื่นไม่ขยับ) แต่ตัวมันเองไม่มีรอบวิ่งจริง
+                            if (hMode === 'skip' && isAdHol(d)) return null;
                             const dayNum = ((startNum - 1 + (count - 1)) % cycleDays) + 1;
                             return 'Day ' + dayNum;
                         }
@@ -2056,6 +2092,29 @@
                 else CalendarAdmin._holidays.push(d);
                 CalendarAdmin._renderHolidayGrid();
                 CalendarAdmin._renderPreview();
+            },
+
+            // ── โหมดจัดการวันหยุดเฉพาะกิจ (เฉพาะโหมด cycle): เลื่อนตลาด (shift) หรือ ตรึงตลาด (skip) ──
+            setHolidayMode: (mode) => {
+                CalendarAdmin._holidayMode = mode;
+                CalendarAdmin._renderHolidayModeToggle();
+                CalendarAdmin._renderPreview();
+            },
+
+            _renderHolidayModeToggle: () => {
+                const active   = 'border-2 border-amber-500 bg-amber-50 text-amber-800 rounded-xl p-2.5 text-center cursor-pointer transition';
+                const inactive = 'border-2 border-gray-200 bg-white text-gray-500 rounded-xl p-2.5 text-center cursor-pointer transition';
+                const shiftBtn = document.getElementById('cal-holidaymode-shift');
+                const skipBtn  = document.getElementById('cal-holidaymode-skip');
+                const mode = CalendarAdmin._holidayMode || 'shift';
+                if (shiftBtn) shiftBtn.className = (mode === 'shift') ? active : inactive;
+                if (skipBtn)  skipBtn.className  = (mode === 'skip')  ? active : inactive;
+                const hint = document.getElementById('cal-holidaymode-hint');
+                if (hint) {
+                    hint.textContent = mode === 'skip'
+                        ? '📌 ตรึงตลาด: วันหยุดยังนับเข้ารอบตามปกติ ตลาดวันอื่นไม่ขยับเลย แค่วันหยุดวันนั้นวันเดียวไม่มีรอบวิ่ง'
+                        : '📌 เลื่อนตลาด: วันหยุดไม่นับเข้ารอบ ตลาดที่อยู่หลังจากนั้นเลื่อนขึ้นมาแทนที่ทั้งแถว (ค่าเดิมของระบบ)';
+                }
             },
 
             // ── fixed mode rows ─────────────────────────────────────────────
@@ -2167,6 +2226,7 @@
                             cycleDays:   parseInt(document.getElementById('cal-cycle-days').value)    || 24,
                             holidays:       [...CalendarAdmin._holidays].sort((a,b) => a-b),
                             weeklyHolidays: [...CalendarAdmin._weeklyHolidays].sort((a,b) => a-b),
+                            holidayMode:    CalendarAdmin._holidayMode || 'shift',
                         };
                     }
                 } else if (CalendarAdmin._mode === 'date') {

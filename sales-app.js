@@ -1676,10 +1676,21 @@ const CalendarCtrl = {
 
     // ✅ วันหยุดของโหมด cycle — รวมทั้ง "วันหยุดเฉพาะกิจ" (เลขวันที่ เช่น วันหยุดนักขัตฤกษ์)
     // และ "วันหยุดประจำสัปดาห์" (เช่น อาทิตย์หยุดทุกสัปดาห์ — ไม่ต้องมาร์คซ้ำทุกเดือน)
+    // คืน true = วันนี้ "ไม่นับเข้ารอบเลย" (ตลาดหลังจากนั้นเลื่อนมาแทนที่) — คือพฤติกรรมของ
+    // วันหยุดประจำสัปดาห์เสมอ ส่วนวันหยุดเฉพาะกิจจะนับแบบนี้ก็ต่อเมื่อ holidayMode = 'shift' (ค่า
+    // default) เท่านั้น ถ้าเป็น 'skip' (ตรึงตลาด) วันหยุดเฉพาะกิจจะยังนับเข้ารอบตามปกติ (ดู
+    // _isCyclePinnedHoliday ด้านล่าง — ใช้คู่กันเพื่อให้ตลาดวันอื่นไม่ขยับ มีแค่วันนั้นวันเดียวที่ไม่วิ่ง)
     _isCycleHoliday: (cfg, year, month, d) => {
-        if ((cfg.holidays || []).includes(d)) return true;
         if ((cfg.weeklyHolidays || []).includes(new Date(year, month, d).getDay())) return true;
+        if ((cfg.holidays || []).includes(d)) return (cfg.holidayMode || 'shift') !== 'skip';
         return false;
+    },
+
+    // ✅ "ตรึงตลาด" (holidayMode = 'skip'): วันหยุดเฉพาะกิจยังนับเป็น 1 สล็อตในรอบตามปกติ (ตลาดวันอื่น
+    // ไม่ขยับ) แต่วันนั้นวันเดียวไม่มีรอบวิ่งจริง — ต่างจาก "เลื่อนตลาด" (shift) ที่วันหยุดไม่นับเข้ารอบเลย
+    // ทำให้ตลาดหลังจากนั้นทั้งแถวเลื่อนมาแทนที่ (พฤติกรรมเดิมของระบบ ก่อนมีโหมดนี้)
+    _isCyclePinnedHoliday: (cfg, year, month, d) => {
+        return (cfg.holidayMode === 'skip') && (cfg.holidays || []).includes(d);
     },
 
     // ✅ REDESIGN: "วันในสัปดาห์ (วนซ้ำ)" — เปลี่ยนจากรีเซ็ตกลับ Day 1 ทุกต้นเดือน (ของเดิม)
@@ -1761,6 +1772,9 @@ const CalendarCtrl = {
                 if (d2 === dateNum) {
                     // ✅ "วันในสัปดาห์ (จบเมื่อครบรอบ)" และโหมดอิงวันที่แบบเดิม: จบรอบแล้วไม่มี Day ต่อ
                     if (count > cycleDays) return null;
+                    // ✅ "ตรึงตลาด" (holidayMode='skip'): วันนี้นับเข้ารอบแล้ว (ตลาดอื่นไม่ขยับ)
+                    // แต่ตัวมันเองไม่มีรอบวิ่งจริง — คืน null แทน label
+                    if (CalendarCtrl._isCyclePinnedHoliday(cfg, year, month, d2)) return null;
                     const dayNum = ((startDayNum - 1 + (count - 1)) % cycleDays) + 1;
                     return 'Day ' + dayNum;
                 }
@@ -1818,6 +1832,9 @@ const CalendarCtrl = {
                 if (CalendarCtrl._isCycleHoliday(cfg, CalendarCtrl._year, CalendarCtrl._month, d)) continue;
                 count++;
                 if (count > cycleDays) return null; // "จบเมื่อครบรอบ" — เกินรอบแล้วไม่มีวันไหนตรงอีก
+                // ✅ "ตรึงตลาด": วันนี้กินสล็อตในรอบไปแล้ว (count เพิ่มแล้วด้านบน) แต่ตัวมันเองไม่มี
+                // รอบวิ่งจริง (getDayLabelForCfg คืน null ให้วันนี้) จึงไม่ใช่คำตอบของการค้นย้อนกลับ
+                if (CalendarCtrl._isCyclePinnedHoliday(cfg, CalendarCtrl._year, CalendarCtrl._month, d)) continue;
                 const dayNum = ((startDayNum - 1 + (count - 1)) % cycleDays) + 1;
                 if (dayNum === targetNum) return d;
             }
