@@ -1324,7 +1324,10 @@ const SupervisorDashboard = {
         // ─ Gross/Net toggle inject ─
         let toggleEl = document.getElementById('sup-gross-net-toggle');
         if (!toggleEl) {
-            const kpiRow = document.getElementById('db-kpi-row');
+            // ✅ FIX (2026-09-15): id เดิม 'db-kpi-row' ไม่มีอยู่จริงใน sales.html (มีแค่ฝั่ง admin
+            // dashboard.js) หน้า sales จริงใช้ 'db-kpi-grid' — ทำให้ toggle นี้ไม่เคยถูกสร้างขึ้นมาเลย
+            // Supervisor/ASM จึงสลับ Gross/Net ไม่ได้ ค้างที่ net ตลอด
+            const kpiRow = document.getElementById('db-kpi-grid');
             if (kpiRow) {
                 toggleEl = document.createElement('div');
                 toggleEl.id = 'sup-gross-net-toggle';

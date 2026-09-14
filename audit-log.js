@@ -469,10 +469,16 @@ function _patchAuditLog() {
     // ── AI.calc ───────────────────────────────────────────────────────────
     if (typeof AI !== 'undefined') {
         const _origCalc = AI.calc;
-        AI.calc = function(k, lock, limit, mxD) {
+        // ✅ FIX (2026-09-15): เดิม wrapper ประกาศรับแค่ 4 args และส่งต่อแค่ 4 args ไปให้ _origCalc
+        // ทำให้ arg ตัวที่ 5 (minPerDay) หายไปเงียบๆ ทุกครั้ง — ติ๊ก "ขั้นต่ำร้าน/วัน" ใน AI Route
+        // Builder แล้วกรอกเลขเอง ค่านั้นไปไม่ถึง calc() จริงเลย (admin-ai.js:463 เช็ค minPerDay != null
+        // เจอ undefined เสมอ เลย fallback ไปใช้ค่าเฉลี่ยอัตโนมัติทุกครั้ง) แก้โดยรับ+ส่งต่อครบ 5 args
+        // และ await ให้ log หลังคำนวณเสร็จจริง (เดิมไม่ await ทำให้ log ก่อน AI ทำงานเสร็จ)
+        AI.calc = async function(k, lock, limit, mxD, minPerDay) {
             const storeCount = State.stores.filter(s => !s.days || !s.days.length).length;
-            _origCalc.call(this, k, lock, limit, mxD);
+            const result = await _origCalc.call(this, k, lock, limit, mxD, minPerDay);
             AuditLog.aiRun(k, storeCount);
+            return result;
         };
     }
 

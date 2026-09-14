@@ -54,7 +54,6 @@ There is no build tool, package manager, linter, or test suite in this repo (no 
 | `center-select.html` | Center picker (inline script, no separate JS file) |
 | `audit-log.js` | Audit log viewer/writer |
 | `auth.js` | SHA-256 password hashing + Firestore auth, `SESSION_TTL` 16h, `renewSession` |
-| `migrate-to-plans.html` | One-off migration tool (drafts/history → unified `plans/` structure) |
 | `sw.js` | Service worker (`CACHE_VERSION`, precache list, network strategies) |
 | `pwa-register.js` | SW registration |
 | `manifest.json` | PWA manifest |
@@ -111,8 +110,8 @@ auditLogs/{centerId}/logs/{logId}
 
 ## 📅 Plan System
 
-- No "Draft/Active/History" naming anywhere in the UI or in new code — everything is just "a Plan" for a given month (`YYYY_MM`). `migrate-to-plans.html` was the one-time tool that collapsed the old drafts/active/history split into this unified `plans/{ym}` structure.
-- Admin can browse/edit any month's plan without affecting what Sales sees. What Sales actually sees as "current month" is `{CENTER_ID}_main.currentPlanYM` — admin only updates this when explicitly switching the live plan (`App._currentPlanYM` is just the admin's local viewing state, separate from `App._livePlanYM`).
+- No "Draft/Active/History" naming anywhere in the UI or in new code — everything is just "a Plan" for a given month (`YYYY_MM`). The old drafts/active/history split was collapsed into this unified `plans/{ym}` structure by a one-time migration tool (`migrate-to-plans.html`, removed 2026-09-15 — its job is done, the pre-migration `routes/`+`drafts/` shape no longer exists anywhere in the live system, and re-running it against an already-migrated center would silently overwrite `currentPlanYM`, so it was more of a footgun than a useful tool to keep around).
+- Admin can browse/edit any month's plan without affecting what Sales sees. **Sales/Supervisor auto-select "current month" from today's real calendar date** (falling back to the latest existing plan in `planList` if today's month hasn't been created yet) — see the `2026-09-04` comment in `sales-app.js`'s `App.start()`/`startSupervisor()`. There is no separate "publish this month as live" step or button anymore (`App.publishPlan` was removed 2026-09-14 as dead code — sales-app.js no longer reads `currentPlanYM` from Firestore at all). `{CENTER_ID}_main.currentPlanYM` and `App._livePlanYM` (admin-data.js) are still written/tracked on the admin side on every load but nothing reads them back — harmless leftover state from before the 2026-09-04 change, not a bug, just don't rely on it meaning anything. `App._currentPlanYM` is just the admin's local viewing state and has no effect on what Sales sees.
 - `State.planCache[ym]` caches `{ stores, calendarConfig, routeOverrides, confirmedBy/At }` per month, lazy-loaded — always populate all of these fields when seeding the cache (a past bug: forgetting `routeOverrides` here made per-route calendar overrides silently ignored, see Bugs table).
 
 ### Calendar Mode
