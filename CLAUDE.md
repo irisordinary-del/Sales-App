@@ -58,6 +58,7 @@ There is no build tool, package manager, linter, or test suite in this repo (no 
 | `pwa-register.js` | SW registration |
 | `manifest.json` | PWA manifest |
 | `firestore.rules` | Security rules |
+| `firestore.indexes.json` | Composite index definitions — deploy with `firebase deploy --only firestore:indexes` (see Firestore Structure below) |
 | `api/optimize-route.js` | Vercel function — proxies OpenRouteService Optimization (VROOM) for AI Route Builder |
 | `api/route-distance.js` | Vercel function — proxies ORS Directions to get real distance/duration for a *fixed* store order |
 | `api/elevation.js` | Vercel function — proxies ORS elevation lookup |
@@ -74,6 +75,7 @@ appData/
   app_centers                                  ← { centerId: {name, docId, routeCount} } for the center picker
   {CENTER_ID}_main/                            ← e.g. "402_main" (window.CENTER_DOC)
     routeList, calendarConfig, currentPlanYM   ← currentPlanYM = the month Sales sees "live" (see Plan system below)
+    moveRequests/{autoId}                      ← sales rep's requests to move a store's day; route/status/requestedAt fields
     plans/{YYYY_MM}/
       calendarConfig: {...}                    ← THIS MONTH's default calendar (center-wide) — see Calendar Mode below
       routeOverrides is NOT stored here — it lives per-route, see below
@@ -89,6 +91,8 @@ sellout/{YYYY_MM}/chunks/                      ← legacy format (pre centerId-p
 skuDistribution/{campaignId}/
 auditLogs/{centerId}/logs/{logId}
 ```
+
+**Composite indexes**: tracked in `firestore.indexes.json` (added 2026-09-18, deploy with `firebase deploy --only firestore:indexes` — requires `firebase login` with project access first). Currently just one: `moveRequests` on `(route ASC, requestedAt DESC)`, needed by `MoveRequest.checkUpdates()` (sales-app.js). If you add a new query that combines an equality `where()` with an `orderBy()` on a different field, Firestore will throw a "query requires an index" error with a direct console link to create it — add the same definition to `firestore.indexes.json` too so it isn't a one-off manual click that gets lost on a fresh project/emulator.
 
 **Important**: `calendarConfig` is set **independently per month** (`plans/{ym}.calendarConfig`) — a center is not "in cycle mode" or "in date mode" globally, each month's plan carries its own mode and can differ from the month before or after it. Never assume month N+1 uses the same mode as month N; always read that month's own `plans/{ym}.calendarConfig` (or a route's override) before interpreting its stores' `days` values or copying schedules between months.
 
@@ -119,10 +123,15 @@ Set per `plans/{ym}.calendarConfig.mode`, optionally overridden per-route via `r
 
 | Mode | Meaning | Key fields |
 |------|---------|--------|
-| `cycle` | Rotating N-day cycle (commonly 24) independent of calendar dates; holidays are skipped when counting | `cycleDays`, `anchorType` (`date` \| `weekday-once` \| `weekday-rolling`), `startDay`/`startDayNum`/`anchorWeekday`/`anchorDate`/`anchorDayNum` depending on anchorType, `holidays` (specific dates), `weeklyHolidays` (weekday numbers, e.g. `[0]` = every Sunday) |
+| `cycle` | Rotating N-day cycle (commonly 24) independent of calendar dates; holidays are skipped when counting | `cycleDays`, `anchorType` (`date` \| `weekday-once` \| `weekday-rolling`), `startDay`/`startDayNum`/`anchorWeekday`/`anchorDate`/`anchorDayNum` depending on anchorType, `holidays` (specific dates), `weeklyHolidays` (weekday numbers, e.g. `[0]` = every Sunday), `holidayMode` (`'shift'` default \| `'skip'`) |
 | `date` | Day N = literal calendar date N of the month | `holidays`, `weeklyHolidays` (both usable here too, e.g. to gray out Sundays) |
 | `fixed` | Admin manually maps specific calendar dates → arbitrary Day labels | `mapping: { "5": "Day 2", ... }` |
 | `weekday` | Day N = a fixed weekday, repeats every week all month (e.g. "Day 1" = every Monday) | `weekdayMap: { "Day 1": 1, ... }` (0=Sun..6=Sat) |
+
+**`cycle` mode's `holidayMode`** (added 2026-09-14) controls what happens to an ad-hoc holiday (a specific date in `holidays`, not `weeklyHolidays`) when counting cycle days — weekly holidays are *always* excluded from the count regardless of this setting:
+  - `'shift'` (default, matches pre-2026-09-14 behavior) — the holiday date doesn't consume a cycle slot at all, so every later date's Day number shifts earlier by one to fill the gap.
+  - `'skip'` ("ตรึงตลาด"/"pin market") — the holiday date *does* consume a cycle slot (so every other date keeps the Day number it would have had anyway) but that slot's own Day label resolves to `null` — no store runs that day, and that one Day number is simply absent from the month.
+  This logic is intentionally centralized in one place per file to avoid drift: `CalendarCtrl._isCycleHoliday`/`_isCyclePinnedHoliday` (sales-app.js, used by both `getDayLabelForCfg` and `getDateFromDay`), `FileManager._resolveCalendarDate` (file-manager.js, export date-column resolution), and `CalendarAdmin._computeDayLabel` (index.html, admin preview grid) — **all three must stay in sync**, same as the rest of this section.
 
 All modes funnel through `CalendarCtrl.getDayLabelForCfg(dateNum, cfg, stores, year, month)` (sales-app.js) — this is the single source of truth for "what Day label does calendar date X show" and must stay in sync with `CalendarAdmin._computeDayLabel`/`_renderPreview` (index.html), which implement the same logic for the admin preview grid. If you change the mapping rules, update both.
 
@@ -163,7 +172,6 @@ let State = {
 ### Key `App` functions
 ```js
 App._getWithTimeout(ref, ms)   // Firestore get() with a timeout guard, use for every get()
-App.loadPlanList(centerDocId)  // load available plan months
 App.loadPlanData(ym)           // lazy-load + cache one month's plan
 App.switchToPlan(ym)           // switch the active view to another month
 App.start()                    // sales login flow (single-route sales rep)
@@ -277,6 +285,13 @@ Both `exportTemplate` (single route) and `exportAllRoutes` (all routes) sort thr
 | Exported files not sorted at all | `exportTemplate`/`exportAllRoutes` mapped `State.stores`/`routes[name]` straight into the sheet in raw array order — no sort by day, market, or sequence at all | `file-manager.js` (fixed via `_sortStoresForExport`) |
 | AI Route Builder gave outlier stores a fake market name | see the `_autoFillMarketNames` gotcha above — a store AI dropped as a geographic outlier (`days: []`) still had a stale `dayOriginal`, so it got grouped and named as if it belonged to that old day (e.g. `"403V01 D02 นราธิวาส"` for a store with no day at all) | `admin-ai.js` |
 | Mobile sidebar overlay dimmed the whole screen on every load | `#sidebar-overlay { display:block; }` inside the `≤767px` media query is an **ID selector**, which beats Tailwind's `.hidden { display:none }` (a class selector) on specificity — so the overlay rendered regardless of whether the drawer was actually open. Fixed as `#sidebar-overlay:not(.hidden) { display:block; }`. **Don't revert to the bare ID rule** — it silently reintroduces this. Paired with an early inline `<script>` (runs right after the sidebar markup, before the rest of the page parses) that collapses `#sidebar` on load at `≤767px`, and a mobile-only check in the `Nav.go` wrapper that closes an open drawer after a menu item is picked | `index.html` |
+| AI Route Builder's custom "ขั้นต่ำร้าน/วัน" silently ignored | `audit-log.js`'s monkey-patch of `AI.calc` only declared/forwarded 4 of its 5 params, dropping `minPerDay` every time — the real `calc()` always saw it as `undefined` and fell back to the auto-computed average regardless of what the admin typed | `audit-log.js` |
+| "📦 อัปโหลดพิกัด" toolbar button did something very different from what it said | The button's label implied a small single-route coordinate refresh (like the real single-route dropzone in Tab 1, wired to `App.handleMapUpload`), but it actually triggered `FileManager.bulkImport` — an all-routes-in-the-file schedule merge. Relabeled to "♻️ นำเข้าไฟล์ที่แก้ใน Excel (ทุกสาย)" with a warning `title`; did not change what it does | `index.html` |
+| Supervisor/ASM Gross↔Net toggle never appeared | `SupervisorDashboard`'s toggle-injection code anchored on `document.getElementById('db-kpi-row')`, which only exists in the *admin* `dashboard.js` shell — `sales.html`'s KPI grid uses `db-kpi-grid`. The toggle buttons were therefore never created, so the mode stayed locked on `'net'` for every Supervisor/ASM | `sales-dashboard.js` |
+| Dashboard's Credit Delivery Status (Confirm/รอ Confirm) panel never rendered | `Dashboard._renderCategories()` has always injected into `document.getElementById('db-credit-delivery')`, but `_renderShell()` never created that container — confirmed via `git blame` that it was missing from the very commit that introduced the injection code, not a later redesign regression | `dashboard.js` |
+| Calendar modes "fixed"/"กำหนดเอง" and "weekday"/"ตามวันในสัปดาห์" unreachable from a fresh setup | `CalendarAdmin.setMode`/`save`/`_computeDayLabel` and the dedicated `cal-fixed-section`/`cal-weekday-section` markup fully supported all 4 modes, but the mode-picker only rendered 2 buttons (`cal-mode-cycle`, `cal-mode-date`) — a new center/plan could only ever end up in `fixed`/`weekday` mode if its Firestore doc already had that value some other way (never via clicking through this UI) | `index.html` |
+| Export modal's "✅ Active (Sales ใช้อยู่)" option silently did nothing | `ExportCtrl.doExport()` never read `export-plan-sel`'s value — picking either option always exported whatever plan the admin was currently viewing. The underlying "Active"-vs-"viewing" distinction is also obsolete since Sales stopped reading `currentPlanYM` (see Plan System above); removed the dropdown, replaced with a line stating which month it exports | `index.html`, `admin-ui.js` |
+| SKU Distribution's "+ เพิ่ม" search-result button dead for any product code/name containing an apostrophe | `.replace(/'/g, "\'")` — the replacement `"\'"` is just the character `'` in a JS string literal, so this was a no-op, not an escape. An embedded `'` broke the generated `onclick="...('...')"` attribute's JS grammar for that row. Fixed to `.replace(/'/g, "\\'")` (an actual backslash) | `sku-distribution.js` |
 
 ---
 
