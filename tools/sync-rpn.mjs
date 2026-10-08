@@ -67,7 +67,8 @@ const must = (re, to, what) => {
     html = html.replace(re, to);
 };
 const FIREBASE = '<script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>\n' +
-                 '    <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore-compat.js"></script>';
+                 '    <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore-compat.js"></script>\n' +
+                 '    <script src="../plan-lock.js"></script>';
 must(/<script src="local-firebase\.js[^"]*"><\/script>/, FIREBASE, 'local-firebase.js');
 must(/<script src="auth-local\.js[^"]*"><\/script>/,
      '<script src="../auth.js"></script>\n    <script src="rpn-online-pre.js"></script>', 'auth-local.js');

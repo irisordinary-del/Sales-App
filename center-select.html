@@ -435,7 +435,8 @@ const App = {
             const ym  = (snap.exists && snap.data().currentPlanYM)
                 || `${now.getFullYear()}_${String(now.getMonth()+1).padStart(2,'0')}`;
             const planSnap = await db.collection('appData').doc(docId).collection('plans').doc(ym).get();
-            const count = planSnap.exists ? (planSnap.data().routeList || []).length : 0;
+            // ✅ RPN V0 (2026-10-08): ไม่นับกองเทียม "รอจัดสาย"
+            const count = planSnap.exists ? (planSnap.data().routeList || []).filter(r => r !== 'รอจัดสาย').length : 0;
             const el = document.getElementById('rc-' + id);
             if (el) { el.textContent = count + ' สายวิ่ง'; el.classList.add('loaded'); }
             App.centers[id].routeCount = count;

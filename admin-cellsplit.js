@@ -273,7 +273,8 @@ const CellSplitApp = {
 
     // ── ขั้น 1: โหลดร้านทุกสายในเดือนปัจจุบันมาวาดเป็นภาพรวม (1 สาย = 1 สี) ──
     _renderOverview: async () => {
-        const routeList = (State.db.routeList || []).slice().sort((a, b) => a.localeCompare(b, 'th', { numeric: true }));
+        // ✅ RPN V0 (2026-10-08): ไม่เอากองเทียม "รอจัดสาย" มาแบ่ง (ไม่ใช่สายวิ่งจริง — RPN จัดการเอง)
+        const routeList = CellSplitApp._realRoutes().sort((a, b) => a.localeCompare(b, 'th', { numeric: true }));
 
         const colorOf = {};
         routeList.forEach((r, i) => { colorOf[r] = Config.hexColors[i % Config.hexColors.length]; });
@@ -308,9 +309,11 @@ const CellSplitApp = {
 
     // โหลด stores ของทุกสาย (ใช้ State.db.routes ที่มีอยู่แล้วก่อน ถ้าไม่มีค่อยดึงจาก Firestore)
     // กรองเก็บเฉพาะร้านที่มีพิกัดจริง — ใช้แค่วาดภาพรวม ไม่เกี่ยวกับ validation ตอนกด "ดูตัวอย่างการแบ่ง"
+    _realRoutes: () => (State.db.routeList || []).filter(r => r !== 'รอจัดสาย'),
+
     _loadAllRouteStores: async () => {
         const ym = App._currentPlanYM;
-        const routeList = State.db.routeList || [];
+        const routeList = CellSplitApp._realRoutes();
         const result = {};
         await Promise.all(routeList.map(async name => {
             let stores = State.db.routes[name];
@@ -320,7 +323,7 @@ const CellSplitApp = {
                     stores = doc.exists ? (doc.data().stores || []) : [];
                 } catch (e) { stores = []; }
             }
-            result[name] = stores.filter(s => typeof s.lat === 'number' && typeof s.lng === 'number' && !isNaN(s.lat) && !isNaN(s.lng));
+            result[name] = stores.filter(s => !s.inactive && typeof s.lat === 'number' && typeof s.lng === 'number' && !isNaN(s.lat) && !isNaN(s.lng));
         }));
         CellSplitApp._overviewStoresByRoute = result;
     },
@@ -420,6 +423,10 @@ const CellSplitApp = {
             UI.hideLoader();
             return UI.showErrorToast('❌ โหลดร้านค้าไม่สำเร็จ: ' + e.message);
         }
+        // ✅ RPN V0: ร้าน "ออกจากแผน" (inactive) ไม่เข้าการแบ่ง — พักไว้แล้วติดไปกับเซลล์ที่ใกล้ที่สุดตอนยืนยัน
+        // (ไม่งั้นหายไปพร้อมสายต้นทางที่ถูกลบ) ตัวร้านไม่ถูกแก้อะไร
+        CellSplitApp._parked = allStores.filter(s => s.inactive);
+        allStores = allStores.filter(s => !s.inactive);
 
         const noCoord = allStores.filter(s => typeof s.lat !== 'number' || typeof s.lng !== 'number' || isNaN(s.lat) || isNaN(s.lng));
         if (noCoord.length) {
@@ -538,8 +545,27 @@ const CellSplitApp = {
         const ym = App._currentPlanYM;
         const { cells } = CellSplitApp._result;
         try {
-            const writes = cells.map((c, i) => App.planRoutesCol(ym).doc(names[i]).set({ stores: c.stores }));
-            const deletes = CellSplitApp._selectedRoutes.map(name => App.planRoutesCol(ym).doc(name).delete());
+            // ✅ RPN V0: ร้าน "ออกจากแผน" ที่พักไว้ (ดู run) ติดไปกับเซลล์ที่มีร้านใกล้ที่สุด — ไม่แก้ตัวร้าน
+            const outStores = cells.map(c => c.stores.slice());
+            (CellSplitApp._parked || []).forEach(p => {
+                let best = 0, bestD = Infinity;
+                const ok = typeof p.lat === 'number' && typeof p.lng === 'number' && !isNaN(p.lat) && !isNaN(p.lng);
+                if (ok) cells.forEach((c, i) => c.stores.forEach(s => {
+                    const d = StoreMgr.getDistSq(p, s);
+                    if (d < bestD) { bestD = d; best = i; }
+                }));
+                outStores[best].push(p);
+            });
+            // ✅ FIX (2026-10-08): เดิม set({stores}) แบบไม่ merge + ลบสายต้นทางทุกสายพร้อมกัน — ถ้าตั้งชื่อเซลล์ใหม่
+            // ซ้ำกับสายต้นทาง (เช่น แบ่ง 402V01 → 402V01 + 402V13) เอกสารเดียวกันโดนเขียนและลบพร้อมกัน อาจจบที่ถูกลบ
+            // → ไม่ลบสายต้นทางที่ชื่อถูกใช้ต่อ · merge เพื่อคงปฏิทินเฉพาะสาย (calendarOverride) ของชื่อเดิมไว้
+            // · ล้าง rpnCal (วันที่จาก RPN ใช้ไม่ได้แล้ว — RPN คำนวณใหม่เมื่อเปิดเดือนนี้) และสถานะรับทราบของเซล
+            const FV = firebase.firestore.FieldValue;
+            const writes = outStores.map((stores, i) => App.planRoutesCol(ym).doc(names[i]).set({
+                stores, rpnCal: FV.delete(), confirmedBy: FV.delete(), confirmedAt: FV.delete(),
+            }, { merge: true }));
+            const deletes = CellSplitApp._selectedRoutes.filter(name => !names.includes(name))
+                .map(name => App.planRoutesCol(ym).doc(name).delete());
             await Promise.all([...writes, ...deletes]);
 
             const newRouteList = (State.db.routeList || [])
@@ -550,7 +576,7 @@ const CellSplitApp = {
 
             CellSplitApp._selectedRoutes.forEach(name => delete State.db.routes[name]);
             State.db.routeList = newRouteList;
-            cells.forEach((c, i) => { State.db.routes[names[i]] = c.stores; });
+            outStores.forEach((stores, i) => { State.db.routes[names[i]] = stores; });
 
             if (typeof App !== 'undefined' && App.writeAuditLog) {
                 App.writeAuditLog('cell_split', {

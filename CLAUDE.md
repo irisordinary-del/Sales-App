@@ -73,6 +73,13 @@ The company forked our admin into **RPN V0** (a local/IndexedDB app, versioned `
 - RPN writes the same Firestore paths/shape we do, plus new store fields (`inactive`, `wasPlan`, `runOf`, `fqs`, `fqRun`, `cys`, `vd`), a pseudo-route **`รอจัดสาย`** in `routeList`, and center-doc fields (`cyPoints`, `routeBase`, `masterKm`, `maxCycleCode`, `routeDist`).
 - **`rpnCal`**: `rpn-online.js` stores each route's real visit dates per Day (computed with RPN's own `Runs.datesOf`, same as its DMS export) at `plans/{ym}/routes/{rt}.rpnCal`; `sales-app.js`'s `RpnCompat` uses it (as calendar mode `'rpn'` from `_resolveActiveCfg`) when its `sig` matches the loaded stores, else falls back to the old `CalendarCtrl` logic. `hash()`/`sig()` must stay identical in both files.
 - `sales-app.js` hides `รอจัดสาย` and `inactive` stores via `RpnCompat.clean()`; every place that writes `stores` back must wrap with `RpnCompat.restore()` or parked stores get deleted.
+- The `rpnCal` sig function exists in **three** places that must match exactly: `rpn/rpn-online.js`, `RpnCompat` (sales-app.js), `App._rpnSig` (admin-data.js — used by `approveMoveRequest` to keep rpnCal valid after moving a store between existing Days).
+- "คำขอย้ายวัน" / "เช็คการยืนยัน" (MoveRequestAdmin / RouteConfirmAdmin) moved from the old planning toolbar to the admin sidebar. `approveMoveRequest` now replaces only `fromDay` in `days` (stores can have several Days) and moves RPN's per-Day fields (`cys`, `fqs`, `fqRun`, `vd`, `runOf`) to `toDay` from a peer store.
+- Anything that lists routes (users gen, tasks checklist, center-select count, cell split, route-confirm) must skip `รอจัดสาย`.
+
+### `plan-lock.js` — temporarily read-only months
+
+Loaded right after the Firebase SDK in `index.html` and `rpn/RoutePlannerV0.html` (not `sales.html`). Rejects every `set`/`update`/`delete` (single doc or batch) under `plans/{ym}` for months in its `LOCKED` list — as of 2026-10-08 `['2026_11','2026_12']` for **all centers**, per the user, while RPN is being trialled. RPN shows a "ดูได้อย่างเดียว" banner on locked months and `rpn-online.js` skips rpnCal reconcile for them. To unlock, edit `LOCKED` and push.
 
 ---
 

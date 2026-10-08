@@ -252,7 +252,8 @@ const UsersApp = {
         const now = new Date();
         const ym  = centerSnap.data().currentPlanYM || `${now.getFullYear()}_${String(now.getMonth()+1).padStart(2,'0')}`;
         const planSnap = await db.collection('appData').doc(docId).collection('plans').doc(ym).get();
-        return planSnap.exists ? (planSnap.data().routeList || []) : [];
+        // ✅ RPN V0 (2026-10-08): "รอจัดสาย" เป็นกองร้านใหม่ของ RPN ไม่ใช่สายวิ่ง — ห้ามสร้าง user ให้
+        return (planSnap.exists ? (planSnap.data().routeList || []) : []).filter(r => r !== 'รอจัดสาย');
     },
 
     previewGen: async () => {

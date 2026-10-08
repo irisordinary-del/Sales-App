@@ -644,6 +644,7 @@ const App = {
         try {
             const planSnap  = await App.planRef(ym).get();
             const routeList = ((planSnap.exists ? planSnap.data().routeList : null) || State.db.routeList || [])
+                .filter(r => r !== 'รอจัดสาย')   // ✅ RPN V0: สายเทียม ไม่มีเซลคนไหนยืนยัน
                 .slice().sort((a, b) => a.localeCompare(b, 'th', { numeric: true }));
             const results = [];
             const BATCH = 5;
@@ -666,6 +667,14 @@ const App = {
     // เก็บที่ appData/{centerId}_main/moveRequests/{autoId}
     // ══════════════════════════════════════════════════════════════════════
     _moveRequestsCol: () => cloudDB.collection('appData').doc(window.CENTER_DOC || 'v1_main').collection('moveRequests'),
+
+    // ✅ RPN V0 (2026-10-08): sig ของ rpnCal — ต้องเหมือน hash()/sig() ใน rpn/rpn-online.js และ RpnCompat (sales-app.js) ทุกตัวอักษร
+    _rpnSig: (stores) => {
+        const hash = (str) => { let h = 5381; for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0; return (h >>> 0).toString(36); };
+        return hash((stores || []).filter(s => s && !s.inactive)
+            .map(s => String(s.id) + ':' + (s.days || []).slice().sort().join(','))
+            .sort().join('|'));
+    },
 
     fetchPendingMoveRequests: async () => {
         try {
@@ -701,18 +710,38 @@ const App = {
             if (!store.seqs) store.seqs = {};
             delete store.seqs[req.fromDay];
             store.seqs[req.toDay] = maxSeq + 1;
-            store.days = [req.toDay]; // ระบบนี้ถือว่า 1 ร้าน = 1 Day ต่อเดือน (ตาม pattern ที่ใช้อยู่ทั้งระบบ)
+            // ✅ RPN V0 (2026-10-08): แผนมาจาก RPN แล้ว — ร้านหนึ่งอยู่ได้หลาย Day (F2 / หลายตลาด)
+            // เดิมเขียน days = [toDay] ทับทั้งหมด ทำให้ Day อื่นของร้านหายเงียบๆ → แทนเฉพาะ fromDay
+            const _days = (store.days || []).filter(d => d !== req.fromDay && d !== req.toDay);
+            store.days = [..._days, req.toDay];
+            // ข้อมูลรายวันของ RPN (CY · F1/F2 · ครั้งที่เลือก · วันที่จากไฟล์ · ช่องที่แยก) ผูกกับ Day —
+            // ลบของ fromDay ออก แล้วใช้ค่าของร้านอื่นที่อยู่ toDay อยู่แล้ว (ตลาดเดียวกันต้องค่าเดียวกัน)
+            const _peer = stores.find(s => s !== store && !s.inactive && (s.days || []).includes(req.toDay));
+            ['cys', 'fqs', 'fqRun', 'vd', 'runOf'].forEach(k => {
+                if (!store[k] || typeof store[k] !== 'object') return;
+                delete store[k][req.fromDay];
+                if (_peer && _peer[k] && _peer[k][req.toDay] !== undefined) store[k][req.toDay] = _peer[k][req.toDay];
+            });
+            // ชื่อตลาดของร้าน = ตลาดของวันที่ร้านอยู่ (RPN อ่านชื่อตลาดของ Day จากร้านในวันนั้น)
+            if (_peer && _peer.marketName && _days.length === 0) store.marketName = _peer.marketName;
 
             // ✅ NEW (2026-09-10): อนุมัติย้ายวันแล้ว sync ชื่อตลาด/Cycle Id ของทั้งสาย (ไม่ใช่แค่ร้าน
             // นี้) ให้ตรงกับวันปัจจุบัน — route นี้อาจไม่ใช่ route ที่แอดมินกำลังเปิดดูอยู่ตอนนี้เลย
             // (ดึงตรงจาก Firestore) เลยต้อง sync ที่นี่ ไม่ใช่รอ export หรือ UI.render ของหน้าปัจจุบัน
             if (typeof FileManager !== 'undefined') FileManager._autoFillMarketNames(stores);
 
-            await routeRef.set({
+            // ✅ RPN V0: rpnCal (วันที่จริงต่อ Day ที่แอปเซลใช้) — ย้ายร้านไป Day ที่มีอยู่แล้ว วันที่ของแต่ละ Day
+            // ไม่เปลี่ยน แค่อัปเดต sig ให้ตรงกับร้านชุดใหม่ · ถ้า toDay ไม่เคยมีใน rpnCal ปล่อย sig ไม่ตรง
+            // (แอปเซลถอยไปใช้ปฏิทินเดิมของสายนี้ จนกว่าจะเปิดเดือนนั้นใน RPN ซึ่งคำนวณใหม่ให้เอง)
+            const routeDoc = {
                 stores,
                 confirmedBy: firebase.firestore.FieldValue.delete(),
                 confirmedAt: firebase.firestore.FieldValue.delete(),
-            }, { merge: true });
+            };
+            const _cal = routeSnap.data().rpnCal;
+            if (_cal && _cal.days && _cal.days[req.toDay]) routeDoc.rpnCal = Object.assign({}, _cal, { sig: App._rpnSig(stores) });
+
+            await routeRef.set(routeDoc, { merge: true });
 
             await reqRef.set({
                 status:     'approved',

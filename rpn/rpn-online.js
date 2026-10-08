@@ -172,6 +172,7 @@
         if (cal.busy || !calReady() || !origSet) return;
         const ym = curYM();
         if (!ym) return;
+        if (window.PlanLock && PlanLock.isLocked(ym)) return;                          // เดือนที่ล็อก (../plan-lock.js) — ไม่เขียน
         const loader = document.getElementById('loader');
         if (loader && loader.style.display && loader.style.display !== 'none') return;   // กำลังโหลด/ประมวลผล — รอก่อน
         const routes = Object.keys(State.db.routes).filter(r => r !== UNASSIGNED && Array.isArray(State.db.routes[r]));
@@ -207,8 +208,25 @@
     };
     bridge.reconcileCal = reconcile;
 
+    // ── 6) แถบบอกว่าเดือนที่เปิดอยู่ถูกล็อก (../plan-lock.js) — แก้บนจอได้แต่บันทึกไม่ได้ จึงต้องบอกให้เห็นตลอด ──
+    const lockBanner = () => {
+        const ym = curYM();
+        const on = !!(ym && window.PlanLock && PlanLock.isLocked(ym));
+        let el = document.getElementById('rpn-lock-banner');
+        if (!on) { if (el) el.remove(); return; }
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'rpn-lock-banner';
+            el.style.cssText = 'position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:9998;background:#991b1b;color:#fff;' +
+                'padding:6px 16px;border-radius:999px;font-size:12px;font-weight:800;box-shadow:0 4px 14px rgba(0,0,0,.25);pointer-events:none;';
+            document.body.appendChild(el);
+        }
+        el.textContent = `🔒 แผนเดือน ${PlanLock.label(ym)} ล็อกอยู่ — ดูได้อย่างเดียว การแก้ไขจะไม่ถูกบันทึก`;
+    };
+
     document.addEventListener('DOMContentLoaded', () => {
         [0, 400, 1600, 3000].forEach(t => setTimeout(wireImport, t));
         setInterval(reconcile, 4000);
+        setInterval(lockBanner, 1000);
     });
 })();

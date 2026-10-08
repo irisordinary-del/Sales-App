@@ -41,4 +41,8 @@ plans/{ym}.rpnCalIndex        = { สาย: hash }
 - เขียนพร้อมกับทุกการบันทึกสาย (เดือนที่เปิดอยู่) + คำนวณใหม่ทั้งเดือนหลังแก้ปฏิทิน + เติมสายที่ยังไม่มี/ไม่ตรงทุก 4 วิ (เขียนเฉพาะสายที่เปลี่ยน)
 - `sig` = hash ของ (รหัสร้าน + days) ของร้านที่ไม่ inactive — แอปเซล (`RpnCompat` ใน `sales-app.js`) ใช้ rpnCal เฉพาะเมื่อ sig ตรง
   ถ้าไม่ตรง (มีใครแก้วันร้านโดยไม่ผ่าน RPN) ถอยไปใช้ `CalendarCtrl` เดิม
-- **`hash()`/`sig()` ใน `rpn-online.js` กับ `RpnCompat` ใน `sales-app.js` ต้องเหมือนกันทุกตัวอักษร**
+- **`hash()`/`sig()` ใน `rpn-online.js`, `RpnCompat` ใน `sales-app.js` และ `App._rpnSig` ใน `admin-data.js` ต้องเหมือนกันทุกตัวอักษร**
+
+## ล็อกเดือน
+
+`../plan-lock.js` (sync-rpn.mjs ใส่ไว้ถัดจาก Firebase) ปฏิเสธการเขียนแผนเดือนที่อยู่ใน `LOCKED` — RPN ขึ้นแถบแดง "ดูได้อย่างเดียว" และไม่ reconcile rpnCal ของเดือนนั้น
