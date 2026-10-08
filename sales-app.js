@@ -1624,14 +1624,25 @@ const ReorderReq = {
         const cfg = CalendarCtrl._resolveActiveCfg(y, m);
         const a = ReorderReq._analyze(stores, cfg);
         const base = Array.from({ length: a.M }, (_, i) => 'Day ' + (i + 1));
-        // มีคำขอค้างอยู่ → เริ่มจากลำดับที่ขอไว้ (แก้คำขอ) ไม่ใช่เริ่มจากแผนเดิม
-        const startFrom = (p) => (p && Array.isArray(p.order) && p.order.length === base.length
-            && p.order.every(l => !l || base.includes(l))) ? p.order.slice() : base.slice();
         const cached = ReorderReq.pendingFor(route, ym);
         ReorderReq.S = {
             ym, route, y, m, stores, rpn: RpnCompat.active(y, m), basisSig: RpnCompat.sig(stores),
-            ...a, base, order: startFrom(cached), pending: cached, drag: -1,
+            ...a, base, order: base.slice(), pending: cached, drag: -1,
         };
+        // ✅ FIX (2026-10-09): เรียงช่องตาม "วันที่จริง" ในเดือน ไม่ใช่เลข Day — รอบที่ไม่ได้เริ่ม D1 ต้นเดือน
+        // (เช่น 402C02 พ.ย.: 2 พ.ย. = D16, 20 พ.ย. = D9) เรียงตามเลข Day แล้ววันที่กระโดดไปมา เซลงง
+        // ช่องที่ไม่มีวันวิ่งในเดือนนี้ไปท้ายสุด · ลากแล้วตลาดอื่น "เลื่อนตามลำดับวันที่"
+        const firstDate = (l) => { const d = ReorderReq._dates(l); return d.length ? Math.min(...d) : 99; };
+        base.sort((p, q) => firstDate(p) - firstDate(q) || ReorderReq._num(p) - ReorderReq._num(q));
+        // มีคำขอค้างอยู่ → เริ่มจากลำดับที่ขอไว้ (แก้คำขอ) — สร้างจาก map (เดิม→ใหม่) ไม่ผูกกับลำดับแถว
+        const startFrom = (p) => {
+            if (!p || !p.map) return base.slice();
+            const inv = {};
+            Object.entries(p.map).forEach(([o, n]) => { inv[n] = o; });
+            const order = base.map(l => inv[l] || l);
+            return (new Set(order).size === order.length && order.every(l => base.includes(l))) ? order : base.slice();
+        };
+        ReorderReq.S.order = startFrom(cached);
         ReorderReq._render();
         await ReorderReq.loadPending(route, true);
         const p = ReorderReq.pendingFor(route, ym);
@@ -1672,7 +1683,7 @@ const ReorderReq = {
         S.order.forEach((old, i) => {
             if (!old || old === S.base[i]) return;
             map[old] = S.base[i];
-            if (S.mode === 'half') map['Day ' + (ReorderReq._num(old) + S.halfK)] = 'Day ' + (i + 1 + S.halfK);
+            if (S.mode === 'half') map['Day ' + (ReorderReq._num(old) + S.halfK)] = 'Day ' + (ReorderReq._num(S.base[i]) + S.halfK);
         });
         return map;
     },
@@ -1723,26 +1734,34 @@ const ReorderReq = {
             : S.mode === 'irregular' ? `จัดได้ทุกช่อง D1–D${S.N} · มีร้านอยู่ 2 ช่องที่ไม่ห่างครึ่งรอบ ระบบจะแสดงคู่ที่ระยะห่างเปลี่ยน`
             : `จัดได้ทุกช่อง D1–D${S.N}`;
 
+        // ช่องเรียงตามวันที่ (ดู open) — แต่ละแถว = วันที่จริง (ตัวหลัก) + เลข Day ของช่องนั้น (ตัวเล็ก)
+        const MON = new Date(S.y, S.m, 1).toLocaleDateString('th-TH', { month: 'short' });
+        const WD = ['อา.', 'จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.', 'ส.'];
+        const dateBox = (pos, active) => {
+            const dts = ReorderReq._dates(pos);
+            const main = dts.length ? `${WD[new Date(S.y, S.m, dts[0]).getDay()]} ${dts[0]} ${MON}` : 'ไม่มีวันวิ่ง';
+            const more = dts.length > 1 ? `<div style="font-size:9.5px;font-weight:800;color:#6366f1;">+ ${dts.slice(1).join(', ')} ${MON}</div>` : '';
+            return `<div style="width:66px;flex-shrink:0;text-align:left;line-height:1.25;">
+                <div style="font-size:12.5px;font-weight:900;color:${active ? '#111827' : '#9ca3af'};">${main}</div>${more}
+                <div style="font-size:9.5px;font-weight:800;color:#9ca3af;">ช่อง D${num(pos)}</div></div>`;
+        };
         const rows = S.order.map((old, i) => {
             const pos = S.base[i];
-            const dts = ReorderReq._dates(pos);
-            const dtTxt = dts.length ? dts.join(', ') + ' ' + new Date(S.y, S.m, 1).toLocaleDateString('th-TH', { month: 'short' }) : '—';
             if (!old) {
                 return `<div class="rr-row" data-i="${i}" style="display:flex;align-items:center;gap:8px;padding:9px 10px;margin-bottom:5px;border-radius:12px;
                         border:1.5px dashed ${i === firstEmpty ? '#6366f1' : '#d1d5db'};background:${i === firstEmpty ? '#eef2ff' : '#fafafa'};">
-                    <span style="font-size:11px;font-weight:900;color:#4b5563;background:#e5e7eb;border-radius:6px;padding:2px 6px;">D${i + 1}</span>
-                    <span style="flex:1;font-size:11.5px;color:${i === firstEmpty ? '#4338ca' : '#9ca3af'};font-weight:700;">${i === firstEmpty ? '← แตะตลาดด้านล่างเพื่อวางช่องนี้' : 'ว่าง'}</span>
-                    <span style="font-size:10px;color:#9ca3af;">${dtTxt}</span></div>`;
+                    ${dateBox(pos, i === firstEmpty)}
+                    <span style="flex:1;font-size:11.5px;color:${i === firstEmpty ? '#4338ca' : '#9ca3af'};font-weight:700;">${i === firstEmpty ? '← แตะตลาดด้านล่างเพื่อวางวันนี้' : 'ว่าง'}</span></div>`;
             }
             const moved = old !== pos;
             const mk = ReorderReq._market(old);
             return `<div class="rr-row" data-i="${i}" style="display:flex;align-items:center;gap:8px;padding:9px 10px;margin-bottom:5px;border-radius:12px;
                     border:1.5px solid ${moved ? '#fcd34d' : '#e5e7eb'};background:${moved ? '#fffbeb' : '#fff'};">
                 <span class="rr-handle" style="color:#9ca3af;font-size:15px;cursor:grab;touch-action:none;padding:0 2px;">⣿</span>
-                <span style="font-size:11px;font-weight:900;color:#374151;background:#f3f4f6;border-radius:6px;padding:2px 6px;">D${i + 1}</span>
+                ${dateBox(pos, true)}
                 <div style="flex:1;min-width:0;">
                     <div style="font-size:12.5px;font-weight:800;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${e(mk || '(ไม่มีชื่อตลาด)')}</div>
-                    <div style="font-size:10.5px;color:#6b7280;">${ReorderReq._count(old)} ร้าน · ${dtTxt}${moved ? ` · <b style="color:#b45309;">มาจาก D${num(old)}</b>` : ''}</div>
+                    <div style="font-size:10.5px;color:#6b7280;">${ReorderReq._count(old)} ร้าน${moved ? ` · <b style="color:#b45309;">มาจาก D${num(old)}</b>` : ''}</div>
                 </div>
                 <div style="display:flex;flex-direction:column;gap:2px;">
                     <button onclick="ReorderReq.move(${i},-1)" style="border:none;background:#f3f4f6;border-radius:6px;font-size:10px;padding:2px 7px;">▲</button>
@@ -1753,7 +1772,7 @@ const ReorderReq = {
         }).join('');
 
         const poolHtml = pool.length ? `
-            <div style="margin:10px 0 4px;font-size:12px;font-weight:900;color:#4338ca;">ตลาดที่ยังไม่ได้วาง ${pool.length} ตลาด — แตะเพื่อวางช่องถัดไป (D${firstEmpty + 1})</div>
+            <div style="margin:10px 0 4px;font-size:12px;font-weight:900;color:#4338ca;">ตลาดที่ยังไม่ได้วาง ${pool.length} ตลาด — แตะเพื่อวางวันถัดไป (${(() => { const d = ReorderReq._dates(S.base[firstEmpty]); return d.length ? d[0] + ' ' + MON : 'D' + num(S.base[firstEmpty]); })()})</div>
             <div style="display:flex;flex-wrap:wrap;gap:6px;">
                 ${pool.map(l => `<button onclick="ReorderReq.place('${l}')"
                     style="padding:6px 10px;border-radius:10px;border:1.5px solid #c7d2fe;background:#eef2ff;font-size:11.5px;font-weight:800;color:#3730a3;text-align:left;">
@@ -1849,7 +1868,9 @@ const ReorderReq = {
         const map = ReorderReq._map();
         if (!Object.keys(map).length) return showSalesToast('ยังไม่ได้ย้ายตลาด', true);
         const summary = S.order.map((old, i) => (old && old !== S.base[i])
-            ? { from: ReorderReq._num(old), to: i + 1, market: ReorderReq._market(old), n: ReorderReq._count(old) } : null).filter(Boolean);
+            ? { from: ReorderReq._num(old), to: ReorderReq._num(S.base[i]), market: ReorderReq._market(old), n: ReorderReq._count(old),
+                fromDates: ReorderReq._dates(old).join(','), toDates: ReorderReq._dates(S.base[i]).join(',') } : null).filter(Boolean)
+            .sort((p, q) => (parseInt(p.toDates, 10) || 99) - (parseInt(q.toDates, 10) || 99));
         const session = Auth.getSession();
         const name = session?.displayName || session?.username || S.route;
         const label = ReorderReq._monthLabel(S.ym);

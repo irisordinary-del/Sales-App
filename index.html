@@ -2903,10 +2903,15 @@
                 const e = MoveRequestAdmin._esc;
                 const locked = typeof PlanLock !== 'undefined' && PlanLock.isLocked(r.ym);
                 const modeTxt = { half: 'สายมีร้าน F2 — จัดครึ่งแรก ครึ่งหลังเลื่อนตาม', free: 'จัดได้ทุกช่อง', irregular: 'จัดได้ทุกช่อง (คู่ F2 ไม่ห่างครึ่งรอบ)' }[r.mode] || '';
+                // วันที่จริง (fromDates/toDates — คำขอตั้งแต่ 2026-10-09) ก่อน แล้วเลข Day ตัวเล็ก · คำขอเก่าไม่มีวันที่ก็แสดงแค่ Day
+                const mon = (() => { const [y, m] = String(r.ym).split('_').map(Number); return new Date(y, m - 1, 1).toLocaleDateString('th-TH', { month: 'short' }); })();
+                const cell = (dates, d, strong) => dates
+                    ? `<div class="${strong ? 'font-black text-emerald-700' : ''}">${e(dates.split(',').join(', '))} ${e(mon)}</div><div class="text-[10px] text-gray-400">D${e(d)}</div>`
+                    : `<span class="${strong ? 'font-black text-emerald-700' : ''}">D${e(d)}</span>`;
                 const rows = (r.summary || []).map(x => `<tr class="border-t border-gray-100">
                     <td class="py-1 pr-2 text-gray-700 truncate max-w-[180px]">${e(x.market || '—')}</td>
-                    <td class="py-1 px-1 text-center whitespace-nowrap">D${e(x.from)}</td><td class="text-gray-300">→</td>
-                    <td class="py-1 px-1 text-center font-black text-emerald-700 whitespace-nowrap">D${e(x.to)}</td>
+                    <td class="py-1 px-1 text-center whitespace-nowrap">${cell(x.fromDates, x.from, false)}</td><td class="text-gray-300">→</td>
+                    <td class="py-1 px-1 text-center whitespace-nowrap">${cell(x.toDates, x.to, true)}</td>
                     <td class="py-1 pl-1 text-right text-gray-400 tabular-nums">${e(x.n)}</td></tr>`).join('');
                 const warn = (r.warnings || []).map(w => `<div class="text-[11px] text-amber-700">⚠️ ${e(w)}</div>`).join('');
                 return `
