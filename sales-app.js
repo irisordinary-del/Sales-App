@@ -1461,6 +1461,8 @@ const MoveRequest = {
                     );
                     if (typeof Processor !== 'undefined' && State.isLoaded) Processor.routeList();
                     if (typeof NotifCtrl !== 'undefined') NotifCtrl.refresh();
+                    // ✅ คำขอจัดลำดับตลาด — ปฏิทินโหมดรออนุมัติ / โหลดแผนใหม่เมื่ออนุมัติแล้ว (ดู ReorderReq._ingest)
+                    if (typeof ReorderReq !== 'undefined') ReorderReq._ingest(route, snap.docs);
                 }, e => console.warn('MoveRequest live listener:', e));
         } catch(e) { console.warn('MoveRequest.startLiveListener:', e); }
     },
@@ -1533,11 +1535,72 @@ const ReorderReq = {
         return a;
     },
 
+    // ── คำขอที่รออนุมัติ → ปฏิทินแสดงตามที่ขอ (โหมดรออนุมัติ สีส้ม) ─────────────────────────────
+    // ✅ NEW (2026-10-08): เดิมส่งคำขอแล้วปฏิทินยังเป็นแผนเดิมจนแอดมินอนุมัติ เซลไม่เห็นว่าแก้อะไรไป
+    // _pending[route][ym] = คำขอ type 'reorder' ที่ status 'pending' · อัปเดตจาก (1) MoveRequest.startLiveListener
+    // (สายของเซลเอง แบบ realtime) (2) loadPending ตอนเปิดปฏิทิน/เลือกสาย (ซุป/ASM) (3) ตอนส่ง/ยกเลิกเอง
+    // พอคำขอถูกอนุมัติ แผนจริงของเดือนนั้นเปลี่ยนแล้ว → ล้าง planCache ของเดือนนั้นให้โหลดใหม่
+    _pending: {},
+    _loadedRoute: {},
+    _showReq: true,
+    _ingest: (route, docs) => {
+        const prev = ReorderReq._pending[route] || {};
+        const now = {};
+        docs.forEach(d => {
+            const r = { id: d.id, ...(typeof d.data === 'function' ? d.data() : d) };
+            if (r.type !== 'reorder') return;
+            if (r.status === 'pending') now[r.ym] = r;
+            else if (r.status === 'approved' && prev[r.ym] && prev[r.ym].id === r.id) {
+                delete State.planCache[r.ym];                         // แผนจริงเปลี่ยนแล้ว — โหลดใหม่
+                if (State.activePlanYM === r.ym) App.switchToPlan?.(r.ym);
+            }
+        });
+        ReorderReq._pending[route] = now;
+        ReorderReq._loadedRoute[route] = true;
+        const popup = document.getElementById('calendar-popup');
+        if (popup && popup.style.display !== 'none') { CalendarCtrl.render(); CalendarCtrl._bgLoadMonth?.(); }
+    },
+    loadPending: async (route, force) => {
+        if (!route || (!force && ReorderReq._loadedRoute[route])) return;
+        ReorderReq._loadedRoute[route] = true;
+        try {
+            const snap = await ReorderReq._col().where('route', '==', route).get();
+            ReorderReq._ingest(route, snap.docs);
+        } catch (e) { console.warn('ReorderReq.loadPending:', e); ReorderReq._loadedRoute[route] = false; }
+    },
+    pendingFor: (route, ym) => (ReorderReq._pending[route] || {})[ym] || null,
+    /** { req, inv: {'Day ใหม่': 'Day เดิม'} } ถ้าปฏิทินเดือนนี้ต้องแสดงตามคำขอ · null = แสดงแผนจริง */
+    previewFor: (ym) => {
+        const req = ReorderReq.pendingFor(ReorderReq._route(), ym);
+        if (!req || !req.map || !ReorderReq._showReq) return null;
+        const inv = {};
+        Object.entries(req.map).forEach(([o, n]) => { inv[n] = o; });
+        return { req, inv };
+    },
+    togglePreview: () => { ReorderReq._showReq = !ReorderReq._showReq; CalendarCtrl.render(); },
+
     renderBar: () => {
         const el = document.getElementById('calendar-reorder-bar');
         if (!el) return;
         const ym = ReorderReq._ym();
         if (!State.planList.includes(ym)) { el.innerHTML = ''; return; }
+        const route = ReorderReq._route();
+        if (route && !ReorderReq._loadedRoute[route]) ReorderReq.loadPending(route);
+        const pend = route ? ReorderReq.pendingFor(route, ym) : null;
+        if (pend && ym > ReorderReq._nowYM()) {
+            const n = (pend.summary || []).length;
+            const show = ReorderReq._showReq;
+            const sb = 'padding:6px 10px;border-radius:9px;font-size:11.5px;font-weight:800;cursor:pointer;';
+            el.innerHTML = `<div style="padding:9px 11px;border-radius:12px;background:#fff7ed;border:1.5px solid #f59e0b;">
+                <div style="font-size:12.5px;font-weight:900;color:#9a3412;">⏳ ขอจัดลำดับตลาดแล้ว ${n} ตลาด — รอแอดมินอนุมัติ</div>
+                <div style="font-size:11px;color:#b45309;margin-top:2px;">${show ? 'ปฏิทินนี้แสดง<b>ตามที่ขอ</b> (ช่องสีส้ม = ตลาดที่ย้าย) · ยังไม่ใช่แผนจริง' : 'ตอนนี้แสดง<b>แผนเดิม</b> (แผนจริงที่ใช้อยู่)'}</div>
+                <div style="display:flex;gap:6px;margin-top:7px;flex-wrap:wrap;">
+                    <button onclick="ReorderReq.togglePreview()" style="${sb}border:1px solid #fdba74;background:#fff;color:#9a3412;">${show ? '👁 ดูแผนเดิม' : '⇅ ดูตามที่ขอ'}</button>
+                    <button onclick="ReorderReq.open()" style="${sb}border:none;background:#f59e0b;color:#fff;">✏️ แก้คำขอ</button>
+                    <button onclick="ReorderReq.cancelFromBar()" style="${sb}border:1px solid #fecaca;background:#fef2f2;color:#dc2626;">ยกเลิกคำขอ</button>
+                </div></div>`;
+            return;
+        }
         const btn = (txt, on) => `<button ${on ? 'onclick="ReorderReq.open()"' : 'disabled'}
             style="width:100%;padding:9px 12px;border-radius:12px;border:1.5px solid ${on ? '#c7d2fe' : '#e5e7eb'};background:${on ? '#eef2ff' : '#f9fafb'};
                    color:${on ? '#3730a3' : '#9ca3af'};font-size:12.5px;font-weight:800;cursor:${on ? 'pointer' : 'default'};">${txt}</button>`;
@@ -1561,16 +1624,39 @@ const ReorderReq = {
         const cfg = CalendarCtrl._resolveActiveCfg(y, m);
         const a = ReorderReq._analyze(stores, cfg);
         const base = Array.from({ length: a.M }, (_, i) => 'Day ' + (i + 1));
+        // มีคำขอค้างอยู่ → เริ่มจากลำดับที่ขอไว้ (แก้คำขอ) ไม่ใช่เริ่มจากแผนเดิม
+        const startFrom = (p) => (p && Array.isArray(p.order) && p.order.length === base.length
+            && p.order.every(l => !l || base.includes(l))) ? p.order.slice() : base.slice();
+        const cached = ReorderReq.pendingFor(route, ym);
         ReorderReq.S = {
             ym, route, y, m, stores, rpn: RpnCompat.active(y, m), basisSig: RpnCompat.sig(stores),
-            ...a, base, order: base.slice(), pending: null, drag: -1,
+            ...a, base, order: startFrom(cached), pending: cached, drag: -1,
         };
         ReorderReq._render();
+        await ReorderReq.loadPending(route, true);
+        const p = ReorderReq.pendingFor(route, ym);
+        const S = ReorderReq.S;
+        if (S && S.ym === ym && (p?.id !== S.pending?.id)) {
+            const untouched = S.order.join() === startFrom(S.pending).join();
+            S.pending = p;
+            if (untouched) S.order = startFrom(p);
+            ReorderReq._render();
+        }
+    },
+
+    cancelFromBar: async () => {
+        const route = ReorderReq._route(), ym = ReorderReq._ym();
+        const p = ReorderReq.pendingFor(route, ym);
+        if (!p) return;
+        if (!confirm('ยกเลิกคำขอจัดลำดับตลาดเดือนนี้? ปฏิทินจะกลับเป็นแผนเดิม')) return;
         try {
-            const snap = await ReorderReq._col().where('route', '==', route).where('status', '==', 'pending').get();
-            const p = snap.docs.map(d => ({ id: d.id, ...d.data() })).find(r => r.type === 'reorder' && r.ym === ym);
-            if (p && ReorderReq.S && ReorderReq.S.ym === ym) { ReorderReq.S.pending = p; ReorderReq._render(); }
-        } catch (e) { console.warn('ReorderReq pending check:', e); }
+            await ReorderReq._col().doc(p.id).delete();
+            delete (ReorderReq._pending[route] || {})[ym];
+            CalendarCtrl.render();
+            showSalesToast('🗑️ ยกเลิกคำขอจัดลำดับแล้ว');
+            if (typeof writeAuditLog === 'function') writeAuditLog('reorder_request_cancel', { route, ym, reqId: p.id });
+            if (typeof NotifCtrl !== 'undefined') NotifCtrl.refresh();
+        } catch (e) { showSalesToast('❌ ยกเลิกไม่สำเร็จ: ' + e.message, true); }
     },
 
     close: () => {
@@ -1747,8 +1833,11 @@ const ReorderReq = {
         if (!S?.pending) return;
         try {
             await ReorderReq._col().doc(S.pending.id).delete();
+            delete (ReorderReq._pending[S.route] || {})[S.ym];
             S.pending = null;
+            S.order = S.base.slice();
             ReorderReq._render();
+            CalendarCtrl.render();
             showSalesToast('🗑️ ยกเลิกคำขอจัดลำดับเดิมแล้ว');
             if (typeof NotifCtrl !== 'undefined') NotifCtrl.refresh();
         } catch (e) { showSalesToast('❌ ยกเลิกไม่สำเร็จ: ' + e.message, true); }
@@ -1768,18 +1857,23 @@ const ReorderReq = {
             // คำขอเดิมของสายนี้ + เดือนนี้ที่ยังรออยู่ → ลบทิ้ง (ส่งใหม่ = แทนของเดิม)
             const snap = await ReorderReq._col().where('route', '==', S.route).where('status', '==', 'pending').get();
             await Promise.all(snap.docs.filter(d => d.data().type === 'reorder' && d.data().ym === S.ym).map(d => d.ref.delete()));
-            const ref = await ReorderReq._col().add({
+            const doc = {
                 ym: S.ym, route: S.route,
                 storeId: '__reorder__', storeName: `⇅ จัดลำดับตลาด ${label}`,
                 fromDay: 'ลำดับเดิม', toDay: `ลำดับใหม่ (${summary.length} ตลาด)`,
                 requestedBy: name, requestedAt: firebase.firestore.FieldValue.serverTimestamp(), status: 'pending',
                 type: 'reorder', map, order: S.order, mode: S.mode, cycleDays: S.N, basisSig: S.basisSig,
                 summary, warnings: ReorderReq._warnings(map), requestedByRole: session?.role || '',
-            });
-            showSalesToast(`📨 ส่งคำขอจัดลำดับตลาด ${label} แล้ว รอแอดมินอนุมัติ`);
+            };
+            const ref = await ReorderReq._col().add(doc);
+            // ปฏิทินเดือนนี้แสดงตามที่ขอทันที (ไม่ต้องรอ listener)
+            (ReorderReq._pending[S.route] = ReorderReq._pending[S.route] || {})[S.ym] = { ...doc, id: ref.id };
+            ReorderReq._showReq = true;
+            showSalesToast(`📨 ส่งคำขอจัดลำดับตลาด ${label} แล้ว — ปฏิทินแสดงตามที่ขอ (สีส้ม) รอแอดมินอนุมัติ`);
             if (typeof writeAuditLog === 'function') writeAuditLog('reorder_request_create', { route: S.route, ym: S.ym, moved: summary.length, reqId: ref.id });
             if (typeof NotifCtrl !== 'undefined') NotifCtrl.refresh();
             ReorderReq.close();
+            CalendarCtrl.render();
         } catch (e) {
             showSalesToast('❌ ส่งคำขอไม่สำเร็จ: ' + e.message, true);
         }
@@ -2424,12 +2518,21 @@ const CalendarCtrl = {
             }
         }
 
+        // ✅ NEW (2026-10-08): คำขอจัดลำดับตลาดที่รออนุมัติของสาย + เดือนที่กำลังดู (ดู ReorderReq.previewFor)
+        const _pend = (typeof ReorderReq !== 'undefined') ? ReorderReq.previewFor(_renderYM) : null;
+        container.style.outline      = _pend ? '2px solid #f59e0b' : '';
+        container.style.outlineOffset = _pend ? '4px' : '';
+        container.style.borderRadius = _pend ? '12px' : '';
+
         const DOW  = ['อา','จ','อ','พ','พฤ','ศ','ส'];
         let html   = DOW.map(d => `<div style="text-align:center;font-size:10px;font-weight:800;color:#9ca3af;padding:4px 0;">${d}</div>`).join('');
         for (let i = 0; i < firstDow; i++) html += `<div></div>`;
 
         for (let d = 1; d <= daysInMonth; d++) {
-            const dayLabel   = CalendarCtrl.getDayLabelForCfg(d, _renderCfg, _renderStores, year, month);
+            // ✅ NEW (2026-10-08): เดือนนี้มีคำขอจัดลำดับตลาดรออนุมัติ → วาดตามที่ขอ (ช่องวันเดิม แต่ตลาดที่จะย้ายมา)
+            const slotLabel  = CalendarCtrl.getDayLabelForCfg(d, _renderCfg, _renderStores, year, month);
+            const dayLabel   = (_pend && slotLabel && _pend.inv[slotLabel]) ? _pend.inv[slotLabel] : slotLabel;
+            const movedHere  = !!(_pend && dayLabel && dayLabel !== slotLabel);
             const isToday    = (d === now.getDate() && month === now.getMonth() && year === now.getFullYear());
             const dow        = new Date(year, month, d).getDay();
             const isWeekend  = dow === 0 || dow === 6;
@@ -2439,6 +2542,10 @@ const CalendarCtrl = {
             if (isToday)         { bgColor = '#2563eb'; textColor = '#fff';    borderColor = '#2563eb'; }
             else if (isHoliday)  { bgColor = '#fef2f2'; textColor = '#dc2626'; borderColor = '#fecaca'; }
             else if (isWeekend)  { bgColor = '#f9fafb'; textColor = '#6b7280'; }
+            if (_pend && !isToday) {
+                if (movedHere) { bgColor = '#fff7ed'; borderColor = '#f59e0b'; }
+                else if (!isHoliday) borderColor = '#fed7aa';
+            } else if (movedHere) borderColor = '#f59e0b';
 
             const _cellYM       = _renderYM;
             const _hasPlan      = State.planList.some(p => p === _cellYM);
@@ -2474,7 +2581,8 @@ const CalendarCtrl = {
             const isSameAsDate = true; // ไม่แสดงเลข Day badge
             // ✅ FIX: ส่ง year/month/d ที่คลิกจริงไปด้วยเสมอ แทนการให้ showDaySheet เดาวันที่คืนจาก dayLabel เอง
             // (จำเป็นมากในโหมด weekday ที่ 1 dayLabel ตรงกับหลายวันที่ในเดือนเดียวกัน)
-            const clickHandler = dayLabel ? `CalendarCtrl.goToDay('${dayLabel}', ${year}, ${month}, ${d})` : '';
+            const clickHandler = dayLabel ? `CalendarCtrl.goToDay('${dayLabel}', ${year}, ${month}, ${d}${movedHere ? `, '${slotLabel}'` : ''})` : '';
+            const movedLine    = movedHere ? `<div style="font-size:8.5px;font-weight:900;line-height:1.2;padding:0 4px;border-radius:4px;background:${isToday?'rgba(255,255,255,0.25)':'#f59e0b'};color:#fff;flex-shrink:0;">⇅ จาก D${parseInt(dayLabel.replace(/\D/g,''), 10)}</div>` : '';
 
             // 📌 งานที่ต้องส่ง — เช็คตามวันที่ปฏิทินจริง ไม่ขึ้นกับว่าสายวิ่งวันนั้นหรือไม่
             const tasksForDay = TaskCtrl.getForDate(new Date(year, month, d));
@@ -2488,6 +2596,7 @@ const CalendarCtrl = {
                        height:80px;overflow:hidden;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;
                        gap:2px;transition:background 0.1s;-webkit-tap-highlight-color:rgba(0,0,0,0.08);">
                 <div style="font-size:13px;font-weight:${isToday?'900':'700'};color:${textColor};line-height:1.3;flex-shrink:0;">${d}</div>
+                ${movedLine}
                 ${dayLabel ? `
                 ${!isSameAsDate ? `<div style="font-size:9px;font-weight:800;padding:1px 5px;border-radius:5px;background:${isToday?'rgba(255,255,255,0.25)':'#ede9fe'};color:${isToday?'#fff':'#5b21b6'};white-space:nowrap;flex-shrink:0;">${dayLabel.replace('Day ','')}</div>` : ''}
                 ${hasRoute ? `<div style="width:5px;height:5px;border-radius:50%;background:${isToday?'#fff':'#2563eb'};flex-shrink:0;"></div>` : hasPlanNotLoaded ? `<div style="width:5px;height:5px;border-radius:50%;background:#d1d5db;flex-shrink:0;"></div>` : ''}
@@ -2500,7 +2609,16 @@ const CalendarCtrl = {
         if (typeof ReorderReq !== 'undefined') ReorderReq.renderBar();
     },
 
-    goToDay: (dayLabel, year, month, day) => { CalendarCtrl.showDaySheet(dayLabel, year, month, day); },
+    goToDay: async (dayLabel, year, month, day, slotLabel) => {
+        await CalendarCtrl.showDaySheet(dayLabel, year, month, day);
+        // ✅ NEW (2026-10-08): ช่องนี้แสดงตามคำขอจัดลำดับที่รออนุมัติ — บอกให้รู้ว่ายังไม่ใช่แผนจริง
+        if (slotLabel) {
+            const body = document.getElementById('cal-day-sheet-body');
+            const note = `<div style="margin:6px 20px 10px;padding:9px 12px;border-radius:12px;background:#fff7ed;border:1px solid #fdba74;font-size:12px;font-weight:700;color:#9a3412;">
+                ⏳ ตามคำขอจัดลำดับ (รออนุมัติ) — ตลาดนี้ย้ายมาจาก D${parseInt(dayLabel.replace(/\D/g, ''), 10)} มาแทน D${parseInt(slotLabel.replace(/\D/g, ''), 10)} · ยังไม่ใช่แผนจริงจนกว่าแอดมินอนุมัติ</div>`;
+            if (body) { const ref = body.children[1]; if (ref) ref.insertAdjacentHTML('beforebegin', note); else body.insertAdjacentHTML('beforeend', note); }
+        }
+    },
 
     navigateToDay: async (dayLabel, market) => {
         CalendarCtrl.closePopup();
