@@ -12,17 +12,26 @@ A vanilla JS/HTML PWA for planning and running sales delivery routes across mult
 
 - **Sales App**: https://sales-app-7ids.vercel.app/sales.html
 - **Admin**: https://sales-app-7ids.vercel.app/index.html
+- **Staging (test)**: https://sales-app-smooth.vercel.app/index.html
 - **GitHub**: https://github.com/irisordinary-del/Sales-App
 - **Firebase project**: route-plan-71e2e (Firestore only)
 
-**⚠️ Branch/deploy note**: the repo has `main`, `staging`, and `staging2`. As of 2026-09, Vercel's production deploy is wired to **`staging2`** — pushing to `staging2` is what actually ships to `sales-app-7ids.vercel.app`. Verify against the Vercel dashboard before assuming `main` is live; don't blindly follow old docs (including older revisions of this file) that say `main` auto-deploys.
+**⚠️ Branch/deploy map** (as of 2026-10-08 — verify in the Vercel dashboard before relying on it; older docs that say `main` auto-deploys are wrong). The repo is connected to **3 Vercel projects**, so every push builds in all three; only a project's *production branch* updates its domain, everything else becomes a login-protected preview:
+
+| Branch | Role | Vercel project → domain |
+|---|---|---|
+| **`staging2`** | **Live** — what sales reps and admins actually use | `sales-app-7ids` → https://sales-app-7ids.vercel.app |
+| `staging` | Test/pre-release — push here first, check it, then fast-forward `staging2` | `sales-app` → https://sales-app-smooth.vercel.app (production branch switched from `main` to `staging` by the user on 2026-10-08) |
+| `main` | Archive/backup of `staging2`, not deployed anywhere user-facing (third project `sales-assis-app` also builds from the repo — check its production branch before assuming) | — |
+
+Usual flow: work on a feature branch → `git push origin <branch>:staging` → verify on sales-app-smooth → `git push origin staging:staging2` (fast-forward; check `git merge-base --is-ancestor origin/staging2 origin/staging` first, never force-push `staging2`) → optionally sync `main` from `staging2` with a merge commit. **All three sites share the same production Firestore** (`route-plan-71e2e`) — "staging" only separates code, not data, so test destructive changes on a `TEST_` center even on staging. After deploying, the service worker serves cache-first until it picks up the new `sw.js`; reload once or twice (or call `navigator.serviceWorker.getRegistration().then(r => r.update())`) before concluding a fix "didn't deploy".
 
 ## Commands
 
 There is no build tool, package manager, linter, or test suite in this repo (no `package.json`). It's plain HTML/CSS/JS served as static files.
 
 - **Run locally**: open the `.html` files directly, or serve the folder with any static file server. There's no dev server script.
-- **Deploy**: `git push origin staging2` (see branch note above) → Vercel auto-deploys.
+- **Deploy**: test with `git push origin <branch>:staging`, go live with `git push origin staging:staging2` (see the branch/deploy map above) → Vercel auto-deploys.
 - **Service worker cache-busting is automatic**: `vercel.json`'s `buildCommand` runs `sed -i "s/__BUILD_TS__/$(date +%Y%m%d%H%M%S)/g" sw.js`, stamping `sw.js`'s `CACHE_VERSION = 'rp-__BUILD_TS__'` with a real timestamp at build time. You do **not** need to manually bump a version string before deploying (older docs/handoff notes that say "bump CACHE_VERSION" are describing an obsolete manual process).
 - **Serverless functions** (`api/*.js`, Vercel Node functions) require `ORS_API_KEY` (an OpenRouteService key) set as a Vercel env var — used for route optimization/distance/elevation. Missing it makes those endpoints 500 with a Thai error message, not a silent failure.
 - **Sanity-check a JS file after editing**: `node --check <file>.js` (no test runner exists; this just catches syntax errors).
