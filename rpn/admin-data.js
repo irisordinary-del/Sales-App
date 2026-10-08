@@ -1,0 +1,1272 @@
+// ==========================================
+// 🏪 StoreMgr
+// ==========================================
+const StoreMgr = {
+    toggleSelect: (id) => {
+        const s = State.stores.find(x => x.id === String(id));
+        if (s) { s.selected = !s.selected; UI.switchTab('tab2'); UI.render(); App.saveDB(); }
+    },
+    clearSelection: () => { State.stores.forEach(s => s.selected = false); UI.render(); App.saveDB(); },
+
+    // ✅ ดึงร้าน inactive กลับมา active
+    reactivateStore: (id) => {
+        const s = State.stores.find(x => x.id === String(id));
+        if (!s) return;
+        s.inactive = false;
+        UI.render();
+        App.saveDB();
+        UI.showSaveToast(`↩️ ดึง "${s.name}" กลับมาแล้ว`);
+    },
+
+    // ✅ ลบร้านออกถาวร — ยืนยันก่อน
+    permanentDelete: (id) => {
+        const s = State.stores.find(x => x.id === String(id));
+        if (!s) return;
+        UI.showConfirm(
+            `ลบ "${s.name}" ถาวรใช่ไหมครับ?\n(ไม่สามารถกู้คืนได้)`,
+            () => {
+                State.stores = State.stores.filter(x => x.id !== String(id));
+                State.db.routes[State.localActiveRoute] = State.stores;
+                UI.render();
+                App.saveDB();
+                UI.showSaveToast(`🗑️ ลบ "${s.name}" ออกแล้ว`);
+            }
+        );
+    },
+
+    changeDay: (id, d) => {
+        const s = State.stores.find(x => x.id === String(id));
+        if (!s) return;
+        if (d === 'remove') { s.days = []; }
+        else if (s.freq === 2) {
+            const mK = State.db.cycleDays / 2;
+            const num = parseInt(d.replace('Day ', ''));
+            const pair = num <= mK ? num + mK : num - mK;
+            s.days = [d, `Day ${pair}`];
+        } else { s.days = [d]; }
+        s.seqs = {};
+        MapCtrl.closePopups();
+        UI.render(); App.saveDB();
+    },
+    assignSelected: () => {
+        const ds = document.getElementById('assign-day');
+        if (!ds) return;
+        const d = ds.value;
+        const mK = State.db.cycleDays / 2;
+        let changed = false;
+        State.stores.forEach(s => {
+            if (!s.selected) return;
+            if (s.freq === 2) {
+                const num = parseInt(d.replace('Day ', ''));
+                const pair = num <= mK ? num + mK : num - mK;
+                s.days = [d, `Day ${pair}`];
+            } else { s.days = [d]; }
+            s.selected = false; s.seqs = {}; changed = true;
+        });
+        if (!changed) UI.showErrorToast('กรุณาเลือกร้านค้าก่อนครับ');
+        else { UI.render(); App.saveDB(); }
+    },
+    getDistSq: (a, b) => Math.pow(a.lat - b.lat, 2) + Math.pow(a.lng - b.lng, 2),
+};
+
+// ==========================================
+// 🚀 App Controller — ระบบ plans/{YYYY_MM}
+// ==========================================
+const App = {
+    // ─── Firestore refs ──────────────────────────────────────────────────
+    get dbRef()   { return cloudDB.collection('appData').doc(window.CENTER_DOC || 'v1_main'); },
+    plansCol:     () => cloudDB.collection('appData').doc(window.CENTER_DOC || 'v1_main').collection('plans'),
+    planRef:      (ym) => App.plansCol().doc(ym),
+    planRoutesCol:(ym) => App.plansCol().doc(ym).collection('routes'),
+
+    // ─── State ───────────────────────────────────────────────────────────
+    _currentPlanYM:  '',   // YYYY_MM ที่แอดมิน "กำลังดู/แก้ไข" อยู่ (local view เท่านั้น)
+    _livePlanYM:     '',   // ✅ YYYY_MM ที่ "Live" จริงให้ Sales เห็น (มาจาก centerDoc.currentPlanYM)
+    _snapshotUnsub:  null,
+    _fileListenersReady: false,
+
+    // ─── Helpers ─────────────────────────────────────────────────────────
+    currentYM: () => {
+        const d = new Date();
+        return `${d.getFullYear()}_${String(d.getMonth()+1).padStart(2,'0')}`;
+    },
+
+    ymToLabel: (ym) => {
+        if (!ym) return '';
+        const [y, m] = ym.split('_');
+        return new Date(+y, +m-1, 1).toLocaleDateString('th-TH', { year: 'numeric', month: 'long' });
+    },
+
+    // ─── Load all routes ─────────────────────────────────────────────────
+    _loadAllRoutes: async (ym, routeList) => {
+        State.db.routes = {};
+        if (!routeList.length) return;
+
+        const col = App.planRoutesCol(ym);
+        const total = routeList.length;
+
+        // ── Step 1: โหลด active route ก่อน → แสดงผลทันที ────────────────
+        const activeRoute = localStorage.getItem(`last_route_${ym}`) || routeList[0];
+        UI.showRouteLoadPopup(0, total);
+        try {
+            const d = await col.doc(activeRoute).get();
+            State.db.routes[activeRoute] = d.exists ? (d.data().stores || []) : [];
+            App.log(`  ✅ ${activeRoute}: ${State.db.routes[activeRoute].length} ร้าน (active)`);
+            State.localActiveRoute = activeRoute;
+            State.stores = State.db.routes[activeRoute];
+            UI.updateRouteLoadPopup(1, total, activeRoute);
+            // ✅ ซ่อน loader ทันทีหลังได้ active route — ไม่รอ background
+            UI.hideLoader();
+            App.sync();
+        } catch(e) {
+            App.log(`  ⚠️ ${activeRoute}: ${e.code || e.message}`);
+            State.db.routes[activeRoute] = [];
+            UI.hideLoader();
+        }
+
+        // ── Step 2: background load ที่เหลือ (non-blocking) ──────────────
+        const remaining = routeList.filter(n => n !== activeRoute);
+        if (!remaining.length) {
+            UI.hideRouteLoadPopup();
+            return;
+        }
+
+        const BATCH = 4;
+        let loadedCount = 1; // นับ active route ที่โหลดไปแล้ว
+
+        // ✅ helper: get พร้อม timeout + retry 1 ครั้ง กัน WebChannel transport hang
+        const _getWithTimeout = (ref, ms = 12000) =>
+            Promise.race([
+                ref.get(),
+                new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))
+            ]);
+
+        const _loadOne = async (name) => {
+            try {
+                const d = await _getWithTimeout(col.doc(name));
+                State.db.routes[name] = d.exists ? (d.data().stores || []) : [];
+                delete State.db._failedRoutes?.[name]; // เคลียร์ failed flag ถ้า retry สำเร็จ
+                App.log(`  ✅ ${name}: ${State.db.routes[name].length} ร้าน`);
+                return true;
+            } catch(e) {
+                // retry 1 ครั้ง (กรณี WebChannel หลุดชั่วคราว)
+                try {
+                    App.log(`  🔄 retry ${name}...`);
+                    await new Promise(r => setTimeout(r, 1500));
+                    const d2 = await _getWithTimeout(col.doc(name), 15000);
+                    State.db.routes[name] = d2.exists ? (d2.data().stores || []) : [];
+                    delete State.db._failedRoutes?.[name];
+                    App.log(`  ✅ ${name} (retry): ${State.db.routes[name].length} ร้าน`);
+                    return true;
+                } catch(e2) {
+                    App.log(`  ⚠️ ${name}: unavailable — ${e2.message}`);
+                    // ✅ ไม่ set [] — เก็บ failed flag ไว้ให้ retry ได้ทีหลัง
+                    if (!State.db._failedRoutes) State.db._failedRoutes = {};
+                    State.db._failedRoutes[name] = true;
+                    // ถ้ายังไม่มีข้อมูลเลย ใส่ undefined sentinel (ไม่ใช่ [])
+                    if (!State.db.routes[name]) State.db.routes[name] = null;
+                    return false;
+                }
+            }
+        };
+
+        // ✅ ไม่ await — ปล่อยทำงาน background จริงๆ
+        (async () => {
+            for (let i = 0; i < remaining.length; i += BATCH) {
+                const batch = remaining.slice(i, i + BATCH);
+                await Promise.all(batch.map(async name => {
+                    await _loadOne(name);
+                    loadedCount++;
+                    UI.updateRouteLoadPopup(loadedCount, total, name);
+                    UI.renderAllRoutes();
+                }));
+            }
+            UI.hideRouteLoadPopup();
+
+            // ✅ ถ้ามี failed routes → แสดง toast + ปุ่ม retry
+            const failed = Object.keys(State.db._failedRoutes || {});
+            if (failed.length > 0) {
+                UI._showRetryFailedToast(failed, col);
+            }
+        })();
+    },
+
+    // ─── Logger ──────────────────────────────────────────────────────────
+    _logLines: [],
+    log: (msg) => {
+        const ts = new Date().toLocaleTimeString('th-TH', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+        App._logLines.push(`[${ts}] ${msg}`);
+        console.log('🔵', msg);
+        const el = document.getElementById('loader-log');
+        if (el) { el.innerHTML = App._logLines.slice(-12).join('<br>'); el.scrollTop = el.scrollHeight; }
+    },
+
+    // ─── Force Reload ────────────────────────────────────────────────────
+    forceReload: async () => {
+        App._logLines = [];
+        App.log('🔄 Force reload...');
+        UI.showLoader('กำลัง Force Reload...', '');
+        const btn = document.getElementById('force-reload-btn');
+        if (btn) btn.style.display = 'none';
+        clearTimeout(App._forceReloadTimer);
+        try {
+            await App._loadPlan(App._currentPlanYM, true);
+        } catch(err) {
+            App.log(`❌ ${err.message}`);
+            UI.hideLoader();
+            UI.showErrorToast('❌ Force reload ไม่สำเร็จ: ' + err.message);
+            if (btn) btn.style.display = 'block';
+        }
+    },
+
+    _forceReloadTimer: null,
+    _startForceReloadTimer: () => {
+        clearTimeout(App._forceReloadTimer);
+        App._forceReloadTimer = setTimeout(() => {
+            const btn = document.getElementById('force-reload-btn');
+            if (btn) btn.style.display = 'block';
+        }, 8000);
+    },
+
+    // ─── Load plan ───────────────────────────────────────────────────────
+    _loadPlan: async (ym, forceServer = false) => {
+        if (!ym) return;
+        UI.showLoader(`โหลด Plan ${App.ymToLabel(ym)}...`, '');
+        App.log(`📦 โหลด plan ${ym}...`);
+
+        try {
+            const snap    = forceServer ? await App.planRef(ym).get({ source: 'server' }) : await App.planRef(ym).get();
+            const data    = snap.exists ? snap.data() : {};
+            const routeList = (data.routeList || []).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
+            State.db.cycleDays     = data.cycleDays     || 24;
+            State.db.calendarConfig = data.calendarConfig || null;
+
+            // V0.5: ซ่อมเดือนที่ routeList หาย (บันทึกปฏิทินในรุ่นก่อน 0.5 เขียนทับเอกสารเดือนทั้งก้อน)
+            // ร้านของแต่ละสายยังอยู่ครบ — ประกอบ routeList กลับจากสายที่มีอยู่จริง แล้วบันทึกคืน
+            if (snap.exists && routeList.length === 0) {
+                try {
+                    const rs = await App.planRoutesCol(ym).get();
+                    const names = (rs.docs || []).filter(d => ((d.data() || {}).stores || []).length).map(d => d.id)
+                        .sort((a, b) => a.localeCompare(b, 'th', { numeric: true }));
+                    if (names.length) {
+                        const cyc = data.cycleDays || (data.calendarConfig && data.calendarConfig.cycleDays) || 24;
+                        await App.planRef(ym).set({ routeList: names, cycleDays: cyc }, { merge: true });
+                        names.forEach(n => routeList.push(n));
+                        State.db.cycleDays = cyc;
+                        App.log(`🛠️ plan ${ym}: ซ่อม routeList ที่หายกลับมา ${names.length} สาย`);
+                        setTimeout(() => { try { UI.showSaveToast(`🛠️ ซ่อมรายชื่อสายของเดือน ${App.ymToLabel(ym)} ที่หายไปกลับมาแล้ว (${names.length} สาย)`); } catch (e) {} }, 1500);
+                    }
+                } catch (e) { console.warn('[loadPlan] ซ่อม routeList ไม่สำเร็จ', e); }
+            }
+
+            // ✅ FIX: fallback ถ้า plan ไม่มี หรือ routeList ว่าง หรือมีแค่ route default ปลอม
+            const hasFakeRoute = routeList.length === 1 && routeList[0] === 'สายที่ 1';
+            if (!snap.exists || routeList.length === 0 || hasFakeRoute) {
+                const fallbackYM = (State.db.planList || []).find(p => p !== ym);
+                if (fallbackYM) {
+                    App.log(`⚠️ plan ${ym} ไม่มีข้อมูลจริง → fallback ไป ${fallbackYM}`);
+                    UI.hideLoader();
+                    return App._loadPlan(fallbackYM);
+                }
+                // ไม่มี fallback → set routeList ว่าง
+                App.log(`⚠️ plan ${ym} ยังไม่มี — รอ Admin สร้าง`);
+                State.db.routeList = [];
+                await App.planRef(ym).set({
+                    routeList:  [],
+                    cycleDays:  State.db.cycleDays,
+                    updatedAt:  firebase.firestore.FieldValue.serverTimestamp(),
+                });
+            } else {
+                State.db.routeList = routeList;
+            }
+
+            await App._loadAllRoutes(ym, State.db.routeList);
+            App.log(`✅ โหลด plan ${ym} เสร็จ — ${State.db.routeList.length} สาย`);
+
+            if (!State.localActiveRoute || !State.db.routes[State.localActiveRoute]) {
+                State.localActiveRoute = localStorage.getItem(`last_route_${ym}`) || State.db.routeList[0];
+            }
+            State.stores = State.db.routes[State.localActiveRoute] || [];
+
+            App._currentPlanYM = ym;
+            App.fetchSalesData();
+            // UI.sync() ถูกเรียกใน _loadAllRoutes แล้ว
+            PlanUI.updateBadge();
+            MapCtrl.fitToStores();
+
+        } catch(err) {
+            App.log(`❌ โหลด plan ${ym} ล้มเหลว: ${err.message}`);
+            UI.hideLoader();
+            UI.showErrorToast('❌ โหลด plan ไม่สำเร็จ: ' + err.message);
+        }
+    },
+
+    // ─── Init ────────────────────────────────────────────────────────────
+    init: async () => {
+        if (!MapCtrl.map) MapCtrl.init();
+        if (App._snapshotUnsub) return;
+
+        UI.showLoader('กำลังเชื่อมต่อ...', '');
+        App.log(`🚀 เริ่มต้น — Center: ${window.CENTER_DOC || '(ไม่ระบุ)'}`);
+        App._startForceReloadTimer();
+
+        if (window.firestoreReady) {
+            await Promise.race([window.firestoreReady, new Promise(r => setTimeout(r, 3000))]);
+        }
+
+        // ─── โหลด planList + currentPlanYM จาก centerDoc ────────────
+        App._snapshotUnsub = App.dbRef.onSnapshot(async (doc) => {
+            clearTimeout(App._forceReloadTimer);
+            const btn = document.getElementById('force-reload-btn');
+            if (btn) btn.style.display = 'none';
+
+            const d = doc.exists ? doc.data() : {};
+            const planList      = (d.planList || []).sort().reverse();
+            const currentPlanYM = d.currentPlanYM || App.currentYM();
+
+            State.db.planList      = planList;
+            State.db.currentPlanYM = currentPlanYM;
+            State.db.maxCycleCode  = d.maxCycleCode || State.db.maxCycleCode || 0;   // v-local: เลข CY ล่าสุด
+            State.db.depot         = d.depot || State.db.depot || null;              // v-local: จุดตั้งต้นกลาง
+            State.db.routeDepots   = d.routeDepots || State.db.routeDepots || {};    // v-local: จุดตั้งต้นรายสาย
+            State.db.masterKm      = d.masterKm || State.db.masterKm || {};          // v-local: ระยะ Master ที่ freeze ไว้
+            State.db.cyPoints      = d.cyPoints || State.db.cyPoints || {};          // v-local: จุดเริ่ม/จบ ต่อ CY
+            State.db.routeBase     = d.routeBase || State.db.routeBase || {};        // v-local: จุดประจำสาย
+            State.db.routeDist     = d.routeDist || State.db.routeDist || {};        // v-local: Distributor Code จากไฟล์
+            // ✅ เดือนที่ "Live" จริงให้ Sales เห็น — แยกจาก App._currentPlanYM ซึ่งเป็นแค่เดือนที่แอดมินกำลังดูอยู่
+            App._livePlanYM = currentPlanYM;
+
+            App.log(`📋 planList: [${planList.join(', ')}], current: ${currentPlanYM}`);
+
+            // ถ้ายังไม่ได้เลือก plan → ใช้ currentPlanYM จาก centerDoc
+            if (!App._currentPlanYM) {
+                App._currentPlanYM = currentPlanYM;
+            }
+
+            await App._loadPlan(App._currentPlanYM);
+            PlanUI.refresh();
+
+        }, (err) => {
+            console.error('onSnapshot error:', err);
+            UI.hideLoader();
+            if (err.code === 'permission-denied') {
+                UI.showErrorToast('⚠️ ไม่มีสิทธิ์เข้าถึงข้อมูล');
+            } else {
+                UI.showErrorToast('⚠️ เชื่อมต่อ Firestore ไม่ได้');
+                const btn = document.getElementById('force-reload-btn');
+                if (btn) btn.style.display = 'block';
+                setTimeout(() => App.forceReload(), 5000);
+            }
+        });
+
+        if (!App._fileListenersReady) {
+            App._fileListenersReady = true;
+            const fileUpload = document.getElementById('fileUpload');
+            if (fileUpload) fileUpload.addEventListener('change', App.handleMapUpload);
+        }
+    },
+
+    // ─── saveDB ──────────────────────────────────────────────────────────
+    saveDB: () => {
+        const ym = App._currentPlanYM;
+        if (!ym) return;
+        State.db.routes[State.localActiveRoute] = State.stores;
+        const routeList = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
+
+        Promise.all([
+            // ✅ BUGFIX (2026-08-29): เดิม .set({stores}) ไม่มี merge:true — Firestore จะแทนที่
+            // เอกสารทั้งก้อน ทำให้ calendarOverride ของสายนั้นหายไปเงียบๆ ทุกครั้งที่กดบันทึก
+            // ✅ NEW: แก้ไขร้าน/วันในสายนี้แล้ว = รีเซ็ตสถานะ "ยืนยันรับสายวิ่ง" ของเซลด้วย
+            App.planRoutesCol(ym).doc(State.localActiveRoute).set({
+                stores: State.stores,
+                confirmedBy: firebase.firestore.FieldValue.delete(),
+                confirmedAt: firebase.firestore.FieldValue.delete(),
+            }, { merge: true }),
+            App.planRef(ym).set({ routeList, cycleDays: State.db.cycleDays || 24, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true }),
+        ])
+        .then(() => UI.showSaveToast(`💾 บันทึกเรียบร้อย`))
+        .catch(err => { console.error('saveDB:', err); UI.showErrorToast('❌ บันทึกไม่สำเร็จ'); });
+    },
+
+    // ─── sync UI ─────────────────────────────────────────────────────────
+    sync: () => {
+        const rs = document.getElementById('routeSelector');
+        if (rs) {
+            // ✅ FIX: ใช้ routeList (ครบทุกสาย) แทน Object.keys(routes) ที่อาจยังโหลดไม่ครบ
+            const fullList = (State.db.routeList && State.db.routeList.length > 0)
+                ? [...State.db.routeList].sort((a,b) => a.localeCompare(b,'th',{numeric:true}))
+                : Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
+            const newHTML = fullList.map(r => `<option value="${r}">${r}</option>`).join('');
+            if (rs.innerHTML !== newHTML) rs.innerHTML = newHTML;
+            rs.value = State.localActiveRoute;
+        }
+        MapCtrl.clearAll();
+        UI.initDaySelector();
+        UI.switchTab('tab1');
+        UI.render();
+    },
+
+    // ─── Switch plan (แค่ "ดู/แก้ไข" ฝั่งแอดมิน — ไม่กระทบ Sales) ──────────
+    switchPlan: async (ym) => {
+        if (App._currentPlanYM === ym) return;
+        State.localActiveRoute = localStorage.getItem(`last_route_${ym}`) || '';
+        await App._loadPlan(ym);
+        // ✅ BUGFIX: เดิมเขียน currentPlanYM ลง centerDoc ทันทีทุกครั้งที่แอดมินสลับดูเดือน
+        // ทำให้ Sales ทุกคนเห็นเดือนเปลี่ยนตามไปด้วยทั้งที่แอดมินแค่ "ดู" ไม่ได้ตั้งใจให้ live
+        // ตอนนี้แยกออกมา — ต้องกดปุ่ม "ตั้งเป็นเดือนที่ใช้งานจริง" (App.publishPlan) เท่านั้นถึงจะมีผลกับ Sales
+        PlanUI.refresh();
+    },
+
+    // ─── Publish plan ให้ Sales เห็นจริง (ต้องกดยืนยันชัดเจน) ──────────────
+    publishPlan: async (ym) => {
+        if (!ym) return;
+        if (ym === App._livePlanYM) {
+            UI.showErrorToast('ℹ️ เดือนนี้ Live อยู่แล้ว');
+            return;
+        }
+        if (!confirm(
+            `⚠️ ยืนยันตั้ง "${App.ymToLabel(ym)}" เป็นเดือนที่ใช้งานจริง?\n\n` +
+            `Sales ทุกคนในศูนย์นี้จะเห็นปฏิทิน/สายวิ่งของเดือนนี้ทันที ` +
+            `(เดือนที่ Live อยู่ตอนนี้คือ ${App.ymToLabel(App._livePlanYM)})`
+        )) return;
+
+        try {
+            await App.dbRef.set({ currentPlanYM: ym }, { merge: true });
+            App._livePlanYM = ym;
+            PlanUI.refresh();
+            UI.showSaveToast(`📢 ตั้ง ${App.ymToLabel(ym)} เป็นเดือนที่ใช้งานจริงแล้ว — Sales เห็นทันที`);
+        } catch(e) {
+            UI.showErrorToast('❌ ตั้งค่าไม่สำเร็จ: ' + ErrorMsg.translate(e));
+        }
+    },
+
+    // ─── Create new plan ─────────────────────────────────────────────────
+    // srcYM: เดือนต้นทางที่จะ copy มา — ถ้าไม่ระบุ fallback ไปใช้เดือนที่แอดมินกำลังดูอยู่ตอนนี้
+    // (ระบุไว้ชัดเจนเพื่อกันเคส "เลือกเดือนสร้างจาก dropdown ที่อิงจาก Plan ล่าสุด" แต่หน้าจอ
+    // ปัจจุบันดันเปิดดูเดือนอื่นอยู่ — ถ้าไม่ระบุ src จะ copy จากเดือนที่เปิดดูผิดเดือนได้)
+    createPlan: async (ym, srcYMOverride) => {
+        if (!ym) return;
+        UI.showLoader(`กำลังสร้าง Plan ${App.ymToLabel(ym)}...`, '');
+        try {
+            const existing = await App.planRef(ym).get();
+            if (existing.exists) {
+                UI.hideLoader();
+                UI.showErrorToast(`⚠️ Plan ${App.ymToLabel(ym)} มีอยู่แล้วครับ`);
+                return;
+            }
+
+            // Copy จาก plan ปัจจุบัน
+            const srcYM   = srcYMOverride || App._currentPlanYM;
+            const srcData = srcYM ? (await App.planRef(srcYM).get()) : null;
+            const srcMeta = srcData?.exists ? srcData.data() : {};
+            const copyRouteList = srcMeta.routeList || State.db.routeList || [];
+
+            // ✅ FIX: วันหยุด "เฉพาะกิจ" (เลขวันที่ เช่น วันหยุดนักขัตฤกษ์ 12 ส.ค.) ผูกกับเดือนต้นทาง
+            // เท่านั้น ห้าม copy ข้ามเดือนตรงๆ (วันที่ 12 เดือนหน้าอาจไม่ใช่วันหยุดเลย) ส่วน
+            // "วันหยุดประจำสัปดาห์" (เช่น อาทิตย์หยุดทุกสัปดาห์) เป็นกติกาที่ไม่ขึ้นกับเดือน copy ได้ปกติ
+            // เช่นเดียวกับ anchorType/anchorWeekday ของแบบวิ่งอิงวันในสัปดาห์ — คำนวณสดใหม่ทุกเดือนอยู่แล้ว
+            let copyCalendarConfig = srcMeta.calendarConfig || null;
+            if (copyCalendarConfig && copyCalendarConfig.mode === 'cycle') {
+                copyCalendarConfig = { ...copyCalendarConfig, holidays: [] };
+                delete copyCalendarConfig.lastDay;      // V0.5: วันวิ่งวันสุดท้ายของไฟล์นำเข้า เป็นของเดือนต้นทางเท่านั้น
+                // V0.6: แบบวันที่ตายตัว — เดือนใหม่เริ่ม D1 ที่วันที่ 1 เสมอ (ตรงวันหยุดประจำสัปดาห์ = เลื่อนไปวันทำงานแรกเอง)
+                // เดิมก๊อปวันเริ่มของเดือนเก่ามา (เช่นเดือนนำเข้าเริ่มวันที่ 3 → เดือนใหม่ D1 = 3 ด้วย)
+                // V0.7.3: ศูนย์รอบสั้น (≤ 14 วัน) เดือนใหม่ใช้ "ตรึงตลาดไว้กับวันที่" เมื่อเจอวันหยุด เป็นค่าเริ่มต้น
+                // (ค่า "เลื่อน" ที่มาจากการนำเข้ามีไว้ให้วันที่ตรงกับไฟล์เท่านั้น) — ถ้าผู้ใช้เลือกเองไว้ในเดือนก่อน คงตามนั้น
+                if ((parseInt(copyCalendarConfig.cycleDays, 10) || 24) <= 14
+                    && (!copyCalendarConfig.holidayMode || copyCalendarConfig.source === 'import')) copyCalendarConfig.holidayMode = 'skip';
+                if (!copyCalendarConfig.anchorType || copyCalendarConfig.anchorType === 'date') {
+                    copyCalendarConfig.anchorType = 'date';
+                    copyCalendarConfig.startDay = 1;
+                    copyCalendarConfig.startDayNum = 1;
+                }
+            }
+
+            await App.planRef(ym).set({
+                routeList:     copyRouteList,
+                cycleDays:     srcMeta.cycleDays     || State.db.cycleDays || 24,
+                calendarConfig: copyCalendarConfig,
+                createdAt:     firebase.firestore.FieldValue.serverTimestamp(),
+                updatedAt:     firebase.firestore.FieldValue.serverTimestamp(),
+                copiedFrom:    srcYM || '',
+            });
+
+            // Copy routes จาก plan ต้นทาง — รวม calendarOverride เฉพาะสาย (ถ้ามี) ไปด้วย
+            // ล้าง holidays เฉพาะกิจของ override เหมือนกับที่ทำกับ default ของศูนย์ข้างบน
+            if (srcYM && copyRouteList.length > 0) {
+                await Promise.all(copyRouteList.map(async name => {
+                    const rd = await App.planRoutesCol(srcYM).doc(name).get();
+                    const stores = rd.exists ? (rd.data().stores || []) : [];
+                    // v-local (โน้ต 14): ปฏิทินเฉพาะสายไม่ติดไปเดือนใหม่ — ทุกสายเริ่มจากปฏิทินระดับเดือน
+                    const payload = { stores, calendarOverride: firebase.firestore.FieldValue.delete() };
+                    // ✅ BUGFIX (2026-08-29): เพิ่ม merge:true ให้ปลอดภัยไว้ก่อน เผื่อ ym ปลายทาง
+                    // มีเอกสารอยู่แล้วบางส่วน (เช่น รันซ้ำ) — กันเขียนทับ field อื่นที่อาจมีอยู่แล้ว
+                    await App.planRoutesCol(ym).doc(name).set(payload, { merge: true });
+                }));
+            }
+
+            // อัปเดต planList ใน centerDoc
+            const curDoc  = await App.dbRef.get();
+            const curData = curDoc.exists ? curDoc.data() : {};
+            const planList = [...new Set([...(curData.planList || []), ym])].sort().reverse();
+            await App.dbRef.set({ planList }, { merge: true });
+
+            State.db.planList = planList;
+            UI.hideLoader();
+            UI.showSaveToast(`✅ สร้าง Plan ${App.ymToLabel(ym)} เรียบร้อย (ยังไม่ live — Sales ยังไม่เห็น จนกว่าจะกด "ตั้งเป็นเดือนที่ใช้งานจริง")`);
+            PlanUI.refresh();
+
+            // switch ไปที่ plan ใหม่ (แค่มุมมองแอดมิน — ไม่กระทบ Sales จนกว่าจะ publish)
+            await App.switchPlan(ym);
+
+        } catch(err) {
+            UI.hideLoader();
+            UI.showErrorToast('❌ สร้าง Plan ไม่สำเร็จ: ' + err.message);
+            console.error('createPlan:', err);
+        }
+    },
+
+    // ─── Delete plan ─────────────────────────────────────────────────────
+    deletePlan: async (ym) => {
+        if (!ym) return;
+        UI.showConfirm(`ยืนยันลบ Plan ${App.ymToLabel(ym)}?`, async () => {
+            try {
+                // ลบ routes subcollection
+                const routeDocs = await App.planRoutesCol(ym).get();
+                await Promise.all(routeDocs.docs.map(d => d.ref.delete()));
+                await App.planRef(ym).delete();
+
+                // อัปเดต planList
+                const curDoc  = await App.dbRef.get();
+                const curData = curDoc.exists ? curDoc.data() : {};
+                const planList = (curData.planList || []).filter(p => p !== ym).sort().reverse();
+
+                // ✅ BUGFIX: เดิมเขียนทับ currentPlanYM (เดือน live ของ Sales) ทุกครั้งที่ลบ plan
+                // ไม่ว่าจะลบเดือนที่ live อยู่จริงหรือแค่ลบ draft เดือนอื่นที่ไม่เกี่ยวกับ Sales เลย
+                // ตอนนี้เช็คก่อน — เขียนทับเฉพาะกรณีลบเดือนที่ live อยู่จริงเท่านั้น
+                const isDeletingLive = App._livePlanYM === ym;
+                if (isDeletingLive) {
+                    const newLiveYM = planList[0] || App.currentYM();
+                    await App.dbRef.set({ planList, currentPlanYM: newLiveYM }, { merge: true });
+                    App._livePlanYM = newLiveYM;
+                    UI.showSaveToast(`🗑️ ลบ Plan ${App.ymToLabel(ym)} เรียบร้อย (เดือนนี้เคย Live อยู่ — เปลี่ยน Live เป็น ${App.ymToLabel(newLiveYM)} อัตโนมัติ)`);
+                } else {
+                    await App.dbRef.set({ planList }, { merge: true });
+                    UI.showSaveToast(`🗑️ ลบ Plan ${App.ymToLabel(ym)} เรียบร้อย`);
+                }
+
+                if (App._currentPlanYM === ym) {
+                    const fallbackYM = planList[0] || App.currentYM();
+                    await App._loadPlan(fallbackYM);
+                }
+                PlanUI.refresh();
+            } catch(err) {
+                UI.showErrorToast('❌ ลบ Plan ไม่สำเร็จ: ' + err.message);
+            }
+        });
+    },
+
+    // ─── Route management ────────────────────────────────────────────────
+    switchRoute: (name) => {
+        if (State.localActiveRoute === name) return;
+        State.localActiveRoute = name;
+        localStorage.setItem(`last_route_${App._currentPlanYM}`, name);
+        // null = failed ระหว่าง background load, undefined = ยังไม่โหลด → ทั้งคู่ fetch ใหม่
+        const needFetch = State.db.routes[name] === undefined || State.db.routes[name] === null;
+        if (needFetch) {
+            const isRetry = State.db.routes[name] === null;
+            UI.showLoader((isRetry ? '🔄 โหลดใหม่ ' : 'กำลังโหลด ') + name + '...');
+            App.planRoutesCol(App._currentPlanYM).doc(name).get().then(d => {
+                State.db.routes[name] = d.exists ? (d.data().stores || []) : [];
+                if (State.db._failedRoutes) delete State.db._failedRoutes[name];
+                State.stores = State.db.routes[name];
+                App.sync(); MapCtrl.fitToStores(); UI.hideLoader();
+            }).catch(() => {
+                State.db.routes[name] = null; // ยังไม่สำเร็จ — เก็บ null ไว้ retry ครั้งต่อไป
+                State.stores = [];
+                App.sync(); UI.hideLoader();
+                UI.showErrorToast('⚠️ โหลด ' + name + ' ไม่สำเร็จ กดสายนี้อีกครั้งเพื่อลอง');
+            });
+        } else {
+            State.stores = State.db.routes[name] || [];
+            App.sync(); MapCtrl.fitToStores();
+        }
+    },
+
+    addRoute: () => {
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.55);z-index:9999;display:flex;align-items:center;justify-content:center;';
+        const box = document.createElement('div');
+        box.style.cssText = 'background:#fff;border-radius:16px;padding:24px;max-width:340px;width:90%;font-family:inherit;box-shadow:0 20px 60px rgba(0,0,0,0.3);';
+        box.innerHTML = '<p style="font-size:14px;font-weight:700;color:#111827;margin-bottom:12px;">ชื่อสายใหม่</p>'
+            + '<input id="_add-route-inp" type="text" placeholder="เช่น 402V01" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #d1d5db;border-radius:10px;font-size:14px;font-family:inherit;outline:none;margin-bottom:16px;">'
+            + '<div style="display:flex;gap:8px;justify-content:flex-end;">'
+            + '<button id="_add-route-cancel" style="padding:8px 18px;border-radius:8px;border:1px solid #d1d5db;background:#fff;color:#6b7280;cursor:pointer;font-size:13px;font-weight:600;">ยกเลิก</button>'
+            + '<button id="_add-route-ok" style="padding:8px 18px;border-radius:8px;border:none;background:#4f46e5;color:#fff;cursor:pointer;font-size:13px;font-weight:700;">เพิ่ม</button>'
+            + '</div>';
+        overlay.appendChild(box); document.body.appendChild(overlay);
+        const inp = box.querySelector('#_add-route-inp'); inp.focus();
+        const close = () => { if (document.body.contains(overlay)) document.body.removeChild(overlay); };
+        const confirm = () => {
+            const n = inp.value.trim(); close(); if (!n) return;
+            State.db.routes[n] = []; State.localActiveRoute = n; State.stores = [];
+            App.sync(); App.saveDB();
+        };
+        box.querySelector('#_add-route-cancel').onclick = close;
+        box.querySelector('#_add-route-ok').onclick     = confirm;
+        inp.addEventListener('keydown', e => { if (e.key === 'Enter') confirm(); if (e.key === 'Escape') close(); });
+        overlay.onclick = e => { if (e.target === overlay) close(); };
+    },
+
+    renameRoute: () => {
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.55);z-index:9999;display:flex;align-items:center;justify-content:center;';
+        const box = document.createElement('div');
+        box.style.cssText = 'background:#fff;border-radius:16px;padding:24px;max-width:340px;width:90%;font-family:inherit;box-shadow:0 20px 60px rgba(0,0,0,0.3);';
+        box.innerHTML = '<p style="font-size:14px;font-weight:700;color:#111827;margin-bottom:12px;">เปลี่ยนชื่อสาย</p>'
+            + `<input id="_ren-route-inp" type="text" value="${State.localActiveRoute}" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #d1d5db;border-radius:10px;font-size:14px;font-family:inherit;outline:none;margin-bottom:16px;">`
+            + '<div style="display:flex;gap:8px;justify-content:flex-end;">'
+            + '<button id="_ren-cancel" style="padding:8px 18px;border-radius:8px;border:1px solid #d1d5db;background:#fff;color:#6b7280;cursor:pointer;font-size:13px;font-weight:600;">ยกเลิก</button>'
+            + '<button id="_ren-ok" style="padding:8px 18px;border-radius:8px;border:none;background:#4f46e5;color:#fff;cursor:pointer;font-size:13px;font-weight:700;">บันทึก</button>'
+            + '</div>';
+        overlay.appendChild(box); document.body.appendChild(overlay);
+        const inp = box.querySelector('#_ren-route-inp'); inp.focus(); inp.select();
+        const close = () => { if (document.body.contains(overlay)) document.body.removeChild(overlay); };
+        const confirm = () => {
+            const newName = inp.value.trim(); close();
+            if (!newName || newName === State.localActiveRoute) return;
+            const ym = App._currentPlanYM;
+            const oldName = State.localActiveRoute;
+            State.db.routes[newName] = State.db.routes[oldName];
+            delete State.db.routes[oldName];
+            State.localActiveRoute = newName;
+            App.sync();
+            const routeList = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
+            Promise.all([
+                App.planRoutesCol(ym).doc(oldName).delete(),
+                // ✅ BUGFIX (2026-08-29): merge:true — ดู comment เดียวกันใน saveDB() ข้างบน
+                App.planRoutesCol(ym).doc(newName).set({ stores: State.db.routes[newName] || [] }, { merge: true }),
+                App.planRef(ym).set({ routeList }, { merge: true }),
+            ]).then(() => UI.showSaveToast('💾 เปลี่ยนชื่อสายเรียบร้อย'))
+              .catch(err => UI.showErrorToast('❌ เปลี่ยนชื่อไม่สำเร็จ: ' + err.message));
+        };
+        box.querySelector('#_ren-cancel').onclick = close;
+        box.querySelector('#_ren-ok').onclick     = confirm;
+        inp.addEventListener('keydown', e => { if (e.key === 'Enter') confirm(); if (e.key === 'Escape') close(); });
+        overlay.onclick = e => { if (e.target === overlay) close(); };
+    },
+
+    deleteRoute: () => {
+        if (Object.keys(State.db.routes).length <= 1)
+            return UI.showErrorToast('ห้ามลบสายสุดท้ายครับ');
+        UI.showConfirm('ยืนยันลบสาย "' + State.localActiveRoute + '"?', () => {
+            const ym = App._currentPlanYM;
+            const deletedName = State.localActiveRoute;
+            delete State.db.routes[deletedName];
+            const sortedKeys = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
+            State.localActiveRoute = sortedKeys[0];
+            State.stores = State.db.routes[State.localActiveRoute] || [];
+            App.sync(); MapCtrl.fitToStores();
+            Promise.all([
+                App.planRoutesCol(ym).doc(deletedName).delete(),
+                App.planRef(ym).set({ routeList: sortedKeys }, { merge: true }),
+            ]).then(() => UI.showSaveToast('🗑️ ลบสายเรียบร้อย'))
+              .catch(err => UI.showErrorToast('❌ ลบไม่สำเร็จ: ' + err.message));
+        });
+    },
+
+    // ─── calendarConfig ──────────────────────────────────────────────────
+    saveCalendarConfig: async (cfg) => {
+        const ym = App._currentPlanYM;
+        if (!ym) return;
+        try {
+            // ✅ BUGFIX: mergeFields แทน merge:true — กัน field เก่าจากโหมดก่อนหน้า (เช่น mapping)
+            // ค้างอยู่ใน Firestore แล้วไปบัง getDayLabelForCfg() ตอนสลับโหมด (ดู index.html CalendarAdmin.save)
+            await App.planRef(ym).set(
+                { calendarConfig: cfg, updatedAt: firebase.firestore.FieldValue.serverTimestamp() },
+                { mergeFields: ['calendarConfig', 'updatedAt'] }
+            );
+            State.db.calendarConfig = cfg;
+            UI.showSaveToast('📅 บันทึกปฏิทินเรียบร้อย');
+        } catch(err) {
+            UI.showErrorToast('❌ บันทึกปฏิทินไม่สำเร็จ: ' + err.message);
+        }
+    },
+
+    // ─── calendarConfig เฉพาะสาย (override) ────────────────────────────────
+    // cfg = null → ลบ override ทิ้ง กลับไปใช้ default ของศูนย์ตามปกติ
+    // ✅ BUGFIX (2026-08-29): เดิมใช้ App._currentPlanYM (เดือนที่หน้า Admin หลักกำลังเปิดดูอยู่)
+    // เสมอ ไม่รับ ym มาจากผู้เรียก — ตอนนี้ modal ตั้งค่าปฏิทินเลื่อนดูเดือนอื่นได้แล้ว
+    // (CalendarAdmin.shiftMonth) ถ้ายังใช้ App._currentPlanYM อยู่ การกด "บันทึก" ตอนเลื่อนไปดู
+    // เดือนอื่นจะเขียนทับ override ของเดือนที่หน้าหลักเปิดอยู่แบบเงียบๆ (คนละเดือนกับที่ตั้งใจแก้)
+    // ทำให้เดือนที่ตั้งใจแก้ดูเหมือน "ไม่ถูกบันทึก" (กลับไปเป็นค่าเดิมทุกครั้งที่เปิดดูใหม่)
+    saveRouteCalendarOverride: async (routeName, cfg, ym) => {
+        ym = ym || App._currentPlanYM;
+        if (!ym || !routeName) return;
+        try {
+            const payload = cfg
+                ? { calendarOverride: cfg }
+                : { calendarOverride: firebase.firestore.FieldValue.delete() };
+            // ✅ NEW (2026-08-29): เปลี่ยนปฏิทินของสายนี้ = Day label อาจเปลี่ยนไป — รีเซ็ตสถานะ
+            // "ยืนยันรับสายวิ่ง" ของเซลกลับเป็นรอยืนยันใหม่เสมอ (ดู RouteConfirm ฝั่ง sales-app.js)
+            payload.confirmedBy = firebase.firestore.FieldValue.delete();
+            payload.confirmedAt = firebase.firestore.FieldValue.delete();
+            await App.planRoutesCol(ym).doc(routeName).set(payload, { merge: true });
+            UI.showSaveToast(cfg
+                ? `📅 บันทึกปฏิทินเฉพาะสาย ${routeName} เรียบร้อย`
+                : `↩️ สาย ${routeName} กลับไปใช้ปฏิทิน default ของศูนย์แล้ว`);
+        } catch(err) {
+            UI.showErrorToast('❌ บันทึกไม่สำเร็จ: ' + err.message);
+        }
+    },
+
+    // ══════════════════════════════════════════════════════════════════════
+    // ✅ NEW (2026-08-31): writeAuditLog — บันทึกประวัติการอนุมัติ/ปฏิเสธคำขอย้ายวัน
+    // ลง auditLogs/{centerId}/logs (collection เดียวกับหน้า Audit Log เดิม) — fire-and-forget
+    // ══════════════════════════════════════════════════════════════════════
+    writeAuditLog: (actionKey, extra = {}) => {
+        try {
+            const session   = Auth.getSession();
+            const validRoles = ['admin', 'supervisor', 'sales', 'route_supervisor', 'asm'];
+            const role      = validRoles.includes(session?.role) ? session.role : 'admin';
+            const centerId  = window.CENTER_ID || (window.CENTER_DOC || 'v1_main').replace(/_main$/, '');
+            cloudDB.collection('auditLogs').doc(centerId).collection('logs').add({
+                actionKey,
+                username: session?.displayName || session?.username || 'admin',
+                role,
+                ts: firebase.firestore.FieldValue.serverTimestamp(),
+                ...extra,
+            }).catch(e => console.warn('[AuditLog] เขียนไม่สำเร็จ (ไม่กระทบการทำงานหลัก):', e));
+        } catch(e) { console.warn('[AuditLog] เขียนไม่สำเร็จ:', e); }
+    },
+
+    // ══════════════════════════════════════════════════════════════════════
+    // ✅ NEW (2026-08-29): ระบบยืนยันรับสายวิ่ง (Route Confirm)
+    // เซลกดยืนยันฝั่ง sales.html (ดู RouteConfirm ใน sales-app.js) — ฟังก์ชันนี้แค่ "อ่าน"
+    // สถานะกลับมาให้แอดมินเช็คเฉยๆ ไม่มีการเขียนข้อมูลใดๆ จากฝั่งแอดมิน
+    // ══════════════════════════════════════════════════════════════════════
+    getRouteConfirmStatus: async (ym) => {
+        if (!ym) return [];
+        try {
+            const planSnap  = await App.planRef(ym).get();
+            const routeList = ((planSnap.exists ? planSnap.data().routeList : null) || State.db.routeList || [])
+                .slice().sort((a, b) => a.localeCompare(b, 'th', { numeric: true }));
+            const results = [];
+            const BATCH = 5;
+            for (let i = 0; i < routeList.length; i += BATCH) {
+                const chunk = routeList.slice(i, i + BATCH);
+                const docs  = await Promise.all(chunk.map(r => App.planRoutesCol(ym).doc(r).get().catch(() => null)));
+                docs.forEach((d, idx) => {
+                    const data = d?.exists ? d.data() : {};
+                    results.push({ route: chunk[idx], confirmedBy: data.confirmedBy || null, confirmedAt: data.confirmedAt || null });
+                });
+            }
+            return results;
+        } catch(e) { console.warn('getRouteConfirmStatus:', e); return []; }
+    },
+
+    // ══════════════════════════════════════════════════════════════════════
+    // ✅ NEW (2026-08-29): ระบบขอย้ายวันร้านค้า (Move Requests)
+    // เซลขอย้ายร้านจาก Day เดิม → Day ใหม่ "ภายในสายตัวเองเท่านั้น" — คำขอรออนุมัติจากแอดมิน
+    // ก่อนจะมีผลจริง (ดู MoveRequest ใน sales-app.js ฝั่งขอ, ฟังก์ชันด้านล่างนี้ฝั่งอนุมัติ)
+    // เก็บที่ appData/{centerId}_main/moveRequests/{autoId}
+    // ══════════════════════════════════════════════════════════════════════
+    _moveRequestsCol: () => cloudDB.collection('appData').doc(window.CENTER_DOC || 'v1_main').collection('moveRequests'),
+
+    fetchPendingMoveRequests: async () => {
+        try {
+            const snap = await App._moveRequestsCol().where('status', '==', 'pending').get();
+            return snap.docs
+                .map(d => ({ id: d.id, ...d.data() }))
+                .sort((a, b) => (a.requestedAt?.toMillis?.() || 0) - (b.requestedAt?.toMillis?.() || 0));
+        } catch(e) { console.warn('fetchPendingMoveRequests:', e); return []; }
+    },
+
+    // ✅ อนุมัติ: ย้ายร้านจริงในสายนั้น (fromDay → toDay) — ต่อท้ายลำดับสุดท้ายของวันปลายทางเสมอ
+    // ไม่ต้องเลือกตำแหน่งเอง แล้วปิดคำขอเป็น 'approved'
+    approveMoveRequest: async (reqId) => {
+        try {
+            const reqRef  = App._moveRequestsCol().doc(reqId);
+            const reqSnap = await reqRef.get();
+            if (!reqSnap.exists) return UI.showErrorToast('⚠️ ไม่พบคำขอนี้ (อาจถูกจัดการไปแล้ว)');
+            const req = reqSnap.data();
+            if (req.status !== 'pending') return UI.showErrorToast('⚠️ คำขอนี้ถูกดำเนินการไปแล้ว');
+
+            const routeRef  = App.planRoutesCol(req.ym).doc(req.route);
+            const routeSnap = await routeRef.get();
+            if (!routeSnap.exists) return UI.showErrorToast('⚠️ ไม่พบสายวิ่งของคำขอนี้ (อาจถูกลบไปแล้ว)');
+            const stores = routeSnap.data().stores || [];
+            const store  = stores.find(s => String(s.id) === String(req.storeId));
+            if (!store) return UI.showErrorToast('⚠️ ไม่พบร้านนี้ในสายแล้ว (อาจถูกย้าย/ลบไปแล้วโดยวิธีอื่น)');
+
+            // ✅ ต่อท้ายลำดับสุดท้ายของวันปลายทางเสมอ (ตามที่ตกลงกันไว้ — เซลไม่ต้องเลือกตำแหน่ง)
+            const maxSeq = stores.reduce((max, s) => {
+                const v = (s.days?.includes(req.toDay) && s.seqs?.[req.toDay]) ? s.seqs[req.toDay] : 0;
+                return Math.max(max, v);
+            }, 0);
+            if (!store.seqs) store.seqs = {};
+            delete store.seqs[req.fromDay];
+            store.seqs[req.toDay] = maxSeq + 1;
+            store.days = [req.toDay]; // ระบบนี้ถือว่า 1 ร้าน = 1 Day ต่อเดือน (ตาม pattern ที่ใช้อยู่ทั้งระบบ)
+
+            await routeRef.set({
+                stores,
+                confirmedBy: firebase.firestore.FieldValue.delete(),
+                confirmedAt: firebase.firestore.FieldValue.delete(),
+            }, { merge: true });
+
+            await reqRef.set({
+                status:     'approved',
+                reviewedBy: Auth.getSession()?.displayName || Auth.getSession()?.username || 'admin',
+                reviewedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            }, { merge: true });
+
+            UI.showSaveToast(`✅ อนุมัติย้าย "${req.storeName}" → ${req.toDay} เรียบร้อย`);
+            App.writeAuditLog('move_request_approve', {
+                reqId, route: req.route, ym: req.ym, storeId: String(req.storeId),
+                storeName: req.storeName || '', fromDay: req.fromDay, toDay: req.toDay,
+            });
+        } catch(e) {
+            UI.showErrorToast('❌ อนุมัติไม่สำเร็จ: ' + e.message);
+        }
+    },
+
+    rejectMoveRequest: async (reqId, note) => {
+        try {
+            // ✅ ดึงข้อมูลคำขอมาก่อน เพื่อบันทึก audit log ให้ครบ (route/ร้าน/วัน)
+            const reqSnap = await App._moveRequestsCol().doc(reqId).get();
+            const req     = reqSnap.exists ? reqSnap.data() : {};
+            await App._moveRequestsCol().doc(reqId).set({
+                status:     'rejected',
+                reviewedBy: Auth.getSession()?.displayName || Auth.getSession()?.username || 'admin',
+                reviewedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                note:       note || '',
+            }, { merge: true });
+            UI.showSaveToast('🚫 ปฏิเสธคำขอเรียบร้อย');
+            App.writeAuditLog('move_request_reject', {
+                reqId, route: req.route || '', ym: req.ym || '', storeId: String(req.storeId || ''),
+                storeName: req.storeName || '', fromDay: req.fromDay || '', toDay: req.toDay || '', note: note || '',
+            });
+        } catch(e) {
+            UI.showErrorToast('❌ ดำเนินการไม่สำเร็จ: ' + e.message);
+        }
+    },
+
+    // ─── Sales data ──────────────────────────────────────────────────────
+    fetchSalesData: async () => {
+        try {
+            const snap = await cloudDB.collection('v1_sales_chunks').get();
+            State.sales = {};
+            snap.forEach(doc => Object.assign(State.sales, doc.data()));
+        } catch(e) { console.warn('fetchSalesData:', e); State.sales = {}; }
+        App.sync();
+        UI.hideLoader();
+    },
+
+    clearAllAssignments: () => {
+        if (!confirm('🗑️ ยืนยันการเคลียร์การจัดสายทั้งหมด?')) return;
+        if (!State.stores?.length) return UI.showErrorToast('⚠️ ไม่มีข้อมูลร้านค้า');
+        // ✅ UX: เก็บ snapshot ไว้ก่อนลบ เผื่อกดพลาด — undo ได้ภายใน 8 วิ
+        App._undoSnapshot = { route: State.localActiveRoute, stores: JSON.parse(JSON.stringify(State.stores)) };
+        State.stores.forEach(s => { s.days = []; s.seqs = {}; s.selected = false; });
+        MapCtrl?.clearRoad?.(true);
+        MapCtrl?.clearAll?.();
+        UI?.render?.();
+        App?.saveDB?.();
+        UI.showUndoBanner(`✅ เคลียร์การจัดสายเสร็จ (${App._undoSnapshot.stores.length} ร้าน)`);
+    },
+
+    // ✅ FIX: เดิมปุ่ม "ล้างสายนี้" ใน Tab 1 เรียกฟังก์ชันนี้ แต่ไม่เคยมีอยู่จริง (บั๊ก — กดแล้วไม่มีอะไรเกิดขึ้น)
+    // ลบร้านค้าทั้งหมดออกจากสายที่กำลังเลือกอยู่ (ต่างจาก clearAllAssignments ที่แค่ล้างวันที่จัด แต่ร้านยังอยู่)
+    clearStores: () => {
+        if (!State.stores?.length) return UI.showErrorToast('⚠️ สายนี้ไม่มีร้านค้าอยู่แล้ว');
+        if (!confirm(`🗑️ ยืนยันลบร้านค้าทั้งหมด (${State.stores.length} ร้าน) ออกจากสาย "${State.localActiveRoute}"?\nการกระทำนี้ลบร้านทิ้งทั้งหมด ไม่ใช่แค่ล้างวันที่จัด`)) return;
+        // ✅ UX: เก็บ snapshot ไว้ก่อนลบ เผื่อกดพลาด — undo ได้ภายใน 8 วิ
+        App._undoSnapshot = { route: State.localActiveRoute, stores: JSON.parse(JSON.stringify(State.stores)) };
+        State.stores = [];
+        if (State.db?.routes) State.db.routes[State.localActiveRoute] = [];
+        MapCtrl?.clearRoad?.(true);
+        MapCtrl?.clearAll?.();
+        UI?.render?.();
+        App?.saveDB?.();
+        UI.showUndoBanner(`✅ ลบร้านค้าออกจากสายนี้เรียบร้อย (${App._undoSnapshot.stores.length} ร้าน)`);
+    },
+
+    // ✅ UX: ย้อนกลับการลบล่าสุด (ใช้ได้ครั้งเดียว ภายใน 8 วิหลังลบ)
+    _undoSnapshot: null,
+    undo: () => {
+        const snap = App._undoSnapshot;
+        if (!snap) return;
+        // กันย้อนกลับผิดสาย ถ้า user สลับไปสายอื่นระหว่างนั้น
+        if (State.localActiveRoute !== snap.route) {
+            UI.showErrorToast('⚠️ สลับสายไปแล้ว ย้อนกลับไม่ได้');
+            UI.hideUndoBanner();
+            return;
+        }
+        State.stores = snap.stores;
+        if (State.db?.routes) State.db.routes[snap.route] = State.stores;
+        MapCtrl?.clearAll?.();
+        UI?.render?.();
+        App?.saveDB?.();
+        UI.hideUndoBanner();
+        UI.showSaveToast('↩️ ย้อนกลับเรียบร้อย');
+    },
+
+    handleMapUpload: (e) => {
+        const file = e.target.files[0]; if (!file) return;
+        const reader = new FileReader();
+        reader.onload = async (ev) => {
+            try {
+                const data     = new Uint8Array(ev.target.result);
+                const workbook = XLSX.read(data, { type: 'array' });
+                const json     = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1, defval: '' });
+                if (json.length < 2) return UI.showErrorToast('ไฟล์ว่างเปล่า');
+                const headers = json[0];
+                let idCol=-1, nameCol=-1, latCol=-1, lngCol=-1, freqCol=-1, dayCol=-1, seqCol=-1, salesCodeCol=-1, shopTypeCol=-1, subDistrictCol=-1, districtCol=-1, provinceCol=-1, marketNameCol=-1, cyCol=-1, cycleNameCol=-1;
+                for (let i = 0; i < headers.length; i++) {
+                    const h = String(headers[i]).toLowerCase();
+                    if      (h.includes('รหัส') && !h.includes('เซลล์'))                         idCol = i;
+                    // ✅ FIX: ต้องเช็คก่อน nameCol เสมอ เพราะ "Cycle Name" มีคำว่า "name" ซ้อนอยู่
+                    // ถ้าเช็ค nameCol ก่อน จะโดนตีความเป็นคอลัมน์ชื่อร้านไปเลย ไม่มีทางถึง cycleNameCol
+                    else if (h.includes('cycle'))                                                 cycleNameCol = i;
+                    else if ((h.includes('ชื่อ') && !h.includes('ตลาด')) || h.includes('name'))  nameCol = i;
+                    else if (h.includes('lat') || h.includes('ละติจูด'))                         latCol = i;
+                    else if (h.includes('lng') || h.includes('lon') || h.includes('ลองจิจูด'))   lngCol = i;
+                    else if (h.includes('freq') || h.includes('ความถี่'))                        freqCol = i;
+                    // ✅ FIX (bug scan): exact 'route'/'สายวิ่ง' → salesCodeCol ก่อน dayCol (substring)
+                    // เดิม column ชื่อ "สายวิ่ง" ถูก dayCol ดักไปก่อน จับรหัสสายไม่ได้เลย
+                    else if (h === 'route' || h === 'สายวิ่ง')                                    salesCodeCol = i;
+                    else if (h.includes('day') || h.includes('สายวิ่ง'))                         dayCol = i;
+                    else if (h.includes('คิว') || h.includes('seq'))                              seqCol = i;
+                    else if ((h.includes('salescode') || h.includes('รหัสเซลล์') || h === 'sales') && salesCodeCol === -1) salesCodeCol = i;
+                    else if (h.includes('ประเภท') || h.includes('type'))                         shopTypeCol = i;
+                    else if (h.includes('sold to city') || h.includes('ตำบล'))                   subDistrictCol = i;
+                    else if (h.includes('sold to state') || h.includes('อำเภอ'))                 districtCol = i;
+                    else if (h.includes('address 5') || h.includes('จังหวัด'))                   provinceCol = i;
+                    else if (h.includes('ตลาด') || h.includes('market'))                          marketNameCol = i;
+                    else if (h === 'cy' || h.startsWith('cy'))                                    cyCol = i;
+                }
+                if (latCol === -1 || lngCol === -1 || idCol === -1)
+                    return UI.showErrorToast('ไม่พบคอลัมน์ รหัส / Lat / Lng ในไฟล์ครับ');
+
+                // ✅ NEW: ไม่มีคอลัมน์ "Cycle Name" — หยุดถามยืนยันก่อน (การเรียงจากคอลัมน์ Day
+                // แทนเป็นแค่การเดา อาจไม่ตรงกับลำดับตลาดที่ตั้งใจจริงเสมอไป)
+                if (cycleNameCol === -1) {
+                    const proceed = await new Promise(resolve => {
+                        UI.showConfirm(
+                            '⚠️ ไม่พบคอลัมน์ "Cycle Name" ในไฟล์นี้\n\n' +
+                            'ระบบจะเรียงลำดับ D01, D02, ... จากคอลัมน์ Day ที่มีอยู่แทน (เรียงจากน้อยไปมาก) ' +
+                            'ซึ่งอาจไม่ตรงกับลำดับตลาดที่ตั้งใจจริงเสมอไป\n\n' +
+                            'ต้องการนำเข้าต่อโดยใช้วิธีนี้หรือไม่?',
+                            () => resolve(true),
+                            () => resolve(false)
+                        );
+                    });
+                    if (!proceed) return;
+                }
+
+                const storeMap = {};
+                for (let i = 1; i < json.length; i++) {
+                    const row = json[i];
+                    if (!row || row.length === 0) continue;
+                    const idStr = row[idCol] ? String(row[idCol]).trim() : `S_${i}`;
+                    if (!idStr) continue;
+                    const lat = parseFloat(String(row[latCol]||'').replace(/[^0-9.-]/g,''));
+                    const lng = parseFloat(String(row[lngCol]||'').replace(/[^0-9.-]/g,''));
+                    if (isNaN(lat)||isNaN(lng)) continue;
+                    const freq = (freqCol !== -1 && String(row[freqCol]||'').trim().toUpperCase().includes('2')) ? 2 : 1;
+                    const rawDay = (dayCol !== -1 && row[dayCol]) ? String(row[dayCol]).trim() : '';
+                    const dayNum = rawDay ? parseInt(rawDay.replace(/[^0-9]/g,'')) : NaN;
+                    // ✅ NEW: ถ้ามีคอลัมน์ "Cycle Name" ใช้ค่านี้กำหนดลำดับ D0N แทน dayNum เดิม
+                    const rawCycle = (cycleNameCol !== -1 && row[cycleNameCol]) ? String(row[cycleNameCol]).trim() : '';
+                    const cycleNum = rawCycle ? parseInt(rawCycle.replace(/[^0-9]/g,'')) : NaN;
+                    const seqNum   = (cycleNameCol !== -1 && !isNaN(cycleNum)) ? cycleNum : dayNum;
+                    const assignedDay = !isNaN(seqNum) ? 'Day ' + seqNum : '';
+                    const assignedSeq = (seqCol !== -1 && row[seqCol]) ? parseInt(String(row[seqCol]).replace(/[^0-9]/g,'')) : NaN;
+                    if (storeMap[idStr]) {
+                        if (assignedDay && !storeMap[idStr].days.includes(assignedDay)) {
+                            storeMap[idStr].days.push(assignedDay);
+                            if (!isNaN(assignedSeq)) storeMap[idStr].seqs[assignedDay] = assignedSeq;
+                        }
+                        storeMap[idStr].freq = 2;
+                    } else {
+                        const s = { id:idStr, code:idStr, name: row[nameCol]?String(row[nameCol]).trim():`Store_${idStr}`, lat, lng, freq, days:[], seqs:{}, selected:false,
+                            salesCode: salesCodeCol !== -1 ? String(row[salesCodeCol]||'').trim() : '',
+                            shopType: shopTypeCol !== -1 ? String(row[shopTypeCol]||'').trim() : '',
+                            subDistrict: subDistrictCol !== -1 ? String(row[subDistrictCol]||'').trim() : '',
+                            district: districtCol !== -1 ? String(row[districtCol]||'').trim() : '',
+                            province: provinceCol !== -1 ? String(row[provinceCol]||'').trim() : '',
+                            marketName: marketNameCol !== -1 ? String(row[marketNameCol]||'').trim() : '',
+                            cy: cyCol !== -1 ? String(row[cyCol]||'').trim() : '',
+                            dayOriginal: cycleNameCol !== -1 ? rawCycle : rawDay,
+                        };
+                        if (assignedDay) { s.days.push(assignedDay); if (!isNaN(assignedSeq)) s.seqs[assignedDay] = assignedSeq; }
+                        storeMap[idStr] = s;
+                    }
+                }
+                const finalArray = Object.values(storeMap);
+                if (finalArray.length === 0) return UI.showErrorToast('ไม่พบพิกัด (Lat, Lng) ในไฟล์ครับ');
+
+                // ✅ NEW: ไฟล์ไม่มีคอลัมน์ "Cycle Name" เลย — เรียงเลข Day ที่มีจริงจากน้อยไปมาก
+                // แล้วแทนที่เป็นลำดับต่อเนื่อง D01, D02, D03... (อุดช่องว่าง) หน้านี้อัปโหลดทีละสาย
+                // อยู่แล้ว เลยทำรวมทั้งก้อนได้เลย ไม่ต้องแยกตามสายแบบ bulkImport
+                if (cycleNameCol === -1) {
+                    const usedNums = new Set();
+                    finalArray.forEach(s => s.days.forEach(d => {
+                        const n = parseInt(String(d).replace('Day ', ''));
+                        if (!isNaN(n)) usedNums.add(n);
+                    }));
+                    const sorted  = Array.from(usedNums).sort((a, b) => a - b);
+                    const rankMap = {};
+                    sorted.forEach((n, idx) => { rankMap[n] = idx + 1; });
+
+                    finalArray.forEach(s => {
+                        const newDays = [];
+                        const newSeqs = {};
+                        s.days.forEach(d => {
+                            const n = parseInt(String(d).replace('Day ', ''));
+                            const newLabel = (!isNaN(n) && rankMap[n]) ? ('Day ' + rankMap[n]) : d;
+                            if (!newDays.includes(newLabel)) newDays.push(newLabel);
+                            if (s.seqs[d] !== undefined) newSeqs[newLabel] = s.seqs[d];
+                        });
+                        s.days = newDays;
+                        s.seqs = newSeqs;
+                    });
+                }
+
+                MapCtrl.clearAll();
+                State.stores = finalArray;
+                App.sync(); App.saveDB(); MapCtrl.fitToStores();
+            } catch(err) { UI.showErrorToast('ขัดข้อง: ' + err.message); }
+            const inp = document.getElementById('fileUpload');
+            if (inp) inp.value = '';
+        };
+        reader.readAsArrayBuffer(file);
+    },
+
+    logout: () => { if (typeof Auth !== 'undefined') Auth.logout(); else window.location.replace('login.html'); },
+};
+
+// ==========================================
+// 📅 PlanUI — plan selector รายเดือน
+// ==========================================
+const PlanUI = {
+    // refresh dropdown
+    refresh: async () => {
+        try {
+            const doc = await App.dbRef.get();
+            const d   = doc.exists ? doc.data() : {};
+            const planList     = (d.planList     || []).sort().reverse();
+            const currentPlanYM = d.currentPlanYM || App.currentYM();
+
+            const sel = document.getElementById('plan-selector');
+            if (!sel) return;
+            sel.innerHTML = planList.length
+                ? planList.map(ym => `<option value="${ym}" ${ym === App._currentPlanYM ? 'selected' : ''}>${App.ymToLabel(ym)}</option>`).join('')
+                : `<option value="${currentPlanYM}">${App.ymToLabel(currentPlanYM)}</option>`;
+
+            PlanUI.updateBadge();
+            // ✅ NEW (2026-08-29): อัปเดต badge ของ "เช็คการยืนยัน" + "คำขอย้ายวัน" ไปพร้อมกันทุกครั้ง
+            // ที่หน้า Plan รีเฟรช (โหลดหน้าแรก / สลับเดือน / บันทึกต่างๆ) — เรียกแบบ non-blocking
+            if (typeof RouteConfirmAdmin !== 'undefined') RouteConfirmAdmin.refreshBadge();
+            if (typeof MoveRequestAdmin  !== 'undefined') {
+                MoveRequestAdmin.refreshBadge();
+                // ✅ NEW (2026-08-31): เปิดฟังคำขอย้ายวันแบบ realtime ครั้งเดียว (idempotent) —
+                // ให้ badge ขึ้นทันทีตอนเซลส่งคำขอใหม่ ไม่ต้องรอแอดมินสลับหน้า/รีเฟรชเอง
+                if (typeof MoveRequestAdmin.startLiveBadge === 'function') MoveRequestAdmin.startLiveBadge();
+            }
+        } catch(e) { console.warn('PlanUI.refresh:', e); }
+    },
+
+    onSelect: async (ym) => {
+        if (!ym || ym === App._currentPlanYM) return;
+        await App.switchPlan(ym);
+    },
+
+    // ✅ ปุ่ม "ตั้งเป็นเดือนที่ใช้งานจริง" — publish เดือนที่กำลังดูอยู่ให้ Sales เห็น
+    publishCurrent: async () => {
+        await App.publishPlan(App._currentPlanYM);
+    },
+
+    updateBadge: () => {
+        const ym    = App._currentPlanYM;
+        const badge = document.getElementById('plan-mode-badge');
+        if (badge) badge.textContent = ym ? `📅 ${App.ymToLabel(ym)}` : '📅 Plan';
+        const sel = document.getElementById('plan-selector');
+        if (sel && ym) sel.value = ym;
+
+        // ✅ ตัวบอกสถานะ live — เดือนที่แอดมินกำลังดูอยู่ ใช่เดือนที่ Sales เห็นจริงไหม
+        const liveBadge  = document.getElementById('plan-live-badge');
+        const publishBtn = document.getElementById('plan-publish-btn');
+        const isLive = ym && ym === App._livePlanYM;
+        if (liveBadge) {
+            if (isLive) {
+                liveBadge.textContent = '🟢 LIVE';
+                liveBadge.style.background = '#059669'; liveBadge.style.color = '#fff';
+            } else {
+                liveBadge.textContent = `⚪ กำลังดู (Live จริง: ${App.ymToLabel(App._livePlanYM || '')})`;
+                liveBadge.style.background = '#e5e7eb'; liveBadge.style.color = '#4b5563';
+            }
+        }
+        if (publishBtn) publishBtn.classList.toggle('hidden', isLive);
+
+        // ✅ UX: badge โหมดปฏิทิน — ไม่ต้องเปิด settings ก็รู้ว่าเดือนนี้ใช้โหมดไหน
+        const modeBadge = document.getElementById('cal-mode-badge');
+        if (modeBadge && ym) {
+            App.planRef(ym).get().then(snap => {
+                const cfg = snap.exists ? (snap.data().calendarConfig || null) : null;
+                const labels = {
+                    cycle:   '🔄 หมุนนับต่อเนื่อง',
+                    date:    '📅 วันที่ตรง Day',
+                    fixed:   '📌 กำหนดเอง',
+                    weekday: '📆 ตามวันในสัปดาห์',
+                };
+                if (cfg && cfg.mode && labels[cfg.mode]) {
+                    modeBadge.textContent = labels[cfg.mode];
+                    modeBadge.classList.remove('hidden');
+                } else {
+                    modeBadge.textContent = '⚠️ ยังไม่ตั้งค่า';
+                    modeBadge.classList.remove('hidden');
+                }
+            }).catch(() => modeBadge.classList.add('hidden'));
+        } else if (modeBadge) {
+            modeBadge.classList.add('hidden');
+        }
+    },
+
+    // เปิด modal เพิ่มเดือนใหม่
+    openCreatePlan: () => {
+        const sel = document.getElementById('plan-month-select');
+        if (sel) {
+            // ✅ FIX: เดิมอิงจาก "วันนี้จริง" เสมอ (+3 เดือน) ทำให้หน้าต่างเลือกเดือนขยับตาม
+            // วันปฏิทินจริงเท่านั้น ไม่เกี่ยวกับว่ามี Plan อยู่แล้วถึงเดือนไหน — พอมี Plan ล่วงหน้า
+            // ไปไกลกว่านั้นแล้ว กลับเพิ่มเดือนถัดไปอีกไม่ได้ (ต้องรอให้วันจริงเลื่อนมาถึงก่อน)
+            // เปลี่ยนเป็นอิงจาก Plan ล่าสุดที่มีอยู่แล้ว (planList[0], เรียงล่าสุดไว้หน้าสุดอยู่แล้ว)
+            // แล้วเสนอ 3 เดือนถัดจากนั้นแทน — ถ้ายังไม่มี Plan เลย (ศูนย์ใหม่) fallback ไปใช้วันนี้จริง
+            const latestYM = (State.db.planList && State.db.planList[0]) || null;
+            let baseYear, baseMonth; // baseMonth เป็น 0-indexed
+            if (latestYM) {
+                const [y, m] = latestYM.split('_').map(Number);
+                baseYear = y; baseMonth = m - 1;
+            } else {
+                const now = new Date();
+                baseYear = now.getFullYear(); baseMonth = now.getMonth();
+            }
+            const months = [];
+            for (let i = 1; i <= 3; i++) {
+                const next = new Date(baseYear, baseMonth + i, 1);
+                const ym   = `${next.getFullYear()}_${String(next.getMonth()+1).padStart(2,'0')}`;
+                const lbl  = App.ymToLabel(ym);
+                months.push({ ym, lbl });
+            }
+            sel.innerHTML = months.map(({ym,lbl}) => `<option value="${ym}">${lbl}</option>`).join('');
+        }
+        document.getElementById('create-plan-modal')?.classList.remove('hidden');
+    },
+
+    doCreatePlan: async () => {
+        const ym = document.getElementById('plan-month-select')?.value;
+        document.getElementById('create-plan-modal')?.classList.add('hidden');
+        if (!ym) return;
+        // ✅ FIX: ต้อง copy จาก "Plan ล่าสุดที่มีอยู่แล้ว" เสมอ (ฐานเดียวกับที่ dropdown ใช้คำนวณ
+        // ตัวเลือกเดือน) ไม่ใช่เดือนที่แอดมินบังเอิญเปิดดูอยู่ตอนนี้ — กันข้อมูลเพี้ยนถ้าสองอย่างไม่ตรงกัน
+        const latestYM = (State.db.planList && State.db.planList[0]) || App._currentPlanYM;
+        await App.createPlan(ym, latestYM);
+    },
+
+    confirmDelete: () => {
+        const ym = App._currentPlanYM;
+        if (!ym) return;
+        App.deletePlan(ym);
+    },
+};
+
+// ==========================================
+// 🔄 StoreTrans
+// ==========================================
+const StoreTrans = {
+    _selectedIds: new Set(),
+    open: () => {
+        StoreTrans._selectedIds.clear();
+        StoreTrans._renderRouteList();
+        StoreTrans._renderStoreList();
+        document.getElementById('transfer-modal').classList.remove('hidden');
+    },
+    close: () => { document.getElementById('transfer-modal').classList.add('hidden'); StoreTrans._selectedIds.clear(); },
+    _renderRouteList: () => {
+        const routes = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
+        const srcEl  = document.getElementById('transfer-src-route');
+        const dstEl  = document.getElementById('transfer-dst-route');
+        if (srcEl) srcEl.innerHTML = routes.map(r => `<option value="${r}" ${r===State.localActiveRoute?'selected':''}>${r}</option>`).join('');
+        if (dstEl) {
+            dstEl.innerHTML = routes.map(r => `<option value="${r}">${r}</option>`).join('');
+            const other = routes.find(r => r !== State.localActiveRoute);
+            if (other) dstEl.value = other;
+        }
+        if (srcEl) srcEl.addEventListener('change', () => StoreTrans._renderStoreList());
+    },
+    _renderStoreList: () => {
+        const srcEl   = document.getElementById('transfer-src-route');
+        const srcRoute = srcEl ? srcEl.value : State.localActiveRoute;
+        const stores   = State.db.routes[srcRoute] || [];
+        StoreTrans._selectedIds.clear();
+        const listEl = document.getElementById('transfer-store-list');
+        if (!listEl) return;
+        if (!stores.length) { listEl.innerHTML = '<p class="text-center text-xs text-gray-400 py-6">ไม่มีร้านค้าในสายนี้</p>'; return; }
+        listEl.innerHTML = stores.map(s => {
+            const dayTxt = s.days?.length ? s.days.join(' & ') : 'รอจัดสาย';
+            const c = s.days?.length && DAY_COLORS[s.days[0]] ? DAY_COLORS[s.days[0]].hex : '#9ca3af';
+            return `<label class="flex items-center gap-2.5 p-2.5 bg-white border border-gray-100 rounded-xl cursor-pointer hover:bg-indigo-50 hover:border-indigo-200 transition">
+                <input type="checkbox" value="${s.id}" onchange="StoreTrans._toggle(this)" class="w-4 h-4 text-indigo-600 rounded flex-shrink-0">
+                <div class="flex-1 min-w-0">
+                    <p class="text-sm font-bold text-gray-800 truncate">${s.name}${s.freq===2?' <span style="background:#ef4444;color:#fff;padding:1px 5px;border-radius:8px;font-size:9px;font-weight:700;">F2</span>':''}</p>
+                    <p class="text-[10px] text-gray-400 font-mono">${s.id}</p>
+                </div>
+                <span class="text-[10px] font-bold px-2 py-0.5 rounded-full text-white flex-shrink-0" style="background:${c};">${dayTxt}</span>
+            </label>`;
+        }).join('');
+    },
+    _toggle: (cb) => {
+        if (cb.checked) StoreTrans._selectedIds.add(cb.value);
+        else            StoreTrans._selectedIds.delete(cb.value);
+        const countEl = document.getElementById('transfer-count');
+        if (countEl) countEl.textContent = StoreTrans._selectedIds.size;
+    },
+    selectAll: () => {
+        document.querySelectorAll('#transfer-store-list input[type=checkbox]').forEach(cb => { cb.checked = true; StoreTrans._selectedIds.add(cb.value); });
+        const countEl = document.getElementById('transfer-count');
+        if (countEl) countEl.textContent = StoreTrans._selectedIds.size;
+    },
+    confirm: async () => {
+        if (StoreTrans._selectedIds.size === 0) return UI.showErrorToast('กรุณาเลือกร้านค้าก่อนครับ');
+        const srcEl  = document.getElementById('transfer-src-route');
+        const dstEl  = document.getElementById('transfer-dst-route');
+        const srcRoute = srcEl ? srcEl.value : State.localActiveRoute;
+        const dstRoute = dstEl ? dstEl.value : '';
+        if (!dstRoute || dstRoute === srcRoute) return UI.showErrorToast('กรุณาเลือกสายปลายทางที่ต่างกันครับ');
+        const ids = Array.from(StoreTrans._selectedIds);
+        const srcStores = State.db.routes[srcRoute] || [];
+        const dstStores = State.db.routes[dstRoute] || [];
+        const moving    = srcStores.filter(s => ids.includes(s.id));
+        State.db.routes[srcRoute] = srcStores.filter(s => !ids.includes(s.id));
+        State.db.routes[dstRoute] = [...dstStores, ...moving];
+        if (State.localActiveRoute === srcRoute) State.stores = State.db.routes[srcRoute];
+        else if (State.localActiveRoute === dstRoute) State.stores = State.db.routes[dstRoute];
+        const ym = App._currentPlanYM;
+        try {
+            // ✅ NEW (2026-08-29): ย้ายร้านข้ามสาย = รายชื่อร้านของทั้ง 2 สายเปลี่ยน — รีเซ็ต
+            // สถานะ "ยืนยันรับสายวิ่ง" ของทั้งสายต้นทางและปลายทาง
+            const _resetConfirm = { confirmedBy: firebase.firestore.FieldValue.delete(), confirmedAt: firebase.firestore.FieldValue.delete() };
+            await Promise.all([
+                // ✅ BUGFIX (2026-08-29): merge:true — ดู comment เดียวกันใน saveDB() ข้างบน
+                App.planRoutesCol(ym).doc(srcRoute).set({ stores: State.db.routes[srcRoute], ..._resetConfirm }, { merge: true }),
+                App.planRoutesCol(ym).doc(dstRoute).set({ stores: State.db.routes[dstRoute], ..._resetConfirm }, { merge: true }),
+            ]);
+            StoreTrans.close(); App.sync();
+            UI.showSaveToast(`✅ ย้าย ${moving.length} ร้าน → ${dstRoute}`);
+        } catch(err) { UI.showErrorToast('❌ ย้ายร้านไม่สำเร็จ: ' + err.message); }
+    },
+};
+
+console.log('✅ admin-data v3 (plans system) loaded');
+

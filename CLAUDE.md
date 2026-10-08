@@ -65,6 +65,15 @@ There is no build tool, package manager, linter, or test suite in this repo (no 
 
 All `api/*.js` proxy to OpenRouteService **only** to keep `ORS_API_KEY` server-side — never call ORS directly from client code.
 
+### `rpn/` — RPN V0, the company's planner (added 2026-10-08)
+
+The company forked our admin into **RPN V0** (a local/IndexedDB app, versioned `V0.x`, maintained by them) and uses it as **the** planning tool. `rpn/` holds it, made online, and `index.html` embeds it as the **วางแผนคิวงาน** and **ภาพรวมแผน** tabs (`#page-rpn` iframe, `RpnHost` in `index.html`). Our other tabs (Dashboard, Route Analysis, Cell Split, All Routes, SKU, Audit) are unchanged. The old `#page-planning` markup + `CalendarAdmin` etc. are still in `index.html` (our core `App` still loads them for the other tabs) but nothing navigates there anymore.
+
+- **Never hand-edit files in `rpn/`** except `rpn-online-pre.js`, `rpn-online.js`, `SYNC.md` — refresh with `node tools/sync-rpn.mjs "<RPN V0 folder>"` (see `rpn/SYNC.md`). Same file names as ours (`admin-data.js`, `file-manager.js` …) are *their* diverged copies, not ours.
+- RPN writes the same Firestore paths/shape we do, plus new store fields (`inactive`, `wasPlan`, `runOf`, `fqs`, `fqRun`, `cys`, `vd`), a pseudo-route **`รอจัดสาย`** in `routeList`, and center-doc fields (`cyPoints`, `routeBase`, `masterKm`, `maxCycleCode`, `routeDist`).
+- **`rpnCal`**: `rpn-online.js` stores each route's real visit dates per Day (computed with RPN's own `Runs.datesOf`, same as its DMS export) at `plans/{ym}/routes/{rt}.rpnCal`; `sales-app.js`'s `RpnCompat` uses it (as calendar mode `'rpn'` from `_resolveActiveCfg`) when its `sig` matches the loaded stores, else falls back to the old `CalendarCtrl` logic. `hash()`/`sig()` must stay identical in both files.
+- `sales-app.js` hides `รอจัดสาย` and `inactive` stores via `RpnCompat.clean()`; every place that writes `stores` back must wrap with `RpnCompat.restore()` or parked stores get deleted.
+
 ---
 
 ## 🗄️ Firestore Structure

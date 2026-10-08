@@ -161,9 +161,14 @@
                 <span class="md:mr-3 flex items-center justify-center"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></span>
                 <span class="hidden md:inline">แบ่งเซลล์</span>
             </button>
-            <button onclick="Nav.go('planning')" id="nav-planning" class="sidebar-menu w-full flex items-center justify-center md:justify-start px-0 md:px-5 py-3 md:py-3.5 text-sm font-bold">
+            <!-- วางแผนคิวงาน + ภาพรวมแผน = RPN V0 (rpn/, ฝังเป็น iframe ใน #page-rpn) — ดู rpn/SYNC.md -->
+            <button onclick="Nav.go('rpn')" id="nav-rpn" class="sidebar-menu w-full flex items-center justify-center md:justify-start px-0 md:px-5 py-3 md:py-3.5 text-sm font-bold">
                 <span class="md:mr-3 flex items-center justify-center"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s7-7.58 7-12.5A7 7 0 0 0 5 9.5C5 14.42 12 22 12 22Z"/><circle cx="12" cy="9.5" r="2.3"/></svg></span>
                 <span class="hidden md:inline">วางแผนคิวงาน</span>
+            </button>
+            <button onclick="Nav.go('rpnoverview')" id="nav-rpnoverview" class="sidebar-menu w-full flex items-center justify-center md:justify-start px-0 md:px-5 py-3 md:py-3.5 text-sm font-bold">
+                <span class="md:mr-3 flex items-center justify-center"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="16" y1="2" x2="16" y2="6"/></svg></span>
+                <span class="hidden md:inline">ภาพรวมแผน</span>
             </button>
             <button onclick="Nav.go('allroutes')" id="nav-allroutes" class="sidebar-menu w-full flex items-center justify-center md:justify-start px-0 md:px-5 py-3 md:py-3.5 text-sm font-bold">
                 <span class="md:mr-3 flex items-center justify-center"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8 12 3 3 8l9 5 9-5Z"/><path d="M3 8v8l9 5 9-5V8"/><line x1="12" y1="13" x2="12" y2="21"/></svg></span>
@@ -890,6 +895,10 @@
         <div id="page-skudist" class="app-page hidden flex flex-col overflow-hidden" style="height:100%;"></div>
         <div id="page-routeanalysis" class="app-page hidden flex flex-col overflow-hidden" style="height:100%;"></div>
         <div id="page-auditlog" class="app-page hidden flex flex-col overflow-hidden" style="height:100%;"></div>
+        <!-- ===== PAGE: RPN V0 (วางแผนคิวงาน / ภาพรวมแผน) — iframe โหลดตอนเปิดครั้งแรก ===== -->
+        <div id="page-rpn" class="app-page hidden flex flex-col overflow-hidden" style="height:100%;">
+            <iframe id="rpn-frame" title="วางแผนคิวงาน (RPN V0)" class="flex-1 w-full border-0" style="height:100%;"></iframe>
+        </div>
 
     </div><!-- end main-wrap -->
 
@@ -1143,10 +1152,72 @@
 
         // App is defined in admin-data.js
 
+        // ─── RpnHost: แท็บวางแผนคิวงาน / ภาพรวมแผน = RPN V0 ใน iframe (rpn/RoutePlannerV0.html) ───
+        // RPN V0 กับหน้านี้อ่าน/เขียน Firestore ชุดเดียวกัน แต่ต่างคนต่างถือข้อมูลไว้ในหน่วยความจำ
+        //   • ออกจากแท็บ RPN หลัง RPN เขียนอะไรไป → โหลดแผนของหน้านี้ใหม่ (Dashboard/ภาพรวมทุกสาย/แบ่งเซลล์เห็นของล่าสุด)
+        //   • หน้านี้เขียนแผน (เช่น แบ่งเซลล์) แล้วกลับเข้าแท็บ RPN → โหลด RPN ใหม่
+        const RpnHost = {
+            _loaded: false,
+            _hostDirty: false,
+            frame: () => document.getElementById('rpn-frame'),
+            win: () => { try { return RpnHost.frame().contentWindow; } catch (e) { return null; } },
+            show: (sub) => {
+                const f = RpnHost.frame();
+                if (!f) return;
+                if (!RpnHost._loaded) {
+                    RpnHost._loaded = true;
+                    RpnHost._hostDirty = false;
+                    f.addEventListener('load', () => RpnHost._go(RpnHost._want), { once: false });
+                    RpnHost._want = sub;
+                    f.src = 'rpn/RoutePlannerV0.html?embed=1&center=' + encodeURIComponent(window.CENTER_ID || '');
+                    return;
+                }
+                RpnHost._want = sub;
+                if (RpnHost._hostDirty) {
+                    RpnHost._hostDirty = false;
+                    try { RpnHost.win().location.reload(); } catch (e) {}
+                    return;
+                }
+                RpnHost._go(sub);
+            },
+            // Nav ของ RPN ถูกสร้างหลังโหลด (overview.js เพิ่มหน้าภาพรวมเองทีหลัง) — ลองซ้ำจนพร้อม
+            _go: (sub, tries = 0) => {
+                const w = RpnHost.win();
+                const ready = w && w.RPNBridge && w.Nav && (sub !== 'overview' || w.document.getElementById('page-overview'));
+                if (ready) { try { w.RPNBridge.go(sub); } catch (e) {} return; }
+                if (tries < 40) setTimeout(() => RpnHost._go(sub, tries + 1), 250);
+            },
+            leave: () => {
+                const w = RpnHost.win();
+                if (w && w.RPNBridge && w.RPNBridge.dirty) {
+                    w.RPNBridge.dirty = false;
+                    if (App && App._currentPlanYM) App._loadPlan(App._currentPlanYM, true);
+                }
+            },
+        };
+        // จดการเขียนแผนของหน้านี้เอง (เฉพาะ path แผน — audit log ฯลฯ ไม่นับ)
+        (function () {
+            const fsx = firebase.firestore;
+            const proto = fsx.DocumentReference && fsx.DocumentReference.prototype;
+            if (!proto) return;
+            ['set', 'update', 'delete'].forEach(n => {
+                const orig = proto[n];
+                if (typeof orig !== 'function') return;
+                proto[n] = function () {
+                    if (/(^|\/)plans(\/|$)|_main$/.test(this.path || '')) RpnHost._hostDirty = true;
+                    return orig.apply(this, arguments);
+                };
+            });
+        })();
+
         // Patch Nav.go สำหรับ dashboard
         const _origNavGo = Nav.go;
         Nav.go = (page) => {
+            const isRpn = (page === 'rpn' || page === 'rpnoverview');
+            if (Nav._page === 'rpn' && !isRpn) RpnHost.leave();
+            Nav._page = isRpn ? 'rpn' : page;
             _origNavGo(page);
+            if (isRpn) RpnHost.show(page === 'rpnoverview' ? 'overview' : 'planning');
             if (page === 'dashboard' && typeof Dashboard !== 'undefined') Dashboard._render();
             if (page === 'auditlog' && typeof AuditLog !== 'undefined') AuditLog.renderPage();
             // sync hamburger ทุกครั้งที่เปลี่ยน page
@@ -1214,7 +1285,7 @@
             }
 
             if (_session.role === 'sales') {
-                ['nav-planning', 'nav-allroutes', 'nav-cellsplit'].forEach(id => {
+                ['nav-rpn', 'nav-rpnoverview', 'nav-allroutes', 'nav-cellsplit'].forEach(id => {
                     const el = document.getElementById(id);
                     if (el) el.style.display = 'none';
                 });

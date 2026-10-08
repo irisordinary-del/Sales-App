@@ -402,7 +402,9 @@ const App = {
                 App._getWithTimeout(routeRef,  15000),
             ]);
             const planConfig     = cfgSnap.exists   ? (cfgSnap.data().calendarConfig || null) : null;
-            const stores         = routeSnap.exists ? (routeSnap.data().stores        || [])  : [];
+            // ✅ RPN V0: ซ่อนร้าน "ออกจากแผน" + ใช้วันที่จริงจาก RPN (ดู RpnCompat)
+            const stores         = RpnCompat.clean(ym, State.myRoute, routeSnap.exists ? routeSnap.data().stores : []);
+            const routeRpn       = { [State.myRoute]: routeSnap.exists ? RpnCompat.calOf(routeSnap.data(), stores) : null };
             // ✅ ตั้งค่าปฏิทินเฉพาะสาย (ถ้ามี) ใช้แทนค่า default ของศูนย์สำหรับสายนี้
             const routeOverride  = routeSnap.exists ? (routeSnap.data().calendarOverride || null) : null;
             const calendarConfig = routeOverride || planConfig;
@@ -412,13 +414,14 @@ const App = {
             State.planCache[ym]  = {
                 stores, calendarConfig, ym, _ok: true,
                 routeOverrides: { [State.myRoute]: routeOverride },
+                routeRpn,
                 confirmedBy, confirmedAt,
             };
             return State.planCache[ym];
         } catch(e) {
             console.warn('loadPlanData:', ym, e);
             const fallback = ym === State.activePlanYM && State.allStores.length > 0
-                ? { stores: State.allStores, calendarConfig: State.calendarConfig, ym, _ok: true }
+                ? { stores: State.allStores, calendarConfig: State.calendarConfig, ym, _ok: true, routeOverrides: State.activeRouteOverrides || {}, routeRpn: State.activeRouteRpn || {} }
                 : null;
             if (fallback) State.planCache[ym] = fallback;
             return fallback || { stores: [], calendarConfig: null, ym };
@@ -501,7 +504,8 @@ const App = {
         const _planData      = _planSnap?.exists ? _planSnap.data() : {};
         State.calendarConfig = _planData.calendarConfig || null;
         // ✅ FIX: fallback ไปใช้ routeList จาก centerDoc ถ้า plan doc ไม่มี
-        State.routeList      = ((_planData.routeList?.length > 0
+        // ✅ RPN V0: ตัดสายเทียม "รอจัดสาย" ออก (ดู RpnCompat)
+        State.routeList      = RpnCompat.cleanRouteList((_planData.routeList?.length > 0
             ? _planData.routeList
             : _centerData.routeList) || [])
             .sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
@@ -520,13 +524,15 @@ const App = {
         // ปฏิทินของเดือนที่ใช้งานอยู่ (active month) แล้วไม่เห็น override เฉพาะสายเลย ตกไปใช้
         // ค่า default ของศูนย์เสมอ ทั้งที่เดือนอื่นๆ (โหลดผ่าน loadPlanDataForSup) เห็น override ถูกต้อง
         const _routeOverridesActive = {};
+        const _routeRpnActive = {};
 
         for (let i = 0; i < State.routeList.length; i += BATCH) {
             const chunk = State.routeList.slice(i, i + BATCH);
             await Promise.all(chunk.map(async (routeId) => {
                 try {
                     const rd = await App._getWithTimeout(_routesCol.doc(routeId), 8000);
-                    State.allRoutes[routeId] = rd.exists ? (rd.data().stores || []) : [];
+                    State.allRoutes[routeId] = RpnCompat.clean(_useYM, routeId, rd.exists ? rd.data().stores : []);
+                    _routeRpnActive[routeId] = rd.exists ? RpnCompat.calOf(rd.data(), State.allRoutes[routeId]) : null;
                     _confirmations[routeId]  = rd.exists ? { confirmedBy: rd.data().confirmedBy || null, confirmedAt: rd.data().confirmedAt || null } : { confirmedBy: null, confirmedAt: null };
                     _routeOverridesActive[routeId] = rd.exists ? (rd.data().calendarOverride || null) : null;
                 } catch(e) { State.allRoutes[routeId] = []; }
@@ -537,6 +543,7 @@ const App = {
         }
         State.allStores = Object.values(State.allRoutes).flat();
         State.activeRouteOverrides = _routeOverridesActive;
+        State.activeRouteRpn       = _routeRpnActive;
 
         // seed planCache เดือน active — ปฏิทินใช้ได้ทันที
         State.planCache[_useYM] = {
@@ -546,6 +553,8 @@ const App = {
             _ok:            true,
             confirmations:  _confirmations,
             routeOverrides: _routeOverridesActive,
+            routeRpn:       _routeRpnActive,
+            routeStores:    State.allRoutes,
         };
 
         LoadBar.setProgress(80, 'โหลดยอดขาย...');
@@ -599,11 +608,12 @@ const App = {
             const planRef        = db.collection('appData').doc(centerDocId).collection('plans').doc(ym);
             const cfgSnap        = await App._getWithTimeout(planRef, 10000);
             const calendarConfig = cfgSnap.exists ? (cfgSnap.data().calendarConfig || null) : null;
-            const routeList      = cfgSnap.exists ? (cfgSnap.data().routeList || []) : [];
+            const routeList      = RpnCompat.cleanRouteList(cfgSnap.exists ? (cfgSnap.data().routeList || []) : []);
             // โหลด stores ทุกสาย batch 5 — เก็บ calendarOverride ของแต่ละสายไว้ด้วย
             // (ใช้ตอน Supervisor เลือกดูสายที่มี override เฉพาะตัว)
             let stores = [];
             const routeOverrides = {};
+            const routeRpn = {}, routeStores = {};
             // ✅ NEW (2026-08-29): เก็บสถานะ "ยืนยันรับสายวิ่ง" ของแต่ละสายไว้ด้วย (ดู RouteConfirm)
             const confirmations = {};
             const BATCH = 5;
@@ -614,13 +624,16 @@ const App = {
                 );
                 docs.forEach((d, idx) => {
                     if (d?.exists) {
-                        stores = stores.concat(d.data().stores || []);
+                        const rs = RpnCompat.clean(ym, chunk[idx], d.data().stores);
+                        routeStores[chunk[idx]] = rs;
+                        routeRpn[chunk[idx]]    = RpnCompat.calOf(d.data(), rs);
+                        stores = stores.concat(rs);
                         routeOverrides[chunk[idx]] = d.data().calendarOverride || null;
                         confirmations[chunk[idx]]  = { confirmedBy: d.data().confirmedBy || null, confirmedAt: d.data().confirmedAt || null };
                     }
                 });
             }
-            State.planCache[ym] = { stores, calendarConfig, ym, _ok: true, routeOverrides, confirmations };
+            State.planCache[ym] = { stores, calendarConfig, ym, _ok: true, routeOverrides, confirmations, routeRpn, routeStores };
         } catch(e) {
             console.warn('loadPlanDataForSup:', ym, e);
             return { stores: [], calendarConfig: null, ym };
@@ -725,7 +738,8 @@ const App = {
         // process stores
         try {
             const rd = _routeResult.status === 'fulfilled' ? _routeResult.value : null;
-            State.allStores = rd?.exists ? (rd.data().stores || []) : [];
+            State.allStores = RpnCompat.clean(_useYM, State.myRoute, rd?.exists ? rd.data().stores : []);
+            State.activeRouteRpn = { [State.myRoute]: rd?.exists ? RpnCompat.calOf(rd.data(), State.allStores) : null };
             // ✅ FIX (2026-09-05): ต้องเก็บ calendarOverride ของสายตัวเองไว้ด้วย ไม่งั้นปฏิทิน
             // ของเดือนที่ใช้งานอยู่ตอนนี้ (active month) จะไม่เห็น override เฉพาะสาย — ตกไปใช้
             // ค่า default ของศูนย์เสมอ (routeOverrides ถูกใช้จริงใน CalendarCtrl.render())
@@ -741,9 +755,10 @@ const App = {
                     confirmedBy: rd?.exists ? (rd.data().confirmedBy || null) : null,
                     confirmedAt: rd?.exists ? (rd.data().confirmedAt || null) : null,
                     routeOverrides: State.activeRouteOverrides,
+                    routeRpn: State.activeRouteRpn,
                 };
             }
-        } catch(e) { State.allStores = []; State.activeRouteOverrides = {}; }
+        } catch(e) { State.allStores = []; State.activeRouteOverrides = {}; State.activeRouteRpn = {}; }
         isMainLoaded = true; checkReady();
 
         // process sales
@@ -760,7 +775,8 @@ const App = {
         const _liveRouteRef = _centerRef.collection('plans').doc(_useYM).collection('routes').doc(State.myRoute);
         App._unsubRoute = _liveRouteRef.onSnapshot(rd => {
             if (!rd.exists) return;
-            State.allStores = rd.data().stores || [];
+            State.allStores = RpnCompat.clean(_useYM, State.myRoute, rd.data().stores);
+            State.activeRouteRpn = { [State.myRoute]: RpnCompat.calOf(rd.data(), State.allStores) };
             // ✅ FIX (2026-09-05): sync override สดๆ ด้วย (เผื่อแอดมินแก้ระหว่างที่เซลเปิดแอปอยู่)
             State.activeRouteOverrides = { [State.myRoute]: rd.data().calendarOverride || null };
             if (State.activePlanYM) {
@@ -773,6 +789,7 @@ const App = {
                     stores: State.allStores, calendarConfig: State.calendarConfig, ym: State.activePlanYM, _ok: true,
                     confirmedBy: rd.data().confirmedBy || null, confirmedAt: rd.data().confirmedAt || null,
                     routeOverrides: State.activeRouteOverrides,
+                    routeRpn: State.activeRouteRpn,
                 };
             }
             if (State.isLoaded) {
@@ -784,6 +801,78 @@ const App = {
         });
 
         // sales โหลดแล้วใน Promise.allSettled ด้านบน
+    },
+};
+
+// ─── RpnCompat — อ่านแผนที่ทำจาก RPN V0 (โปรแกรมวางแผนของบริษัท, rpn/) ──────────
+// ✅ NEW (2026-10-08): ตั้งแต่ใช้ RPN V0 เป็นตัววางแผน ข้อมูลในเอกสารสายมีของใหม่ 3 อย่างที่แอปเซลต้องรู้
+//   1) สายเทียม "รอจัดสาย" (กองร้านใหม่ที่ยังไม่มีเจ้าของ) อยู่ใน routeList — ไม่ใช่สายวิ่งจริง ซ่อนเสมอ
+//   2) ร้าน s.inactive = true คือร้านที่ "ออกจากแผน" (พักไว้ ไม่ลบ) — ไม่แสดง แต่ตอนแอปเซลเขียน stores
+//      กลับ (ลากสลับลำดับ) ต้องใส่คืนให้ครบ ไม่งั้นร้านที่พักไว้หายจาก Firestore → ใช้ clean()/restore() คู่กันเสมอ
+//   3) rpnCal = วันที่เข้าเยี่ยมจริงของแต่ละ Day ที่ RPN คำนวณไว้ (rpn/rpn-online.js) — ตรงกับไฟล์ DMS
+//      (รอบสั้นวิ่งซ้ำ +14 วัน, F1/F2 รายตลาด, ช่องที่แยก ✂️ ที่เลข Day เกินความยาวรอบ ฯลฯ) ใช้แทนการ
+//      คำนวณปฏิทินเองเมื่อ sig ตรงกับร้านที่โหลดมา — ถ้าไม่ตรง (มีใครแก้วันโดยไม่ผ่าน RPN) ถอยไปใช้
+//      CalendarCtrl แบบเดิม · hash()/sig() ต้องตรงกับ rpn/rpn-online.js ทุกตัวอักษร
+const RpnCompat = {
+    UNASSIGNED: 'รอจัดสาย',
+    _hidden: {},    // `${ym}|${route}` → ร้าน inactive ของสายนั้น (ไม่แสดง แต่ต้องเขียนกลับครบ)
+
+    hash: (str) => { let h = 5381; for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0; return (h >>> 0).toString(36); },
+    sig: (stores) => RpnCompat.hash((stores || []).filter(s => s && !s.inactive)
+        .map(s => String(s.id) + ':' + (s.days || []).slice().sort().join(','))
+        .sort().join('|')),
+
+    cleanRouteList: (list) => (list || []).filter(r => r && r !== RpnCompat.UNASSIGNED),
+
+    clean: (ym, route, stores) => {
+        const all = stores || [];
+        const hidden = all.filter(s => s && s.inactive);
+        RpnCompat._hidden[ym + '|' + route] = hidden;
+        return hidden.length ? all.filter(s => s && !s.inactive) : all;
+    },
+    restore: (ym, route, stores) => {
+        const hidden = RpnCompat._hidden[ym + '|' + route] || [];
+        if (!hidden.length) return stores;
+        const ids = new Set(stores.map(s => s.id));
+        return stores.concat(hidden.filter(s => !ids.has(s.id)));
+    },
+
+    /** rpnCal ของเอกสารสาย ถ้ายังตรงกับร้านที่โหลดมา (visible = หลัง clean()) — ไม่งั้น null */
+    calOf: (data, visible) => {
+        const c = data && data.rpnCal;
+        if (!c || c.v !== 1 || !c.days) return null;
+        return c.sig === RpnCompat.sig(visible) ? c : null;
+    },
+
+    _iso: (y, m, d) => `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`,
+    _num: (label) => parseInt(String(label || '').replace(/\D/g, ''), 10) || 0,
+
+    /** Day ที่วิ่งวันที่นี้ (ถ้ามีหลายตลาดชนกัน เอาเลข Day น้อยสุด) */
+    labelOn: (rpn, year, month, dateNum) => {
+        const key = RpnCompat._iso(year, month, dateNum);
+        const hit = Object.keys(rpn.days).filter(k => (rpn.days[k].d || []).includes(key));
+        return hit.sort((a, b) => RpnCompat._num(a) - RpnCompat._num(b))[0] || null;
+    },
+    /** วันที่ (เลขวันในเดือน) ทั้งหมดที่ Day นี้วิ่งในเดือนนั้น */
+    datesOf: (rpn, dayLabel, year, month) => {
+        const pre = RpnCompat._iso(year, month, 1).slice(0, 8);
+        return ((rpn.days[dayLabel] || {}).d || []).filter(s => s.startsWith(pre))
+            .map(s => parseInt(s.slice(8), 10)).sort((a, b) => a - b);
+    },
+    marketOf: (rpn, dayLabel) => (rpn && rpn.days && rpn.days[dayLabel] && rpn.days[dayLabel].m) || '',
+
+    /** rpnCal ของสายที่กำลังดูในเดือนนั้น (เลือกสายแบบเดียวกับ CalendarCtrl._resolveActiveCfg) */
+    active: (year, month) => {
+        const ym = `${year}_${String(month + 1).padStart(2, '0')}`;
+        const route = (App.isSupervisor() && SupervisorUI._selectedRoute) ? SupervisorUI._selectedRoute : State.myRoute;
+        return State.planCache[ym]?.routeRpn?.[route] || null;
+    },
+    /** ร้านของสายที่กำลังดู — Supervisor ใช้รายการต่อสายจากเอกสารสายจริง (salesCode ของร้านที่ RPN ย้ายสาย
+     *  ยังเป็นรหัสเดิมจนกว่าจะส่งออก DMS จึงกรองด้วย salesCode ไม่ได้แล้ว) */
+    storesOfRoute: (plan, route, fallback) => {
+        if (plan?.routeStores?.[route]) return plan.routeStores[route];
+        if (State.allRoutes?.[route] && (!plan || plan.ym === State.activePlanYM)) return State.allRoutes[route];
+        return (fallback || []).filter(s => s.salesCode === route);
     },
 };
 
@@ -844,9 +933,17 @@ function getDayMarketList(day, forMonth, forYear) {
         const [ly, lm] = loadedYM.split('_').map(Number);
         if (forYear !== ly || forMonth !== lm - 1) return [];
     }
+    // ✅ RPN V0: ชื่อตลาดรายวันจาก RPN (ของเดือนที่โหลดอยู่) มาก่อน
+    {
+        const [_ay, _am] = (State.activePlanYM || '').split('_').map(Number);
+        const _rm = (_ay && _am) ? RpnCompat.marketOf(RpnCompat.active(_ay, _am - 1), day) : '';
+        if (_rm) return [trimMarketName(_rm)];
+    }
     // ✅ FIX-SUP: Supervisor ที่เลือกสายแล้ว → เฉพาะร้านในสายนั้น ไม่ปนสายอื่น (เหมือน CalendarCtrl.render)
+    // ✅ RPN V0: State.allStores ของ Supervisor ที่เลือกสายแล้ว = ร้านของสายนั้นอยู่แล้ว (SupervisorUI.selectRoute)
+    // เดิมกรองซ้ำด้วย salesCode ซึ่งพลาดร้านที่ RPN ย้ายสาย (salesCode ยังเป็นรหัสเดิม)
     const _sourceStores = (App.isSupervisor() && SupervisorUI._selectedRoute)
-        ? State.allStores.filter(s => s.salesCode === SupervisorUI._selectedRoute)
+        ? RpnCompat.storesOfRoute(null, SupervisorUI._selectedRoute, State.allStores)
         : State.allStores;
     // ✅ FIX-F2: ร้าน F2 (ไปมากกว่า 1 วัน) มีช่อง marketName ได้ค่าเดียว ผูกกับวันแรก (days[0])
     // เท่านั้น — ถ้าเช็คด้วย .includes(day) ตรงๆ ร้าน F2 จะเอาชื่อของวันแรกไปปนกับวันที่สองด้วย
@@ -1101,8 +1198,9 @@ const Processor = {
         // ✅ BUGFIX (2026-08-29): เดิม .set({stores}) ไม่มี merge:true — Firestore แทนที่เอกสาร
         // ทั้งก้อน ทำให้ calendarOverride ของสายนี้หายไปเงียบๆ ทุกครั้งที่ลากสลับลำดับร้าน
         // ✅ NEW: สลับลำดับร้าน = แก้ไขสายนี้ — รีเซ็ตสถานะ "ยืนยันรับสายวิ่ง" ด้วย (ต้องยืนยันใหม่)
+        // ✅ RPN V0: ใส่ร้าน "ออกจากแผน" ที่ซ่อนไว้คืนก่อนเขียน — ไม่งั้นหายจาก Firestore (ดู RpnCompat)
         _writeRef.set({
-            stores: updated,
+            stores: RpnCompat.restore(State.activePlanYM, State.myRoute, updated),
             confirmedBy: firebase.firestore.FieldValue.delete(),
             confirmedAt: firebase.firestore.FieldValue.delete(),
         }, { merge: true })
@@ -1636,7 +1734,12 @@ const CalendarCtrl = {
         const plan  = State.planCache[ym];
         const route = (App.isSupervisor() && SupervisorUI._selectedRoute) ? SupervisorUI._selectedRoute : State.myRoute;
         const override = plan?.routeOverrides?.[route];
-        return override || (plan !== undefined ? plan?.calendarConfig : State.calendarConfig);
+        const base = override || (plan !== undefined ? plan?.calendarConfig : State.calendarConfig);
+        // ✅ RPN V0 (2026-10-08): สายที่มีวันที่จริงจาก RPN (rpnCal) → ใช้ชุดนั้นเป็นหลัก ห่อเป็นโหมด 'rpn'
+        // คงค่าเดิม (holidays ฯลฯ) ไว้ให้ส่วนแสดงผล และเก็บ _base ไว้เผื่อวันที่ไม่มีตลาดไหนวิ่ง (ดู getDayLabelForCfg)
+        const rpn = plan?.routeRpn?.[route];
+        if (rpn) return Object.assign({}, base || {}, { mode: 'rpn', _rpn: rpn, _base: base || null, _baseMode: base?.mode || null });
+        return base;
     },
 
     // ✅ ข้อ 6: คืน dayLabel ของวันนี้ตาม calendarConfig (ของสายตัวเอง ถ้ามี override)
@@ -1724,6 +1827,14 @@ const CalendarCtrl = {
         // ทำให้วันที่ไม่มีร้าน/ตลาดเลย (dayLabel = null) กดเข้าไปดู day sheet ไม่ได้เลย
         // ที่ถูกต้องคือ "Day N" ควรมีอยู่เสมอตามโครงสร้างปฏิทิน ไม่ขึ้นกับว่าวันนั้นมีร้านหรือไม่
         // (การมีร้านหรือไม่ ใช้ตัดสินแค่ "hasRoute" / จุดสีน้ำเงินเท่านั้น ไม่ควรใช้ตัดสินว่าคลิกได้ไหม)
+        // ✅ RPN V0: วันที่จริงจาก RPN (ดู _resolveActiveCfg / RpnCompat) — วันที่ไม่มีตลาดไหนวิ่งเลย ใช้ปฏิทินเดิม
+        // คำนวณ Day ให้กดดูได้ตามเดิม แต่เฉพาะ Day ที่ RPN ไม่ได้วางไว้ที่วันอื่น (กัน Day เดียวโผล่ 2 ที่)
+        if (cfg && cfg.mode === 'rpn') {
+            const hit = RpnCompat.labelOn(cfg._rpn, year, month, dateNum);
+            if (hit) return hit;
+            const fb = cfg._base ? CalendarCtrl.getDayLabelForCfg(dateNum, cfg._base, stores, year, month) : null;
+            return (fb && !cfg._rpn.days[fb]) ? fb : null;
+        }
         if (!cfg || (!cfg.mode && (!cfg.mapping || Object.keys(cfg.mapping).length === 0))) {
             return `Day ${dateNum}`;
         }
@@ -1776,6 +1887,17 @@ const CalendarCtrl = {
         // ✅ FIX (2026-09-05): เดิมอ่าน State.calendarConfig (ศูนย์) ตรงๆ ไม่เช็ค override เฉพาะสาย
         const cfg = CalendarCtrl._resolveActiveCfg(CalendarCtrl._year, CalendarCtrl._month);
         const targetNum = parseInt(String(dayLabel || '').replace('Day ', ''));
+
+        // ✅ RPN V0: วันแรกที่ Day นี้วิ่งจริงในเดือนที่เปิดดู (ไม่มีใน RPN = ถอยไปปฏิทินเดิม เหมือน getDayLabelForCfg)
+        if (cfg && cfg.mode === 'rpn') {
+            if (cfg._rpn.days[dayLabel]) return RpnCompat.datesOf(cfg._rpn, dayLabel, CalendarCtrl._year, CalendarCtrl._month)[0] || null;
+            if (!cfg._base) return null;
+            const _y = CalendarCtrl._year, _m = CalendarCtrl._month, _dim = new Date(_y, _m + 1, 0).getDate();
+            for (let d = 1; d <= _dim; d++) {
+                if (CalendarCtrl.getDayLabelForCfg(d, cfg, State.allStores, _y, _m) === dayLabel) return d;
+            }
+            return null;
+        }
 
         // ✅ FIX: เดิมฟังก์ชันนี้ไม่มี branch สำหรับโหมด date/default/legacy เลย (คืน null เสมอ
         // ทั้งที่เป็นกรณีที่ง่ายที่สุด — Day N ตรงกับวันที่ N ของเดือนตรงๆ) ทำให้ผู้เรียกต้อง
@@ -1846,6 +1968,16 @@ const CalendarCtrl = {
         // ✅ FIX (2026-09-05): เดิมอ่าน State.calendarConfig (ศูนย์) ตรงๆ ไม่เช็ค override เฉพาะสาย
         const cfg = CalendarCtrl._resolveActiveCfg(year, month);
         if (!cfg) return [];
+
+        // ✅ RPN V0: Day หนึ่งวิ่งได้หลายวันในเดือน (รอบสั้น +14 วัน / F2) — RPN บอกมาครบแล้ว
+        if (cfg.mode === 'rpn') {
+            if (cfg._rpn.days[dayLabel]) return RpnCompat.datesOf(cfg._rpn, dayLabel, year, month);
+            const dim = new Date(year, month + 1, 0).getDate(), out = [];
+            for (let d = 1; d <= dim; d++) {
+                if (CalendarCtrl.getDayLabelForCfg(d, cfg, State.allStores, year, month) === dayLabel) out.push(d);
+            }
+            return out;
+        }
 
         if (cfg.mode === 'weekday') {
             const wmap = cfg.weekdayMap || {};
@@ -1942,8 +2074,9 @@ const CalendarCtrl = {
         // ไม่งั้นชื่อตลาด/จุดสีในปฏิทินจะปนกับสายอื่นในศูนย์เดียวกัน (เทียบ salesCode ตรงตัว
         // เพราะ field นี้คงที่ไม่ขึ้นกับเดือน ต่างจาก State.allRoutes ที่มีแค่เดือน active)
         const _renderStoresAll = _renderPlan?.stores || State.allStores;
+        // ✅ RPN V0: ใช้รายการร้านต่อสายจากเอกสารสายจริง (ร้านที่ RPN ย้ายสายยังมี salesCode เดิม)
         const _renderStores = (App.isSupervisor() && SupervisorUI._selectedRoute)
-            ? _renderStoresAll.filter(s => s.salesCode === SupervisorUI._selectedRoute)
+            ? RpnCompat.storesOfRoute(_renderPlan, SupervisorUI._selectedRoute, _renderStoresAll)
             : _renderStoresAll;
 
         const modeEl = document.getElementById('calendar-mode-badge');
@@ -1962,7 +2095,7 @@ const CalendarCtrl = {
                     modeEl.textContent = '⚠️ ยังไม่ได้ตั้งค่าปฏิทิน';
                     modeEl.style.background = '#fef3c7'; modeEl.style.color = '#92400e';
                 }
-            } else if (_renderCfg.mode === 'cycle') {
+            } else if (_renderCfg.mode === 'cycle' || _renderCfg._baseMode === 'cycle') {
                 modeEl.textContent = '🔄 Cycle D1-' + (_renderCfg.cycleDays || 24);
                 modeEl.style.background = '#ede9fe'; modeEl.style.color = '#5b21b6';
             } else {
@@ -1999,6 +2132,9 @@ const CalendarCtrl = {
             }
 
             const mktsInCell = (dayLabel && _renderPlan) ? (() => {
+                // ✅ RPN V0: ชื่อตลาดรายวันจาก RPN (ตัวเดียวกับที่ส่งออก DMS) มาก่อน
+                const _rm = _renderCfg?.mode === 'rpn' ? RpnCompat.marketOf(_renderCfg._rpn, dayLabel) : '';
+                if (_rm) return [trimMarketName(_rm)];
                 // ✅ FIX-F2: เหมือน getDayMarketList — นับเฉพาะร้านที่วันนี้เป็นวันแรก (days[0])
                 // ของมัน กันร้าน F2 เอาชื่อตลาดวันแรกไปโผล่ปนในวันที่สอง
                 const names = new Set();
@@ -2085,6 +2221,9 @@ const CalendarCtrl = {
 
         // ✅ FIX-F2: นับเฉพาะร้านที่วันนี้เป็นวันแรก (days[0]) ของมัน — เหมือน getDayMarketList
         const mkts       = (() => {
+            // ✅ RPN V0: ชื่อตลาดรายวันจาก RPN มาก่อน
+            const _rm = RpnCompat.marketOf(RpnCompat.active(_sy, _sm), dayLabel);
+            if (_rm) return [trimMarketName(_rm)];
             const names = new Set();
             _activeStores.forEach(s => {
                 if (s.days?.[0] === dayLabel && s.marketName)
@@ -2291,7 +2430,7 @@ const CalendarCtrl = {
         const _curYM = State.activePlanYM || '';
         if (_curYM && State.allStores.length > 0 && !State.planCache[_curYM]?._ok) {
             // ✅ FIX (2026-09-05): ใส่ routeOverrides ที่เก็บไว้ตอนโหลดแอปด้วย (เช่นเดียวกับ 2 จุดข้างบน)
-            State.planCache[_curYM] = { stores: State.allStores, calendarConfig: State.calendarConfig, ym: _curYM, _ok: true, routeOverrides: State.activeRouteOverrides || {} };
+            State.planCache[_curYM] = { stores: State.allStores, calendarConfig: State.calendarConfig, ym: _curYM, _ok: true, routeOverrides: State.activeRouteOverrides || {}, routeRpn: State.activeRouteRpn || {} };
         }
         CalendarCtrl.render();
         popup.style.display = 'block';
@@ -2636,8 +2775,9 @@ const SupervisorUI = {
         // ✅ BUGFIX (2026-08-29): merge:true — ดู comment เดียวกันด้านบน (จุดลากสลับลำดับของ
         // สายตัวเอง) จุดนี้คือ Supervisor/ASM ดูสายลูกทีมแล้วลากสลับลำดับแทน มีปัญหาเดียวกัน
         // ✅ NEW: รีเซ็ตสถานะ "ยืนยันรับสายวิ่ง" ของสายที่ถูกแก้ไขด้วย
+        // ✅ RPN V0: ใส่ร้าน "ออกจากแผน" ที่ซ่อนไว้คืนก่อนเขียน (ดู RpnCompat)
         _writeRef.set({
-            stores: updated,
+            stores: RpnCompat.restore(State.activePlanYM, routeId, updated),
             confirmedBy: firebase.firestore.FieldValue.delete(),
             confirmedAt: firebase.firestore.FieldValue.delete(),
         }, { merge: true })
