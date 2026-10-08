@@ -98,40 +98,13 @@ Admin approves in "คำขอย้ายวัน" → `MoveRequestAdmin.appr
 
 `rpn-online.js` adds our old formula (`{route} D{NN} {top-2 tambons} {district} {province}`, same as `FileManager._autoFillMarketNames`) to RPN's market-suggest UI without editing RPN files: an extra "สูตรเดิม" chip in the per-day panel, a "สูตรเดิม" option on every row of the "🗂 ทั้งสาย" table, and a "📛 สูตรเดิมทุกวัน" button there. The user picks per day or all at once.
 
-### `plan-lock.js` — temporarily read-only months
+### `plan-lock.js` — read-only plan months
 
-Loaded right after the Firebase SDK in `index.html` and `rpn/RoutePlannerV0.html` (not `sales.html`). Rejects every `set`/`update`/`delete` (single doc or batch) under `plans/{ym}` for months in its `LOCKED` list — applies to **all centers**. Was `['2026_11','2026_12']` during the RPN trial on 2026-10-08, unlocked the same day per the user (currently `[]`). RPN shows a "ดูได้อย่างเดียว" banner on locked months and `rpn-online.js` skips rpnCal reconcile for them. To unlock, edit `LOCKED` and push.
+Loaded right after the Firebase SDK in `index.html` and `rpn/RoutePlannerV0.html` (not `sales.html`). Rejects every `set`/`update`/`delete` (single doc or batch) under `appData/{center}/plans/{ym}` when that month is locked. Two lock sources:
+- **Per center (normal):** `{CENTER}_main.lockedMonths: ['YYYY_MM']`, toggled by admins from the sidebar "🔒 ล็อกแผน" (`PlanLockUI` in index.html; supervisors see status only; logged as `PLAN_LOCK`/`PLAN_UNLOCK`). Every open admin page and RPN iframe listens to the center doc via `onSnapshot`, so it takes effect immediately without a deploy. Firestore rules already accept the field (center-doc whitelist is `hasAny` on the merged doc).
+- **All centers:** the hard-coded `LOCKED` array in the file (edit + push). Was `['2026_11','2026_12']` during the RPN trial on 2026-10-08, unlocked the same day (currently `[]`).
 
----
-
-## 🗄️ Firestore Structure
-
-```
-appData/
-  app_users                                    ← user accounts (role, centerId, password hash)
-  app_centers                                  ← { centerId: {name, docId, routeCount} } for the center picker
-  {CENTER_ID}_main/                            ← e.g. "402_main" (window.CENTER_DOC)
-    routeList, calendarConfig, currentPlanYM   ← currentPlanYM = the month Sales sees "live" (see Plan system below)
-    moveRequests/{autoId}                      ← sales rep's requests to move a store's day; route/status/requestedAt fields
-    plans/{YYYY_MM}/
-      calendarConfig: {...}                    ← THIS MONTH's default calendar (center-wide) — see Calendar Mode below
-      routeOverrides is NOT stored here — it lives per-route, see below
-      routes/{routeCode}/
-        stores: [ {...Store Object} ]
-        calendarOverride: {...} | (absent)      ← optional, THIS route + THIS month only; wins over plans/{ym}.calendarConfig
-        confirmedBy, confirmedAt                ← sales rep's "รับทราบสายวิ่ง" ack; reset to unset whenever days/calendar change
-
-targets/{CENTER_ID}_{YYYY_MM}                  ← per-route sales targets (current format, centerId-prefixed)
-targets/{YYYY_MM}                              ← legacy format, read-only fallback — do not write to it
-sellout/{CENTER_ID}_{YYYY_MM}/chunks/          ← sales data, current format
-sellout/{YYYY_MM}/chunks/                      ← legacy format (pre centerId-prefix), still has real historical data
-skuDistribution/{campaignId}/
-auditLogs/{centerId}/logs/{logId}
-```
-
-**Composite indexes**: tracked in `firestore.indexes.json` (added 2026-09-18, deploy with `firebase deploy --only firestore:indexes` — requires `firebase login` with project access first). Currently just one: `moveRequests` on `(route ASC, requestedAt DESC)`, needed by `MoveRequest.checkUpdates()` (sales-app.js). If you add a new query that combines an equality `where()` with an `orderBy()` on a different field, Firestore will throw a "query requires an index" error with a direct console link to create it — add the same definition to `firestore.indexes.json` too so it isn't a one-off manual click that gets lost on a fresh project/emulator.
-
-**Important**: `calendarConfig` is set **independently per month** (`plans/{ym}.calendarConfig`) — a center is not "in cycle mode" or "in date mode" globally, each month's plan carries its own mode and can differ from the month before or after it. Never assume month N+1 uses the same mode as month N; always read that month's own `plans/{ym}.calendarConfig` (or a route's override) before interpreting its stores' `days` values or copying schedules between months.
+RPN shows a red "ดูได้อย่างเดียว" banner on locked months; `rpn-online.js` skips rpnCal reconcile and the admin can't approve reorder requests for them. Client-side only (like the app's auth) and there's a short window after page load before the center doc arrives.
 
 ### Store Object fields
 ```js

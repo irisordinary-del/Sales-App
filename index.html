@@ -178,6 +178,11 @@
                 <span class="hidden md:inline">คำขอย้ายวัน</span>
                 <span id="move-request-badge" class="hidden" style="position:absolute;top:6px;right:10px;background:#dc2626;color:#fff;font-size:10px;font-weight:900;min-width:16px;height:16px;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:0 3px;">0</span>
             </button>
+            <button onclick="PlanLockUI.open()" id="nav-planlock" class="sidebar-menu w-full flex items-center justify-center md:justify-start px-0 md:px-5 py-3 md:py-3.5 text-sm font-bold" style="position:relative;" title="ล็อก/ปลดล็อกแผนรายเดือนของศูนย์นี้">
+                <span class="text-lg md:mr-3">🔒</span>
+                <span class="hidden md:inline">ล็อกแผน</span>
+                <span id="plan-lock-badge" class="hidden" style="position:absolute;top:6px;right:10px;background:#991b1b;color:#fff;font-size:10px;font-weight:900;min-width:16px;height:16px;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:0 3px;">0</span>
+            </button>
             <button onclick="RouteConfirmAdmin.open()" id="nav-routeconfirm" class="sidebar-menu w-full flex items-center justify-center md:justify-start px-0 md:px-5 py-3 md:py-3.5 text-sm font-bold" style="position:relative;" title="เช็คว่าสายไหนยืนยันรับสายวิ่งแล้วบ้าง">
                 <span class="text-lg md:mr-3">✅</span>
                 <span class="hidden md:inline">เช็คการยืนยัน</span>
@@ -1310,7 +1315,7 @@
             }
 
             if (_session.role === 'sales') {
-                ['nav-rpn', 'nav-rpnoverview', 'nav-moverequest', 'nav-routeconfirm', 'nav-allroutes', 'nav-cellsplit'].forEach(id => {
+                ['nav-rpn', 'nav-rpnoverview', 'nav-moverequest', 'nav-planlock', 'nav-routeconfirm', 'nav-allroutes', 'nav-cellsplit'].forEach(id => {
                     const el = document.getElementById(id);
                     if (el) el.style.display = 'none';
                 });
@@ -2781,6 +2786,83 @@
         };
 
         // ═════════════════════════════════════════════════════════════════
+        // ✅ NEW (2026-10-08): PlanLockUI — ล็อก/ปลดล็อกแผนรายเดือนของศูนย์นี้ (เมนู "🔒 ล็อกแผน")
+        // เก็บที่ {ศูนย์}_main.lockedMonths · ตัวล็อกจริงอยู่ใน plan-lock.js (ดักการเขียน plans/{เดือน} ทั้งหน้านี้และ RPN)
+        // admin เท่านั้นที่กดได้ — supervisor เห็นสถานะอย่างเดียว (ด่านฝั่งหน้าเว็บ ไม่ได้บังคับใน firestore.rules)
+        // ═════════════════════════════════════════════════════════════════
+        const PlanLockUI = {
+            _isAdmin: () => Auth.getSession()?.role === 'admin',
+            _modal: () => {
+                let m = document.getElementById('plan-lock-modal');
+                if (!m) {
+                    m = document.createElement('div');
+                    m.id = 'plan-lock-modal';
+                    m.className = 'hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4';
+                    m.addEventListener('click', (e) => { if (e.target === m) PlanLockUI.close(); });
+                    document.body.appendChild(m);
+                }
+                return m;
+            },
+            open: () => { PlanLockUI._modal().classList.remove('hidden'); PlanLockUI.render(); },
+            close: () => PlanLockUI._modal().classList.add('hidden'),
+            render: () => {
+                PlanLockUI.badge();
+                const m = document.getElementById('plan-lock-modal');
+                if (!m || m.classList.contains('hidden')) return;
+                const admin = PlanLockUI._isAdmin();
+                const nowYM = App.currentYM ? App.currentYM() : '';
+                const months = [...new Set([...(State.db.planList || []), ...PlanLock.months()])].sort().reverse();
+                const rows = months.map(ym => {
+                    const locked = PlanLock.isLocked(ym), global = PlanLock.isGlobal(ym);
+                    const tag = ym === nowYM ? ' <span class="text-[10px] font-bold text-indigo-600">(เดือนนี้)</span>' : '';
+                    const btn = global
+                        ? `<span class="text-[11px] text-gray-400" title="ล็อกทุกศูนย์จากไฟล์ plan-lock.js — ปลดจากหน้านี้ไม่ได้">ล็อกทุกศูนย์</span>`
+                        : admin
+                            ? `<button onclick="PlanLockUI.toggle('${ym}', ${!locked})"
+                                class="px-3 py-1.5 rounded-lg text-xs font-bold ${locked ? 'bg-emerald-600 hover:bg-emerald-500 text-white' : 'bg-red-50 hover:bg-red-100 text-red-700 border border-red-200'}">${locked ? '🔓 ปลดล็อก' : '🔒 ล็อก'}</button>`
+                            : '';
+                    return `<div class="flex items-center gap-3 p-3 rounded-xl border ${locked ? 'bg-red-50 border-red-200' : 'bg-white border-gray-200'}">
+                        <div class="flex-1"><div class="text-sm font-bold text-gray-800">${App.ymToLabel(ym)}${tag}</div>
+                        <div class="text-[11px] font-semibold ${locked ? 'text-red-700' : 'text-emerald-700'}">${locked ? '🔒 ล็อก — ดูได้อย่างเดียว บันทึกไม่ได้' : '🔓 แก้ไขได้'}</div></div>${btn}</div>`;
+                }).join('') || '<div class="text-center text-xs text-gray-400 py-6">— ยังไม่มีแผนเดือนไหน —</div>';
+                m.innerHTML = `
+                    <div class="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden" style="max-height:90dvh;display:flex;flex-direction:column;">
+                        <div class="p-5 border-b flex justify-between items-start bg-gray-50 flex-shrink-0">
+                            <div><h2 class="text-base font-black text-gray-900">🔒 ล็อกแผน · ศูนย์ ${window.CENTER_ID || ''}</h2>
+                            <p class="text-xs text-gray-500 mt-0.5">เดือนที่ล็อก: ทุกคนในหน้า admin และหน้าวางแผน (RPN) ดูได้แต่บันทึกไม่ได้ · อนุมัติคำขอของเดือนนั้นไม่ได้ · หน้าเซลไม่ได้รับผล</p>
+                            ${admin ? '' : '<p class="text-xs font-bold text-amber-700 mt-1">ดูได้อย่างเดียว — admin เท่านั้นที่ล็อก/ปลดล็อกได้</p>'}</div>
+                            <button onclick="PlanLockUI.close()" class="w-8 h-8 rounded-full border border-gray-200 text-gray-400 hover:bg-gray-100 font-bold flex-shrink-0">✕</button>
+                        </div>
+                        <div class="overflow-y-auto flex-1 p-5 space-y-2">${PlanLock.loaded() ? rows : '<div class="text-center text-xs text-gray-400 py-6">⏳ กำลังโหลดสถานะ...</div>'}</div>
+                    </div>`;
+            },
+            toggle: async (ym, on) => {
+                if (!PlanLockUI._isAdmin()) return UI.showErrorToast('⚠️ admin เท่านั้นที่ล็อก/ปลดล็อกแผนได้');
+                if (!confirm(on
+                    ? `ล็อกแผน ${App.ymToLabel(ym)} ของศูนย์ ${window.CENTER_ID}?\n\nทุกคนจะบันทึกแผนเดือนนี้ไม่ได้ (รวมการอนุมัติคำขอของเดือนนี้) จนกว่าจะปลดล็อก`
+                    : `ปลดล็อกแผน ${App.ymToLabel(ym)} ของศูนย์ ${window.CENTER_ID}?\n\nทุกคนที่มีสิทธิ์จะแก้และบันทึกแผนเดือนนี้ได้ทันที`)) return;
+                try {
+                    await PlanLock.set(ym, on);
+                    if (typeof AuditLog !== 'undefined' && AuditLog.write) AuditLog.write(on ? 'PLAN_LOCK' : 'PLAN_UNLOCK', { ym });
+                    else App.writeAuditLog(on ? 'PLAN_LOCK' : 'PLAN_UNLOCK', { ym });
+                    UI.showSaveToast(on ? `🔒 ล็อกแผน ${App.ymToLabel(ym)} แล้ว` : `🔓 ปลดล็อกแผน ${App.ymToLabel(ym)} แล้ว`);
+                } catch (e) { UI.showErrorToast('❌ ไม่สำเร็จ: ' + (e && e.message)); }
+            },
+            badge: () => {
+                const b = document.getElementById('plan-lock-badge');
+                if (!b || typeof PlanLock === 'undefined') return;
+                const n = [...new Set([...(State.db.planList || []), ...PlanLock.months()])].filter(ym => PlanLock.isLocked(ym)).length;
+                if (n > 0) { b.textContent = n; b.classList.remove('hidden'); } else b.classList.add('hidden');
+            },
+        };
+        if (typeof PlanLock !== 'undefined') PlanLock.onChange(() => {
+            PlanLockUI.render();
+            // คำขอที่เปิดดูอยู่ — ปุ่มอนุมัติขึ้นกับสถานะล็อก
+            const mm = document.getElementById('move-request-modal');
+            if (mm && !mm.classList.contains('hidden') && typeof MoveRequestAdmin !== 'undefined') MoveRequestAdmin.load();
+        });
+
+        // ═════════════════════════════════════════════════════════════════
         // ✅ NEW (2026-08-29): MoveRequestAdmin — อนุมัติ/ปฏิเสธคำขอย้ายวันร้านค้า
         // ═════════════════════════════════════════════════════════════════
         const MoveRequestAdmin = {
@@ -2834,7 +2916,7 @@
                         <table class="w-full text-[11px] mt-2 bg-white rounded-lg">${rows}</table>
                         ${warn ? `<div class="mt-2 space-y-0.5">${warn}</div>` : ''}
                         <div class="text-[11px] text-gray-400 mt-1">ขอโดย ${e(r.requestedBy || '—')} · ${dateStr}</div>
-                        ${locked ? `<div class="text-[11px] font-bold text-red-700 mt-1">🔒 แผนเดือนนี้ล็อกอยู่ — อนุมัติได้หลังปลดล็อก (plan-lock.js)</div>` : ''}
+                        ${locked ? `<div class="text-[11px] font-bold text-red-700 mt-1">🔒 แผนเดือนนี้ล็อกอยู่ — อนุมัติได้หลังปลดล็อก (เมนู "🔒 ล็อกแผน")</div>` : ''}
                         <div class="flex gap-2 mt-2.5">
                             <button onclick="MoveRequestAdmin.approveReorder('${r.id}')" ${locked ? 'disabled' : ''}
                                 class="flex-1 ${locked ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-500 text-white'} text-xs font-bold py-2 rounded-lg">✅ อนุมัติ (ทำใน RPN)</button>

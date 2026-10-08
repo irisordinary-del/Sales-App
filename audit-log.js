@@ -55,6 +55,8 @@ const AuditLog = {
         PLAN_DRAFT_CREATE:   { icon: '📝', label: 'สร้าง Draft Plan' },
         PLAN_DRAFT_ACTIVATE: { icon: '🚀', label: 'Activate Draft → Active' },
         PLAN_MODE_SWITCH:    { icon: '🔀', label: 'เปลี่ยน Plan Mode' },
+        PLAN_LOCK:           { icon: '🔒', label: 'ล็อกแผนรายเดือน' },
+        PLAN_UNLOCK:         { icon: '🔓', label: 'ปลดล็อกแผนรายเดือน' },
         // AI
         AI_RUN:              { icon: '🤖', label: 'รัน AI จัดสาย' },
         // KPI / Data
