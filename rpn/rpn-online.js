@@ -224,9 +224,185 @@
         el.textContent = `🔒 แผนเดือน ${PlanLock.label(ym)} ล็อกอยู่ — ดูได้อย่างเดียว การแก้ไขจะไม่ถูกบันทึก`;
     };
 
+    // ── 7) อนุมัติคำขอ "จัดลำดับตลาด" จากแอปเซล (moveRequests type 'reorder') ──────────────
+    // หน้า admin (MoveRequestAdmin ใน ../index.html) เรียก RPNBridge.applyReorder(req) — ทำใน RPN เพื่อให้
+    // rpnCal (วันที่ของแอปเซล) คำนวณใหม่ด้วย Runs ทันทีตอนบันทึก (injectCal) และตรงกับไฟล์ DMS ที่ส่งออกจาก RPN
+    // ไม่ใช้ Reorder.apply ของ RPN ตรง ๆ เพราะ (1) หาครึ่งรอบจากความยาวรอบของศูนย์ ไม่ใช่ของสาย และ
+    // (2) ไม่ย้าย fqs/fqRun/vd ตามตลาด — ตรรกะที่เหลือยึดตาม reorder.js: ร้าน + ลำดับคิว + ข้อมูลรายตลาด
+    // ไปทั้งกลุ่ม · CY อยู่กับช่องวัน (กติกา AS&D) · req.map = { 'Day เดิม': 'Day ใหม่' } (sales-app.js คำนวณ
+    // รวมครึ่งหลังของสาย F2 มาแล้ว) ต้องเป็นการสับตำแหน่งในชุดเดิม (ทุกช่องปลายทางมีเจ้าของเดียว)
+    const dn = (d) => parseInt(String(d || '').replace(/\D/g, ''), 10) || 0;
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+    bridge.ready = () => {
+        try {
+            const loader = document.getElementById('loader');
+            return !!(curYM() && calReady() && (!loader || !loader.style.display || loader.style.display === 'none'));
+        } catch (e) { return false; }
+    };
+    /** "402V01 D04 บ้านไร่" → เลขวันในชื่อเปลี่ยนตาม map (คงจำนวนหลักเดิม) — ไม่มีเลขวันในชื่อ = ไม่แตะ */
+    const renameDay = (name, map) => String(name || '').replace(/D(\d{1,2})(?!\d)/, (all, n) => {
+        const to = map['Day ' + parseInt(n, 10)];
+        if (!to) return all;
+        const v = String(dn(to));
+        return 'D' + (n.length >= 2 ? v.padStart(2, '0') : v);
+    });
+    bridge.applyReorder = async (req) => {
+        const route = req && req.route, ym = req && req.ym, map = (req && req.map) || {};
+        if (!route || !ym) return { ok: false, msg: 'คำขอไม่ครบ (ไม่มีสายหรือเดือน)' };
+        if (window.PlanLock && PlanLock.isLocked(ym)) return { ok: false, msg: PlanLock.message(ym) };
+        const from = Object.keys(map), to = from.map(k => map[k]);
+        if (!from.length) return { ok: false, msg: 'คำขอนี้ไม่ได้ย้ายตลาดไหนเลย' };
+        if (new Set(to).size !== to.length || to.some(t => !from.includes(t))) return { ok: false, msg: 'ลำดับในคำขอไม่สมบูรณ์ (ช่องปลายทางซ้ำหรือหาย)' };
+
+        if (curYM() !== ym) {
+            if (!(State.db.planList || []).includes(ym)) return { ok: false, msg: 'ไม่มีแผนเดือน ' + ym + ' ในศูนย์นี้' };
+            await App.switchPlan(ym);
+        }
+        for (let i = 0; i < 80 && !(Array.isArray(State.db.routes[route]) && bridge.ready()); i++) await sleep(250);
+        const arr = State.db.routes[route];
+        if (!Array.isArray(arr)) return { ok: false, msg: 'ไม่พบสาย ' + route + ' ในแผนเดือนนี้' };
+        if (req.basisSig && req.basisSig !== sigOf(arr) && !req.force) return { ok: false, stale: true, msg: 'แผนสายนี้ถูกแก้หลังจากส่งคำขอ' };
+
+        try { if (window.EditHistory) EditHistory.mark('จัดลำดับตลาดตามคำขอ ' + route); } catch (e) {}
+        const cyBySlot = {};
+        arr.forEach(s => (s.days || []).forEach(d => {
+            const c = (s.cys && s.cys[d]) || ((s.days || []).length === 1 ? s.cy : '');
+            if (c && !cyBySlot[d]) cyBySlot[d] = c;
+        }));
+        const remapKeys = (o) => {
+            if (!o || typeof o !== 'object') return o;
+            const n = {};
+            Object.keys(o).forEach(k => { n[map[k] || k] = o[k]; });
+            return n;
+        };
+        arr.forEach(s => {
+            if (s.runOf) Object.values(s.runOf).forEach(r => { if (r && r.src && map[r.src]) r.src = map[r.src]; });
+            // ร้าน "ออกจากแผน" จำวันเดิมไว้ใน wasPlan (removed.js ใช้ตอนดึงกลับ) — ต้องย้ายตามตลาดด้วย
+            if (s.wasPlan && Array.isArray(s.wasPlan.days)) {
+                s.wasPlan.days = s.wasPlan.days.map(d => map[d] || d);
+                if (s.wasPlan.seqs) s.wasPlan.seqs = remapKeys(s.wasPlan.seqs);
+            }
+            const old = s.days || [];
+            if (!old.length) return;
+            s.days = old.map(d => map[d] || d).sort((a, b) => dn(a) - dn(b));
+            ['seqs', 'fqs', 'fqRun', 'vd'].forEach(k => { if (s[k]) s[k] = remapKeys(s[k]); });
+            const nc = {};
+            s.days.forEach(t => { if (cyBySlot[t]) nc[t] = cyBySlot[t]; });
+            if (s.cys || Object.keys(nc).length) { s.cys = nc; s.cy = nc[s.days[0]] || ''; }
+            if (s.marketName) s.marketName = renameDay(s.marketName, map);
+        });
+        let ptsChanged = false;
+        const pts = State.db.cyPoints && State.db.cyPoints[route];
+        if (pts && from.some(k => pts[k])) { State.db.cyPoints[route] = remapKeys(pts); ptsChanged = true; }
+
+        await App.planRoutesCol(ym).doc(route).set({
+            stores: arr,
+            confirmedBy: firebase.firestore.FieldValue.delete(),
+            confirmedAt: firebase.firestore.FieldValue.delete(),
+        }, { merge: true });
+        if (ptsChanged) await App.dbRef.set({ cyPoints: State.db.cyPoints }, { merge: true });
+        try { Runs.bump && Runs.bump(); } catch (e) {}
+        try { if (typeof MultiRoute !== 'undefined' && MultiRoute.rebuild) MultiRoute.rebuild(); } catch (e) {}
+        try { UI.render(); } catch (e) {}
+        return { ok: true, moved: from.length };
+    };
+
+    // ── 8) ชื่อตลาด "สูตรเดิม" ของระบบเรา (FileManager._autoFillMarketNames ใน ../file-manager.js) ─────
+    //   {สาย} D{NN} {2 ตำบลที่มีร้านมากสุด} {อำเภอที่มากสุด} {จังหวัดที่มากสุด} — ตัดคำนำหน้า ต./ตำบล ฯลฯ ก่อน
+    //   อำเภอซ้ำกับตำบลก็ใส่ซ้ำ (ตั้งใจ ตามสูตรเดิม) · ใช้รหัสสายแทน salesCode ของร้าน (ร้านที่ RPN ย้ายสาย
+    //   ยังมี salesCode เดิมจนกว่าจะส่งออก DMS)
+    // เพิ่มเป็นตัวเลือกใน 2 ที่ของ market-suggest.js (ไม่แก้ไฟล์ของ RPN): ป้าย 💡 ในหน้าต่างรายวัน และ
+    // ตาราง "ทั้งสาย" (ตัวเลือก "สูตรเดิม" ทุกแถว + ปุ่มเลือกสูตรเดิมทุกวันในครั้งเดียว) — ผู้ใช้เลือกเอง
+    const legacyName = (route, day) => {
+        const list = ((State.db.routes || {})[route] || []).filter(s => !s.inactive && (s.days || []).includes(day));
+        if (!list.length) return '';
+        const strip = (v) => String(v || '').replace(/^(ตำบล|ต\.|อำเภอ|อ\.|จังหวัด|จ\.)\s*/, '').trim();
+        const rank = (f) => {
+            const c = {}, order = [];
+            list.forEach(s => { const v = strip(s[f]); if (!v) return; if (!(v in c)) { c[v] = 0; order.push(v); } c[v]++; });
+            return order.sort((a, b) => c[b] - c[a]);
+        };
+        const digits = String(day).replace(/[^0-9]/g, '');
+        return [route, digits ? 'D' + digits.padStart(2, '0') : '', ...rank('subDistrict').slice(0, 2),
+            rank('district')[0] || '', rank('province')[0] || ''].filter(Boolean).join(' ');
+    };
+    const escH = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const LEGACY = '__legacy__';
+    const wireNaming = () => {
+        if (typeof RoadMaster === 'undefined' || !RoadMaster.dayPanelHTML || !RoadMaster._mkWrapped
+            || typeof MarketSuggest === 'undefined') return false;
+        if (RoadMaster._legacyWrapped) return true;
+        RoadMaster._legacyWrapped = true;
+        // ป้ายในหน้าต่างรายวัน
+        const origPanel = RoadMaster.dayPanelHTML;
+        RoadMaster.dayPanelHTML = function (day) {
+            const html = origPanel.apply(this, arguments);
+            const route = State.localActiveRoute;
+            const at = '<span class="text-gray-400 shrink-0">💡 แนะนำ</span>';
+            if (!html || !route || !html.includes(at)) return html;
+            const name = legacyName(route, day);
+            if (!name) return html;
+            const chip = `<button onclick="MarketSuggest.use('${escH(day)}', this.dataset.t)" data-t="${escH(name)}"
+                title="สูตรเดิมของระบบ: สาย D วัน + 2 ตำบลที่มีร้านมากสุด + อำเภอ + จังหวัด — กดเพื่อใช้ชื่อนี้"
+                class="px-1.5 py-0.5 rounded-md border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-[10.5px] text-indigo-900 font-bold">
+                ${escH(name)} <span class="font-normal text-indigo-500">สูตรเดิม</span></button>`;
+            return html.replace(at, at + chip);
+        };
+        // ตาราง "ทั้งสาย"
+        const origBulk = MarketSuggest.bulk;
+        MarketSuggest.bulk = async function () {
+            const r = await origBulk.apply(this, arguments);
+            const route = State.localActiveRoute;
+            const days = (typeof RoadMaster !== 'undefined') ? RoadMaster.daysOf(route) : [];
+            days.forEach((day, i) => {
+                const sel = document.getElementById('mkb-s' + i);
+                const name = legacyName(route, day);
+                if (!sel || !name) return;
+                sel.insertAdjacentHTML('beforeend', `<option value="${LEGACY}" data-t="${escH(name)}">${escH(name)} (สูตรเดิม)</option>`);
+            });
+            const bar = document.querySelector('#mk-bulk button[onclick="MarketSuggest.bulkAll(true)"]');
+            if (bar) bar.insertAdjacentHTML('beforebegin', `<button onclick="MarketSuggest.bulkLegacyAll()"
+                title="เลือกชื่อแบบสูตรเดิมให้ทุกวัน แล้วติ๊กไว้ — กด 'ใช้ชื่อที่ติ๊ก' เพื่อบันทึก"
+                class="px-2 py-1.5 rounded-lg border border-indigo-200 bg-indigo-50 text-[11px] font-bold text-indigo-700">📛 สูตรเดิมทุกวัน</button>`);
+            return r;
+        };
+        MarketSuggest.bulkLegacyAll = () => {
+            document.querySelectorAll('#mk-bulk select[id^="mkb-s"]').forEach(sel => {
+                if (!sel.querySelector(`option[value="${LEGACY}"]`)) return;
+                sel.value = LEGACY;
+                const c = document.getElementById('mkb-c' + sel.id.slice(5));
+                if (c) c.checked = true;
+            });
+        };
+        // ใช้ชื่อที่ติ๊ก — แถวที่เลือก "สูตรเดิม" บันทึกเอง แล้วเอาติ๊กออกก่อนส่งให้ของเดิมทำแถวที่เหลือ
+        const origApply = MarketSuggest.bulkApply;
+        MarketSuggest.bulkApply = function () {
+            const route = State.localActiveRoute;
+            const days = (typeof RoadMaster !== 'undefined') ? RoadMaster.daysOf(route) : [];
+            let n = 0;
+            days.forEach((day, i) => {
+                const sel = document.getElementById('mkb-s' + i), c = document.getElementById('mkb-c' + i);
+                if (!sel || !c || !c.checked || sel.value !== LEGACY) return;
+                const t = sel.selectedOptions[0] && sel.selectedOptions[0].dataset.t;
+                if (t) { if (!n) { try { if (window.EditHistory) EditHistory.mark('ตั้งชื่อตลาดสูตรเดิม'); } catch (e) {} } RoadMaster.setMarketName(route, day, t); n++; }
+                c.checked = false;
+            });
+            const rest = document.querySelectorAll('#mk-bulk input[id^="mkb-c"]:checked').length;
+            if (rest) return origApply.apply(this, arguments);
+            MarketSuggest.closeBulk();
+            try { RoadMaster.render(); } catch (e) {}
+            try { UI.render(); } catch (e) {}
+            try { if (n && UI.showSaveToast) UI.showSaveToast(`✏️ ตั้งชื่อตลาดสูตรเดิม ${n} วัน`); } catch (e) {}
+        };
+        return true;
+    };
+    bridge.legacyName = legacyName;
+
     document.addEventListener('DOMContentLoaded', () => {
         [0, 400, 1600, 3000].forEach(t => setTimeout(wireImport, t));
         setInterval(reconcile, 4000);
         setInterval(lockBanner, 1000);
+        const tryNaming = (k) => { if (!wireNaming() && k < 40) setTimeout(() => tryNaming(k + 1), 500); };
+        setTimeout(() => tryNaming(0), 1500);
     });
 })();

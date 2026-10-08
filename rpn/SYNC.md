@@ -43,6 +43,10 @@ plans/{ym}.rpnCalIndex        = { สาย: hash }
   ถ้าไม่ตรง (มีใครแก้วันร้านโดยไม่ผ่าน RPN) ถอยไปใช้ `CalendarCtrl` เดิม
 - **`hash()`/`sig()` ใน `rpn-online.js`, `RpnCompat` ใน `sales-app.js` และ `App._rpnSig` ใน `admin-data.js` ต้องเหมือนกันทุกตัวอักษร**
 
+## คำขอจัดลำดับตลาด / ชื่อตลาดสูตรเดิม
+
+`rpn-online.js` มี `RPNBridge.applyReorder(req)` (หน้า admin เรียกตอนอนุมัติคำขอ type 'reorder' จากแอปเซล) และเพิ่มตัวเลือกชื่อตลาด "สูตรเดิม" ในหน้าแนะนำชื่อตลาดของ RPN (ครอบ `RoadMaster.dayPanelHTML` / `MarketSuggest.bulk` / `MarketSuggest.bulkApply`) — ถ้า RPN เปลี่ยนชื่อฟังก์ชันหรือ id ของ element เหล่านี้ (`mkb-s{i}`, `mkb-c{i}`, `#mk-bulk`) ต้องตามแก้ใน rpn-online.js
+
 ## ล็อกเดือน
 
 `../plan-lock.js` (sync-rpn.mjs ใส่ไว้ถัดจาก Firebase) ปฏิเสธการเขียนแผนเดือนที่อยู่ใน `LOCKED` — RPN ขึ้นแถบแดง "ดูได้อย่างเดียว" และไม่ reconcile rpnCal ของเดือนนั้น

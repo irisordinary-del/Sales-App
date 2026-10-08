@@ -1190,6 +1190,24 @@
                 if (ready) { try { w.RPNBridge.go(sub); } catch (e) {} return; }
                 if (tries < 40) setTimeout(() => RpnHost._go(sub, tries + 1), 250);
             },
+            /** โหลด RPN ไว้เบื้องหลัง (ไม่เปลี่ยนหน้า) แล้วรอจนพร้อมรับคำสั่ง — ใช้ตอนอนุมัติคำขอจัดลำดับตลาด */
+            ensure: async () => {
+                const f = RpnHost.frame();
+                if (!f) throw new Error('ไม่พบกรอบ RPN');
+                if (!RpnHost._loaded) {
+                    RpnHost._loaded = true;
+                    RpnHost._hostDirty = false;
+                    RpnHost._want = 'planning';
+                    f.addEventListener('load', () => RpnHost._go(RpnHost._want));
+                    f.src = 'rpn/RoutePlannerV0.html?embed=1&center=' + encodeURIComponent(window.CENTER_ID || '');
+                }
+                for (let i = 0; i < 120; i++) {
+                    const w = RpnHost.win();
+                    try { if (w && w.RPNBridge && w.RPNBridge.ready && w.RPNBridge.ready()) return w; } catch (e) {}
+                    await new Promise(r => setTimeout(r, 500));
+                }
+                throw new Error('เปิดหน้าวางแผน (RPN) ไม่สำเร็จภายใน 60 วินาที');
+            },
             leave: () => {
                 const w = RpnHost.win();
                 if (w && w.RPNBridge && w.RPNBridge.dirty) {
@@ -2778,8 +2796,10 @@
                 list.innerHTML = '<div class="text-center text-xs text-gray-400 py-6">⏳ กำลังโหลด...</div>';
                 const reqs = await App.fetchPendingMoveRequests();
                 if (!reqs.length) { list.innerHTML = '<div class="text-center text-xs text-gray-400 py-6">✨ ไม่มีคำขอค้างอยู่</div>'; return; }
+                MoveRequestAdmin._reqs = Object.fromEntries(reqs.map(r => [r.id, r]));
                 list.innerHTML = reqs.map(r => {
                     const dateStr = r.requestedAt?.toDate ? r.requestedAt.toDate().toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' }) : '';
+                    if (r.type === 'reorder') return MoveRequestAdmin._reorderCard(r, dateStr);
                     return `
                     <div class="p-3 rounded-xl bg-gray-50 border border-gray-200">
                         <div class="text-sm font-bold text-gray-800">${r.storeName || r.storeId} <span class="text-[11px] font-normal text-gray-400">(${r.storeCode || r.storeId})</span></div>
@@ -2791,6 +2811,70 @@
                         </div>
                     </div>`;
                 }).join('');
+            },
+
+            // ✅ NEW (2026-10-08): คำขอ "จัดลำดับตลาด" (type 'reorder') จากแอปเซล — ย้ายทั้งตลาดระหว่างช่อง Day
+            // ของเดือนถัดไป · อนุมัติ = สั่ง RPN (iframe) ทำผ่าน RPNBridge.applyReorder (rpn/rpn-online.js)
+            // วันที่ของแอปเซล (rpnCal) จึงคำนวณใหม่ด้วยตรรกะเดียวกับไฟล์ DMS
+            _esc: (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])),
+            _reorderCard: (r, dateStr) => {
+                const e = MoveRequestAdmin._esc;
+                const locked = typeof PlanLock !== 'undefined' && PlanLock.isLocked(r.ym);
+                const modeTxt = { half: 'สายมีร้าน F2 — จัดครึ่งแรก ครึ่งหลังเลื่อนตาม', free: 'จัดได้ทุกช่อง', irregular: 'จัดได้ทุกช่อง (คู่ F2 ไม่ห่างครึ่งรอบ)' }[r.mode] || '';
+                const rows = (r.summary || []).map(x => `<tr class="border-t border-gray-100">
+                    <td class="py-1 pr-2 text-gray-700 truncate max-w-[180px]">${e(x.market || '—')}</td>
+                    <td class="py-1 px-1 text-center whitespace-nowrap">D${e(x.from)}</td><td class="text-gray-300">→</td>
+                    <td class="py-1 px-1 text-center font-black text-emerald-700 whitespace-nowrap">D${e(x.to)}</td>
+                    <td class="py-1 pl-1 text-right text-gray-400 tabular-nums">${e(x.n)}</td></tr>`).join('');
+                const warn = (r.warnings || []).map(w => `<div class="text-[11px] text-amber-700">⚠️ ${e(w)}</div>`).join('');
+                return `
+                    <div class="p-3 rounded-xl bg-indigo-50/50 border border-indigo-200">
+                        <div class="text-sm font-bold text-gray-800">⇅ จัดลำดับตลาด · สาย ${e(r.route)} · ${e(App.ymToLabel(r.ym))}</div>
+                        <div class="text-[11px] text-gray-500 mt-0.5">ย้าย ${(r.summary || []).length} ตลาด · รอบ ${e(r.cycleDays)} วัน · ${e(modeTxt)}</div>
+                        <table class="w-full text-[11px] mt-2 bg-white rounded-lg">${rows}</table>
+                        ${warn ? `<div class="mt-2 space-y-0.5">${warn}</div>` : ''}
+                        <div class="text-[11px] text-gray-400 mt-1">ขอโดย ${e(r.requestedBy || '—')} · ${dateStr}</div>
+                        ${locked ? `<div class="text-[11px] font-bold text-red-700 mt-1">🔒 แผนเดือนนี้ล็อกอยู่ — อนุมัติได้หลังปลดล็อก (plan-lock.js)</div>` : ''}
+                        <div class="flex gap-2 mt-2.5">
+                            <button onclick="MoveRequestAdmin.approveReorder('${r.id}')" ${locked ? 'disabled' : ''}
+                                class="flex-1 ${locked ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-500 text-white'} text-xs font-bold py-2 rounded-lg">✅ อนุมัติ (ทำใน RPN)</button>
+                            <button onclick="MoveRequestAdmin.reject('${r.id}')" class="flex-1 bg-red-100 hover:bg-red-200 text-red-700 text-xs font-bold py-2 rounded-lg">🚫 ปฏิเสธ</button>
+                        </div>
+                    </div>`;
+            },
+
+            approveReorder: async (reqId) => {
+                const r = (MoveRequestAdmin._reqs || {})[reqId];
+                if (!r) return UI.showErrorToast('⚠️ ไม่พบคำขอนี้ — ลองปิดแล้วเปิดใหม่');
+                if (!confirm(`อนุมัติจัดลำดับตลาดสาย ${r.route} (${App.ymToLabel(r.ym)}) ${(r.summary || []).length} ตลาด?\n\n` +
+                    `ระบบจะเปิดแผนเดือนนี้ใน RPN แล้วสลับให้ทันที (ย้อนกลับได้ด้วย Ctrl+Z ในหน้าวางแผน)\n` +
+                    `หลังอนุมัติต้องส่งออก DMS ของเดือนนี้ใหม่`)) return;
+                UI.showLoader('⇅ กำลังจัดลำดับตลาดใน RPN...', `สาย ${r.route} · ${App.ymToLabel(r.ym)}`);
+                try {
+                    const w = await RpnHost.ensure();
+                    let res = await w.RPNBridge.applyReorder(r);
+                    if (!res.ok && res.stale) {
+                        UI.hideLoader();
+                        if (!confirm(`แผนสาย ${r.route} ถูกแก้ไปแล้วหลังจากเซลส่งคำขอ\nยังต้องการจัดลำดับตามคำขอนี้ต่อไหม?`)) return;
+                        UI.showLoader('⇅ กำลังจัดลำดับตลาดใน RPN...', `สาย ${r.route}`);
+                        res = await w.RPNBridge.applyReorder(Object.assign({}, r, { force: true }));
+                    }
+                    if (!res.ok) { UI.hideLoader(); return UI.showErrorToast('❌ ' + (res.msg || 'อนุมัติไม่สำเร็จ')); }
+                    await App._moveRequestsCol().doc(reqId).set({
+                        status: 'approved',
+                        reviewedBy: Auth.getSession()?.displayName || Auth.getSession()?.username || 'admin',
+                        reviewedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                    }, { merge: true });
+                    App.writeAuditLog('move_request_approve', { reqId, type: 'reorder', route: r.route, ym: r.ym, moved: res.moved });
+                    if (App._currentPlanYM === r.ym) App._loadPlan(r.ym, true);
+                    UI.hideLoader();
+                    UI.showSaveToast(`✅ จัดลำดับตลาดสาย ${r.route} แล้ว — อย่าลืมส่งออก DMS ${App.ymToLabel(r.ym)} ใหม่`);
+                    await MoveRequestAdmin.load();
+                    MoveRequestAdmin.refreshBadge();
+                } catch (e) {
+                    UI.hideLoader();
+                    UI.showErrorToast('❌ อนุมัติไม่สำเร็จ: ' + (e && e.message));
+                }
             },
 
             approve: async (reqId) => {

@@ -1467,6 +1467,326 @@ const MoveRequest = {
 };
 
 // ═════════════════════════════════════════════════════════════════════════
+// ✅ NEW (2026-10-08): ReorderReq — เซล / ซุป / ASM "ขอจัดลำดับตลาด" ของเดือนถัดไป
+// ลากตลาดไปช่อง Day อื่นได้อิสระ (ลาก D5 ไปช่อง 2 → D2..D4 เลื่อนลงเอง) หรือ "ล้างทั้งหมด" แล้ววางเองทีละช่อง
+// ตั้งแต่ D1 · ส่งเป็นคำขอใน moveRequests (type 'reorder') → แอดมินอนุมัติในเมนู "คำขอย้ายวัน" ซึ่งสั่ง RPN
+// ทำให้ (RPNBridge.applyReorder ใน rpn/rpn-online.js) — แผน วันที่ในแอปนี้ และไฟล์ DMS จึงตรงกันเสมอ
+// โหมดของสาย (ตามที่ตกลงกันไว้):
+//   half      — มีร้าน F2 และทุกคู่ห่างครึ่งรอบพอดี (รอบ 24 → D3+D15) → จัดได้ครึ่งแรก ครึ่งหลังเลื่อนตาม
+//   free      — ไม่มีร้านอยู่หลายช่อง (รวมรอบ 12 วันที่ F2 เป็นของตลาด วิ่งซ้ำ +14 วันเอง) → จัดได้ทุกช่อง
+//   irregular — มีร้านหลายช่องแต่ไม่ห่างครึ่งรอบ (เช่น 402C01 รอบ 23) → จัดได้ทุกช่อง แต่เตือนคู่ที่ระยะห่างเปลี่ยน
+// คำขอต้องผ่าน firestore.rules เดิม (ฟิลด์ storeId/storeName/fromDay/toDay) จึงใส่ค่าที่อ่านรู้เรื่องไว้แทน
+// ═════════════════════════════════════════════════════════════════════════
+const ReorderReq = {
+    S: null,
+    _num: (d) => parseInt(String(d || '').replace(/\D/g, ''), 10) || 0,
+    _esc: (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])),
+    _ym: () => `${CalendarCtrl._year}_${String(CalendarCtrl._month + 1).padStart(2, '0')}`,
+    _nowYM: () => { const d = new Date(); return `${d.getFullYear()}_${String(d.getMonth() + 1).padStart(2, '0')}`; },
+    _route: () => App.isSupervisor() ? (SupervisorUI._selectedRoute || '') : State.myRoute,
+    _col: () => MoveRequest._col(MoveRequest._centerDocId()),
+    _monthLabel: (ym) => { const [y, m] = ym.split('_').map(Number); return new Date(y, m - 1, 1).toLocaleDateString('th-TH', { year: 'numeric', month: 'long' }); },
+
+    /** ร้านของสายในเดือนนั้น (หลัง RpnCompat.clean — ไม่มีร้านออกจากแผน) · null = ยังโหลดเดือนนั้นไม่เสร็จ */
+    _stores: (ym, route) => {
+        const plan = State.planCache[ym];
+        if (!plan?._ok) return null;
+        return App.isSupervisor() ? RpnCompat.storesOfRoute(plan, route, plan.stores || []) : (plan.stores || []);
+    },
+
+    /** ความยาวรอบ + โหมด + ร้านที่ Day ผิดรูป */
+    _analyze: (stores, cfg) => {
+        const num = ReorderReq._num;
+        const isCycle = cfg && (cfg.mode === 'cycle' || cfg._baseMode === 'cycle');
+        const maxDay = Math.max(0, ...stores.flatMap(s => (s.days || []).map(num)));
+        const N = isCycle ? (parseInt(cfg.cycleDays, 10) || 24) : Math.min(31, Math.max(maxDay, 1));
+        const bad = [];
+        stores.forEach(s => (s.days || []).forEach(d => { if (!/^Day \d+$/.test(d)) bad.push(`${s.name || s.id} (${d})`); }));
+        const inSlots = (s) => (s.days || []).filter(d => num(d) >= 1 && num(d) <= N);
+        const multi = stores.filter(s => inSlots(s).length >= 2);
+        const halfK = N / 2;
+        const half = N % 2 === 0 && multi.length > 0 && multi.every(s => {
+            const ds = inSlots(s).map(num).sort((a, b) => a - b);
+            return ds.length === 2 && ds[1] - ds[0] === halfK;
+        });
+        const mode = half ? 'half' : (multi.length ? 'irregular' : 'free');
+        return { N, M: half ? halfK : N, halfK, mode, multi, bad };
+    },
+
+    /** ชื่อตลาดของช่อง Day ในเดือนนั้น — ชื่อจาก RPN ก่อน แล้วชื่อที่ร้านเก็บไว้ แล้วค่อย generate */
+    _market: (label) => {
+        const S = ReorderReq.S;
+        const rm = RpnCompat.marketOf(S.rpn, label);
+        if (rm) return trimMarketName(rm);
+        const cnt = {};
+        S.stores.forEach(s => { if (s.days?.[0] === label && s.marketName) { const k = trimMarketName(s.marketName); cnt[k] = (cnt[k] || 0) + 1; } });
+        const top = Object.entries(cnt).sort((a, b) => b[1] - a[1])[0];
+        if (top) return top[0];
+        const gen = generateDayMarketName(S.stores, label);
+        return gen ? trimMarketName(gen) : '';
+    },
+    _count: (label) => ReorderReq.S.stores.filter(s => (s.days || []).includes(label)).length,
+    _dates: (label) => {
+        const S = ReorderReq.S;
+        let a = CalendarCtrl.getDatesFromDayInMonth(label, S.y, S.m);
+        if (!a.length) { const d = CalendarCtrl.getDateFromDay(label); a = d ? [d] : []; }
+        return a;
+    },
+
+    renderBar: () => {
+        const el = document.getElementById('calendar-reorder-bar');
+        if (!el) return;
+        const ym = ReorderReq._ym();
+        if (!State.planList.includes(ym)) { el.innerHTML = ''; return; }
+        const btn = (txt, on) => `<button ${on ? 'onclick="ReorderReq.open()"' : 'disabled'}
+            style="width:100%;padding:9px 12px;border-radius:12px;border:1.5px solid ${on ? '#c7d2fe' : '#e5e7eb'};background:${on ? '#eef2ff' : '#f9fafb'};
+                   color:${on ? '#3730a3' : '#9ca3af'};font-size:12.5px;font-weight:800;cursor:${on ? 'pointer' : 'default'};">${txt}</button>`;
+        if (ym <= ReorderReq._nowYM()) { el.innerHTML = btn('⇅ จัดลำดับตลาดได้ตั้งแต่เดือนหน้า — เลื่อนไปเดือนถัดไป ›', false); return; }
+        if (!ReorderReq._route()) { el.innerHTML = btn('⇅ เลือกสายก่อน แล้วค่อยขอจัดลำดับตลาด', false); return; }
+        el.innerHTML = btn(`⇅ ขอจัดลำดับตลาด · ${ReorderReq._monthLabel(ym)}`, true);
+    },
+
+    open: async () => {
+        const ym = ReorderReq._ym(), route = ReorderReq._route();
+        if (ym <= ReorderReq._nowYM()) return showSalesToast('⚠️ เดือนปัจจุบันแก้ลำดับตลาดไม่ได้', true);
+        if (!route) return showSalesToast('⚠️ เลือกสายก่อน', true);
+        let stores = ReorderReq._stores(ym, route);
+        if (!stores) {
+            showSalesToast('⏳ กำลังโหลดแผนเดือนนี้...');
+            await (App.isSupervisor() ? App.loadPlanDataForSup : App.loadPlanData)(ym);
+            stores = ReorderReq._stores(ym, route);
+        }
+        if (!stores || !stores.length) return showSalesToast('⚠️ ไม่พบร้านของสายนี้ในแผนเดือนนี้', true);
+        const y = CalendarCtrl._year, m = CalendarCtrl._month;
+        const cfg = CalendarCtrl._resolveActiveCfg(y, m);
+        const a = ReorderReq._analyze(stores, cfg);
+        const base = Array.from({ length: a.M }, (_, i) => 'Day ' + (i + 1));
+        ReorderReq.S = {
+            ym, route, y, m, stores, rpn: RpnCompat.active(y, m), basisSig: RpnCompat.sig(stores),
+            ...a, base, order: base.slice(), pending: null, drag: -1,
+        };
+        ReorderReq._render();
+        try {
+            const snap = await ReorderReq._col().where('route', '==', route).where('status', '==', 'pending').get();
+            const p = snap.docs.map(d => ({ id: d.id, ...d.data() })).find(r => r.type === 'reorder' && r.ym === ym);
+            if (p && ReorderReq.S && ReorderReq.S.ym === ym) { ReorderReq.S.pending = p; ReorderReq._render(); }
+        } catch (e) { console.warn('ReorderReq pending check:', e); }
+    },
+
+    close: () => {
+        try { ReorderReq._sortable?.destroy(); } catch (e) {}
+        ReorderReq._sortable = null;
+        document.getElementById('reorder-req-sheet')?.remove();
+        ReorderReq.S = null;
+    },
+
+    /** old → new ทั้งหมด (รวมครึ่งหลังของโหมด half) */
+    _map: () => {
+        const S = ReorderReq.S, map = {};
+        S.order.forEach((old, i) => {
+            if (!old || old === S.base[i]) return;
+            map[old] = S.base[i];
+            if (S.mode === 'half') map['Day ' + (ReorderReq._num(old) + S.halfK)] = 'Day ' + (i + 1 + S.halfK);
+        });
+        return map;
+    },
+    _warnings: (map) => {
+        const S = ReorderReq.S, num = ReorderReq._num, out = [];
+        if (S.mode === 'irregular') {
+            const hit = [];
+            S.multi.forEach(s => {
+                const old = (s.days || []).filter(d => num(d) <= S.N);
+                const nw = old.map(d => map[d] || d);
+                const g0 = old.map(num).sort((a, b) => a - b), g1 = nw.map(num).sort((a, b) => a - b);
+                if (g0[1] - g0[0] !== g1[1] - g1[0]) hit.push(`${s.name || s.id}: ${g0.map(n => 'D' + n).join('+')} → ${g1.map(n => 'D' + n).join('+')}`);
+            });
+            if (hit.length) out.push(`ร้านที่อยู่ 2 ช่อง ${hit.length} ร้าน ระยะห่างจะเปลี่ยน เช่น ${hit.slice(0, 3).join(' · ')}`);
+        }
+        return out;
+    },
+
+    _render: () => {
+        const S = ReorderReq.S;
+        if (!S) return;
+        const e = ReorderReq._esc, num = ReorderReq._num;
+        let sheet = document.getElementById('reorder-req-sheet');
+        if (!sheet) {
+            sheet = document.createElement('div');
+            sheet.id = 'reorder-req-sheet';
+            sheet.style.cssText = 'position:fixed;inset:0;z-index:100000;display:flex;align-items:flex-end;justify-content:center;';
+            document.body.appendChild(sheet);
+        }
+        if (S.bad.length) {
+            sheet.innerHTML = `<div style="position:absolute;inset:0;background:rgba(0,0,0,0.5);" onclick="ReorderReq.close()"></div>
+            <div style="position:relative;background:#fff;border-radius:20px 20px 0 0;width:100%;max-width:520px;padding:18px 16px 28px;">
+                <div style="font-size:15px;font-weight:900;color:#111827;">⇅ จัดลำดับตลาด · ${e(S.route)}</div>
+                <div style="margin-top:10px;padding:12px;border-radius:12px;background:#fef2f2;border:1px solid #fecaca;font-size:12.5px;color:#991b1b;line-height:1.6;">
+                    แผนสายนี้มีร้านที่ช่อง Day ผิดรูป ${S.bad.length} รายการ เช่น ${e(S.bad.slice(0, 3).join(', '))}<br>ต้องให้แอดมินแก้ในหน้าวางแผนก่อน ถึงจะขอจัดลำดับได้</div>
+                <button onclick="ReorderReq.close()" style="margin-top:14px;width:100%;padding:11px;border-radius:12px;border:none;background:#f3f4f6;font-weight:800;">ปิด</button>
+            </div>`;
+            return;
+        }
+        const map = ReorderReq._map();
+        const changed = S.order.map((old, i) => (old && old !== S.base[i]) ? i : -1).filter(i => i >= 0);
+        const empties = S.order.filter(o => !o).length;
+        const pool = S.base.filter(l => !S.order.includes(l));
+        const firstEmpty = S.order.indexOf(null);
+        const warnings = ReorderReq._warnings(map);
+        const modeTxt = S.mode === 'half'
+            ? `สายนี้มีร้าน F2 (คู่ห่าง ${S.halfK} วัน) — จัดได้ D1–D${S.M} แล้ว D${S.M + 1}–D${S.N} เลื่อนตามให้เอง`
+            : S.mode === 'irregular' ? `จัดได้ทุกช่อง D1–D${S.N} · มีร้านอยู่ 2 ช่องที่ไม่ห่างครึ่งรอบ ระบบจะแสดงคู่ที่ระยะห่างเปลี่ยน`
+            : `จัดได้ทุกช่อง D1–D${S.N}`;
+
+        const rows = S.order.map((old, i) => {
+            const pos = S.base[i];
+            const dts = ReorderReq._dates(pos);
+            const dtTxt = dts.length ? dts.join(', ') + ' ' + new Date(S.y, S.m, 1).toLocaleDateString('th-TH', { month: 'short' }) : '—';
+            if (!old) {
+                return `<div class="rr-row" data-i="${i}" style="display:flex;align-items:center;gap:8px;padding:9px 10px;margin-bottom:5px;border-radius:12px;
+                        border:1.5px dashed ${i === firstEmpty ? '#6366f1' : '#d1d5db'};background:${i === firstEmpty ? '#eef2ff' : '#fafafa'};">
+                    <span style="font-size:11px;font-weight:900;color:#4b5563;background:#e5e7eb;border-radius:6px;padding:2px 6px;">D${i + 1}</span>
+                    <span style="flex:1;font-size:11.5px;color:${i === firstEmpty ? '#4338ca' : '#9ca3af'};font-weight:700;">${i === firstEmpty ? '← แตะตลาดด้านล่างเพื่อวางช่องนี้' : 'ว่าง'}</span>
+                    <span style="font-size:10px;color:#9ca3af;">${dtTxt}</span></div>`;
+            }
+            const moved = old !== pos;
+            const mk = ReorderReq._market(old);
+            return `<div class="rr-row" data-i="${i}" style="display:flex;align-items:center;gap:8px;padding:9px 10px;margin-bottom:5px;border-radius:12px;
+                    border:1.5px solid ${moved ? '#fcd34d' : '#e5e7eb'};background:${moved ? '#fffbeb' : '#fff'};">
+                <span class="rr-handle" style="color:#9ca3af;font-size:15px;cursor:grab;touch-action:none;padding:0 2px;">⣿</span>
+                <span style="font-size:11px;font-weight:900;color:#374151;background:#f3f4f6;border-radius:6px;padding:2px 6px;">D${i + 1}</span>
+                <div style="flex:1;min-width:0;">
+                    <div style="font-size:12.5px;font-weight:800;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${e(mk || '(ไม่มีชื่อตลาด)')}</div>
+                    <div style="font-size:10.5px;color:#6b7280;">${ReorderReq._count(old)} ร้าน · ${dtTxt}${moved ? ` · <b style="color:#b45309;">มาจาก D${num(old)}</b>` : ''}</div>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:2px;">
+                    <button onclick="ReorderReq.move(${i},-1)" style="border:none;background:#f3f4f6;border-radius:6px;font-size:10px;padding:2px 7px;">▲</button>
+                    <button onclick="ReorderReq.move(${i},1)" style="border:none;background:#f3f4f6;border-radius:6px;font-size:10px;padding:2px 7px;">▼</button>
+                </div>
+                <button onclick="ReorderReq.unplace(${i})" title="เอาออกไปกองรอวาง" style="border:none;background:none;color:#9ca3af;font-size:15px;padding:0 2px;">✕</button>
+            </div>`;
+        }).join('');
+
+        const poolHtml = pool.length ? `
+            <div style="margin:10px 0 4px;font-size:12px;font-weight:900;color:#4338ca;">ตลาดที่ยังไม่ได้วาง ${pool.length} ตลาด — แตะเพื่อวางช่องถัดไป (D${firstEmpty + 1})</div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                ${pool.map(l => `<button onclick="ReorderReq.place('${l}')"
+                    style="padding:6px 10px;border-radius:10px;border:1.5px solid #c7d2fe;background:#eef2ff;font-size:11.5px;font-weight:800;color:#3730a3;text-align:left;">
+                    D${num(l)} · ${e(ReorderReq._market(l) || '(ไม่มีชื่อ)')} <span style="font-weight:600;color:#6366f1;">${ReorderReq._count(l)}</span></button>`).join('')}
+            </div>` : '';
+
+        const pendingHtml = S.pending ? `
+            <div style="margin-bottom:10px;padding:10px 12px;border-radius:12px;background:#fffbeb;border:1px solid #fde68a;font-size:12px;color:#92400e;">
+                ⏳ มีคำขอจัดลำดับของเดือนนี้รออนุมัติอยู่ (${(S.pending.summary || []).length} ตลาด) — ส่งใหม่จะแทนคำขอเดิม
+                <button onclick="ReorderReq.cancelPending()" style="margin-left:6px;font-size:11px;font-weight:800;padding:2px 9px;border-radius:7px;border:1px solid #fecaca;background:#fef2f2;color:#dc2626;">ยกเลิกคำขอเดิม</button>
+            </div>` : '';
+
+        const canSend = !empties && changed.length > 0;
+        sheet.innerHTML = `
+        <div style="position:absolute;inset:0;background:rgba(0,0,0,0.5);" onclick="ReorderReq.close()"></div>
+        <div style="position:relative;background:#fff;border-radius:20px 20px 0 0;width:100%;max-width:520px;max-height:92dvh;display:flex;flex-direction:column;">
+            <div style="padding:14px 16px 8px;flex-shrink:0;">
+                <div style="display:flex;justify-content:center;padding:0 0 8px;"><div style="width:40px;height:4px;border-radius:2px;background:#e5e7eb;"></div></div>
+                <div style="font-size:15px;font-weight:900;color:#111827;">⇅ ขอจัดลำดับตลาด · ${e(S.route)}</div>
+                <div style="font-size:11.5px;color:#6b7280;margin-top:2px;">${e(ReorderReq._monthLabel(S.ym))} · ${e(modeTxt)}</div>
+                <div style="font-size:11px;color:#9ca3af;margin-top:2px;">ลาก ⣿ หรือกด ▲▼ เพื่อย้ายตลาด ตลาดอื่นเลื่อนตามเอง · ต้องรอแอดมินอนุมัติก่อนมีผล</div>
+                <div style="display:flex;gap:8px;margin-top:10px;">
+                    <button onclick="ReorderReq.reset()" style="flex:1;padding:8px;border-radius:10px;border:1px solid #e5e7eb;background:#f9fafb;font-size:12px;font-weight:800;color:#374151;">↺ คืนค่าเดิม</button>
+                    <button onclick="ReorderReq.clearAll()" style="flex:1;padding:8px;border-radius:10px;border:1px solid #fecaca;background:#fef2f2;font-size:12px;font-weight:800;color:#b91c1c;">🧹 ล้างทั้งหมด แล้ววางเอง</button>
+                </div>
+            </div>
+            <div style="flex:1;overflow-y:auto;padding:4px 16px 10px;">
+                ${pendingHtml}
+                <div id="rr-list">${rows}</div>
+                ${poolHtml}
+                ${warnings.length ? `<div style="margin-top:10px;padding:10px 12px;border-radius:12px;background:#fffbeb;border:1px solid #fde68a;font-size:11.5px;color:#92400e;">${warnings.map(w => '⚠️ ' + e(w)).join('<br>')}</div>` : ''}
+            </div>
+            <div style="padding:10px 16px 22px;border-top:1px solid #f3f4f6;flex-shrink:0;display:flex;gap:8px;">
+                <button onclick="ReorderReq.close()" style="flex:1;padding:12px;border-radius:12px;border:none;background:#f3f4f6;font-size:13px;font-weight:800;color:#374151;">ปิด</button>
+                <button onclick="ReorderReq.submit()" ${canSend ? '' : 'disabled'}
+                    style="flex:2;padding:12px;border-radius:12px;border:none;background:${canSend ? '#4f46e5' : '#e5e7eb'};color:${canSend ? '#fff' : '#9ca3af'};font-size:13px;font-weight:900;">
+                    ${empties ? `วางให้ครบก่อน (เหลือ ${empties} ช่อง)` : changed.length ? `📨 ส่งคำขอ (ย้าย ${changed.length} ตลาด)` : 'ยังไม่ได้ย้ายตลาด'}</button>
+            </div>
+        </div>`;
+
+        try { ReorderReq._sortable?.destroy(); } catch (err) {}
+        ReorderReq._sortable = null;
+        const list = document.getElementById('rr-list');
+        if (list && typeof Sortable !== 'undefined') {
+            ReorderReq._sortable = Sortable.create(list, {
+                handle: '.rr-handle', animation: 150, delay: 0,
+                onEnd: (ev) => {
+                    if (ev.oldIndex === ev.newIndex) return;
+                    const it = S.order.splice(ev.oldIndex, 1)[0];
+                    S.order.splice(ev.newIndex, 0, it);
+                    ReorderReq._render();
+                },
+            });
+        }
+    },
+
+    move: (i, dir) => {
+        const S = ReorderReq.S, j = i + dir;
+        if (!S || j < 0 || j >= S.order.length) return;
+        const t = S.order[i]; S.order[i] = S.order[j]; S.order[j] = t;
+        ReorderReq._render();
+    },
+    unplace: (i) => { if (ReorderReq.S) { ReorderReq.S.order[i] = null; ReorderReq._render(); } },
+    place: (label) => {
+        const S = ReorderReq.S;
+        if (!S) return;
+        const i = S.order.indexOf(null);
+        if (i < 0) return;
+        S.order[i] = label;
+        ReorderReq._render();
+    },
+    reset: () => { const S = ReorderReq.S; if (S) { S.order = S.base.slice(); ReorderReq._render(); } },
+    clearAll: () => { const S = ReorderReq.S; if (S) { S.order = S.base.map(() => null); ReorderReq._render(); } },
+
+    cancelPending: async () => {
+        const S = ReorderReq.S;
+        if (!S?.pending) return;
+        try {
+            await ReorderReq._col().doc(S.pending.id).delete();
+            S.pending = null;
+            ReorderReq._render();
+            showSalesToast('🗑️ ยกเลิกคำขอจัดลำดับเดิมแล้ว');
+            if (typeof NotifCtrl !== 'undefined') NotifCtrl.refresh();
+        } catch (e) { showSalesToast('❌ ยกเลิกไม่สำเร็จ: ' + e.message, true); }
+    },
+
+    submit: async () => {
+        const S = ReorderReq.S;
+        if (!S || S.order.includes(null)) return;
+        const map = ReorderReq._map();
+        if (!Object.keys(map).length) return showSalesToast('ยังไม่ได้ย้ายตลาด', true);
+        const summary = S.order.map((old, i) => (old && old !== S.base[i])
+            ? { from: ReorderReq._num(old), to: i + 1, market: ReorderReq._market(old), n: ReorderReq._count(old) } : null).filter(Boolean);
+        const session = Auth.getSession();
+        const name = session?.displayName || session?.username || S.route;
+        const label = ReorderReq._monthLabel(S.ym);
+        try {
+            // คำขอเดิมของสายนี้ + เดือนนี้ที่ยังรออยู่ → ลบทิ้ง (ส่งใหม่ = แทนของเดิม)
+            const snap = await ReorderReq._col().where('route', '==', S.route).where('status', '==', 'pending').get();
+            await Promise.all(snap.docs.filter(d => d.data().type === 'reorder' && d.data().ym === S.ym).map(d => d.ref.delete()));
+            const ref = await ReorderReq._col().add({
+                ym: S.ym, route: S.route,
+                storeId: '__reorder__', storeName: `⇅ จัดลำดับตลาด ${label}`,
+                fromDay: 'ลำดับเดิม', toDay: `ลำดับใหม่ (${summary.length} ตลาด)`,
+                requestedBy: name, requestedAt: firebase.firestore.FieldValue.serverTimestamp(), status: 'pending',
+                type: 'reorder', map, order: S.order, mode: S.mode, cycleDays: S.N, basisSig: S.basisSig,
+                summary, warnings: ReorderReq._warnings(map), requestedByRole: session?.role || '',
+            });
+            showSalesToast(`📨 ส่งคำขอจัดลำดับตลาด ${label} แล้ว รอแอดมินอนุมัติ`);
+            if (typeof writeAuditLog === 'function') writeAuditLog('reorder_request_create', { route: S.route, ym: S.ym, moved: summary.length, reqId: ref.id });
+            if (typeof NotifCtrl !== 'undefined') NotifCtrl.refresh();
+            ReorderReq.close();
+        } catch (e) {
+            showSalesToast('❌ ส่งคำขอไม่สำเร็จ: ' + e.message, true);
+        }
+    },
+};
+
+// ═════════════════════════════════════════════════════════════════════════
 // ✅ NEW (2026-08-29): NotifCtrl — รวมการแจ้งเตือนทั้ง 2 เรื่องไว้จุดเดียว
 // เปิดจากไอคอนแฮมเบอร์เกอร์มุมขวาบน (มีจุดแดงเตือนถ้ามีอะไรค้าง)
 // ═════════════════════════════════════════════════════════════════════════
@@ -2177,6 +2497,7 @@ const CalendarCtrl = {
             </div>`;
         }
         container.innerHTML = html;
+        if (typeof ReorderReq !== 'undefined') ReorderReq.renderBar();
     },
 
     goToDay: (dayLabel, year, month, day) => { CalendarCtrl.showDaySheet(dayLabel, year, month, day); },

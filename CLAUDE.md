@@ -86,6 +86,16 @@ The company forked our admin into **RPN V0** (a local/IndexedDB app, versioned `
 - "คำขอย้ายวัน" / "เช็คการยืนยัน" (MoveRequestAdmin / RouteConfirmAdmin) moved from the old planning toolbar to the admin sidebar. `approveMoveRequest` now replaces only `fromDay` in `days` (stores can have several Days) and moves RPN's per-Day fields (`cys`, `fqs`, `fqRun`, `vd`, `runOf`) to `toDay` from a peer store.
 - Anything that lists routes (users gen, tasks checklist, center-select count, cell split, route-confirm) must skip `รอจัดสาย`.
 
+### Sales "ขอจัดลำดับตลาด" (market reorder requests, added 2026-10-08)
+
+`ReorderReq` (sales-app.js) — button under the calendar header, next months only (current/past month disabled); sales for their own route, Sup/ASM for the selected route. Drag/▲▼ to move a whole market between Day slots (others shift, splice semantics), or "ล้างทั้งหมด" then tap markets into slots from D1. Mode per route: `half` (every multi-day store is an exact half-cycle pair → only D1–D(N/2) movable, second half mirrored), `free` (no multi-day stores — incl. 12-day cycles where F2 is market-level via +14 days), `irregular` (pairs not half-cycle, e.g. 402C01 cycle 23 → all slots movable, warns which pair gaps change). Malformed Day labels (e.g. `Day 12.5`) block the request.
+Stored as a normal `moveRequests` doc with `type:'reorder'`, `map` {old→new, incl. mirrored half}, `summary`, `warnings`, `basisSig`; filler `storeId:'__reorder__'`/`storeName`/`fromDay`/`toDay` keep the existing firestore.rules happy. Resubmitting deletes the previous pending reorder for that route+month.
+Admin approves in "คำขอย้ายวัน" → `MoveRequestAdmin.approveReorder` → `RpnHost.ensure()` (loads the RPN iframe in the background) → `RPNBridge.applyReorder` (rpn/rpn-online.js), which switches RPN to that month and remaps `days`, `seqs`, `fqs`, `fqRun`, `vd`, `wasPlan`, `runOf.src`, `cyPoints` with the market, keeps `cys` on the slot (AS&D rule), rewrites the `D..` number inside `marketName`, and saves (rpnCal is re-injected). It deliberately does **not** call RPN's own `Reorder.apply` (that one derives the half-cycle from the *center's* cycleDays and doesn't move `fqs`). Locked months can't be approved. After approval the DMS export for that month must be redone.
+
+### Legacy market naming in RPN
+
+`rpn-online.js` adds our old formula (`{route} D{NN} {top-2 tambons} {district} {province}`, same as `FileManager._autoFillMarketNames`) to RPN's market-suggest UI without editing RPN files: an extra "สูตรเดิม" chip in the per-day panel, a "สูตรเดิม" option on every row of the "🗂 ทั้งสาย" table, and a "📛 สูตรเดิมทุกวัน" button there. The user picks per day or all at once.
+
 ### `plan-lock.js` — temporarily read-only months
 
 Loaded right after the Firebase SDK in `index.html` and `rpn/RoutePlannerV0.html` (not `sales.html`). Rejects every `set`/`update`/`delete` (single doc or batch) under `plans/{ym}` for months in its `LOCKED` list — as of 2026-10-08 `['2026_11','2026_12']` for **all centers**, per the user, while RPN is being trialled. RPN shows a "ดูได้อย่างเดียว" banner on locked months and `rpn-online.js` skips rpnCal reconcile for them. To unlock, edit `LOCKED` and push.
