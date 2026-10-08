@@ -1180,10 +1180,11 @@
                 }
                 RpnHost._go(sub);
             },
-            // Nav ของ RPN ถูกสร้างหลังโหลด (overview.js เพิ่มหน้าภาพรวมเองทีหลัง) — ลองซ้ำจนพร้อม
+            // หน้าภาพรวมของ RPN ถูกสร้างหลังโหลด (overview.js เพิ่มเองทีหลัง) — ลองซ้ำจนพร้อม
+            // (Nav/App/State ของ RPN ประกาศเป็น const ระดับบนสุด ไม่อยู่บน window — สั่งผ่าน RPNBridge เท่านั้น)
             _go: (sub, tries = 0) => {
                 const w = RpnHost.win();
-                const ready = w && w.RPNBridge && w.Nav && (sub !== 'overview' || w.document.getElementById('page-overview'));
+                const ready = w && w.RPNBridge && (sub !== 'overview' || w.document.getElementById('page-overview'));
                 if (ready) { try { w.RPNBridge.go(sub); } catch (e) {} return; }
                 if (tries < 40) setTimeout(() => RpnHost._go(sub, tries + 1), 250);
             },
@@ -1217,7 +1218,11 @@
             if (Nav._page === 'rpn' && !isRpn) RpnHost.leave();
             Nav._page = isRpn ? 'rpn' : page;
             _origNavGo(page);
-            if (isRpn) RpnHost.show(page === 'rpnoverview' ? 'overview' : 'planning');
+            if (isRpn) {
+                // Nav.go เดิมโชว์ #page-{page} — 'rpnoverview' ไม่มีหน้าของตัวเอง ใช้ #page-rpn ร่วมกัน
+                document.getElementById('page-rpn')?.classList.remove('hidden');
+                RpnHost.show(page === 'rpnoverview' ? 'overview' : 'planning');
+            }
             if (page === 'dashboard' && typeof Dashboard !== 'undefined') Dashboard._render();
             if (page === 'auditlog' && typeof AuditLog !== 'undefined') AuditLog.renderPage();
             // sync hamburger ทุกครั้งที่เปลี่ยน page
