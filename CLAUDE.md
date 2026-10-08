@@ -100,7 +100,7 @@ Admin approves in "คำขอย้ายวัน" → `MoveRequestAdmin.appr
 
 ### `plan-lock.js` — temporarily read-only months
 
-Loaded right after the Firebase SDK in `index.html` and `rpn/RoutePlannerV0.html` (not `sales.html`). Rejects every `set`/`update`/`delete` (single doc or batch) under `plans/{ym}` for months in its `LOCKED` list — as of 2026-10-08 `['2026_11','2026_12']` for **all centers**, per the user, while RPN is being trialled. RPN shows a "ดูได้อย่างเดียว" banner on locked months and `rpn-online.js` skips rpnCal reconcile for them. To unlock, edit `LOCKED` and push.
+Loaded right after the Firebase SDK in `index.html` and `rpn/RoutePlannerV0.html` (not `sales.html`). Rejects every `set`/`update`/`delete` (single doc or batch) under `plans/{ym}` for months in its `LOCKED` list — applies to **all centers**. Was `['2026_11','2026_12']` during the RPN trial on 2026-10-08, unlocked the same day per the user (currently `[]`). RPN shows a "ดูได้อย่างเดียว" banner on locked months and `rpn-online.js` skips rpnCal reconcile for them. To unlock, edit `LOCKED` and push.
 
 ---
 
