@@ -386,17 +386,8 @@ const App = {
     _getWithTimeout: (ref, ms = 8000) =>
         Promise.race([ref.get(), new Promise((_,rej) => setTimeout(() => rej(new Error('timeout')), ms))]),
 
-    loadPlanList: async (centerDocId) => {
-        try {
-            State.planCenterDocId = centerDocId;
-            const snap = await App._getWithTimeout(db.collection('appData').doc(centerDocId), 5000);
-            const meta = snap.exists ? snap.data() : {};
-            // ✅ ระบบใหม่: ใช้ planList และ currentPlanYM โดยตรง
-            State.planList       = (meta.planList || []).sort().reverse();
-            State.currentPlanYM  = meta.currentPlanYM || '';
-            console.log('📅 planList:', State.planList, 'current:', State.currentPlanYM);
-        } catch(e) { console.warn('loadPlanList:', e); State.planList = []; }
-    },
+    // ✅ FIX (2026-09-14): ตัด loadPlanList ออก — ไม่มีจุดเรียกใช้เหลือแล้ว (App.start()/startSupervisor()
+    // เขียน logic เดียวกันนี้แบบ inline เองแทน ไม่เคยเรียกฟังก์ชันนี้จริง)
 
     loadPlanData: async (ym) => {
         if (Object.prototype.hasOwnProperty.call(State.planCache, ym) &&
@@ -816,6 +807,34 @@ function ymToThaiShortLocal(ym) {
     } catch(e) { return ym; }
 }
 
+// ✅ NEW: สายที่มีร้าน F2 เยอะมากบางสายมีบางวันที่ "ไม่มีร้านไหนถือเป็นวันแรกเลย" (มีแต่ร้านที่มา
+// วันนั้นเป็นรอบสอง) — วันแบบนี้ไม่มีร้านไหนเก็บชื่อตลาดที่ถูกต้องของมันไว้ถาวรได้เลย (ร้าน F2 มีช่อง
+// marketName ค่าเดียว ผูกกับวันแรกไปแล้ว) จึง generate ชื่อสดจากตำบล/อำเภอ/จังหวัดของร้านที่ไปวันนั้น
+// จริงแทน (สูตรเดียวกับ FileManager._dayMarketNameMap / _autoFillMarketNames ฝั่งแอดมิน) ไม่บันทึกกลับ
+function generateDayMarketName(stores, day) {
+    const group = stores.filter(s => s.days?.includes(day));
+    if (!group.length) return null;
+    const stripPrefix = (v) => String(v || '').replace(/^(ตำบล|ต\.|อำเภอ|อ\.|จังหวัด|จ\.)\s*/, '').trim();
+    const rankByFreq = (field) => {
+        const counts = {}, order = [];
+        group.forEach(s => {
+            const v = stripPrefix(s[field]);
+            if (!v) return;
+            if (!(v in counts)) { counts[v] = 0; order.push(v); }
+            counts[v]++;
+        });
+        return order.sort((a, b) => counts[b] - counts[a]);
+    };
+    const dayDigits = String(day).replace(/[^0-9]/g, '');
+    if (!dayDigits) return null;
+    const tambons  = rankByFreq('subDistrict').slice(0, 2);
+    const amphoe   = rankByFreq('district')[0]  || '';
+    const province = rankByFreq('province')[0]  || '';
+    const dToken   = 'D' + dayDigits.padStart(2, '0');
+    const salesCode = group[0].salesCode || '';
+    return [salesCode, dToken, ...tambons, amphoe, province].filter(Boolean).join(' ');
+}
+
 function getDayMarketList(day, forMonth, forYear) {
     if (forMonth !== undefined && forYear !== undefined) {
         const loadedYM = State.activePlanYM || (() => {
@@ -825,11 +844,23 @@ function getDayMarketList(day, forMonth, forYear) {
         const [ly, lm] = loadedYM.split('_').map(Number);
         if (forYear !== ly || forMonth !== lm - 1) return [];
     }
+    // ✅ FIX-SUP: Supervisor ที่เลือกสายแล้ว → เฉพาะร้านในสายนั้น ไม่ปนสายอื่น (เหมือน CalendarCtrl.render)
+    const _sourceStores = (App.isSupervisor() && SupervisorUI._selectedRoute)
+        ? State.allStores.filter(s => s.salesCode === SupervisorUI._selectedRoute)
+        : State.allStores;
+    // ✅ FIX-F2: ร้าน F2 (ไปมากกว่า 1 วัน) มีช่อง marketName ได้ค่าเดียว ผูกกับวันแรก (days[0])
+    // เท่านั้น — ถ้าเช็คด้วย .includes(day) ตรงๆ ร้าน F2 จะเอาชื่อของวันแรกไปปนกับวันที่สองด้วย
+    // ทั้งที่ชื่อนั้นไม่ใช่ของวันที่สอง จึงต้องนับเฉพาะร้านที่วันนี้เป็น "วันแรก" ของมันเท่านั้น
     const names = new Set();
-    State.allStores.forEach(s => {
-        if (s.days?.includes(day) && s.marketName?.trim())
+    _sourceStores.forEach(s => {
+        if (s.days?.[0] === day && s.marketName?.trim())
             names.add(trimMarketName(s.marketName));
     });
+    // ✅ FIX-F2: สายที่มีร้าน F2 เยอะมากบางวันอาจไม่มีร้านไหนถือเป็นวันแรกเลย — generate ชื่อสดแทน
+    if (names.size === 0) {
+        const gen = generateDayMarketName(_sourceStores, day);
+        if (gen) names.add(trimMarketName(gen));
+    }
     return Array.from(names).filter(Boolean).sort();
 }
 
@@ -928,18 +959,21 @@ const Processor = {
                 ? `Day ${_dayNum} · ${_mktNow.split(' · ')[0]}`
                 : `Day ${_dayNum}`;
         }
-        const _stEl = document.getElementById('stores-title');
-        if (_stEl) _stEl.textContent = _mktNow
-            ? 'Day ' + State.currentDay.replace('Day ','') + ' · ' + _mktNow
-            : 'รายชื่อร้านค้าทั้งหมด';
+        // ✅ FIX (2026-09-14): ตัด #stores-title lookup ออก — id นี้ไม่มีอยู่จริงใน sales.html
+        // (ซากจาก UI เก่าก่อนเปลี่ยนมาใช้ #day-label-display ข้างบนแทน)
         Processor.routeList();
     },
 
     routeList: () => {
+        // ✅ FIX-F2: ร้าน F2 ที่วันนี้เป็นวันที่สองของมัน ช่อง marketName ผูกกับวันแรกเท่านั้น
+        // (ไม่ใช่ชื่อของวันนี้) ถ้าเทียบ trimMarketName(s.marketName) === _filterMarket ตรงๆ ร้าน
+        // แบบนี้จะหลุดจากรายการทั้งที่ต้องไปวันนี้จริง — วันไหนมีตลาดเดียว (กรณีส่วนใหญ่หลัง regen)
+        // ไม่ต้องกรองชื่อเลย ก็ครบทุกร้านของวันนั้นอยู่แล้ว กรองชื่อเฉพาะวันที่มีมากกว่า 1 ตลาดจริงๆ
+        const _todayMkts = getDayMarketList(State.currentDay);
         let list = State.allStores
             .filter(s => {
                 if (!s.days.includes(State.currentDay)) return false;
-                if (State._filterMarket) return trimMarketName(s.marketName) === State._filterMarket;
+                if (State._filterMarket && _todayMkts.length > 1) return trimMarketName(s.marketName) === State._filterMarket;
                 return true;
             })
             .sort((a, b) => (a.seqs?.[State.currentDay] || 999) - (b.seqs?.[State.currentDay] || 999));
@@ -1631,10 +1665,21 @@ const CalendarCtrl = {
 
     // ✅ วันหยุดของโหมด cycle — รวมทั้ง "วันหยุดเฉพาะกิจ" (เลขวันที่ เช่น วันหยุดนักขัตฤกษ์)
     // และ "วันหยุดประจำสัปดาห์" (เช่น อาทิตย์หยุดทุกสัปดาห์ — ไม่ต้องมาร์คซ้ำทุกเดือน)
+    // คืน true = วันนี้ "ไม่นับเข้ารอบเลย" (ตลาดหลังจากนั้นเลื่อนมาแทนที่) — คือพฤติกรรมของ
+    // วันหยุดประจำสัปดาห์เสมอ ส่วนวันหยุดเฉพาะกิจจะนับแบบนี้ก็ต่อเมื่อ holidayMode = 'shift' (ค่า
+    // default) เท่านั้น ถ้าเป็น 'skip' (ตรึงตลาด) วันหยุดเฉพาะกิจจะยังนับเข้ารอบตามปกติ (ดู
+    // _isCyclePinnedHoliday ด้านล่าง — ใช้คู่กันเพื่อให้ตลาดวันอื่นไม่ขยับ มีแค่วันนั้นวันเดียวที่ไม่วิ่ง)
     _isCycleHoliday: (cfg, year, month, d) => {
-        if ((cfg.holidays || []).includes(d)) return true;
         if ((cfg.weeklyHolidays || []).includes(new Date(year, month, d).getDay())) return true;
+        if ((cfg.holidays || []).includes(d)) return (cfg.holidayMode || 'shift') !== 'skip';
         return false;
+    },
+
+    // ✅ "ตรึงตลาด" (holidayMode = 'skip'): วันหยุดเฉพาะกิจยังนับเป็น 1 สล็อตในรอบตามปกติ (ตลาดวันอื่น
+    // ไม่ขยับ) แต่วันนั้นวันเดียวไม่มีรอบวิ่งจริง — ต่างจาก "เลื่อนตลาด" (shift) ที่วันหยุดไม่นับเข้ารอบเลย
+    // ทำให้ตลาดหลังจากนั้นทั้งแถวเลื่อนมาแทนที่ (พฤติกรรมเดิมของระบบ ก่อนมีโหมดนี้)
+    _isCyclePinnedHoliday: (cfg, year, month, d) => {
+        return (cfg.holidayMode === 'skip') && (cfg.holidays || []).includes(d);
     },
 
     // ✅ REDESIGN: "วันในสัปดาห์ (วนซ้ำ)" — เปลี่ยนจากรีเซ็ตกลับ Day 1 ทุกต้นเดือน (ของเดิม)
@@ -1716,6 +1761,9 @@ const CalendarCtrl = {
                 if (d2 === dateNum) {
                     // ✅ "วันในสัปดาห์ (จบเมื่อครบรอบ)" และโหมดอิงวันที่แบบเดิม: จบรอบแล้วไม่มี Day ต่อ
                     if (count > cycleDays) return null;
+                    // ✅ "ตรึงตลาด" (holidayMode='skip'): วันนี้นับเข้ารอบแล้ว (ตลาดอื่นไม่ขยับ)
+                    // แต่ตัวมันเองไม่มีรอบวิ่งจริง — คืน null แทน label
+                    if (CalendarCtrl._isCyclePinnedHoliday(cfg, year, month, d2)) return null;
                     const dayNum = ((startDayNum - 1 + (count - 1)) % cycleDays) + 1;
                     return 'Day ' + dayNum;
                 }
@@ -1773,6 +1821,9 @@ const CalendarCtrl = {
                 if (CalendarCtrl._isCycleHoliday(cfg, CalendarCtrl._year, CalendarCtrl._month, d)) continue;
                 count++;
                 if (count > cycleDays) return null; // "จบเมื่อครบรอบ" — เกินรอบแล้วไม่มีวันไหนตรงอีก
+                // ✅ "ตรึงตลาด": วันนี้กินสล็อตในรอบไปแล้ว (count เพิ่มแล้วด้านบน) แต่ตัวมันเองไม่มี
+                // รอบวิ่งจริง (getDayLabelForCfg คืน null ให้วันนี้) จึงไม่ใช่คำตอบของการค้นย้อนกลับ
+                if (CalendarCtrl._isCyclePinnedHoliday(cfg, CalendarCtrl._year, CalendarCtrl._month, d)) continue;
                 const dayNum = ((startDayNum - 1 + (count - 1)) % cycleDays) + 1;
                 if (dayNum === targetNum) return d;
             }
@@ -1886,7 +1937,14 @@ const CalendarCtrl = {
         // ✅ ใช้ค่า override เฉพาะสายที่กำลังดูอยู่ (ถ้ามี) แทนค่า default ของศูนย์ — resolve ผ่าน
         // จุดกลางเดียว (_resolveActiveCfg) เพื่อไม่ให้ตรรกะเพี้ยนไปคนละจุดแบบที่เคยเกิดบั๊กมาแล้ว
         const _renderCfg    = CalendarCtrl._resolveActiveCfg(year, month);
-        const _renderStores = _renderPlan?.stores || State.allStores;
+        // ✅ FIX-SUP: planCache[ym].stores เป็นร้านรวมทุกสายในศูนย์เสมอ (ดู loadPlanDataForSup /
+        // ขั้นตอน seed ตอน login) — ถ้า Supervisor เลือกดูสายใดสายหนึ่งอยู่ ต้องกรองเหลือแค่สายนั้น
+        // ไม่งั้นชื่อตลาด/จุดสีในปฏิทินจะปนกับสายอื่นในศูนย์เดียวกัน (เทียบ salesCode ตรงตัว
+        // เพราะ field นี้คงที่ไม่ขึ้นกับเดือน ต่างจาก State.allRoutes ที่มีแค่เดือน active)
+        const _renderStoresAll = _renderPlan?.stores || State.allStores;
+        const _renderStores = (App.isSupervisor() && SupervisorUI._selectedRoute)
+            ? _renderStoresAll.filter(s => s.salesCode === SupervisorUI._selectedRoute)
+            : _renderStoresAll;
 
         const modeEl = document.getElementById('calendar-mode-badge');
         if (modeEl) {
@@ -1941,11 +1999,17 @@ const CalendarCtrl = {
             }
 
             const mktsInCell = (dayLabel && _renderPlan) ? (() => {
+                // ✅ FIX-F2: เหมือน getDayMarketList — นับเฉพาะร้านที่วันนี้เป็นวันแรก (days[0])
+                // ของมัน กันร้าน F2 เอาชื่อตลาดวันแรกไปโผล่ปนในวันที่สอง
                 const names = new Set();
                 _renderStores.forEach(s => {
-                    if (s.days?.includes(dayLabel) && s.marketName)
+                    if (s.days?.[0] === dayLabel && s.marketName)
                         names.add(trimMarketName(s.marketName));
                 });
+                if (names.size === 0) {
+                    const gen = generateDayMarketName(_renderStores, dayLabel);
+                    if (gen) names.add(trimMarketName(gen));
+                }
                 return Array.from(names).filter(Boolean).sort();
             })() : [];
             const mktLabel = mktsInCell[0] || '';
@@ -2019,12 +2083,17 @@ const CalendarCtrl = {
             ? (State.allRoutes[SupervisorUI._selectedRoute] || State.allStores)
             : State.allStores;
 
+        // ✅ FIX-F2: นับเฉพาะร้านที่วันนี้เป็นวันแรก (days[0]) ของมัน — เหมือน getDayMarketList
         const mkts       = (() => {
             const names = new Set();
             _activeStores.forEach(s => {
-                if (s.days?.includes(dayLabel) && s.marketName)
+                if (s.days?.[0] === dayLabel && s.marketName)
                     names.add(trimMarketName(s.marketName));
             });
+            if (names.size === 0) {
+                const gen = generateDayMarketName(_activeStores, dayLabel);
+                if (gen) names.add(trimMarketName(gen));
+            }
             return Array.from(names).filter(Boolean).sort();
         })();
         const storeCount = _activeStores.filter(s => s.days?.includes(dayLabel)).length;
@@ -2075,7 +2144,12 @@ const CalendarCtrl = {
         <div style="padding:0 16px;">
             <button onclick="CalendarCtrl.navigateToDay('${dayLabel}','')" style="width:100%;padding:13px;border-radius:14px;border:none;background:#2563eb;color:#fff;font-size:15px;font-weight:800;cursor:pointer;margin-bottom:12px;">📋 ดูคิวงานทั้งหมด ${storeCount} ร้าน</button>
             ${mkts.length > 0 ? `<div style="font-size:11px;font-weight:800;color:#6b7280;margin-bottom:8px;padding:0 4px;">เลือกตลาด</div><div style="display:flex;flex-direction:column;gap:8px;">${mkts.map(mkt => {
-                const cnt = _activeStores.filter(s => s.days?.includes(dayLabel) && trimMarketName(s.marketName) === mkt).length;
+                // ✅ FIX-F2: ถ้าวันนี้มีตลาดเดียว นับร้านทั้งหมดของวันนี้ตรงๆ (รวมร้าน F2 ที่มาวันนี้
+                // เป็นวันที่สอง ซึ่ง marketName ในช่องตัวเองยังผูกกับวันแรกอยู่ เทียบชื่อไม่ตรง) —
+                // เทียบชื่อแบบเดิมเฉพาะตอนวันนี้มีมากกว่า 1 ตลาดจริงๆ เท่านั้น
+                const cnt = (mkts.length === 1)
+                    ? storeCount
+                    : _activeStores.filter(s => s.days?.includes(dayLabel) && trimMarketName(s.marketName) === mkt).length;
                 return `<button onclick="CalendarCtrl.navigateToDay('${dayLabel}','${mkt.replace(/'/g,"\\'")}')\" style="width:100%;padding:12px 16px;border-radius:14px;border:1.5px solid #e5e7eb;background:#f9fafb;display:flex;justify-content:space-between;align-items:center;cursor:pointer;font-family:inherit;"><span style="font-size:14px;font-weight:700;color:#111827;">🏪 ${mkt}</span><span style="font-size:12px;font-weight:800;color:#6b7280;background:#e5e7eb;padding:3px 12px;border-radius:20px;">${cnt} ร้าน</span></button>`;
             }).join('')}</div>` : '<div style="text-align:center;color:#9ca3af;font-size:13px;padding:16px 0;">ไม่มีข้อมูลตลาด</div>'}
             <div style="display:flex;align-items:baseline;justify-content:space-between;margin:18px 4px 10px;">
@@ -2370,26 +2444,9 @@ const MapCtrl = {
     },
 };
 
-// ─── Resizer ──────────────────────────────────────────────────────────────
-const Resizer = {
-    init: () => {
-        const handle = document.getElementById('resize-handle');
-        if (!handle) return;
-        let startY = 0, startH = 0;
-        const listEl = document.getElementById('route-store-list')?.closest('.overflow-y-auto');
-        if (!listEl) return;
-        handle.addEventListener('touchstart', e => {
-            startY = e.touches[0].clientY;
-            startH = listEl.offsetHeight;
-        }, { passive: true });
-        handle.addEventListener('touchmove', e => {
-            const dy = e.touches[0].clientY - startY;
-            const newH = Math.max(120, Math.min(window.innerHeight * 0.8, startH + dy));
-            listEl.style.height = newH + 'px';
-            if (map) map.invalidateSize();
-        }, { passive: true });
-    },
-};
+// ✅ FIX (2026-09-14): ตัด Resizer ออก — หา #resize-handle ซึ่งไม่มีอยู่จริงใน sales.html เลย
+// (ตัว resizer จริงที่ใช้งานอยู่คือ #resizer/#resizer-pill ผูกกับ initResizer() ที่ฝังใน sales.html เอง)
+// Resizer.init() เดิมจึงเป็น no-op เงียบๆ ทุกครั้งที่โหลดหน้า ไม่มีผลอะไรเลย
 
 // ─── SupervisorUI ─────────────────────────────────────────────────────────
 const SupervisorUI = {
@@ -2798,10 +2855,7 @@ const ActivityCtrl = {
 document.getElementById('day-select').addEventListener('change', (e) => {
     State.currentDay  = e.target.value;
     const _m  = getDayMarkets(State.currentDay);
-    const _sEl = document.getElementById('stores-title');
-    if (_sEl) _sEl.textContent = _m
-        ? 'สายวิ่งวันที่ ' + State.currentDay.replace('Day ','') + ' · ' + _m
-        : 'รายชื่อร้านค้าทั้งหมด';
+    // ✅ FIX (2026-09-14): ตัด #stores-title lookup ออก — id นี้ไม่มีอยู่จริงใน sales.html (ดู comment เดียวกันด้านบน)
     // ✅ ข้อ 5: sync label display
     const _lbl = document.getElementById('day-label-display');
     if (_lbl && State.currentDay) {
@@ -2813,4 +2867,4 @@ document.getElementById('day-select').addEventListener('change', (e) => {
 });
 
 window.addEventListener('resize', () => { if (map) map.invalidateSize(); });
-document.addEventListener('DOMContentLoaded', () => { App.checkAuth(); Resizer.init(); });
+document.addEventListener('DOMContentLoaded', () => { App.checkAuth(); });

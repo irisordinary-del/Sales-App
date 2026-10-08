@@ -475,11 +475,8 @@ const App = {
         if (!id) return;
         Modal.closeDelete();
 
-        // ลบออกจาก centers map แล้ว set ทับ (ไม่ใช้ merge เพื่อให้ลบ key จริงๆ)
-        const updated = { ...App.centers };
-        delete updated[id];
-
         Toast.show('⏳ กำลังลบศูนย์ ' + id + '...');
+        // FieldValue.delete() ลบ key ออกจาก map จริงๆ (ต่างจาก set ค่า null/undefined ซึ่งยังทิ้ง key ค้างไว้)
         CENTERS_DOC.update({ ['centers.' + id]: firebase.firestore.FieldValue.delete() })
             .then(() => Toast.show('🗑️ ลบศูนย์ ' + id + ' เรียบร้อย'))
             .catch(err => Toast.show('❌ ลบไม่สำเร็จ: ' + err.message, true));

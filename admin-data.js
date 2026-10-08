@@ -87,6 +87,14 @@ const App = {
     planRef:      (ym) => App.plansCol().doc(ym),
     planRoutesCol:(ym) => App.plansCol().doc(ym).collection('routes'),
 
+    // ✅ BUGFIX: เดิม localStorage key "last_route_{ym}" ไม่ผูกกับศูนย์เลย มีแค่เดือน — ถ้าแอดมิน/
+    // supervisor เคยดูศูนย์อื่นที่ใช้เดือนเดียวกัน (เกิดขึ้นแทบทุกครั้งเพราะส่วนใหญ่อยู่เดือนปัจจุบัน
+    // เหมือนกันหมด) แล้วสลับมาศูนย์นี้ จะไปอ่านชื่อสายของศูนย์เก่ามาใช้ — สายนั้นไม่มีจริงในศูนย์นี้
+    // (Firestore get() คืน exists:false) แต่ code ก็ยัง set State.db.routes[ชื่อสายนั้น] = [] ไว้อยู่ดี
+    // กลายเป็นสายผีว่างเปล่าโผล่ในหน้า "ภาพรวมทุกสาย" (Object.keys(State.db.routes) เห็นมันด้วย)
+    // แก้โดยผูก key กับศูนย์ (window.CENTER_DOC) ด้วยเสมอ กันข้ามศูนย์ปนกัน
+    _lastRouteKey: (ym) => `last_route_${window.CENTER_DOC || 'v1_main'}_${ym}`,
+
     // ─── State ───────────────────────────────────────────────────────────
     _currentPlanYM:  '',   // YYYY_MM ที่แอดมิน "กำลังดู/แก้ไข" อยู่ (local view เท่านั้น)
     _livePlanYM:     '',   // ✅ YYYY_MM ที่ "Live" จริงให้ Sales เห็น (มาจาก centerDoc.currentPlanYM)
@@ -114,7 +122,7 @@ const App = {
         const total = routeList.length;
 
         // ── Step 1: โหลด active route ก่อน → แสดงผลทันที ────────────────
-        const activeRoute = localStorage.getItem(`last_route_${ym}`) || routeList[0];
+        const activeRoute = localStorage.getItem(App._lastRouteKey(ym)) || routeList[0];
         UI.showRouteLoadPopup(0, total);
         try {
             const d = await col.doc(activeRoute).get();
@@ -286,7 +294,7 @@ const App = {
             App.log(`✅ โหลด plan ${ym} เสร็จ — ${State.db.routeList.length} สาย`);
 
             if (!State.localActiveRoute || !State.db.routes[State.localActiveRoute]) {
-                State.localActiveRoute = localStorage.getItem(`last_route_${ym}`) || State.db.routeList[0];
+                State.localActiveRoute = localStorage.getItem(App._lastRouteKey(ym)) || State.db.routeList[0];
             }
             State.stores = State.db.routes[State.localActiveRoute] || [];
 
@@ -368,7 +376,7 @@ const App = {
     },
 
     // ─── saveDB ──────────────────────────────────────────────────────────
-    saveDB: () => {
+    saveDB: async () => {
         const ym = App._currentPlanYM;
         if (!ym) return;
         State.db.routes[State.localActiveRoute] = State.stores;
@@ -378,16 +386,38 @@ const App = {
         // จนกว่าจะ reload หน้า — เกิดชัดสุดตอนเพิ่ม/ลบ/import สายใหม่ในเซสชันเดียวกัน
         State.db.routeList = routeList;
 
+        // ✅ NEW: เดิมทุกครั้งที่กด "บันทึก" จะรีเซ็ตสถานะ "ยืนยันรับสายวิ่ง" ของเซลทิ้งเสมอ ไม่ว่า
+        // จะแก้อะไรจริงหรือไม่ (แม้แต่กดบันทึกซ้ำเฉยๆ) — เช็คก่อนว่า days/seqs/รายชื่อร้านของสายนี้
+        // เปลี่ยนจริงไหม (ไม่นับ field UI เช่น "selected" ที่ไม่ใช่ส่วนของแผนที่เซลต้องยืนยัน) ถ้าไม่
+        // เปลี่ยนเลย ไม่ต้องไปรีเซ็ตสถานะ กันเซลต้องกดยืนยันซ้ำทั้งที่ไม่มีอะไรเปลี่ยนจริง
+        const normalizeForCompare = (stores) => (stores || [])
+            .map(s => ({ id: s.id, days: [...(s.days || [])].sort(), seqs: s.seqs || {} }))
+            .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+
+        let routeChanged = true;
+        try {
+            const existing = await App.planRoutesCol(ym).doc(State.localActiveRoute).get();
+            if (existing.exists) {
+                const prevStores = existing.data().stores || [];
+                routeChanged = JSON.stringify(normalizeForCompare(prevStores)) !== JSON.stringify(normalizeForCompare(State.stores));
+            }
+        } catch (e) {
+            console.warn('saveDB: เช็คการเปลี่ยนแปลงไม่สำเร็จ ถือว่ามีการเปลี่ยนแปลงไว้ก่อน (ปลอดภัยกว่า)', e);
+        }
+
+        const routeDoc = {
+            stores: State.stores,
+            dayStats: State.db.routeDayStats[State.localActiveRoute] || {},
+        };
+        if (routeChanged) {
+            routeDoc.confirmedBy = firebase.firestore.FieldValue.delete();
+            routeDoc.confirmedAt = firebase.firestore.FieldValue.delete();
+        }
+
         Promise.all([
             // ✅ BUGFIX (2026-08-29): เดิม .set({stores}) ไม่มี merge:true — Firestore จะแทนที่
             // เอกสารทั้งก้อน ทำให้ calendarOverride ของสายนั้นหายไปเงียบๆ ทุกครั้งที่กดบันทึก
-            // ✅ NEW: แก้ไขร้าน/วันในสายนี้แล้ว = รีเซ็ตสถานะ "ยืนยันรับสายวิ่ง" ของเซลด้วย
-            App.planRoutesCol(ym).doc(State.localActiveRoute).set({
-                stores: State.stores,
-                dayStats: State.db.routeDayStats[State.localActiveRoute] || {},
-                confirmedBy: firebase.firestore.FieldValue.delete(),
-                confirmedAt: firebase.firestore.FieldValue.delete(),
-            }, { merge: true }),
+            App.planRoutesCol(ym).doc(State.localActiveRoute).set(routeDoc, { merge: true }),
             App.planRef(ym).set({ routeList, cycleDays: State.db.cycleDays || 24, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true }),
         ])
         .then(() => UI.showSaveToast(`💾 บันทึกเรียบร้อย`))
@@ -416,35 +446,13 @@ const App = {
     // ─── Switch plan (แค่ "ดู/แก้ไข" ฝั่งแอดมิน — ไม่กระทบ Sales) ──────────
     switchPlan: async (ym) => {
         if (App._currentPlanYM === ym) return;
-        State.localActiveRoute = localStorage.getItem(`last_route_${ym}`) || '';
+        State.localActiveRoute = localStorage.getItem(App._lastRouteKey(ym)) || '';
         await App._loadPlan(ym);
         // ✅ BUGFIX: เดิมเขียน currentPlanYM ลง centerDoc ทันทีทุกครั้งที่แอดมินสลับดูเดือน
         // ทำให้ Sales ทุกคนเห็นเดือนเปลี่ยนตามไปด้วยทั้งที่แอดมินแค่ "ดู" ไม่ได้ตั้งใจให้ live
-        // ตอนนี้แยกออกมา — ต้องกดปุ่ม "ตั้งเป็นเดือนที่ใช้งานจริง" (App.publishPlan) เท่านั้นถึงจะมีผลกับ Sales
+        // ✅ FIX (2026-09-14): เดิมมีปุ่ม "ตั้งเป็นเดือนที่ใช้งานจริง" (App.publishPlan) ให้กดยืนยันแยก
+        // ตอนนี้ฟังก์ชันนั้นถูกลบไปแล้ว — ฝั่ง Sales ยึดวันที่ปฏิทินจริงเป็นหลักแทน ไม่มีขั้นตอน publish แยกอีกต่อไป
         PlanUI.refresh();
-    },
-
-    // ─── Publish plan ให้ Sales เห็นจริง (ต้องกดยืนยันชัดเจน) ──────────────
-    publishPlan: async (ym) => {
-        if (!ym) return;
-        if (ym === App._livePlanYM) {
-            UI.showErrorToast('ℹ️ เดือนนี้ Live อยู่แล้ว');
-            return;
-        }
-        if (!confirm(
-            `⚠️ ยืนยันตั้ง "${App.ymToLabel(ym)}" เป็นเดือนที่ใช้งานจริง?\n\n` +
-            `Sales ทุกคนในศูนย์นี้จะเห็นปฏิทิน/สายวิ่งของเดือนนี้ทันที ` +
-            `(เดือนที่ Live อยู่ตอนนี้คือ ${App.ymToLabel(App._livePlanYM)})`
-        )) return;
-
-        try {
-            await App.dbRef.set({ currentPlanYM: ym }, { merge: true });
-            App._livePlanYM = ym;
-            PlanUI.refresh();
-            UI.showSaveToast(`📢 ตั้ง ${App.ymToLabel(ym)} เป็นเดือนที่ใช้งานจริงแล้ว — Sales เห็นทันที`);
-        } catch(e) {
-            UI.showErrorToast('❌ ตั้งค่าไม่สำเร็จ: ' + ErrorMsg.translate(e));
-        }
     },
 
     // ─── Create new plan ─────────────────────────────────────────────────
@@ -524,51 +532,11 @@ const App = {
         }
     },
 
-    // ─── Delete plan ─────────────────────────────────────────────────────
-    deletePlan: async (ym) => {
-        if (!ym) return;
-        UI.showConfirm(`ยืนยันลบ Plan ${App.ymToLabel(ym)}?`, async () => {
-            try {
-                // ลบ routes subcollection
-                const routeDocs = await App.planRoutesCol(ym).get();
-                await Promise.all(routeDocs.docs.map(d => d.ref.delete()));
-                await App.planRef(ym).delete();
-
-                // อัปเดต planList
-                const curDoc  = await App.dbRef.get();
-                const curData = curDoc.exists ? curDoc.data() : {};
-                const planList = (curData.planList || []).filter(p => p !== ym).sort().reverse();
-
-                // ✅ BUGFIX: เดิมเขียนทับ currentPlanYM (เดือน live ของ Sales) ทุกครั้งที่ลบ plan
-                // ไม่ว่าจะลบเดือนที่ live อยู่จริงหรือแค่ลบ draft เดือนอื่นที่ไม่เกี่ยวกับ Sales เลย
-                // ตอนนี้เช็คก่อน — เขียนทับเฉพาะกรณีลบเดือนที่ live อยู่จริงเท่านั้น
-                const isDeletingLive = App._livePlanYM === ym;
-                if (isDeletingLive) {
-                    const newLiveYM = planList[0] || App.currentYM();
-                    await App.dbRef.set({ planList, currentPlanYM: newLiveYM }, { merge: true });
-                    App._livePlanYM = newLiveYM;
-                    UI.showSaveToast(`🗑️ ลบ Plan ${App.ymToLabel(ym)} เรียบร้อย (เดือนนี้เคย Live อยู่ — เปลี่ยน Live เป็น ${App.ymToLabel(newLiveYM)} อัตโนมัติ)`);
-                } else {
-                    await App.dbRef.set({ planList }, { merge: true });
-                    UI.showSaveToast(`🗑️ ลบ Plan ${App.ymToLabel(ym)} เรียบร้อย`);
-                }
-
-                if (App._currentPlanYM === ym) {
-                    const fallbackYM = planList[0] || App.currentYM();
-                    await App._loadPlan(fallbackYM);
-                }
-                PlanUI.refresh();
-            } catch(err) {
-                UI.showErrorToast('❌ ลบ Plan ไม่สำเร็จ: ' + err.message);
-            }
-        });
-    },
-
     // ─── Route management ────────────────────────────────────────────────
     switchRoute: (name) => {
         if (State.localActiveRoute === name) return;
         State.localActiveRoute = name;
-        localStorage.setItem(`last_route_${App._currentPlanYM}`, name);
+        localStorage.setItem(App._lastRouteKey(App._currentPlanYM), name);
         // null = failed ระหว่าง background load, undefined = ยังไม่โหลด → ทั้งคู่ fetch ใหม่
         const needFetch = State.db.routes[name] === undefined || State.db.routes[name] === null;
         if (needFetch) {
@@ -618,66 +586,6 @@ const App = {
         overlay.onclick = e => { if (e.target === overlay) close(); };
     },
 
-    renameRoute: () => {
-        const overlay = document.createElement('div');
-        overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.55);z-index:9999;display:flex;align-items:center;justify-content:center;';
-        const box = document.createElement('div');
-        box.style.cssText = 'background:#fff;border-radius:16px;padding:24px;max-width:340px;width:90%;font-family:inherit;box-shadow:0 20px 60px rgba(0,0,0,0.3);';
-        box.innerHTML = '<p style="font-size:14px;font-weight:700;color:#111827;margin-bottom:12px;">เปลี่ยนชื่อสาย</p>'
-            + `<input id="_ren-route-inp" type="text" value="${State.localActiveRoute}" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #d1d5db;border-radius:10px;font-size:14px;font-family:inherit;outline:none;margin-bottom:16px;">`
-            + '<div style="display:flex;gap:8px;justify-content:flex-end;">'
-            + '<button id="_ren-cancel" style="padding:8px 18px;border-radius:8px;border:1px solid #d1d5db;background:#fff;color:#6b7280;cursor:pointer;font-size:13px;font-weight:600;">ยกเลิก</button>'
-            + '<button id="_ren-ok" style="padding:8px 18px;border-radius:8px;border:none;background:#4f46e5;color:#fff;cursor:pointer;font-size:13px;font-weight:700;">บันทึก</button>'
-            + '</div>';
-        overlay.appendChild(box); document.body.appendChild(overlay);
-        const inp = box.querySelector('#_ren-route-inp'); inp.focus(); inp.select();
-        const close = () => { if (document.body.contains(overlay)) document.body.removeChild(overlay); };
-        const confirm = () => {
-            const newName = inp.value.trim(); close();
-            if (!newName || newName === State.localActiveRoute) return;
-            const ym = App._currentPlanYM;
-            const oldName = State.localActiveRoute;
-            State.db.routes[newName] = State.db.routes[oldName];
-            delete State.db.routes[oldName];
-            State.localActiveRoute = newName;
-            App.sync();
-            const routeList = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
-            State.db.routeList = routeList; // ✅ BUGFIX: ดู comment เดียวกันใน saveDB()
-            Promise.all([
-                App.planRoutesCol(ym).doc(oldName).delete(),
-                // ✅ BUGFIX (2026-08-29): merge:true — ดู comment เดียวกันใน saveDB() ข้างบน
-                App.planRoutesCol(ym).doc(newName).set({ stores: State.db.routes[newName] || [] }, { merge: true }),
-                App.planRef(ym).set({ routeList }, { merge: true }),
-            ]).then(() => {
-                UI.showSaveToast('💾 เปลี่ยนชื่อสายเรียบร้อย');
-                if (typeof AuditLog !== 'undefined') AuditLog.routeRename(oldName, newName);
-            }).catch(err => UI.showErrorToast('❌ เปลี่ยนชื่อไม่สำเร็จ: ' + err.message));
-        };
-        box.querySelector('#_ren-cancel').onclick = close;
-        box.querySelector('#_ren-ok').onclick     = confirm;
-        inp.addEventListener('keydown', e => { if (e.key === 'Enter') confirm(); if (e.key === 'Escape') close(); });
-        overlay.onclick = e => { if (e.target === overlay) close(); };
-    },
-
-    deleteRoute: () => {
-        if (Object.keys(State.db.routes).length <= 1)
-            return UI.showErrorToast('ห้ามลบสายสุดท้ายครับ');
-        UI.showConfirm('ยืนยันลบสาย "' + State.localActiveRoute + '"?', () => {
-            const ym = App._currentPlanYM;
-            const deletedName = State.localActiveRoute;
-            delete State.db.routes[deletedName];
-            const sortedKeys = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
-            State.db.routeList = sortedKeys; // ✅ BUGFIX: ดู comment เดียวกันใน saveDB()
-            State.localActiveRoute = sortedKeys[0];
-            State.stores = State.db.routes[State.localActiveRoute] || [];
-            App.sync(); MapCtrl.fitToStores();
-            Promise.all([
-                App.planRoutesCol(ym).doc(deletedName).delete(),
-                App.planRef(ym).set({ routeList: sortedKeys }, { merge: true }),
-            ]).then(() => UI.showSaveToast('🗑️ ลบสายเรียบร้อย'))
-              .catch(err => UI.showErrorToast('❌ ลบไม่สำเร็จ: ' + err.message));
-        });
-    },
 
     // ─── calendarConfig เฉพาะสาย (override) ────────────────────────────────
     // cfg = null → ลบ override ทิ้ง กลับไปใช้ default ของศูนย์ตามปกติ
@@ -961,9 +869,10 @@ const App = {
                 if (latCol === -1 || lngCol === -1 || idCol === -1)
                     return UI.showErrorToast('ไม่พบคอลัมน์ รหัส / Lat / Lng ในไฟล์ครับ');
 
-                // ✅ NEW: ไม่มีคอลัมน์ "Cycle Name" — หยุดถามยืนยันก่อน (การเรียงจากคอลัมน์ Day
-                // แทนเป็นแค่การเดา อาจไม่ตรงกับลำดับตลาดที่ตั้งใจจริงเสมอไป)
-                if (cycleNameCol === -1) {
+                // ✅ NEW: ไม่มีทั้งคอลัมน์ "Cycle Name" และ "Cycle Code"/"Cycle Id" — หยุดถามยืนยันก่อน
+                // (การเรียงจากคอลัมน์ Day แทนเป็นแค่การเดา อาจไม่ตรงกับลำดับตลาดที่ตั้งใจจริงเสมอไป —
+                // ถ้ามี Cycle Id อยู่แล้วไม่ต้องเตือน เพราะเชื่อถือได้กว่าคอลัมน์ Day)
+                if (cycleNameCol === -1 && cyCol === -1) {
                     const proceed = await new Promise(resolve => {
                         UI.showConfirm(
                             '⚠️ ไม่พบคอลัมน์ "Cycle Name" ในไฟล์นี้\n\n' +
@@ -989,10 +898,26 @@ const App = {
                     const freq = (freqCol !== -1 && String(row[freqCol]||'').trim().toUpperCase().includes('2')) ? 2 : 1;
                     const rawDay = (dayCol !== -1 && row[dayCol]) ? String(row[dayCol]).trim() : '';
                     const dayNum = rawDay ? parseInt(rawDay.replace(/[^0-9]/g,'')) : NaN;
-                    // ✅ NEW: ถ้ามีคอลัมน์ "Cycle Name" ใช้ค่านี้กำหนดลำดับ D0N แทน dayNum เดิม
+                    // ✅ FIX: ดึงเลขวันจากรูปแบบ "D{N}" โดยเฉพาะ (ไม่ใช่ strip ตัวเลขทั้งหมดในสตริง) —
+                    // "Cycle Name" มักมีรหัสสาย/ลูกค้าปนอยู่ด้วย (เช่น "40201 D01 ดำเนิน ราชบุรี")
+                    // ถ้า strip ตัวเลขทั้งหมดจะได้ "4020101" ไม่ใช่ 1 — ต้องจับเฉพาะเลขที่ตามหลัง "D"
+                    // เท่านั้น ใช้ regex เดียวกันได้ทั้ง "Cycle Id" (รูปแบบ "D01") และ "Cycle Name"
+                    const extractDayNum = (text) => {
+                        const s = String(text || '');
+                        const m = s.match(/D\s*(\d{1,2})(?!\d)/i);
+                        if (m) return parseInt(m[1], 10);
+                        const digitsOnly = s.replace(/[^0-9]/g, '');
+                        return digitsOnly ? parseInt(digitsOnly, 10) : NaN;
+                    };
+                    // ✅ ลำดับความสำคัญตัวกำหนดวัน: Cycle Id/Code ก่อน (เลขรอบ 1-24 ตรงๆ เชื่อถือ
+                    // ได้สุด) → Cycle Name (ต้องแกะจากข้อความ) → Day (สำรองสุดท้าย ใช้เฉพาะตอนไม่มี
+                    // ทั้ง 2 คอลัมน์บนเลย เพราะ Day ในไฟล์ที่ export จากระบบเราเองคือวันที่ปฏิทินจริง
+                    // ไม่ใช่เลขรอบ — ถ้าเอามาใช้ตรงๆ จะได้เลข Day เพี้ยนเกิน cycleDays)
+                    const rawCyId  = (cyCol !== -1 && row[cyCol]) ? String(row[cyCol]).trim() : '';
+                    const cyIdNum  = rawCyId ? extractDayNum(rawCyId) : NaN;
                     const rawCycle = (cycleNameCol !== -1 && row[cycleNameCol]) ? String(row[cycleNameCol]).trim() : '';
-                    const cycleNum = rawCycle ? parseInt(rawCycle.replace(/[^0-9]/g,'')) : NaN;
-                    const seqNum   = (cycleNameCol !== -1 && !isNaN(cycleNum)) ? cycleNum : dayNum;
+                    const cycleNum = rawCycle ? extractDayNum(rawCycle) : NaN;
+                    const seqNum   = !isNaN(cyIdNum) ? cyIdNum : (!isNaN(cycleNum) ? cycleNum : dayNum);
                     const assignedDay = !isNaN(seqNum) ? 'Day ' + seqNum : '';
                     const assignedSeq = (seqCol !== -1 && row[seqCol]) ? parseInt(String(row[seqCol]).replace(/[^0-9]/g,'')) : NaN;
                     if (storeMap[idStr]) {
@@ -1010,7 +935,7 @@ const App = {
                             province: provinceCol !== -1 ? String(row[provinceCol]||'').trim() : '',
                             marketName: marketNameCol !== -1 ? String(row[marketNameCol]||'').trim() : '',
                             cy: cyCol !== -1 ? String(row[cyCol]||'').trim() : '',
-                            dayOriginal: cycleNameCol !== -1 ? rawCycle : rawDay,
+                            dayOriginal: !isNaN(cyIdNum) ? rawCyId : (!isNaN(cycleNum) ? rawCycle : rawDay),
                         };
                         if (assignedDay) { s.days.push(assignedDay); if (!isNaN(assignedSeq)) s.seqs[assignedDay] = assignedSeq; }
                         storeMap[idStr] = s;
@@ -1019,10 +944,11 @@ const App = {
                 const finalArray = Object.values(storeMap);
                 if (finalArray.length === 0) return UI.showErrorToast('ไม่พบพิกัด (Lat, Lng) ในไฟล์ครับ');
 
-                // ✅ NEW: ไฟล์ไม่มีคอลัมน์ "Cycle Name" เลย — เรียงเลข Day ที่มีจริงจากน้อยไปมาก
-                // แล้วแทนที่เป็นลำดับต่อเนื่อง D01, D02, D03... (อุดช่องว่าง) หน้านี้อัปโหลดทีละสาย
-                // อยู่แล้ว เลยทำรวมทั้งก้อนได้เลย ไม่ต้องแยกตามสายแบบ bulkImport
-                if (cycleNameCol === -1) {
+                // ✅ NEW: ไฟล์ไม่มีทั้งคอลัมน์ "Cycle Name" และ "Cycle Id" เลย (เหลือแต่ Day ดิบที่
+                // เชื่อถือไม่ได้) — เรียงเลข Day ที่มีจริงจากน้อยไปมาก แล้วแทนที่เป็นลำดับต่อเนื่อง
+                // D01, D02, D03... (อุดช่องว่าง) หน้านี้อัปโหลดทีละสายอยู่แล้ว เลยทำรวมทั้งก้อนได้เลย
+                // ไม่ต้องแยกตามสายแบบ bulkImport
+                if (cycleNameCol === -1 && cyCol === -1) {
                     const usedNums = new Set();
                     finalArray.forEach(s => s.days.forEach(d => {
                         const n = parseInt(String(d).replace('Day ', ''));
@@ -1377,9 +1303,7 @@ const PlanUI = {
     },
 
     updateBadge: () => {
-        const ym    = App._currentPlanYM;
-        const badge = document.getElementById('plan-mode-badge');
-        if (badge) badge.textContent = ym ? `📅 ${App.ymToLabel(ym)}` : '📅 Plan';
+        const ym  = App._currentPlanYM;
         const sel = document.getElementById('plan-selector');
         if (sel && ym) sel.value = ym;
 
@@ -1445,12 +1369,6 @@ const PlanUI = {
         // ตัวเลือกเดือน) ไม่ใช่เดือนที่แอดมินบังเอิญเปิดดูอยู่ตอนนี้ — กันข้อมูลเพี้ยนถ้าสองอย่างไม่ตรงกัน
         const latestYM = (State.db.planList && State.db.planList[0]) || App._currentPlanYM;
         await App.createPlan(ym, latestYM);
-    },
-
-    confirmDelete: () => {
-        const ym = App._currentPlanYM;
-        if (!ym) return;
-        App.deletePlan(ym);
     },
 };
 

@@ -352,13 +352,6 @@ body {
     border: 1px solid #e0e7ff; /* indigo-100 */
 }
 .db-toolbar-btn--soft:hover { background: #e0e7ff; }
-.db-toolbar-btn--solid {
-    color: #fff;
-    background: #4f46e5; /* indigo-600 */
-    border: 1px solid transparent;
-}
-.db-toolbar-btn--solid:hover { background: #4338ca; } /* indigo-700 */
-
 /* Disabled + focus-visible states shared across the new toolbar/panel controls */
 .db-toolbar-btn:disabled,
 .db-action-btn:disabled,
