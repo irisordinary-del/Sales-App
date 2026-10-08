@@ -113,7 +113,25 @@
     };
     const calHash = (cal) => cal ? hash(cal.sig + JSON.stringify(cal.days)) : '';
 
-    const cal = { written: {}, index: {}, indexYM: '', done: {}, need: false, busy: false };
+    const cal = { written: {}, index: {}, indexYM: '', done: {}, need: false, busy: false, loading: 0, gen: 0 };
+
+    // ✅ FIX (2026-10-08): App._loadPlan ของ RPN ล้าง State.db.routes แล้วโหลดเดือนใหม่ "ก่อน" ค่อยตั้ง
+    // App._currentPlanYM — ช่วงนั้น curYM() ยังเป็นเดือนเก่าแต่ข้อมูลเป็นของเดือนใหม่ (และยังโหลดไม่ครบ)
+    // เคยทำให้ reconcile เขียน rpnCal ว่างลงเดือนที่เพิ่งออกจากมา (402 พ.ย. 11 สาย — แอปเซลไม่ใช้เพราะ sig
+    // ไม่ตรง) → ระหว่างโหลดห้ามคำนวณ rpnCal เลย และงานที่ค้างข้ามรอบโหลดให้ทิ้ง (เทียบ gen)
+    const wrapLoad = () => {
+        if (typeof App === 'undefined' || typeof App._loadPlan !== 'function') return setTimeout(wrapLoad, 300);
+        if (App._loadPlan._rpnWrapped) return;
+        const orig = App._loadPlan;
+        App._loadPlan = async function () {
+            cal.loading++; cal.gen++;
+            try { return await orig.apply(this, arguments); }
+            finally { cal.loading--; cal.gen++; cal.done = {}; }
+        };
+        App._loadPlan._rpnWrapped = true;
+    };
+    wrapLoad();
+    const failed = (rt) => !!(State.db._failedRoutes && State.db._failedRoutes[rt]);
 
     const fs = firebase.firestore;
     const DocProto = fs.DocumentReference && fs.DocumentReference.prototype;
@@ -123,7 +141,9 @@
     const injectCal = (ref, data, opts) => {
         const m = ROUTE_RE.exec(ref.path || '');
         if (!m || !data || !Array.isArray(data.stores) || m[3] === UNASSIGNED || !calReady()) return data;
-        if (m[2] !== curYM()) return data;                               // เดือนอื่น (เช่น คัดลอกตอนสร้างเดือน) — ให้ reconcile ทำตอนเปิดเดือนนั้น
+        if (m[2] !== curYM() || cal.loading) {                           // เดือนอื่น / กำลังสลับเดือน — คำนวณไม่ได้ ล้างของเดิมกันค้าง
+            return (opts && (opts.merge || opts.mergeFields)) ? Object.assign({}, data, { rpnCal: fs.FieldValue.delete() }) : data;
+        }
         let c = null;
         try { if (sigOf(data.stores) === sigOf(State.db.routes[m[3]])) c = calPayload(m[3]); } catch (e) { console.warn('[rpnCal]', e); }
         if (c) { cal.written[m[3]] = calHash(c); return Object.assign({}, data, { rpnCal: c }); }
@@ -175,11 +195,14 @@
         if (window.PlanLock && PlanLock.isLocked(ym)) return;                          // เดือนที่ล็อก (../plan-lock.js) — ไม่เขียน
         const loader = document.getElementById('loader');
         if (loader && loader.style.display && loader.style.display !== 'none') return;   // กำลังโหลด/ประมวลผล — รอก่อน
-        const routes = Object.keys(State.db.routes).filter(r => r !== UNASSIGNED && Array.isArray(State.db.routes[r]));
+        if (cal.loading) return;                                                        // กำลังสลับ/โหลดเดือน (ดู wrapLoad)
+        const routes = Object.keys(State.db.routes).filter(r => r !== UNASSIGNED && Array.isArray(State.db.routes[r]) && !failed(r));
         if (cal.indexYM !== ym) { cal.indexYM = ym; cal.index = null; cal.done = {}; cal.written = {}; }
         const todo = routes.filter(r => cal.need || !cal.done[r]);
         if (!todo.length) return;
         cal.busy = true;
+        const gen0 = cal.gen;
+        const still = () => cal.gen === gen0 && !cal.loading && curYM() === ym;          // ข้อมูลยังเป็นของเดือนนี้ชุดเดิมอยู่ไหม
         try {
             const planRef = App.planRef(ym);
             if (!cal.index) {
@@ -189,6 +212,7 @@
             cal.need = false;
             let changed = false;
             for (const rt of todo) {
+                if (!still()) return;
                 const c = calPayload(rt);
                 cal.done[rt] = true;
                 if (!c) continue;
@@ -199,7 +223,7 @@
                 cal.index[rt] = h;
                 changed = true;
             }
-            if (changed && curYM() === ym) await origSet.call(planRef, { rpnCalIndex: cal.index }, { merge: true });
+            if (changed && still()) await origSet.call(planRef, { rpnCalIndex: cal.index }, { merge: true });
         } catch (e) {
             console.warn('[rpnCal] reconcile', e);
         } finally {
@@ -236,7 +260,7 @@
     bridge.ready = () => {
         try {
             const loader = document.getElementById('loader');
-            return !!(curYM() && calReady() && (!loader || !loader.style.display || loader.style.display === 'none'));
+            return !!(curYM() && calReady() && !cal.loading && (!loader || !loader.style.display || loader.style.display === 'none'));
         } catch (e) { return false; }
     };
     /** "402V01 D04 บ้านไร่" → เลขวันในชื่อเปลี่ยนตาม map (คงจำนวนหลักเดิม) — ไม่มีเลขวันในชื่อ = ไม่แตะ */
