@@ -2879,13 +2879,25 @@
                 const reqs = await App.fetchPendingMoveRequests();
                 if (!reqs.length) { list.innerHTML = '<div class="text-center text-xs text-gray-400 py-6">✨ ไม่มีคำขอค้างอยู่</div>'; return; }
                 MoveRequestAdmin._reqs = Object.fromEntries(reqs.map(r => [r.id, r]));
+                await MoveRequestAdmin._fillMarkets(reqs);
+                const e = MoveRequestAdmin._esc;
                 list.innerHTML = reqs.map(r => {
                     const dateStr = r.requestedAt?.toDate ? r.requestedAt.toDate().toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' }) : '';
                     if (r.type === 'reorder') return MoveRequestAdmin._reorderCard(r, dateStr);
+                    // ✅ NEW (2026-10-09): บอกวันที่ + ชื่อตลาดของวันต้นทาง/ปลายทาง (เดิมมีแค่ "Day 8 → Day 1")
+                    const mon = (() => { const [y, m] = String(r.ym).split('_').map(Number); return (y && m) ? new Date(y, m - 1, 1).toLocaleDateString('th-TH', { month: 'short' }) : ''; })();
+                    const side = (day, dates, mk, strong) => `<div class="flex-1 min-w-0 p-2 rounded-lg ${strong ? 'bg-emerald-50 border border-emerald-200' : 'bg-white border border-gray-200'}">
+                        <div class="text-[11px] font-black ${strong ? 'text-emerald-700' : 'text-gray-700'}">${dates ? e(String(dates).split(',').join(', ')) + ' ' + e(mon) + ' · ' : ''}${e(day)}</div>
+                        <div class="text-[11px] text-gray-600 truncate" title="${e(mk || '')}">${e(mk || '(ไม่มีชื่อตลาด)')}</div></div>`;
                     return `
                     <div class="p-3 rounded-xl bg-gray-50 border border-gray-200">
                         <div class="text-sm font-bold text-gray-800">${r.storeName || r.storeId} <span class="text-[11px] font-normal text-gray-400">(${r.storeCode || r.storeId})</span></div>
-                        <div class="text-xs text-gray-600 mt-1">สาย <b>${r.route}</b> · ${r.fromDay} → <b>${r.toDay}</b></div>
+                        <div class="text-xs text-gray-600 mt-1">สาย <b>${r.route}</b> · ${App.ymToLabel(r.ym)}</div>
+                        <div class="flex items-stretch gap-1.5 mt-1.5">
+                            ${side(r.fromDay, r.fromDates, r.fromMarket, false)}
+                            <div class="self-center text-gray-400 font-black">→</div>
+                            ${side(r.toDay, r.toDates, r.toMarket, true)}
+                        </div>
                         <div class="text-[11px] text-gray-400 mt-1">ขอโดย ${r.requestedBy || '—'} · ${dateStr}</div>
                         <div class="flex gap-2 mt-2.5">
                             <button onclick="MoveRequestAdmin.approve('${r.id}')" class="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold py-2 rounded-lg">✅ อนุมัติ</button>
@@ -2898,6 +2910,38 @@
             // ✅ NEW (2026-10-08): คำขอ "จัดลำดับตลาด" (type 'reorder') จากแอปเซล — ย้ายทั้งตลาดระหว่างช่อง Day
             // ของเดือนถัดไป · อนุมัติ = สั่ง RPN (iframe) ทำผ่าน RPNBridge.applyReorder (rpn/rpn-online.js)
             // วันที่ของแอปเซล (rpnCal) จึงคำนวณใหม่ด้วยตรรกะเดียวกับไฟล์ DMS
+            /** คำขอย้ายร้านที่ส่งก่อน 2026-10-09 ไม่มีชื่อตลาด/วันที่ติดมา — อ่านจากเอกสารสายของเดือนนั้นแทน
+             *  ชื่อ: rpnCal.days[Day].m (ชื่อเดียวกับที่ RPN ส่งออก DMS) › ชื่อที่ร้านในวันนั้นเก็บไว้มากสุด · วันที่: rpnCal เท่านั้น */
+            _fillMarkets: async (reqs) => {
+                const need = reqs.filter(r => r.type !== 'reorder' && (!r.fromMarket || !r.toMarket));
+                const keys = [...new Set(need.map(r => r.ym + '|' + r.route))];
+                const docs = {};
+                await Promise.all(keys.map(async k => {
+                    const [ym, rt] = k.split('|');
+                    try { const s = await App.planRoutesCol(ym).doc(rt).get(); docs[k] = s.exists ? s.data() : null; } catch (err) { docs[k] = null; }
+                }));
+                const trim = (v) => String(v || '').replace(/^[A-Z0-9]+\s+D\d+\s+/i, '').trim();
+                need.forEach(r => {
+                    const d = docs[r.ym + '|' + r.route];
+                    if (!d) return;
+                    const info = (day) => {
+                        const c = d.rpnCal && d.rpnCal.days && d.rpnCal.days[day];
+                        let mk = c && c.m ? trim(c.m) : '';
+                        if (!mk) {
+                            const cnt = {};
+                            (d.stores || []).forEach(s => { if (!s.inactive && (s.days || []).includes(day) && s.marketName) { const t = trim(s.marketName); cnt[t] = (cnt[t] || 0) + 1; } });
+                            mk = (Object.entries(cnt).sort((a, b) => b[1] - a[1])[0] || [''])[0];
+                        }
+                        const dates = c && c.d ? c.d.filter(x => x.startsWith(r.ym.replace('_', '-'))).map(x => parseInt(x.slice(8), 10)).join(',') : '';
+                        return { mk, dates };
+                    };
+                    const f = info(r.fromDay), t = info(r.toDay);
+                    if (!r.fromMarket) r.fromMarket = f.mk;
+                    if (!r.toMarket) r.toMarket = t.mk;
+                    if (!r.fromDates) r.fromDates = f.dates;
+                    if (!r.toDates) r.toDates = t.dates;
+                });
+            },
             _esc: (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])),
             _reorderCard: (r, dateStr) => {
                 const e = MoveRequestAdmin._esc;

@@ -1406,6 +1406,9 @@ const MoveRequest = {
         }).sort((a, b) => a.first - b.first || num(a.l) - num(b.l));
         const fromDts = datesOf(fromDay);
         const fromTxt = fromDts.length ? `${fromDts.join(', ')} ${MON} (${fromDay})` : fromDay;
+        // เก็บไว้ให้ submit แนบชื่อตลาด + วันที่ไปกับคำขอ (การ์ดคำขอฝั่งแอดมินแสดง)
+        MoveRequest._pick = { from: { mk: getDayMarketList(fromDay)[0] || '', dates: fromDts.join(',') } };
+        info.forEach(x => { MoveRequest._pick[x.l] = { mk: x.mk, dates: x.dts.join(',') }; });
 
         let sheet = document.getElementById('move-request-sheet');
         if (!sheet) {
@@ -1454,9 +1457,13 @@ const MoveRequest = {
         const session = Auth.getSession();
         const name    = session?.displayName || session?.username || route;
         try {
+            const pk = MoveRequest._pick || {};
             const docRef = await MoveRequest._col(MoveRequest._centerDocId()).add({
                 ym, route, storeId, storeCode: store?.code || store?.id || '', storeName: store?.name || String(storeId),
                 fromDay, toDay,
+                // ✅ NEW (2026-10-09): ชื่อตลาด + วันที่ (เลขวันในเดือน คั่น ,) ให้การ์ดคำขอฝั่งแอดมินอ่านง่าย
+                fromMarket: pk.from?.mk || '', fromDates: pk.from?.dates || '',
+                toMarket: pk[toDay]?.mk || '', toDates: pk[toDay]?.dates || '',
                 requestedBy: name, requestedAt: firebase.firestore.FieldValue.serverTimestamp(),
                 status: 'pending',
             });
