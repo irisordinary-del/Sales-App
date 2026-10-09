@@ -1068,17 +1068,21 @@ const Processor = {
         // ผลคือ Processor.setupRoute() throw ReferenceError ทุกครั้งที่รัน (ตั้งแต่ตอนเปิดแอปครั้งแรก)
         // ทำให้ Processor.routeList() ท้ายฟังก์ชันไม่ถูกเรียกเลย — สายวิ่ง/วันที่ไม่ขึ้นเลย
         // node --check จับไม่ได้เพราะเป็น runtime error ไม่ใช่ syntax error — ต้องรันจริงในเบราว์เซอร์ถึงเจอ
-        const _mktNow = State.currentDay ? getDayMarkets(State.currentDay) : '';
-        const _labelEl = document.getElementById('day-label-display');
-        if (_labelEl && State.currentDay) {
-            const _dayNum = State.currentDay.replace('Day ','');
-            _labelEl.textContent = _mktNow
-                ? `Day ${_dayNum} · ${_mktNow.split(' · ')[0]}`
-                : `Day ${_dayNum}`;
-        }
+        Processor.syncDayLabel();
         // ✅ FIX (2026-09-14): ตัด #stores-title lookup ออก — id นี้ไม่มีอยู่จริงใน sales.html
         // (ซากจาก UI เก่าก่อนเปลี่ยนมาใช้ #day-label-display ข้างบนแทน)
         Processor.routeList();
+    },
+
+    // หัวหน้าคิวงาน "Day N · ชื่อตลาด" — ✅ FIX (2026-10-09): รวมไว้ที่เดียว เดิมเขียนซ้ำ 2 ที่ (setupRoute +
+    // day-select change) แต่ CalendarCtrl.navigateToDay (กดวันในปฏิทิน → ดูคิวงาน) ไม่ได้อัปเดตเลย
+    // หัวจึงค้างวัน/ตลาดเดิมทั้งที่รายการร้านเปลี่ยนเป็นวันใหม่แล้ว · market = ตลาดที่เลือกจาก day sheet (ถ้ามี)
+    syncDayLabel: (market) => {
+        const el = document.getElementById('day-label-display');
+        if (!el || !State.currentDay) return;
+        const mk = market || getDayMarkets(State.currentDay).split(' · ')[0];
+        const dn = State.currentDay.replace('Day ', '');
+        el.textContent = mk ? `Day ${dn} · ${mk}` : `Day ${dn}`;
     },
 
     routeList: () => {
@@ -2816,6 +2820,7 @@ const CalendarCtrl = {
         State._filterMarket    = market || '';
         const el = document.getElementById('day-select');
         if (el) el.value = dayLabel;
+        Processor.syncDayLabel(market);
         State.mapNeedsFit = true;
         Processor.routeList();
         UI.switchTab('route');
@@ -3613,14 +3618,9 @@ const ActivityCtrl = {
 // ─── Event listeners ──────────────────────────────────────────────────────
 document.getElementById('day-select').addEventListener('change', (e) => {
     State.currentDay  = e.target.value;
-    const _m  = getDayMarkets(State.currentDay);
+    State._filterMarket = '';
     // ✅ FIX (2026-09-14): ตัด #stores-title lookup ออก — id นี้ไม่มีอยู่จริงใน sales.html (ดู comment เดียวกันด้านบน)
-    // ✅ ข้อ 5: sync label display
-    const _lbl = document.getElementById('day-label-display');
-    if (_lbl && State.currentDay) {
-        const _dn = State.currentDay.replace('Day ','');
-        _lbl.textContent = _m ? `Day ${_dn} · ${_m.split(' · ')[0]}` : `Day ${_dn}`;
-    }
+    Processor.syncDayLabel();
     State.mapNeedsFit = true;
     Processor.routeList();
 });
