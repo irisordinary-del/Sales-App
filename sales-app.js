@@ -1383,7 +1383,10 @@ const MoveRequest = {
         const stores = (App.isSupervisor() && SupervisorUI._selectedRoute) ? (State.allRoutes[route] || []) : State.allStores;
         const store  = stores.find(s => String(s.id) === String(storeId));
         if (!store) return showSalesToast('⚠️ ไม่พบร้านนี้', true);
-        const days = Array.from(new Set(stores.flatMap(s => s.days || []))).filter(d => d && d !== fromDay);
+        // ✅ (2026-10-09): ไม่ให้เลือก Day ที่ร้านนี้อยู่แล้ว (F2/F4) — ย้ายไปทับจะเหลือรอบเดียว และทำให้คำขอคู่
+        // (ดู _askOther) อนุมัติก่อน-หลังแล้วได้ผลต่างกัน
+        const own = new Set(store.days || []);
+        const days = Array.from(new Set(stores.flatMap(s => s.days || []))).filter(d => d && d !== fromDay && !own.has(d));
         if (!days.length) return showSalesToast('⚠️ ไม่มี Day อื่นให้ย้ายไปในสายนี้', true);
 
         // ✅ NEW (2026-10-09): แต่ละ Day แสดงวันที่จริง + ชื่อตลาด + จำนวนร้าน และเรียงตามวันที่ในเดือนที่ใช้งานอยู่
@@ -1408,8 +1411,23 @@ const MoveRequest = {
         const fromTxt = fromDts.length ? `${fromDts.join(', ')} ${MON} (${fromDay})` : fromDay;
         // เก็บไว้ให้ submit แนบชื่อตลาด + วันที่ไปกับคำขอ (การ์ดคำขอฝั่งแอดมินแสดง)
         MoveRequest._pick = { from: { mk: getDayMarketList(fromDay)[0] || '', dates: fromDts.join(',') } };
-        info.forEach(x => { MoveRequest._pick[x.l] = { mk: x.mk, dates: x.dts.join(',') }; });
+        // ข้อมูลทุก Day ของสาย (รวม Day อื่นของร้านนี้เอง) — ใช้ทั้งขั้นเลือกวันแรก และขั้นถาม "ตลาดอื่นของร้านเดียวกัน"
+        const allInfo = Array.from(new Set(stores.flatMap(s => s.days || []))).filter(Boolean).map(l => {
+            const dts = datesOf(l);
+            return { l, dts, first: dts.length ? Math.min(...dts) : 99, mk: getDayMarketList(l)[0] || '', n: stores.filter(s => (s.days || []).includes(l)).length };
+        }).sort((a, b) => a.first - b.first || num(a.l) - num(b.l));
+        allInfo.forEach(x => { MoveRequest._pick[x.l] = { mk: x.mk, dates: x.dts.join(',') }; });
+        MoveRequest._flow = { storeId: String(storeId), store, fromDay, allInfo, y, m, MON, WD, num, moves: [], queue: [] };
 
+        MoveRequest._sheet(`
+            <div style="font-size:15px;font-weight:900;color:#111827;margin-bottom:2px;">🔁 ขอย้ายวัน — ${store.name}</div>
+            <div style="font-size:12px;color:#6b7280;margin-bottom:14px;">ตอนนี้อยู่ ${fromTxt} · เลือกวันปลายทาง (ต้องรอแอดมินอนุมัติก่อน มีผลจริง)</div>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+                ${info.map(x => MoveRequest._dayBtn(x, `MoveRequest.choose('${fromDay}','${x.l}')`)).join('')}
+            </div>`);
+    },
+
+    _sheet: (inner) => {
         let sheet = document.getElementById('move-request-sheet');
         if (!sheet) {
             sheet = document.createElement('div');
@@ -1421,30 +1439,100 @@ const MoveRequest = {
         <div style="position:absolute;inset:0;background:rgba(0,0,0,0.5);" onclick="MoveRequest.closePicker()"></div>
         <div style="position:relative;background:#fff;border-radius:20px 20px 0 0;width:100%;max-width:480px;max-height:70vh;overflow-y:auto;padding:16px 16px 28px;">
             <div style="display:flex;justify-content:center;padding:0 0 10px;"><div style="width:40px;height:4px;border-radius:2px;background:#e5e7eb;"></div></div>
-            <div style="font-size:15px;font-weight:900;color:#111827;margin-bottom:2px;">🔁 ขอย้ายวัน — ${store.name}</div>
-            <div style="font-size:12px;color:#6b7280;margin-bottom:14px;">ตอนนี้อยู่ ${fromTxt} · เลือกวันปลายทาง (ต้องรอแอดมินอนุมัติก่อน มีผลจริง)</div>
-            <div style="display:flex;flex-direction:column;gap:8px;">
-                ${info.map(x => {
-                    const dateMain = x.dts.length ? `${WD[new Date(y, m, x.dts[0]).getDay()]} ${x.dts[0]} ${MON}` : 'ไม่มีวันวิ่งเดือนนี้';
-                    const more = x.dts.length > 1 ? `<div style="font-size:10px;font-weight:800;color:#6366f1;">+ ${x.dts.slice(1).join(', ')} ${MON}</div>` : '';
-                    return `<button onclick="MoveRequest.submit('${storeId}','${fromDay}','${x.l}')"
-                    style="width:100%;padding:10px 14px;border-radius:14px;border:1.5px solid #e5e7eb;background:#f9fafb;text-align:left;cursor:pointer;display:flex;align-items:center;gap:12px;">
-                        <div style="width:74px;flex-shrink:0;line-height:1.25;">
-                            <div style="font-size:13px;font-weight:900;color:#111827;">${dateMain}</div>${more}
-                            <div style="font-size:10px;font-weight:800;color:#9ca3af;">${x.l}</div>
-                        </div>
-                        <div style="flex:1;min-width:0;">
-                            <div style="font-size:13px;font-weight:800;color:#1d4ed8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${x.mk || '(ไม่มีชื่อตลาด)'}</div>
-                            <div style="font-size:11px;color:#6b7280;">${x.n} ร้าน</div>
-                        </div></button>`;
-                }).join('')}
-            </div>
+            ${inner}
         </div>`;
+    },
+
+    _dayBtn: (x, onclick, tag) => {
+        const { y, m, MON, WD } = MoveRequest._flow;
+        const dateMain = x.dts.length ? `${WD[new Date(y, m, x.dts[0]).getDay()]} ${x.dts[0]} ${MON}` : 'ไม่มีวันวิ่งเดือนนี้';
+        const more = x.dts.length > 1 ? `<div style="font-size:10px;font-weight:800;color:#6366f1;">+ ${x.dts.slice(1).join(', ')} ${MON}</div>` : '';
+        return `<button onclick="${onclick}"
+        style="width:100%;padding:10px 14px;border-radius:14px;border:1.5px solid ${tag ? '#a5b4fc' : '#e5e7eb'};background:${tag ? '#eef2ff' : '#f9fafb'};text-align:left;cursor:pointer;display:flex;align-items:center;gap:12px;">
+            <div style="width:74px;flex-shrink:0;line-height:1.25;">
+                <div style="font-size:13px;font-weight:900;color:#111827;">${dateMain}</div>${more}
+                <div style="font-size:10px;font-weight:800;color:#9ca3af;">${x.l}</div>
+            </div>
+            <div style="flex:1;min-width:0;">
+                ${tag ? `<div style="font-size:10px;font-weight:900;color:#4f46e5;">${tag}</div>` : ''}
+                <div style="font-size:13px;font-weight:800;color:#1d4ed8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${x.mk || '(ไม่มีชื่อตลาด)'}</div>
+                <div style="font-size:11px;color:#6b7280;">${x.n} ร้าน</div>
+            </div></button>`;
+    },
+
+    // ✅ NEW (2026-10-09): เลือกวันปลายทางแล้ว — ถ้าร้านนี้อยู่ตลาดอื่นด้วย (F2/F4: ร้านเดียวกันคนละชื่อตลาด)
+    // ถามเซลทีละตลาดว่าจะย้ายด้วยไหม ก่อนส่งคำขอ · ย้ายด้วย = ส่งคำขอแยกใบต่อตลาด ผูกด้วย groupId
+    choose: (fromDay, toDay) => {
+        const f = MoveRequest._flow;
+        if (!f) return;
+        f.moves = [{ fromDay, toDay }];
+        f.queue = (f.store.days || []).filter(d => d && d !== fromDay);
+        MoveRequest._askOther();
+    },
+
+    _askOther: () => {
+        const f = MoveRequest._flow;
+        if (!f.queue.length) return MoveRequest.submit(f.storeId, f.moves);
+        const other = f.queue[0];
+        const o = f.allInfo.find(x => x.l === other) || { l: other, dts: [], mk: '' };
+        const first = f.moves[0];
+        const fromI = f.allInfo.find(x => x.l === first.fromDay), toI = f.allInfo.find(x => x.l === first.toDay);
+        const when = (x) => x && x.dts.length ? `${x.dts.join(', ')} ${f.MON}` : '';
+        MoveRequest._sheet(`
+            <div style="font-size:15px;font-weight:900;color:#111827;margin-bottom:6px;">🔗 ร้านนี้มีรอบเยี่ยมวันอื่นด้วย</div>
+            <div style="font-size:12px;color:#374151;margin-bottom:10px;line-height:1.5;">
+                กำลังขอย้าย <b>${f.store.name}</b><br>
+                จาก <b>${(fromI && fromI.mk) || first.fromDay}</b> ${when(fromI)} → <b>${(toI && toI.mk) || first.toDay}</b> ${when(toI)}
+            </div>
+            <div style="padding:10px 12px;border-radius:14px;background:#fff7ed;border:1.5px solid #fed7aa;margin-bottom:12px;">
+                <div style="font-size:11px;font-weight:800;color:#9a3412;">ร้านเดียวกันยังอยู่ที่</div>
+                <div style="font-size:13px;font-weight:900;color:#111827;">${o.mk || '(ไม่มีชื่อตลาด)'}</div>
+                <div style="font-size:11px;color:#6b7280;">${when(o) ? when(o) + ' · ' : ''}${other}</div>
+            </div>
+            <div style="font-size:13px;font-weight:900;color:#111827;margin-bottom:8px;">ต้องการย้ายรอบนี้ด้วยไหม?</div>
+            <div style="display:flex;gap:8px;">
+                <button onclick="MoveRequest._skipOther()" style="flex:1;padding:11px;border-radius:12px;border:1.5px solid #e5e7eb;background:#fff;font-weight:800;font-size:13px;color:#374151;cursor:pointer;">ไม่ย้าย คงไว้ที่เดิม</button>
+                <button onclick="MoveRequest._pickOther()" style="flex:1;padding:11px;border-radius:12px;border:none;background:#4f46e5;font-weight:800;font-size:13px;color:#fff;cursor:pointer;">ย้ายด้วย → เลือกวัน</button>
+            </div>`);
+    },
+
+    _skipOther: () => { MoveRequest._flow.queue.shift(); MoveRequest._askOther(); },
+
+    _pickOther: () => {
+        const f = MoveRequest._flow;
+        const other = f.queue[0];
+        // ห้ามเลือก Day ที่ร้านอยู่อยู่แล้ว หรือที่เลือกเป็นปลายทางไปแล้ว (กันรอบหายตอนแอดมินอนุมัติทีละใบ)
+        const taken = new Set([...(f.store.days || []), ...f.moves.map(x => x.toDay)]);
+        const list = f.allInfo.filter(x => !taken.has(x.l));
+        if (!list.length) { showSalesToast('⚠️ ไม่มีวันว่างให้ย้ายตลาดนี้', true); return MoveRequest._skipOther(); }
+        // แนะนำ: ห่างจากวันเดิมเท่ากับที่ย้ายตลาดแรก (คงระยะห่างระหว่าง 2 รอบของร้านไว้)
+        const maxN = Math.max(...f.allInfo.map(x => f.num(x.l)));
+        const shift = f.num(f.moves[0].toDay) - f.num(f.moves[0].fromDay);
+        let sN = (f.num(other) + shift - 1) % maxN; if (sN < 0) sN += maxN; sN += 1;
+        const sug = list.find(x => f.num(x.l) === sN);
+        const rest = list.filter(x => x !== sug);
+        MoveRequest._sheet(`
+            <div style="font-size:15px;font-weight:900;color:#111827;margin-bottom:2px;">🔁 ย้ายอีกตลาด — ${f.store.name}</div>
+            <div style="font-size:12px;color:#6b7280;margin-bottom:14px;">จาก ${(f.allInfo.find(x => x.l === other) || {}).mk || other} (${other}) · เลือกวันปลายทาง</div>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+                ${sug ? MoveRequest._dayBtn(sug, `MoveRequest._addOther('${sug.l}')`, '⭐ แนะนำ — ห่างจากรอบแรกเท่าเดิม') : ''}
+                ${rest.map(x => MoveRequest._dayBtn(x, `MoveRequest._addOther('${x.l}')`)).join('')}
+            </div>
+            <button onclick="MoveRequest._askOther()" style="margin-top:12px;width:100%;padding:10px;border-radius:12px;border:1.5px solid #e5e7eb;background:#fff;font-weight:800;font-size:12px;color:#6b7280;cursor:pointer;">← กลับ</button>`);
+    },
+
+    _addOther: (toDay) => {
+        const f = MoveRequest._flow;
+        f.moves.push({ fromDay: f.queue.shift(), toDay });
+        MoveRequest._askOther();
     },
 
     closePicker: () => { document.getElementById('move-request-sheet')?.remove(); },
 
-    submit: async (storeId, fromDay, toDay) => {
+    // moves: [{fromDay,toDay}, ...] — ใบแรกคือตลาดที่เซลกดขอ ใบถัดไปคือตลาดอื่นของร้านเดียวกันที่ตอบ "ย้ายด้วย"
+    // (เรียกแบบเดิม submit(storeId, fromDay, toDay) ก็ยังได้)
+    submit: async (storeId, moves, toDayArg) => {
+        if (!Array.isArray(moves)) moves = [{ fromDay: moves, toDay: toDayArg }];
         MoveRequest.closePicker();
         // 🔒 กันไว้อีกชั้น เผื่อ pendingSet ยังไม่ทันอัปเดตตอนกดปุ่มก่อนหน้า
         if (MoveRequest._pendingSet.has(String(storeId))) {
@@ -1458,22 +1546,33 @@ const MoveRequest = {
         const name    = session?.displayName || session?.username || route;
         try {
             const pk = MoveRequest._pick || {};
-            const docRef = await MoveRequest._col(MoveRequest._centerDocId()).add({
-                ym, route, storeId, storeCode: store?.code || store?.id || '', storeName: store?.name || String(storeId),
-                fromDay, toDay,
-                // ✅ NEW (2026-10-09): ชื่อตลาด + วันที่ (เลขวันในเดือน คั่น ,) ให้การ์ดคำขอฝั่งแอดมินอ่านง่าย
-                fromMarket: pk.from?.mk || '', fromDates: pk.from?.dates || '',
-                toMarket: pk[toDay]?.mk || '', toDates: pk[toDay]?.dates || '',
-                requestedBy: name, requestedAt: firebase.firestore.FieldValue.serverTimestamp(),
-                status: 'pending',
+            const col = MoveRequest._col(MoveRequest._centerDocId());
+            const groupId = moves.length > 1 ? col.doc().id : null;
+            const batch = db.batch();
+            const refs = moves.map(({ fromDay, toDay }) => {
+                const ref = col.doc();
+                batch.set(ref, {
+                    ym, route, storeId, storeCode: store?.code || store?.id || '', storeName: store?.name || String(storeId),
+                    fromDay, toDay,
+                    // ✅ NEW (2026-10-09): ชื่อตลาด + วันที่ (เลขวันในเดือน คั่น ,) ให้การ์ดคำขอฝั่งแอดมินอ่านง่าย
+                    fromMarket: pk[fromDay]?.mk || (fromDay === moves[0].fromDay ? pk.from?.mk : '') || '',
+                    fromDates: pk[fromDay]?.dates || (fromDay === moves[0].fromDay ? pk.from?.dates : '') || '',
+                    toMarket: pk[toDay]?.mk || '', toDates: pk[toDay]?.dates || '',
+                    // ✅ NEW (2026-10-09): ร้านเดียวกันย้ายหลายตลาดพร้อมกัน — การ์ดแอดมินแสดงว่าเป็นชุดเดียวกัน
+                    ...(groupId ? { groupId, groupSize: moves.length } : {}),
+                    requestedBy: name, requestedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                    status: 'pending',
+                });
+                return ref;
             });
+            await batch.commit();
             MoveRequest._pendingSet.add(String(storeId)); // ✅ อัปเดต local ทันที ไม่ต้องรอ query ใหม่
             if (typeof Processor !== 'undefined' && State.isLoaded) Processor.routeList();
-            showSalesToast(`📨 ส่งคำขอย้าย "${store?.name || storeId}" → ${toDay} แล้ว รออนุมัติจากแอดมิน`);
+            showSalesToast(`📨 ส่งคำขอย้าย "${store?.name || storeId}" ${moves.map(x => '→ ' + x.toDay).join(', ')} แล้ว รออนุมัติจากแอดมิน`);
             if (typeof NotifCtrl !== 'undefined') NotifCtrl.refresh();
-            if (typeof writeAuditLog === 'function') {
-                writeAuditLog('move_request_create', { route, ym, storeId: String(storeId), storeName: store?.name || '', fromDay, toDay, reqId: docRef.id });
-            }
+            if (typeof writeAuditLog === 'function') moves.forEach(({ fromDay, toDay }, i) => {
+                writeAuditLog('move_request_create', { route, ym, storeId: String(storeId), storeName: store?.name || '', fromDay, toDay, reqId: refs[i].id });
+            });
         } catch(e) {
             showSalesToast('❌ ส่งคำขอไม่สำเร็จ: ' + e.message, true);
         }

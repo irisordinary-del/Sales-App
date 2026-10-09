@@ -2889,6 +2889,8 @@
                     const side = (day, dates, mk, strong) => `<div class="flex-1 min-w-0 p-2 rounded-lg ${strong ? 'bg-emerald-50 border border-emerald-200' : 'bg-white border border-gray-200'}">
                         <div class="text-[11px] font-black ${strong ? 'text-emerald-700' : 'text-gray-700'}">${dates ? e(String(dates).split(',').join(', ')) + ' ' + e(mon) + ' · ' : ''}${e(day)}</div>
                         <div class="text-[11px] text-gray-600 truncate" title="${e(mk || '')}">${e(mk || '(ไม่มีชื่อตลาด)')}</div></div>`;
+                    // ✅ NEW (2026-10-09): คำขอชุดเดียวกัน (ร้านเดียวกันย้ายหลายตลาด — MoveRequest._askOther ฝั่งเซล)
+                    const grp = r.groupId ? reqs.filter(x => x.groupId === r.groupId) : [];
                     return `
                     <div class="p-3 rounded-xl bg-gray-50 border border-gray-200">
                         <div class="text-sm font-bold text-gray-800">${r.storeName || r.storeId} <span class="text-[11px] font-normal text-gray-400">(${r.storeCode || r.storeId})</span></div>
@@ -2898,9 +2900,11 @@
                             <div class="self-center text-gray-400 font-black">→</div>
                             ${side(r.toDay, r.toDates, r.toMarket, true)}
                         </div>
+                        ${grp.length > 1 ? `<div class="mt-1.5 px-2 py-1 rounded-lg bg-indigo-50 border border-indigo-200 text-[11px] font-bold text-indigo-700">🔗 ร้านเดียวกันขอย้าย ${grp.length} รอบพร้อมกัน (${grp.map(x => e(x.fromDay) + '→' + e(x.toDay)).join(', ')})</div>` : ''}
                         <div class="text-[11px] text-gray-400 mt-1">ขอโดย ${r.requestedBy || '—'} · ${dateStr}</div>
                         <div class="flex gap-2 mt-2.5">
-                            <button onclick="MoveRequestAdmin.approve('${r.id}')" class="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold py-2 rounded-lg">✅ อนุมัติ</button>
+                            ${grp.length > 1 ? `<button onclick="MoveRequestAdmin.approveGroup('${e(r.groupId)}')" class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold py-2 rounded-lg">✅ อนุมัติทั้งชุด (${grp.length})</button>` : ''}
+                            <button onclick="MoveRequestAdmin.approve('${r.id}')" class="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold py-2 rounded-lg">✅ ${grp.length > 1 ? 'เฉพาะใบนี้' : 'อนุมัติ'}</button>
                             <button onclick="MoveRequestAdmin.reject('${r.id}')" class="flex-1 bg-red-100 hover:bg-red-200 text-red-700 text-xs font-bold py-2 rounded-lg">🚫 ปฏิเสธ</button>
                         </div>
                     </div>`;
@@ -3015,6 +3019,18 @@
             approve: async (reqId) => {
                 if (!confirm('ยืนยันอนุมัติคำขอนี้? ระบบจะย้ายร้านให้ทันที')) return;
                 await App.approveMoveRequest(reqId);
+                await MoveRequestAdmin.load();
+                MoveRequestAdmin.refreshBadge();
+                if (typeof PlanUI !== 'undefined') PlanUI.refresh();
+            },
+
+            // อนุมัติทุกใบในชุด (ร้านเดียวกันหลายตลาด) ทีละใบตามลำดับ — วันปลายทางไม่ทับวันที่ร้านอยู่ (ฝั่งเซลกันไว้)
+            // ลำดับการอนุมัติจึงไม่มีผลกับผลลัพธ์
+            approveGroup: async (groupId) => {
+                const grp = Object.values(MoveRequestAdmin._reqs || {}).filter(x => x.groupId === groupId);
+                if (!grp.length) return;
+                if (!confirm(`ยืนยันอนุมัติทั้งชุด ${grp.length} ใบ? (${grp[0].storeName || grp[0].storeId}: ${grp.map(x => x.fromDay + '→' + x.toDay).join(', ')})`)) return;
+                for (const r of grp) await App.approveMoveRequest(r.id);
                 await MoveRequestAdmin.load();
                 MoveRequestAdmin.refreshBadge();
                 if (typeof PlanUI !== 'undefined') PlanUI.refresh();
