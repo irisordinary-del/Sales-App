@@ -12,17 +12,28 @@ A vanilla JS/HTML PWA for planning and running sales delivery routes across mult
 
 - **Sales App**: https://sales-app-7ids.vercel.app/sales.html
 - **Admin**: https://sales-app-7ids.vercel.app/index.html
+- **Staging (test)**: https://sales-app-smooth.vercel.app/index.html
 - **GitHub**: https://github.com/irisordinary-del/Sales-App
 - **Firebase project**: route-plan-71e2e (Firestore only)
 
-**⚠️ Branch/deploy note**: the repo has `main`, `staging`, and `staging2`. As of 2026-09, Vercel's production deploy is wired to **`staging2`** — pushing to `staging2` is what actually ships to `sales-app-7ids.vercel.app`. Verify against the Vercel dashboard before assuming `main` is live; don't blindly follow old docs (including older revisions of this file) that say `main` auto-deploys.
+**⚠️ Branch/deploy map** (as of 2026-10-08 — verify in the Vercel dashboard before relying on it; older docs that say `main` auto-deploys are wrong). The repo is connected to **3 Vercel projects**, so every push builds in all three; only a project's *production branch* updates its domain, everything else becomes a login-protected preview:
+
+| Branch | Role | Vercel project → domain |
+|---|---|---|
+| **`staging2`** | **Live** — what sales reps and admins actually use | `sales-app-7ids` → https://sales-app-7ids.vercel.app |
+| `staging` | Test/pre-release — push here first, check it, then fast-forward `staging2` | `sales-app` → https://sales-app-smooth.vercel.app (production branch switched from `main` to `staging` by the user on 2026-10-08) |
+| `main` | Archive/backup of `staging2`, not deployed anywhere user-facing (third project `sales-assis-app` also builds from the repo — check its production branch before assuming) | — |
+
+**⚠️ Don't push the same commit to `staging` and `staging2` back-to-back.** Vercel dedupes by commit SHA per project: if `sales-app-7ids` first builds the SHA as a *Preview* (from the `staging` push), the `staging2` push of that same SHA is skipped and production stays on the old deployment (happened 2026-10-08 with `e3985e9`). Push `staging2` alone and wait for the "Production – sales-app-7ids" deployment before pushing the same SHA elsewhere — or make sure the SHA going to `staging2` is new. Verify with the GitHub deployments API / the served `sw.js` `CACHE_VERSION`, not just the green commit status (a Preview success also shows green).
+
+Usual flow: work on a feature branch → `git push origin <branch>:staging` → verify on sales-app-smooth → `git push origin staging:staging2` (fast-forward; check `git merge-base --is-ancestor origin/staging2 origin/staging` first, never force-push `staging2`) → optionally sync `main` from `staging2` with a merge commit. **All three sites share the same production Firestore** (`route-plan-71e2e`) — "staging" only separates code, not data, so test destructive changes on a `TEST_` center even on staging. After deploying, the service worker serves cache-first until it picks up the new `sw.js`; reload once or twice (or call `navigator.serviceWorker.getRegistration().then(r => r.update())`) before concluding a fix "didn't deploy".
 
 ## Commands
 
 There is no build tool, package manager, linter, or test suite in this repo (no `package.json`). It's plain HTML/CSS/JS served as static files.
 
 - **Run locally**: open the `.html` files directly, or serve the folder with any static file server. There's no dev server script.
-- **Deploy**: `git push origin staging2` (see branch note above) → Vercel auto-deploys.
+- **Deploy**: test with `git push origin <branch>:staging`, go live with `git push origin staging:staging2` (see the branch/deploy map above) → Vercel auto-deploys.
 - **Service worker cache-busting is automatic**: `vercel.json`'s `buildCommand` runs `sed -i "s/__BUILD_TS__/$(date +%Y%m%d%H%M%S)/g" sw.js`, stamping `sw.js`'s `CACHE_VERSION = 'rp-__BUILD_TS__'` with a real timestamp at build time. You do **not** need to manually bump a version string before deploying (older docs/handoff notes that say "bump CACHE_VERSION" are describing an obsolete manual process).
 - **Serverless functions** (`api/*.js`, Vercel Node functions) require `ORS_API_KEY` (an OpenRouteService key) set as a Vercel env var — used for route optimization/distance/elevation. Missing it makes those endpoints 500 with a Thai error message, not a silent failure.
 - **Sanity-check a JS file after editing**: `node --check <file>.js` (no test runner exists; this just catches syntax errors).
@@ -65,36 +76,37 @@ There is no build tool, package manager, linter, or test suite in this repo (no 
 
 All `api/*.js` proxy to OpenRouteService **only** to keep `ORS_API_KEY` server-side — never call ORS directly from client code.
 
----
+### `rpn/` — RPN V0, the company's planner (added 2026-10-08)
 
-## 🗄️ Firestore Structure
+The company forked our admin into **RPN V0** (a local/IndexedDB app, versioned `V0.x`, maintained by them) and uses it as **the** planning tool. `rpn/` holds it, made online, and `index.html` embeds it as the **วางแผนคิวงาน** and **ภาพรวมแผน** tabs (`#page-rpn` iframe, `RpnHost` in `index.html`). Our other tabs (Dashboard, Route Analysis, Cell Split, All Routes, SKU, Audit) are unchanged. The old `#page-planning` markup + `CalendarAdmin` etc. are still in `index.html` (our core `App` still loads them for the other tabs) but nothing navigates there anymore.
 
-```
-appData/
-  app_users                                    ← user accounts (role, centerId, password hash)
-  app_centers                                  ← { centerId: {name, docId, routeCount} } for the center picker
-  {CENTER_ID}_main/                            ← e.g. "402_main" (window.CENTER_DOC)
-    routeList, calendarConfig, currentPlanYM   ← currentPlanYM = the month Sales sees "live" (see Plan system below)
-    moveRequests/{autoId}                      ← sales rep's requests to move a store's day; route/status/requestedAt fields
-    plans/{YYYY_MM}/
-      calendarConfig: {...}                    ← THIS MONTH's default calendar (center-wide) — see Calendar Mode below
-      routeOverrides is NOT stored here — it lives per-route, see below
-      routes/{routeCode}/
-        stores: [ {...Store Object} ]
-        calendarOverride: {...} | (absent)      ← optional, THIS route + THIS month only; wins over plans/{ym}.calendarConfig
-        confirmedBy, confirmedAt                ← sales rep's "รับทราบสายวิ่ง" ack; reset to unset whenever days/calendar change
+- **Never hand-edit files in `rpn/`** except `rpn-online-pre.js`, `rpn-online.js`, `SYNC.md` — refresh with `node tools/sync-rpn.mjs "<RPN V0 folder>"` (see `rpn/SYNC.md`). Same file names as ours (`admin-data.js`, `file-manager.js` …) are *their* diverged copies, not ours.
+- RPN writes the same Firestore paths/shape we do, plus new store fields (`inactive`, `wasPlan`, `runOf`, `fqs`, `fqRun`, `cys`, `vd`), a pseudo-route **`รอจัดสาย`** in `routeList`, and center-doc fields (`cyPoints`, `routeBase`, `masterKm`, `maxCycleCode`, `routeDist`).
+- **`rpnCal`**: `rpn-online.js` stores each route's real visit dates per Day (computed with RPN's own `Runs.datesOf`, same as its DMS export) at `plans/{ym}/routes/{rt}.rpnCal`; `sales-app.js`'s `RpnCompat` uses it (as calendar mode `'rpn'` from `_resolveActiveCfg`) when its `sig` matches the loaded stores, else falls back to the old `CalendarCtrl` logic. `hash()`/`sig()` must stay identical in both files.
+- `sales-app.js` hides `รอจัดสาย` and `inactive` stores via `RpnCompat.clean()`; every place that writes `stores` back must wrap with `RpnCompat.restore()` or parked stores get deleted.
+- The `rpnCal` sig function exists in **three** places that must match exactly: `rpn/rpn-online.js`, `RpnCompat` (sales-app.js), `App._rpnSig` (admin-data.js — used by `approveMoveRequest` to keep rpnCal valid after moving a store between existing Days).
+- "คำขอย้ายวัน" / "เช็คการยืนยัน" (MoveRequestAdmin / RouteConfirmAdmin) moved from the old planning toolbar to the admin sidebar. `approveMoveRequest` now replaces only `fromDay` in `days` (stores can have several Days) and moves RPN's per-Day fields (`cys`, `fqs`, `fqRun`, `vd`, `runOf`) to `toDay` from a peer store.
+- **Move request for a multi-visit store** (F2/F4, added 2026-10-09): after the sales rep picks the target Day, `MoveRequest.choose` → `_askOther` asks once per *other* Day the store is on ("ย้ายรอบนี้ด้วยไหม?"), suggesting a target with the same shift. Each moved visit is its own `moveRequests` doc sharing `groupId`/`groupSize` (written in one batch); admin cards show "🔗 … N รอบพร้อมกัน" with "อนุมัติทั้งชุด" (`MoveRequestAdmin.approveGroup`). Target lists exclude Days the store is already on (and other chosen targets) — otherwise `approveMoveRequest`'s replace-`fromDay` logic would collapse two visits into one and approval order would matter.
+- Anything that lists routes (users gen, tasks checklist, center-select count, cell split, route-confirm) must skip `รอจัดสาย`.
 
-targets/{CENTER_ID}_{YYYY_MM}                  ← per-route sales targets (current format, centerId-prefixed)
-targets/{YYYY_MM}                              ← legacy format, read-only fallback — do not write to it
-sellout/{CENTER_ID}_{YYYY_MM}/chunks/          ← sales data, current format
-sellout/{YYYY_MM}/chunks/                      ← legacy format (pre centerId-prefix), still has real historical data
-skuDistribution/{campaignId}/
-auditLogs/{centerId}/logs/{logId}
-```
+### Sales "ขอจัดลำดับตลาด" (market reorder requests, added 2026-10-08)
 
-**Composite indexes**: tracked in `firestore.indexes.json` (added 2026-09-18, deploy with `firebase deploy --only firestore:indexes` — requires `firebase login` with project access first). Currently just one: `moveRequests` on `(route ASC, requestedAt DESC)`, needed by `MoveRequest.checkUpdates()` (sales-app.js). If you add a new query that combines an equality `where()` with an `orderBy()` on a different field, Firestore will throw a "query requires an index" error with a direct console link to create it — add the same definition to `firestore.indexes.json` too so it isn't a one-off manual click that gets lost on a fresh project/emulator.
+`ReorderReq` (sales-app.js) — button under the calendar header, next months only (current/past month disabled); sales for their own route, Sup/ASM for the selected route. Drag/▲▼ to move a whole market between Day slots (others shift, splice semantics), or "ล้างทั้งหมด" then tap markets into slots from D1. Mode per route: `half` (every multi-day store is an exact half-cycle pair → only D1–D(N/2) movable, second half mirrored), `free` (no multi-day stores — incl. 12-day cycles where F2 is market-level via +14 days), `irregular` (pairs not half-cycle, e.g. 402C01 cycle 23 → all slots movable, warns which pair gaps change). Malformed Day labels (e.g. `Day 12.5`) block the request.
+Stored as a normal `moveRequests` doc with `type:'reorder'`, `map` {old→new, incl. mirrored half}, `summary`, `warnings`, `basisSig`; filler `storeId:'__reorder__'`/`storeName`/`fromDay`/`toDay` keep the existing firestore.rules happy. Resubmitting deletes the previous pending reorder for that route+month.
+While a request is pending, the sales calendar for that route+month shows the *requested* order ("รออนุมัติ" mode: orange grid outline, moved cells marked "⇅ จาก D5", tapping a moved date shows the incoming market's stores with a pending note) with a bar offering "ดูแผนเดิม" (toggle back to the real plan), "แก้คำขอ" (reopens the editor starting from the requested order) and cancel — `ReorderReq.previewFor`/`_pending`, fed by `MoveRequest.startLiveListener` (own route, realtime) and `loadPending` (Sup/ASM, on calendar open). When a pending request turns `approved`, that month's `planCache` is dropped so the real (reordered) plan reloads.
+Admin approves in "คำขอย้ายวัน" → `MoveRequestAdmin.approveReorder` → `RpnHost.ensure()` (loads the RPN iframe in the background) → `RPNBridge.applyReorder` (rpn/rpn-online.js), which switches RPN to that month and remaps `days`, `seqs`, `fqs`, `fqRun`, `vd`, `wasPlan`, `runOf.src`, `cyPoints` with the market, keeps `cys` on the slot (AS&D rule), rewrites the `D..` number inside `marketName`, and saves (rpnCal is re-injected). It deliberately does **not** call RPN's own `Reorder.apply` (that one derives the half-cycle from the *center's* cycleDays and doesn't move `fqs`). Locked months can't be approved. After approval the DMS export for that month must be redone.
 
-**Important**: `calendarConfig` is set **independently per month** (`plans/{ym}.calendarConfig`) — a center is not "in cycle mode" or "in date mode" globally, each month's plan carries its own mode and can differ from the month before or after it. Never assume month N+1 uses the same mode as month N; always read that month's own `plans/{ym}.calendarConfig` (or a route's override) before interpreting its stores' `days` values or copying schedules between months.
+### Legacy market naming in RPN
+
+`rpn-online.js` adds our old formula (`{route} D{NN} {top-2 tambons} {district} {province}`, same as `FileManager._autoFillMarketNames`) to RPN's market-suggest UI without editing RPN files: an extra "สูตรเดิม" chip in the per-day panel, a "สูตรเดิม" option on every row of the "🗂 ทั้งสาย" table, and a "📛 สูตรเดิมทุกวัน" button there. The user picks per day or all at once.
+
+### `plan-lock.js` — read-only plan months
+
+Loaded right after the Firebase SDK in `index.html` and `rpn/RoutePlannerV0.html` (not `sales.html`). Rejects every `set`/`update`/`delete` (single doc or batch) under `appData/{center}/plans/{ym}` when that month is locked. Two lock sources:
+- **Per center (normal):** `{CENTER}_main.lockedMonths: ['YYYY_MM']`, toggled by admins from the sidebar "🔒 ล็อกแผน" (`PlanLockUI` in index.html; supervisors see status only; logged as `PLAN_LOCK`/`PLAN_UNLOCK`). Every open admin page and RPN iframe listens to the center doc via `onSnapshot`, so it takes effect immediately without a deploy. Firestore rules already accept the field (center-doc whitelist is `hasAny` on the merged doc).
+- **All centers:** the hard-coded `LOCKED` array in the file (edit + push). Was `['2026_11','2026_12']` during the RPN trial on 2026-10-08, unlocked the same day (currently `[]`).
+
+RPN shows a red "ดูได้อย่างเดียว" banner on locked months; `rpn-online.js` skips rpnCal reconcile and the admin can't approve reorder requests for them. Client-side only (like the app's auth) and there's a short window after page load before the center doc arrives.
 
 ### Store Object fields
 ```js
@@ -291,6 +303,7 @@ Both `exportTemplate` (single route) and `exportAllRoutes` (all routes) sort thr
 | Dashboard's Credit Delivery Status (Confirm/รอ Confirm) panel never rendered | `Dashboard._renderCategories()` has always injected into `document.getElementById('db-credit-delivery')`, but `_renderShell()` never created that container — confirmed via `git blame` that it was missing from the very commit that introduced the injection code, not a later redesign regression | `dashboard.js` |
 | Calendar modes "fixed"/"กำหนดเอง" and "weekday"/"ตามวันในสัปดาห์" unreachable from a fresh setup | `CalendarAdmin.setMode`/`save`/`_computeDayLabel` and the dedicated `cal-fixed-section`/`cal-weekday-section` markup fully supported all 4 modes, but the mode-picker only rendered 2 buttons (`cal-mode-cycle`, `cal-mode-date`) — a new center/plan could only ever end up in `fixed`/`weekday` mode if its Firestore doc already had that value some other way (never via clicking through this UI) | `index.html` |
 | Export modal's "✅ Active (Sales ใช้อยู่)" option silently did nothing | `ExportCtrl.doExport()` never read `export-plan-sel`'s value — picking either option always exported whatever plan the admin was currently viewing. The underlying "Active"-vs-"viewing" distinction is also obsolete since Sales stopped reading `currentPlanYM` (see Plan System above); removed the dropdown, replaced with a line stating which month it exports | `index.html`, `admin-ui.js` |
+| Market-reorder approval applied to stale data (402V09 Nov, 2026-10-08) | Firestore `enablePersistence` + plain `get()` can return IndexedDB-cached docs for several seconds after page load/month switch; `RPNBridge.applyReorder` swapped D1↔D21 on RPN's stale in-memory copy and saved it over newer server data (the request's `basisSig` didn't match — the stale-confirm was clicked through). Also `renameDay` rewrote `D..` tokens of *unmoved* stores whose names were already offset. Fixed: approval re-reads the route with `get({source:'server'})` and works on that; renames only when the token equals the store's old slot; plain `get()` is server-first with cache fallback (8s admin/RPN in plan-lock.js, 4s sales-app.js); stale-confirm text now recommends rejecting | `rpn/rpn-online.js`, `plan-lock.js`, `sales-app.js`, `index.html` |
 | SKU Distribution's "+ เพิ่ม" search-result button dead for any product code/name containing an apostrophe | `.replace(/'/g, "\'")` — the replacement `"\'"` is just the character `'` in a JS string literal, so this was a no-op, not an escape. An embedded `'` broke the generated `onclick="...('...')"` attribute's JS grammar for that row. Fixed to `.replace(/'/g, "\\'")` (an actual backslash) | `sku-distribution.js` |
 
 ---

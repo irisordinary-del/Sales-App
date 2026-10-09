@@ -33,6 +33,26 @@ const firebaseConfig = {
 };
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
+// ✅ FIX (2026-10-09): get() แบบไม่ระบุ source อ่านจาก server ก่อน (ออฟไลน์ค่อยใช้แคช) — แคช IndexedDB
+// (enablePersistence ด้านล่าง) เคยทำให้ซุปเห็นแผนเดือนหน้าเป็นข้อมูลเก่า แล้วส่งคำขอจัดลำดับบนข้อมูลนั้น
+// (402V09 พ.ย. 2026-10-08) · ลากสลับลำดับร้านก็เขียน stores ทั้งก้อนจากข้อมูลที่ get() มา จึงต้องสดเสมอ
+(function () {
+    const D = firebase.firestore.DocumentReference && firebase.firestore.DocumentReference.prototype;
+    if (!D || typeof D.get !== 'function' || D.get._serverFirst) return;
+    const orig = D.get;
+    // สัญญาณอ่อนในพื้นที่: รอ server ไม่เกิน 4 วิ แล้วถอยไปแบบเดิม (แคช) — แอปยังเปิดได้แม้เน็ตไม่ดี
+    D.get = function (opts) {
+        if (opts) return orig.call(this, opts);
+        const self = this;
+        return new Promise((resolve, reject) => {
+            let done = false;
+            const fallback = () => { if (done) return; done = true; orig.call(self).then(resolve, reject); };
+            orig.call(self, { source: 'server' }).then(v => { if (!done) { done = true; resolve(v); } }, fallback);
+            setTimeout(fallback, 4000);
+        });
+    };
+    D.get._serverFirst = true;
+})();
 
 // ✅ FIX (2026-07-12): เจอ error ซ้ำๆ ตลอด "WebChannelConnection RPC 'Listen' stream
 // transport errored" + 404 บน google.firestore.v1.Firestore/Listen ในทุกอุปกรณ์/เบราว์เซอร์
@@ -402,7 +422,9 @@ const App = {
                 App._getWithTimeout(routeRef,  15000),
             ]);
             const planConfig     = cfgSnap.exists   ? (cfgSnap.data().calendarConfig || null) : null;
-            const stores         = routeSnap.exists ? (routeSnap.data().stores        || [])  : [];
+            // ✅ RPN V0: ซ่อนร้าน "ออกจากแผน" + ใช้วันที่จริงจาก RPN (ดู RpnCompat)
+            const stores         = RpnCompat.clean(ym, State.myRoute, routeSnap.exists ? routeSnap.data().stores : []);
+            const routeRpn       = { [State.myRoute]: routeSnap.exists ? RpnCompat.calOf(routeSnap.data(), stores) : null };
             // ✅ ตั้งค่าปฏิทินเฉพาะสาย (ถ้ามี) ใช้แทนค่า default ของศูนย์สำหรับสายนี้
             const routeOverride  = routeSnap.exists ? (routeSnap.data().calendarOverride || null) : null;
             const calendarConfig = routeOverride || planConfig;
@@ -412,13 +434,14 @@ const App = {
             State.planCache[ym]  = {
                 stores, calendarConfig, ym, _ok: true,
                 routeOverrides: { [State.myRoute]: routeOverride },
+                routeRpn,
                 confirmedBy, confirmedAt,
             };
             return State.planCache[ym];
         } catch(e) {
             console.warn('loadPlanData:', ym, e);
             const fallback = ym === State.activePlanYM && State.allStores.length > 0
-                ? { stores: State.allStores, calendarConfig: State.calendarConfig, ym, _ok: true }
+                ? { stores: State.allStores, calendarConfig: State.calendarConfig, ym, _ok: true, routeOverrides: State.activeRouteOverrides || {}, routeRpn: State.activeRouteRpn || {} }
                 : null;
             if (fallback) State.planCache[ym] = fallback;
             return fallback || { stores: [], calendarConfig: null, ym };
@@ -501,7 +524,8 @@ const App = {
         const _planData      = _planSnap?.exists ? _planSnap.data() : {};
         State.calendarConfig = _planData.calendarConfig || null;
         // ✅ FIX: fallback ไปใช้ routeList จาก centerDoc ถ้า plan doc ไม่มี
-        State.routeList      = ((_planData.routeList?.length > 0
+        // ✅ RPN V0: ตัดสายเทียม "รอจัดสาย" ออก (ดู RpnCompat)
+        State.routeList      = RpnCompat.cleanRouteList((_planData.routeList?.length > 0
             ? _planData.routeList
             : _centerData.routeList) || [])
             .sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
@@ -520,13 +544,15 @@ const App = {
         // ปฏิทินของเดือนที่ใช้งานอยู่ (active month) แล้วไม่เห็น override เฉพาะสายเลย ตกไปใช้
         // ค่า default ของศูนย์เสมอ ทั้งที่เดือนอื่นๆ (โหลดผ่าน loadPlanDataForSup) เห็น override ถูกต้อง
         const _routeOverridesActive = {};
+        const _routeRpnActive = {};
 
         for (let i = 0; i < State.routeList.length; i += BATCH) {
             const chunk = State.routeList.slice(i, i + BATCH);
             await Promise.all(chunk.map(async (routeId) => {
                 try {
                     const rd = await App._getWithTimeout(_routesCol.doc(routeId), 8000);
-                    State.allRoutes[routeId] = rd.exists ? (rd.data().stores || []) : [];
+                    State.allRoutes[routeId] = RpnCompat.clean(_useYM, routeId, rd.exists ? rd.data().stores : []);
+                    _routeRpnActive[routeId] = rd.exists ? RpnCompat.calOf(rd.data(), State.allRoutes[routeId]) : null;
                     _confirmations[routeId]  = rd.exists ? { confirmedBy: rd.data().confirmedBy || null, confirmedAt: rd.data().confirmedAt || null } : { confirmedBy: null, confirmedAt: null };
                     _routeOverridesActive[routeId] = rd.exists ? (rd.data().calendarOverride || null) : null;
                 } catch(e) { State.allRoutes[routeId] = []; }
@@ -537,6 +563,7 @@ const App = {
         }
         State.allStores = Object.values(State.allRoutes).flat();
         State.activeRouteOverrides = _routeOverridesActive;
+        State.activeRouteRpn       = _routeRpnActive;
 
         // seed planCache เดือน active — ปฏิทินใช้ได้ทันที
         State.planCache[_useYM] = {
@@ -546,6 +573,8 @@ const App = {
             _ok:            true,
             confirmations:  _confirmations,
             routeOverrides: _routeOverridesActive,
+            routeRpn:       _routeRpnActive,
+            routeStores:    State.allRoutes,
         };
 
         LoadBar.setProgress(80, 'โหลดยอดขาย...');
@@ -599,11 +628,12 @@ const App = {
             const planRef        = db.collection('appData').doc(centerDocId).collection('plans').doc(ym);
             const cfgSnap        = await App._getWithTimeout(planRef, 10000);
             const calendarConfig = cfgSnap.exists ? (cfgSnap.data().calendarConfig || null) : null;
-            const routeList      = cfgSnap.exists ? (cfgSnap.data().routeList || []) : [];
+            const routeList      = RpnCompat.cleanRouteList(cfgSnap.exists ? (cfgSnap.data().routeList || []) : []);
             // โหลด stores ทุกสาย batch 5 — เก็บ calendarOverride ของแต่ละสายไว้ด้วย
             // (ใช้ตอน Supervisor เลือกดูสายที่มี override เฉพาะตัว)
             let stores = [];
             const routeOverrides = {};
+            const routeRpn = {}, routeStores = {};
             // ✅ NEW (2026-08-29): เก็บสถานะ "ยืนยันรับสายวิ่ง" ของแต่ละสายไว้ด้วย (ดู RouteConfirm)
             const confirmations = {};
             const BATCH = 5;
@@ -614,13 +644,16 @@ const App = {
                 );
                 docs.forEach((d, idx) => {
                     if (d?.exists) {
-                        stores = stores.concat(d.data().stores || []);
+                        const rs = RpnCompat.clean(ym, chunk[idx], d.data().stores);
+                        routeStores[chunk[idx]] = rs;
+                        routeRpn[chunk[idx]]    = RpnCompat.calOf(d.data(), rs);
+                        stores = stores.concat(rs);
                         routeOverrides[chunk[idx]] = d.data().calendarOverride || null;
                         confirmations[chunk[idx]]  = { confirmedBy: d.data().confirmedBy || null, confirmedAt: d.data().confirmedAt || null };
                     }
                 });
             }
-            State.planCache[ym] = { stores, calendarConfig, ym, _ok: true, routeOverrides, confirmations };
+            State.planCache[ym] = { stores, calendarConfig, ym, _ok: true, routeOverrides, confirmations, routeRpn, routeStores };
         } catch(e) {
             console.warn('loadPlanDataForSup:', ym, e);
             return { stores: [], calendarConfig: null, ym };
@@ -725,7 +758,8 @@ const App = {
         // process stores
         try {
             const rd = _routeResult.status === 'fulfilled' ? _routeResult.value : null;
-            State.allStores = rd?.exists ? (rd.data().stores || []) : [];
+            State.allStores = RpnCompat.clean(_useYM, State.myRoute, rd?.exists ? rd.data().stores : []);
+            State.activeRouteRpn = { [State.myRoute]: rd?.exists ? RpnCompat.calOf(rd.data(), State.allStores) : null };
             // ✅ FIX (2026-09-05): ต้องเก็บ calendarOverride ของสายตัวเองไว้ด้วย ไม่งั้นปฏิทิน
             // ของเดือนที่ใช้งานอยู่ตอนนี้ (active month) จะไม่เห็น override เฉพาะสาย — ตกไปใช้
             // ค่า default ของศูนย์เสมอ (routeOverrides ถูกใช้จริงใน CalendarCtrl.render())
@@ -741,9 +775,10 @@ const App = {
                     confirmedBy: rd?.exists ? (rd.data().confirmedBy || null) : null,
                     confirmedAt: rd?.exists ? (rd.data().confirmedAt || null) : null,
                     routeOverrides: State.activeRouteOverrides,
+                    routeRpn: State.activeRouteRpn,
                 };
             }
-        } catch(e) { State.allStores = []; State.activeRouteOverrides = {}; }
+        } catch(e) { State.allStores = []; State.activeRouteOverrides = {}; State.activeRouteRpn = {}; }
         isMainLoaded = true; checkReady();
 
         // process sales
@@ -760,7 +795,8 @@ const App = {
         const _liveRouteRef = _centerRef.collection('plans').doc(_useYM).collection('routes').doc(State.myRoute);
         App._unsubRoute = _liveRouteRef.onSnapshot(rd => {
             if (!rd.exists) return;
-            State.allStores = rd.data().stores || [];
+            State.allStores = RpnCompat.clean(_useYM, State.myRoute, rd.data().stores);
+            State.activeRouteRpn = { [State.myRoute]: RpnCompat.calOf(rd.data(), State.allStores) };
             // ✅ FIX (2026-09-05): sync override สดๆ ด้วย (เผื่อแอดมินแก้ระหว่างที่เซลเปิดแอปอยู่)
             State.activeRouteOverrides = { [State.myRoute]: rd.data().calendarOverride || null };
             if (State.activePlanYM) {
@@ -773,6 +809,7 @@ const App = {
                     stores: State.allStores, calendarConfig: State.calendarConfig, ym: State.activePlanYM, _ok: true,
                     confirmedBy: rd.data().confirmedBy || null, confirmedAt: rd.data().confirmedAt || null,
                     routeOverrides: State.activeRouteOverrides,
+                    routeRpn: State.activeRouteRpn,
                 };
             }
             if (State.isLoaded) {
@@ -784,6 +821,78 @@ const App = {
         });
 
         // sales โหลดแล้วใน Promise.allSettled ด้านบน
+    },
+};
+
+// ─── RpnCompat — อ่านแผนที่ทำจาก RPN V0 (โปรแกรมวางแผนของบริษัท, rpn/) ──────────
+// ✅ NEW (2026-10-08): ตั้งแต่ใช้ RPN V0 เป็นตัววางแผน ข้อมูลในเอกสารสายมีของใหม่ 3 อย่างที่แอปเซลต้องรู้
+//   1) สายเทียม "รอจัดสาย" (กองร้านใหม่ที่ยังไม่มีเจ้าของ) อยู่ใน routeList — ไม่ใช่สายวิ่งจริง ซ่อนเสมอ
+//   2) ร้าน s.inactive = true คือร้านที่ "ออกจากแผน" (พักไว้ ไม่ลบ) — ไม่แสดง แต่ตอนแอปเซลเขียน stores
+//      กลับ (ลากสลับลำดับ) ต้องใส่คืนให้ครบ ไม่งั้นร้านที่พักไว้หายจาก Firestore → ใช้ clean()/restore() คู่กันเสมอ
+//   3) rpnCal = วันที่เข้าเยี่ยมจริงของแต่ละ Day ที่ RPN คำนวณไว้ (rpn/rpn-online.js) — ตรงกับไฟล์ DMS
+//      (รอบสั้นวิ่งซ้ำ +14 วัน, F1/F2 รายตลาด, ช่องที่แยก ✂️ ที่เลข Day เกินความยาวรอบ ฯลฯ) ใช้แทนการ
+//      คำนวณปฏิทินเองเมื่อ sig ตรงกับร้านที่โหลดมา — ถ้าไม่ตรง (มีใครแก้วันโดยไม่ผ่าน RPN) ถอยไปใช้
+//      CalendarCtrl แบบเดิม · hash()/sig() ต้องตรงกับ rpn/rpn-online.js ทุกตัวอักษร
+const RpnCompat = {
+    UNASSIGNED: 'รอจัดสาย',
+    _hidden: {},    // `${ym}|${route}` → ร้าน inactive ของสายนั้น (ไม่แสดง แต่ต้องเขียนกลับครบ)
+
+    hash: (str) => { let h = 5381; for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0; return (h >>> 0).toString(36); },
+    sig: (stores) => RpnCompat.hash((stores || []).filter(s => s && !s.inactive)
+        .map(s => String(s.id) + ':' + (s.days || []).slice().sort().join(','))
+        .sort().join('|')),
+
+    cleanRouteList: (list) => (list || []).filter(r => r && r !== RpnCompat.UNASSIGNED),
+
+    clean: (ym, route, stores) => {
+        const all = stores || [];
+        const hidden = all.filter(s => s && s.inactive);
+        RpnCompat._hidden[ym + '|' + route] = hidden;
+        return hidden.length ? all.filter(s => s && !s.inactive) : all;
+    },
+    restore: (ym, route, stores) => {
+        const hidden = RpnCompat._hidden[ym + '|' + route] || [];
+        if (!hidden.length) return stores;
+        const ids = new Set(stores.map(s => s.id));
+        return stores.concat(hidden.filter(s => !ids.has(s.id)));
+    },
+
+    /** rpnCal ของเอกสารสาย ถ้ายังตรงกับร้านที่โหลดมา (visible = หลัง clean()) — ไม่งั้น null */
+    calOf: (data, visible) => {
+        const c = data && data.rpnCal;
+        if (!c || c.v !== 1 || !c.days) return null;
+        return c.sig === RpnCompat.sig(visible) ? c : null;
+    },
+
+    _iso: (y, m, d) => `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`,
+    _num: (label) => parseInt(String(label || '').replace(/\D/g, ''), 10) || 0,
+
+    /** Day ที่วิ่งวันที่นี้ (ถ้ามีหลายตลาดชนกัน เอาเลข Day น้อยสุด) */
+    labelOn: (rpn, year, month, dateNum) => {
+        const key = RpnCompat._iso(year, month, dateNum);
+        const hit = Object.keys(rpn.days).filter(k => (rpn.days[k].d || []).includes(key));
+        return hit.sort((a, b) => RpnCompat._num(a) - RpnCompat._num(b))[0] || null;
+    },
+    /** วันที่ (เลขวันในเดือน) ทั้งหมดที่ Day นี้วิ่งในเดือนนั้น */
+    datesOf: (rpn, dayLabel, year, month) => {
+        const pre = RpnCompat._iso(year, month, 1).slice(0, 8);
+        return ((rpn.days[dayLabel] || {}).d || []).filter(s => s.startsWith(pre))
+            .map(s => parseInt(s.slice(8), 10)).sort((a, b) => a - b);
+    },
+    marketOf: (rpn, dayLabel) => (rpn && rpn.days && rpn.days[dayLabel] && rpn.days[dayLabel].m) || '',
+
+    /** rpnCal ของสายที่กำลังดูในเดือนนั้น (เลือกสายแบบเดียวกับ CalendarCtrl._resolveActiveCfg) */
+    active: (year, month) => {
+        const ym = `${year}_${String(month + 1).padStart(2, '0')}`;
+        const route = (App.isSupervisor() && SupervisorUI._selectedRoute) ? SupervisorUI._selectedRoute : State.myRoute;
+        return State.planCache[ym]?.routeRpn?.[route] || null;
+    },
+    /** ร้านของสายที่กำลังดู — Supervisor ใช้รายการต่อสายจากเอกสารสายจริง (salesCode ของร้านที่ RPN ย้ายสาย
+     *  ยังเป็นรหัสเดิมจนกว่าจะส่งออก DMS จึงกรองด้วย salesCode ไม่ได้แล้ว) */
+    storesOfRoute: (plan, route, fallback) => {
+        if (plan?.routeStores?.[route]) return plan.routeStores[route];
+        if (State.allRoutes?.[route] && (!plan || plan.ym === State.activePlanYM)) return State.allRoutes[route];
+        return (fallback || []).filter(s => s.salesCode === route);
     },
 };
 
@@ -844,9 +953,17 @@ function getDayMarketList(day, forMonth, forYear) {
         const [ly, lm] = loadedYM.split('_').map(Number);
         if (forYear !== ly || forMonth !== lm - 1) return [];
     }
+    // ✅ RPN V0: ชื่อตลาดรายวันจาก RPN (ของเดือนที่โหลดอยู่) มาก่อน
+    {
+        const [_ay, _am] = (State.activePlanYM || '').split('_').map(Number);
+        const _rm = (_ay && _am) ? RpnCompat.marketOf(RpnCompat.active(_ay, _am - 1), day) : '';
+        if (_rm) return [trimMarketName(_rm)];
+    }
     // ✅ FIX-SUP: Supervisor ที่เลือกสายแล้ว → เฉพาะร้านในสายนั้น ไม่ปนสายอื่น (เหมือน CalendarCtrl.render)
+    // ✅ RPN V0: State.allStores ของ Supervisor ที่เลือกสายแล้ว = ร้านของสายนั้นอยู่แล้ว (SupervisorUI.selectRoute)
+    // เดิมกรองซ้ำด้วย salesCode ซึ่งพลาดร้านที่ RPN ย้ายสาย (salesCode ยังเป็นรหัสเดิม)
     const _sourceStores = (App.isSupervisor() && SupervisorUI._selectedRoute)
-        ? State.allStores.filter(s => s.salesCode === SupervisorUI._selectedRoute)
+        ? RpnCompat.storesOfRoute(null, SupervisorUI._selectedRoute, State.allStores)
         : State.allStores;
     // ✅ FIX-F2: ร้าน F2 (ไปมากกว่า 1 วัน) มีช่อง marketName ได้ค่าเดียว ผูกกับวันแรก (days[0])
     // เท่านั้น — ถ้าเช็คด้วย .includes(day) ตรงๆ ร้าน F2 จะเอาชื่อของวันแรกไปปนกับวันที่สองด้วย
@@ -951,17 +1068,21 @@ const Processor = {
         // ผลคือ Processor.setupRoute() throw ReferenceError ทุกครั้งที่รัน (ตั้งแต่ตอนเปิดแอปครั้งแรก)
         // ทำให้ Processor.routeList() ท้ายฟังก์ชันไม่ถูกเรียกเลย — สายวิ่ง/วันที่ไม่ขึ้นเลย
         // node --check จับไม่ได้เพราะเป็น runtime error ไม่ใช่ syntax error — ต้องรันจริงในเบราว์เซอร์ถึงเจอ
-        const _mktNow = State.currentDay ? getDayMarkets(State.currentDay) : '';
-        const _labelEl = document.getElementById('day-label-display');
-        if (_labelEl && State.currentDay) {
-            const _dayNum = State.currentDay.replace('Day ','');
-            _labelEl.textContent = _mktNow
-                ? `Day ${_dayNum} · ${_mktNow.split(' · ')[0]}`
-                : `Day ${_dayNum}`;
-        }
+        Processor.syncDayLabel();
         // ✅ FIX (2026-09-14): ตัด #stores-title lookup ออก — id นี้ไม่มีอยู่จริงใน sales.html
         // (ซากจาก UI เก่าก่อนเปลี่ยนมาใช้ #day-label-display ข้างบนแทน)
         Processor.routeList();
+    },
+
+    // หัวหน้าคิวงาน "Day N · ชื่อตลาด" — ✅ FIX (2026-10-09): รวมไว้ที่เดียว เดิมเขียนซ้ำ 2 ที่ (setupRoute +
+    // day-select change) แต่ CalendarCtrl.navigateToDay (กดวันในปฏิทิน → ดูคิวงาน) ไม่ได้อัปเดตเลย
+    // หัวจึงค้างวัน/ตลาดเดิมทั้งที่รายการร้านเปลี่ยนเป็นวันใหม่แล้ว · market = ตลาดที่เลือกจาก day sheet (ถ้ามี)
+    syncDayLabel: (market) => {
+        const el = document.getElementById('day-label-display');
+        if (!el || !State.currentDay) return;
+        const mk = market || getDayMarkets(State.currentDay).split(' · ')[0];
+        const dn = State.currentDay.replace('Day ', '');
+        el.textContent = mk ? `Day ${dn} · ${mk}` : `Day ${dn}`;
     },
 
     routeList: () => {
@@ -1101,8 +1222,9 @@ const Processor = {
         // ✅ BUGFIX (2026-08-29): เดิม .set({stores}) ไม่มี merge:true — Firestore แทนที่เอกสาร
         // ทั้งก้อน ทำให้ calendarOverride ของสายนี้หายไปเงียบๆ ทุกครั้งที่ลากสลับลำดับร้าน
         // ✅ NEW: สลับลำดับร้าน = แก้ไขสายนี้ — รีเซ็ตสถานะ "ยืนยันรับสายวิ่ง" ด้วย (ต้องยืนยันใหม่)
+        // ✅ RPN V0: ใส่ร้าน "ออกจากแผน" ที่ซ่อนไว้คืนก่อนเขียน — ไม่งั้นหายจาก Firestore (ดู RpnCompat)
         _writeRef.set({
-            stores: updated,
+            stores: RpnCompat.restore(State.activePlanYM, State.myRoute, updated),
             confirmedBy: firebase.firestore.FieldValue.delete(),
             confirmedAt: firebase.firestore.FieldValue.delete(),
         }, { merge: true })
@@ -1265,9 +1387,51 @@ const MoveRequest = {
         const stores = (App.isSupervisor() && SupervisorUI._selectedRoute) ? (State.allRoutes[route] || []) : State.allStores;
         const store  = stores.find(s => String(s.id) === String(storeId));
         if (!store) return showSalesToast('⚠️ ไม่พบร้านนี้', true);
-        const days = Array.from(new Set(stores.flatMap(s => s.days || []))).filter(d => d && d !== fromDay).sort();
+        // ✅ (2026-10-09): ไม่ให้เลือก Day ที่ร้านนี้อยู่แล้ว (F2/F4) — ย้ายไปทับจะเหลือรอบเดียว และทำให้คำขอคู่
+        // (ดู _askOther) อนุมัติก่อน-หลังแล้วได้ผลต่างกัน
+        const own = new Set(store.days || []);
+        const days = Array.from(new Set(stores.flatMap(s => s.days || []))).filter(d => d && d !== fromDay && !own.has(d));
         if (!days.length) return showSalesToast('⚠️ ไม่มี Day อื่นให้ย้ายไปในสายนี้', true);
 
+        // ✅ NEW (2026-10-09): แต่ละ Day แสดงวันที่จริง + ชื่อตลาด + จำนวนร้าน และเรียงตามวันที่ในเดือนที่ใช้งานอยู่
+        // (เดิมเรียงแบบตัวอักษร: Day 1, Day 10, Day 11 … และไม่บอกว่าเป็นตลาดอะไร วันไหน)
+        const [ay, am1] = String(State.activePlanYM || '').split('_').map(Number);
+        const y = ay || new Date().getFullYear(), m = am1 ? am1 - 1 : new Date().getMonth();
+        const dim = new Date(y, m + 1, 0).getDate();
+        const cfg = CalendarCtrl._resolveActiveCfg(y, m);
+        const datesOf = (label) => {
+            let a = CalendarCtrl.getDatesFromDayInMonth(label, y, m);
+            if (!a.length) { a = []; for (let d = 1; d <= dim; d++) if (CalendarCtrl.getDayLabelForCfg(d, cfg, stores, y, m) === label) a.push(d); }
+            return a;
+        };
+        const MON = new Date(y, m, 1).toLocaleDateString('th-TH', { month: 'short' });
+        const WD = ['อา.', 'จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.', 'ส.'];
+        const num = (l) => parseInt(String(l).replace(/\D/g, ''), 10) || 0;
+        const info = days.map(l => {
+            const dts = datesOf(l);
+            return { l, dts, first: dts.length ? Math.min(...dts) : 99, mk: getDayMarketList(l)[0] || '', n: stores.filter(s => (s.days || []).includes(l)).length };
+        }).sort((a, b) => a.first - b.first || num(a.l) - num(b.l));
+        const fromDts = datesOf(fromDay);
+        const fromTxt = fromDts.length ? `${fromDts.join(', ')} ${MON} (${fromDay})` : fromDay;
+        // เก็บไว้ให้ submit แนบชื่อตลาด + วันที่ไปกับคำขอ (การ์ดคำขอฝั่งแอดมินแสดง)
+        MoveRequest._pick = { from: { mk: getDayMarketList(fromDay)[0] || '', dates: fromDts.join(',') } };
+        // ข้อมูลทุก Day ของสาย (รวม Day อื่นของร้านนี้เอง) — ใช้ทั้งขั้นเลือกวันแรก และขั้นถาม "ตลาดอื่นของร้านเดียวกัน"
+        const allInfo = Array.from(new Set(stores.flatMap(s => s.days || []))).filter(Boolean).map(l => {
+            const dts = datesOf(l);
+            return { l, dts, first: dts.length ? Math.min(...dts) : 99, mk: getDayMarketList(l)[0] || '', n: stores.filter(s => (s.days || []).includes(l)).length };
+        }).sort((a, b) => a.first - b.first || num(a.l) - num(b.l));
+        allInfo.forEach(x => { MoveRequest._pick[x.l] = { mk: x.mk, dates: x.dts.join(',') }; });
+        MoveRequest._flow = { storeId: String(storeId), store, fromDay, allInfo, y, m, MON, WD, num, moves: [], queue: [] };
+
+        MoveRequest._sheet(`
+            <div style="font-size:15px;font-weight:900;color:#111827;margin-bottom:2px;">🔁 ขอย้ายวัน — ${store.name}</div>
+            <div style="font-size:12px;color:#6b7280;margin-bottom:14px;">ตอนนี้อยู่ ${fromTxt} · เลือกวันปลายทาง (ต้องรอแอดมินอนุมัติก่อน มีผลจริง)</div>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+                ${info.map(x => MoveRequest._dayBtn(x, `MoveRequest.choose('${fromDay}','${x.l}')`)).join('')}
+            </div>`);
+    },
+
+    _sheet: (inner) => {
         let sheet = document.getElementById('move-request-sheet');
         if (!sheet) {
             sheet = document.createElement('div');
@@ -1279,18 +1443,100 @@ const MoveRequest = {
         <div style="position:absolute;inset:0;background:rgba(0,0,0,0.5);" onclick="MoveRequest.closePicker()"></div>
         <div style="position:relative;background:#fff;border-radius:20px 20px 0 0;width:100%;max-width:480px;max-height:70vh;overflow-y:auto;padding:16px 16px 28px;">
             <div style="display:flex;justify-content:center;padding:0 0 10px;"><div style="width:40px;height:4px;border-radius:2px;background:#e5e7eb;"></div></div>
-            <div style="font-size:15px;font-weight:900;color:#111827;margin-bottom:2px;">🔁 ขอย้ายวัน — ${store.name}</div>
-            <div style="font-size:12px;color:#6b7280;margin-bottom:14px;">ตอนนี้อยู่ ${fromDay} · เลือกวันปลายทาง (ต้องรอแอดมินอนุมัติก่อน มีผลจริง)</div>
-            <div style="display:flex;flex-direction:column;gap:8px;">
-                ${days.map(d => `<button onclick="MoveRequest.submit('${storeId}','${fromDay}','${d}')"
-                    style="width:100%;padding:12px 16px;border-radius:14px;border:1.5px solid #e5e7eb;background:#f9fafb;text-align:left;font-size:14px;font-weight:700;color:#111827;cursor:pointer;">${d}</button>`).join('')}
-            </div>
+            ${inner}
         </div>`;
+    },
+
+    _dayBtn: (x, onclick, tag) => {
+        const { y, m, MON, WD } = MoveRequest._flow;
+        const dateMain = x.dts.length ? `${WD[new Date(y, m, x.dts[0]).getDay()]} ${x.dts[0]} ${MON}` : 'ไม่มีวันวิ่งเดือนนี้';
+        const more = x.dts.length > 1 ? `<div style="font-size:10px;font-weight:800;color:#6366f1;">+ ${x.dts.slice(1).join(', ')} ${MON}</div>` : '';
+        return `<button onclick="${onclick}"
+        style="width:100%;padding:10px 14px;border-radius:14px;border:1.5px solid ${tag ? '#a5b4fc' : '#e5e7eb'};background:${tag ? '#eef2ff' : '#f9fafb'};text-align:left;cursor:pointer;display:flex;align-items:center;gap:12px;">
+            <div style="width:74px;flex-shrink:0;line-height:1.25;">
+                <div style="font-size:13px;font-weight:900;color:#111827;">${dateMain}</div>${more}
+                <div style="font-size:10px;font-weight:800;color:#9ca3af;">${x.l}</div>
+            </div>
+            <div style="flex:1;min-width:0;">
+                ${tag ? `<div style="font-size:10px;font-weight:900;color:#4f46e5;">${tag}</div>` : ''}
+                <div style="font-size:13px;font-weight:800;color:#1d4ed8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${x.mk || '(ไม่มีชื่อตลาด)'}</div>
+                <div style="font-size:11px;color:#6b7280;">${x.n} ร้าน</div>
+            </div></button>`;
+    },
+
+    // ✅ NEW (2026-10-09): เลือกวันปลายทางแล้ว — ถ้าร้านนี้อยู่ตลาดอื่นด้วย (F2/F4: ร้านเดียวกันคนละชื่อตลาด)
+    // ถามเซลทีละตลาดว่าจะย้ายด้วยไหม ก่อนส่งคำขอ · ย้ายด้วย = ส่งคำขอแยกใบต่อตลาด ผูกด้วย groupId
+    choose: (fromDay, toDay) => {
+        const f = MoveRequest._flow;
+        if (!f) return;
+        f.moves = [{ fromDay, toDay }];
+        f.queue = (f.store.days || []).filter(d => d && d !== fromDay);
+        MoveRequest._askOther();
+    },
+
+    _askOther: () => {
+        const f = MoveRequest._flow;
+        if (!f.queue.length) return MoveRequest.submit(f.storeId, f.moves);
+        const other = f.queue[0];
+        const o = f.allInfo.find(x => x.l === other) || { l: other, dts: [], mk: '' };
+        const first = f.moves[0];
+        const fromI = f.allInfo.find(x => x.l === first.fromDay), toI = f.allInfo.find(x => x.l === first.toDay);
+        const when = (x) => x && x.dts.length ? `${x.dts.join(', ')} ${f.MON}` : '';
+        MoveRequest._sheet(`
+            <div style="font-size:15px;font-weight:900;color:#111827;margin-bottom:6px;">🔗 ร้านนี้มีรอบเยี่ยมวันอื่นด้วย</div>
+            <div style="font-size:12px;color:#374151;margin-bottom:10px;line-height:1.5;">
+                กำลังขอย้าย <b>${f.store.name}</b><br>
+                จาก <b>${(fromI && fromI.mk) || first.fromDay}</b> ${when(fromI)} → <b>${(toI && toI.mk) || first.toDay}</b> ${when(toI)}
+            </div>
+            <div style="padding:10px 12px;border-radius:14px;background:#fff7ed;border:1.5px solid #fed7aa;margin-bottom:12px;">
+                <div style="font-size:11px;font-weight:800;color:#9a3412;">ร้านเดียวกันยังอยู่ที่</div>
+                <div style="font-size:13px;font-weight:900;color:#111827;">${o.mk || '(ไม่มีชื่อตลาด)'}</div>
+                <div style="font-size:11px;color:#6b7280;">${when(o) ? when(o) + ' · ' : ''}${other}</div>
+            </div>
+            <div style="font-size:13px;font-weight:900;color:#111827;margin-bottom:8px;">ต้องการย้ายรอบนี้ด้วยไหม?</div>
+            <div style="display:flex;gap:8px;">
+                <button onclick="MoveRequest._skipOther()" style="flex:1;padding:11px;border-radius:12px;border:1.5px solid #e5e7eb;background:#fff;font-weight:800;font-size:13px;color:#374151;cursor:pointer;">ไม่ย้าย คงไว้ที่เดิม</button>
+                <button onclick="MoveRequest._pickOther()" style="flex:1;padding:11px;border-radius:12px;border:none;background:#4f46e5;font-weight:800;font-size:13px;color:#fff;cursor:pointer;">ย้ายด้วย → เลือกวัน</button>
+            </div>`);
+    },
+
+    _skipOther: () => { MoveRequest._flow.queue.shift(); MoveRequest._askOther(); },
+
+    _pickOther: () => {
+        const f = MoveRequest._flow;
+        const other = f.queue[0];
+        // ห้ามเลือก Day ที่ร้านอยู่อยู่แล้ว หรือที่เลือกเป็นปลายทางไปแล้ว (กันรอบหายตอนแอดมินอนุมัติทีละใบ)
+        const taken = new Set([...(f.store.days || []), ...f.moves.map(x => x.toDay)]);
+        const list = f.allInfo.filter(x => !taken.has(x.l));
+        if (!list.length) { showSalesToast('⚠️ ไม่มีวันว่างให้ย้ายตลาดนี้', true); return MoveRequest._skipOther(); }
+        // แนะนำ: ห่างจากวันเดิมเท่ากับที่ย้ายตลาดแรก (คงระยะห่างระหว่าง 2 รอบของร้านไว้)
+        const maxN = Math.max(...f.allInfo.map(x => f.num(x.l)));
+        const shift = f.num(f.moves[0].toDay) - f.num(f.moves[0].fromDay);
+        let sN = (f.num(other) + shift - 1) % maxN; if (sN < 0) sN += maxN; sN += 1;
+        const sug = list.find(x => f.num(x.l) === sN);
+        const rest = list.filter(x => x !== sug);
+        MoveRequest._sheet(`
+            <div style="font-size:15px;font-weight:900;color:#111827;margin-bottom:2px;">🔁 ย้ายอีกตลาด — ${f.store.name}</div>
+            <div style="font-size:12px;color:#6b7280;margin-bottom:14px;">จาก ${(f.allInfo.find(x => x.l === other) || {}).mk || other} (${other}) · เลือกวันปลายทาง</div>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+                ${sug ? MoveRequest._dayBtn(sug, `MoveRequest._addOther('${sug.l}')`, '⭐ แนะนำ — ห่างจากรอบแรกเท่าเดิม') : ''}
+                ${rest.map(x => MoveRequest._dayBtn(x, `MoveRequest._addOther('${x.l}')`)).join('')}
+            </div>
+            <button onclick="MoveRequest._askOther()" style="margin-top:12px;width:100%;padding:10px;border-radius:12px;border:1.5px solid #e5e7eb;background:#fff;font-weight:800;font-size:12px;color:#6b7280;cursor:pointer;">← กลับ</button>`);
+    },
+
+    _addOther: (toDay) => {
+        const f = MoveRequest._flow;
+        f.moves.push({ fromDay: f.queue.shift(), toDay });
+        MoveRequest._askOther();
     },
 
     closePicker: () => { document.getElementById('move-request-sheet')?.remove(); },
 
-    submit: async (storeId, fromDay, toDay) => {
+    // moves: [{fromDay,toDay}, ...] — ใบแรกคือตลาดที่เซลกดขอ ใบถัดไปคือตลาดอื่นของร้านเดียวกันที่ตอบ "ย้ายด้วย"
+    // (เรียกแบบเดิม submit(storeId, fromDay, toDay) ก็ยังได้)
+    submit: async (storeId, moves, toDayArg) => {
+        if (!Array.isArray(moves)) moves = [{ fromDay: moves, toDay: toDayArg }];
         MoveRequest.closePicker();
         // 🔒 กันไว้อีกชั้น เผื่อ pendingSet ยังไม่ทันอัปเดตตอนกดปุ่มก่อนหน้า
         if (MoveRequest._pendingSet.has(String(storeId))) {
@@ -1303,19 +1549,34 @@ const MoveRequest = {
         const session = Auth.getSession();
         const name    = session?.displayName || session?.username || route;
         try {
-            const docRef = await MoveRequest._col(MoveRequest._centerDocId()).add({
-                ym, route, storeId, storeCode: store?.code || store?.id || '', storeName: store?.name || String(storeId),
-                fromDay, toDay,
-                requestedBy: name, requestedAt: firebase.firestore.FieldValue.serverTimestamp(),
-                status: 'pending',
+            const pk = MoveRequest._pick || {};
+            const col = MoveRequest._col(MoveRequest._centerDocId());
+            const groupId = moves.length > 1 ? col.doc().id : null;
+            const batch = db.batch();
+            const refs = moves.map(({ fromDay, toDay }) => {
+                const ref = col.doc();
+                batch.set(ref, {
+                    ym, route, storeId, storeCode: store?.code || store?.id || '', storeName: store?.name || String(storeId),
+                    fromDay, toDay,
+                    // ✅ NEW (2026-10-09): ชื่อตลาด + วันที่ (เลขวันในเดือน คั่น ,) ให้การ์ดคำขอฝั่งแอดมินอ่านง่าย
+                    fromMarket: pk[fromDay]?.mk || (fromDay === moves[0].fromDay ? pk.from?.mk : '') || '',
+                    fromDates: pk[fromDay]?.dates || (fromDay === moves[0].fromDay ? pk.from?.dates : '') || '',
+                    toMarket: pk[toDay]?.mk || '', toDates: pk[toDay]?.dates || '',
+                    // ✅ NEW (2026-10-09): ร้านเดียวกันย้ายหลายตลาดพร้อมกัน — การ์ดแอดมินแสดงว่าเป็นชุดเดียวกัน
+                    ...(groupId ? { groupId, groupSize: moves.length } : {}),
+                    requestedBy: name, requestedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                    status: 'pending',
+                });
+                return ref;
             });
+            await batch.commit();
             MoveRequest._pendingSet.add(String(storeId)); // ✅ อัปเดต local ทันที ไม่ต้องรอ query ใหม่
             if (typeof Processor !== 'undefined' && State.isLoaded) Processor.routeList();
-            showSalesToast(`📨 ส่งคำขอย้าย "${store?.name || storeId}" → ${toDay} แล้ว รออนุมัติจากแอดมิน`);
+            showSalesToast(`📨 ส่งคำขอย้าย "${store?.name || storeId}" ${moves.map(x => '→ ' + x.toDay).join(', ')} แล้ว รออนุมัติจากแอดมิน`);
             if (typeof NotifCtrl !== 'undefined') NotifCtrl.refresh();
-            if (typeof writeAuditLog === 'function') {
-                writeAuditLog('move_request_create', { route, ym, storeId: String(storeId), storeName: store?.name || '', fromDay, toDay, reqId: docRef.id });
-            }
+            if (typeof writeAuditLog === 'function') moves.forEach(({ fromDay, toDay }, i) => {
+                writeAuditLog('move_request_create', { route, ym, storeId: String(storeId), storeName: store?.name || '', fromDay, toDay, reqId: refs[i].id });
+            });
         } catch(e) {
             showSalesToast('❌ ส่งคำขอไม่สำเร็จ: ' + e.message, true);
         }
@@ -1363,8 +1624,443 @@ const MoveRequest = {
                     );
                     if (typeof Processor !== 'undefined' && State.isLoaded) Processor.routeList();
                     if (typeof NotifCtrl !== 'undefined') NotifCtrl.refresh();
+                    // ✅ คำขอจัดลำดับตลาด — ปฏิทินโหมดรออนุมัติ / โหลดแผนใหม่เมื่ออนุมัติแล้ว (ดู ReorderReq._ingest)
+                    if (typeof ReorderReq !== 'undefined') ReorderReq._ingest(route, snap.docs);
                 }, e => console.warn('MoveRequest live listener:', e));
         } catch(e) { console.warn('MoveRequest.startLiveListener:', e); }
+    },
+};
+
+// ═════════════════════════════════════════════════════════════════════════
+// ✅ NEW (2026-10-08): ReorderReq — เซล / ซุป / ASM "ขอจัดลำดับตลาด" ของเดือนถัดไป
+// ลากตลาดไปช่อง Day อื่นได้อิสระ (ลาก D5 ไปช่อง 2 → D2..D4 เลื่อนลงเอง) หรือ "ล้างทั้งหมด" แล้ววางเองทีละช่อง
+// ตั้งแต่ D1 · ส่งเป็นคำขอใน moveRequests (type 'reorder') → แอดมินอนุมัติในเมนู "คำขอย้ายวัน" ซึ่งสั่ง RPN
+// ทำให้ (RPNBridge.applyReorder ใน rpn/rpn-online.js) — แผน วันที่ในแอปนี้ และไฟล์ DMS จึงตรงกันเสมอ
+// โหมดของสาย (ตามที่ตกลงกันไว้):
+//   half      — มีร้าน F2 และทุกคู่ห่างครึ่งรอบพอดี (รอบ 24 → D3+D15) → จัดได้ครึ่งแรก ครึ่งหลังเลื่อนตาม
+//   free      — ไม่มีร้านอยู่หลายช่อง (รวมรอบ 12 วันที่ F2 เป็นของตลาด วิ่งซ้ำ +14 วันเอง) → จัดได้ทุกช่อง
+//   irregular — มีร้านหลายช่องแต่ไม่ห่างครึ่งรอบ (เช่น 402C01 รอบ 23) → จัดได้ทุกช่อง แต่เตือนคู่ที่ระยะห่างเปลี่ยน
+// คำขอต้องผ่าน firestore.rules เดิม (ฟิลด์ storeId/storeName/fromDay/toDay) จึงใส่ค่าที่อ่านรู้เรื่องไว้แทน
+// ═════════════════════════════════════════════════════════════════════════
+const ReorderReq = {
+    S: null,
+    _num: (d) => parseInt(String(d || '').replace(/\D/g, ''), 10) || 0,
+    _esc: (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])),
+    _ym: () => `${CalendarCtrl._year}_${String(CalendarCtrl._month + 1).padStart(2, '0')}`,
+    _nowYM: () => { const d = new Date(); return `${d.getFullYear()}_${String(d.getMonth() + 1).padStart(2, '0')}`; },
+    _route: () => App.isSupervisor() ? (SupervisorUI._selectedRoute || '') : State.myRoute,
+    _col: () => MoveRequest._col(MoveRequest._centerDocId()),
+    _monthLabel: (ym) => { const [y, m] = ym.split('_').map(Number); return new Date(y, m - 1, 1).toLocaleDateString('th-TH', { year: 'numeric', month: 'long' }); },
+
+    /** ร้านของสายในเดือนนั้น (หลัง RpnCompat.clean — ไม่มีร้านออกจากแผน) · null = ยังโหลดเดือนนั้นไม่เสร็จ */
+    _stores: (ym, route) => {
+        const plan = State.planCache[ym];
+        if (!plan?._ok) return null;
+        return App.isSupervisor() ? RpnCompat.storesOfRoute(plan, route, plan.stores || []) : (plan.stores || []);
+    },
+
+    /** ความยาวรอบ + โหมด + ร้านที่ Day ผิดรูป */
+    _analyze: (stores, cfg) => {
+        const num = ReorderReq._num;
+        const isCycle = cfg && (cfg.mode === 'cycle' || cfg._baseMode === 'cycle');
+        const maxDay = Math.max(0, ...stores.flatMap(s => (s.days || []).map(num)));
+        const N = isCycle ? (parseInt(cfg.cycleDays, 10) || 24) : Math.min(31, Math.max(maxDay, 1));
+        const bad = [];
+        stores.forEach(s => (s.days || []).forEach(d => { if (!/^Day \d+$/.test(d)) bad.push(`${s.name || s.id} (${d})`); }));
+        const inSlots = (s) => (s.days || []).filter(d => num(d) >= 1 && num(d) <= N);
+        const multi = stores.filter(s => inSlots(s).length >= 2);
+        const halfK = N / 2;
+        const half = N % 2 === 0 && multi.length > 0 && multi.every(s => {
+            const ds = inSlots(s).map(num).sort((a, b) => a - b);
+            return ds.length === 2 && ds[1] - ds[0] === halfK;
+        });
+        const mode = half ? 'half' : (multi.length ? 'irregular' : 'free');
+        return { N, M: half ? halfK : N, halfK, mode, multi, bad };
+    },
+
+    /** ชื่อตลาดของช่อง Day ในเดือนนั้น — ชื่อจาก RPN ก่อน แล้วชื่อที่ร้านเก็บไว้ แล้วค่อย generate */
+    _market: (label) => {
+        const S = ReorderReq.S;
+        const rm = RpnCompat.marketOf(S.rpn, label);
+        if (rm) return trimMarketName(rm);
+        const cnt = {};
+        S.stores.forEach(s => { if (s.days?.[0] === label && s.marketName) { const k = trimMarketName(s.marketName); cnt[k] = (cnt[k] || 0) + 1; } });
+        const top = Object.entries(cnt).sort((a, b) => b[1] - a[1])[0];
+        if (top) return top[0];
+        const gen = generateDayMarketName(S.stores, label);
+        return gen ? trimMarketName(gen) : '';
+    },
+    _count: (label) => ReorderReq.S.stores.filter(s => (s.days || []).includes(label)).length,
+    _dates: (label) => {
+        const S = ReorderReq.S;
+        let a = CalendarCtrl.getDatesFromDayInMonth(label, S.y, S.m);
+        if (!a.length) { const d = CalendarCtrl.getDateFromDay(label); a = d ? [d] : []; }
+        return a;
+    },
+
+    // ── คำขอที่รออนุมัติ → ปฏิทินแสดงตามที่ขอ (โหมดรออนุมัติ สีส้ม) ─────────────────────────────
+    // ✅ NEW (2026-10-08): เดิมส่งคำขอแล้วปฏิทินยังเป็นแผนเดิมจนแอดมินอนุมัติ เซลไม่เห็นว่าแก้อะไรไป
+    // _pending[route][ym] = คำขอ type 'reorder' ที่ status 'pending' · อัปเดตจาก (1) MoveRequest.startLiveListener
+    // (สายของเซลเอง แบบ realtime) (2) loadPending ตอนเปิดปฏิทิน/เลือกสาย (ซุป/ASM) (3) ตอนส่ง/ยกเลิกเอง
+    // พอคำขอถูกอนุมัติ แผนจริงของเดือนนั้นเปลี่ยนแล้ว → ล้าง planCache ของเดือนนั้นให้โหลดใหม่
+    _pending: {},
+    _loadedRoute: {},
+    _showReq: true,
+    _ingest: (route, docs) => {
+        const prev = ReorderReq._pending[route] || {};
+        const now = {};
+        docs.forEach(d => {
+            const r = { id: d.id, ...(typeof d.data === 'function' ? d.data() : d) };
+            if (r.type !== 'reorder') return;
+            if (r.status === 'pending') now[r.ym] = r;
+            else if (r.status === 'approved' && prev[r.ym] && prev[r.ym].id === r.id) {
+                delete State.planCache[r.ym];                         // แผนจริงเปลี่ยนแล้ว — โหลดใหม่
+                if (State.activePlanYM === r.ym) App.switchToPlan?.(r.ym);
+            }
+        });
+        ReorderReq._pending[route] = now;
+        ReorderReq._loadedRoute[route] = true;
+        const popup = document.getElementById('calendar-popup');
+        if (popup && popup.style.display !== 'none') { CalendarCtrl.render(); CalendarCtrl._bgLoadMonth?.(); }
+    },
+    loadPending: async (route, force) => {
+        if (!route || (!force && ReorderReq._loadedRoute[route])) return;
+        ReorderReq._loadedRoute[route] = true;
+        try {
+            const snap = await ReorderReq._col().where('route', '==', route).get();
+            ReorderReq._ingest(route, snap.docs);
+        } catch (e) { console.warn('ReorderReq.loadPending:', e); ReorderReq._loadedRoute[route] = false; }
+    },
+    pendingFor: (route, ym) => (ReorderReq._pending[route] || {})[ym] || null,
+    /** { req, inv: {'Day ใหม่': 'Day เดิม'} } ถ้าปฏิทินเดือนนี้ต้องแสดงตามคำขอ · null = แสดงแผนจริง */
+    previewFor: (ym) => {
+        const req = ReorderReq.pendingFor(ReorderReq._route(), ym);
+        if (!req || !req.map || !ReorderReq._showReq) return null;
+        const inv = {};
+        Object.entries(req.map).forEach(([o, n]) => { inv[n] = o; });
+        return { req, inv };
+    },
+    togglePreview: () => { ReorderReq._showReq = !ReorderReq._showReq; CalendarCtrl.render(); },
+
+    renderBar: () => {
+        const el = document.getElementById('calendar-reorder-bar');
+        if (!el) return;
+        const ym = ReorderReq._ym();
+        if (!State.planList.includes(ym)) { el.innerHTML = ''; return; }
+        const route = ReorderReq._route();
+        if (route && !ReorderReq._loadedRoute[route]) ReorderReq.loadPending(route);
+        const pend = route ? ReorderReq.pendingFor(route, ym) : null;
+        if (pend && ym > ReorderReq._nowYM()) {
+            const n = (pend.summary || []).length;
+            const show = ReorderReq._showReq;
+            const sb = 'padding:6px 10px;border-radius:9px;font-size:11.5px;font-weight:800;cursor:pointer;';
+            el.innerHTML = `<div style="padding:9px 11px;border-radius:12px;background:#fff7ed;border:1.5px solid #f59e0b;">
+                <div style="font-size:12.5px;font-weight:900;color:#9a3412;">⏳ ขอจัดลำดับตลาดแล้ว ${n} ตลาด — รอแอดมินอนุมัติ</div>
+                <div style="font-size:11px;color:#b45309;margin-top:2px;">${show ? 'ปฏิทินนี้แสดง<b>ตามที่ขอ</b> (ช่องสีส้ม = ตลาดที่ย้าย) · ยังไม่ใช่แผนจริง' : 'ตอนนี้แสดง<b>แผนเดิม</b> (แผนจริงที่ใช้อยู่)'}</div>
+                <div style="display:flex;gap:6px;margin-top:7px;flex-wrap:wrap;">
+                    <button onclick="ReorderReq.togglePreview()" style="${sb}border:1px solid #fdba74;background:#fff;color:#9a3412;">${show ? '👁 ดูแผนเดิม' : '⇅ ดูตามที่ขอ'}</button>
+                    <button onclick="ReorderReq.open()" style="${sb}border:none;background:#f59e0b;color:#fff;">✏️ แก้คำขอ</button>
+                    <button onclick="ReorderReq.cancelFromBar()" style="${sb}border:1px solid #fecaca;background:#fef2f2;color:#dc2626;">ยกเลิกคำขอ</button>
+                </div></div>`;
+            return;
+        }
+        const btn = (txt, on) => `<button ${on ? 'onclick="ReorderReq.open()"' : 'disabled'}
+            style="width:100%;padding:9px 12px;border-radius:12px;border:1.5px solid ${on ? '#c7d2fe' : '#e5e7eb'};background:${on ? '#eef2ff' : '#f9fafb'};
+                   color:${on ? '#3730a3' : '#9ca3af'};font-size:12.5px;font-weight:800;cursor:${on ? 'pointer' : 'default'};">${txt}</button>`;
+        if (ym <= ReorderReq._nowYM()) { el.innerHTML = btn('⇅ จัดลำดับตลาดได้ตั้งแต่เดือนหน้า — เลื่อนไปเดือนถัดไป ›', false); return; }
+        if (!ReorderReq._route()) { el.innerHTML = btn('⇅ เลือกสายก่อน แล้วค่อยขอจัดลำดับตลาด', false); return; }
+        el.innerHTML = btn(`⇅ ขอจัดลำดับตลาด · ${ReorderReq._monthLabel(ym)}`, true);
+    },
+
+    open: async () => {
+        const ym = ReorderReq._ym(), route = ReorderReq._route();
+        if (ym <= ReorderReq._nowYM()) return showSalesToast('⚠️ เดือนปัจจุบันแก้ลำดับตลาดไม่ได้', true);
+        if (!route) return showSalesToast('⚠️ เลือกสายก่อน', true);
+        let stores = ReorderReq._stores(ym, route);
+        if (!stores) {
+            showSalesToast('⏳ กำลังโหลดแผนเดือนนี้...');
+            await (App.isSupervisor() ? App.loadPlanDataForSup : App.loadPlanData)(ym);
+            stores = ReorderReq._stores(ym, route);
+        }
+        if (!stores || !stores.length) return showSalesToast('⚠️ ไม่พบร้านของสายนี้ในแผนเดือนนี้', true);
+        const y = CalendarCtrl._year, m = CalendarCtrl._month;
+        const cfg = CalendarCtrl._resolveActiveCfg(y, m);
+        const a = ReorderReq._analyze(stores, cfg);
+        const base = Array.from({ length: a.M }, (_, i) => 'Day ' + (i + 1));
+        const cached = ReorderReq.pendingFor(route, ym);
+        ReorderReq.S = {
+            ym, route, y, m, stores, rpn: RpnCompat.active(y, m), basisSig: RpnCompat.sig(stores),
+            ...a, base, order: base.slice(), pending: cached, drag: -1,
+        };
+        // ✅ FIX (2026-10-09): เรียงช่องตาม "วันที่จริง" ในเดือน ไม่ใช่เลข Day — รอบที่ไม่ได้เริ่ม D1 ต้นเดือน
+        // (เช่น 402C02 พ.ย.: 2 พ.ย. = D16, 20 พ.ย. = D9) เรียงตามเลข Day แล้ววันที่กระโดดไปมา เซลงง
+        // ช่องที่ไม่มีวันวิ่งในเดือนนี้ไปท้ายสุด · ลากแล้วตลาดอื่น "เลื่อนตามลำดับวันที่"
+        const firstDate = (l) => { const d = ReorderReq._dates(l); return d.length ? Math.min(...d) : 99; };
+        base.sort((p, q) => firstDate(p) - firstDate(q) || ReorderReq._num(p) - ReorderReq._num(q));
+        // มีคำขอค้างอยู่ → เริ่มจากลำดับที่ขอไว้ (แก้คำขอ) — สร้างจาก map (เดิม→ใหม่) ไม่ผูกกับลำดับแถว
+        const startFrom = (p) => {
+            if (!p || !p.map) return base.slice();
+            const inv = {};
+            Object.entries(p.map).forEach(([o, n]) => { inv[n] = o; });
+            const order = base.map(l => inv[l] || l);
+            return (new Set(order).size === order.length && order.every(l => base.includes(l))) ? order : base.slice();
+        };
+        ReorderReq.S.order = startFrom(cached);
+        ReorderReq._render();
+        await ReorderReq.loadPending(route, true);
+        const p = ReorderReq.pendingFor(route, ym);
+        const S = ReorderReq.S;
+        if (S && S.ym === ym && (p?.id !== S.pending?.id)) {
+            const untouched = S.order.join() === startFrom(S.pending).join();
+            S.pending = p;
+            if (untouched) S.order = startFrom(p);
+            ReorderReq._render();
+        }
+    },
+
+    cancelFromBar: async () => {
+        const route = ReorderReq._route(), ym = ReorderReq._ym();
+        const p = ReorderReq.pendingFor(route, ym);
+        if (!p) return;
+        if (!confirm('ยกเลิกคำขอจัดลำดับตลาดเดือนนี้? ปฏิทินจะกลับเป็นแผนเดิม')) return;
+        try {
+            await ReorderReq._col().doc(p.id).delete();
+            delete (ReorderReq._pending[route] || {})[ym];
+            CalendarCtrl.render();
+            showSalesToast('🗑️ ยกเลิกคำขอจัดลำดับแล้ว');
+            if (typeof writeAuditLog === 'function') writeAuditLog('reorder_request_cancel', { route, ym, reqId: p.id });
+            if (typeof NotifCtrl !== 'undefined') NotifCtrl.refresh();
+        } catch (e) { showSalesToast('❌ ยกเลิกไม่สำเร็จ: ' + e.message, true); }
+    },
+
+    close: () => {
+        try { ReorderReq._sortable?.destroy(); } catch (e) {}
+        ReorderReq._sortable = null;
+        document.getElementById('reorder-req-sheet')?.remove();
+        ReorderReq.S = null;
+    },
+
+    /** old → new ทั้งหมด (รวมครึ่งหลังของโหมด half) */
+    _map: () => {
+        const S = ReorderReq.S, map = {};
+        S.order.forEach((old, i) => {
+            if (!old || old === S.base[i]) return;
+            map[old] = S.base[i];
+            if (S.mode === 'half') map['Day ' + (ReorderReq._num(old) + S.halfK)] = 'Day ' + (ReorderReq._num(S.base[i]) + S.halfK);
+        });
+        return map;
+    },
+    _warnings: (map) => {
+        const S = ReorderReq.S, num = ReorderReq._num, out = [];
+        if (S.mode === 'irregular') {
+            const hit = [];
+            S.multi.forEach(s => {
+                const old = (s.days || []).filter(d => num(d) <= S.N);
+                const nw = old.map(d => map[d] || d);
+                const g0 = old.map(num).sort((a, b) => a - b), g1 = nw.map(num).sort((a, b) => a - b);
+                if (g0[1] - g0[0] !== g1[1] - g1[0]) hit.push(`${s.name || s.id}: ${g0.map(n => 'D' + n).join('+')} → ${g1.map(n => 'D' + n).join('+')}`);
+            });
+            if (hit.length) out.push(`ร้านที่อยู่ 2 ช่อง ${hit.length} ร้าน ระยะห่างจะเปลี่ยน เช่น ${hit.slice(0, 3).join(' · ')}`);
+        }
+        return out;
+    },
+
+    _render: () => {
+        const S = ReorderReq.S;
+        if (!S) return;
+        const e = ReorderReq._esc, num = ReorderReq._num;
+        let sheet = document.getElementById('reorder-req-sheet');
+        if (!sheet) {
+            sheet = document.createElement('div');
+            sheet.id = 'reorder-req-sheet';
+            sheet.style.cssText = 'position:fixed;inset:0;z-index:100000;display:flex;align-items:flex-end;justify-content:center;';
+            document.body.appendChild(sheet);
+        }
+        if (S.bad.length) {
+            sheet.innerHTML = `<div style="position:absolute;inset:0;background:rgba(0,0,0,0.5);" onclick="ReorderReq.close()"></div>
+            <div style="position:relative;background:#fff;border-radius:20px 20px 0 0;width:100%;max-width:520px;padding:18px 16px 28px;">
+                <div style="font-size:15px;font-weight:900;color:#111827;">⇅ จัดลำดับตลาด · ${e(S.route)}</div>
+                <div style="margin-top:10px;padding:12px;border-radius:12px;background:#fef2f2;border:1px solid #fecaca;font-size:12.5px;color:#991b1b;line-height:1.6;">
+                    แผนสายนี้มีร้านที่ช่อง Day ผิดรูป ${S.bad.length} รายการ เช่น ${e(S.bad.slice(0, 3).join(', '))}<br>ต้องให้แอดมินแก้ในหน้าวางแผนก่อน ถึงจะขอจัดลำดับได้</div>
+                <button onclick="ReorderReq.close()" style="margin-top:14px;width:100%;padding:11px;border-radius:12px;border:none;background:#f3f4f6;font-weight:800;">ปิด</button>
+            </div>`;
+            return;
+        }
+        const map = ReorderReq._map();
+        const changed = S.order.map((old, i) => (old && old !== S.base[i]) ? i : -1).filter(i => i >= 0);
+        const empties = S.order.filter(o => !o).length;
+        const pool = S.base.filter(l => !S.order.includes(l));
+        const firstEmpty = S.order.indexOf(null);
+        const warnings = ReorderReq._warnings(map);
+        const modeTxt = S.mode === 'half'
+            ? `สายนี้มีร้าน F2 (คู่ห่าง ${S.halfK} วัน) — จัดได้ D1–D${S.M} แล้ว D${S.M + 1}–D${S.N} เลื่อนตามให้เอง`
+            : S.mode === 'irregular' ? `จัดได้ทุกช่อง D1–D${S.N} · มีร้านอยู่ 2 ช่องที่ไม่ห่างครึ่งรอบ ระบบจะแสดงคู่ที่ระยะห่างเปลี่ยน`
+            : `จัดได้ทุกช่อง D1–D${S.N}`;
+
+        // ช่องเรียงตามวันที่ (ดู open) — แต่ละแถว = วันที่จริง (ตัวหลัก) + เลข Day ของช่องนั้น (ตัวเล็ก)
+        const MON = new Date(S.y, S.m, 1).toLocaleDateString('th-TH', { month: 'short' });
+        const WD = ['อา.', 'จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.', 'ส.'];
+        const dateBox = (pos, active) => {
+            const dts = ReorderReq._dates(pos);
+            const main = dts.length ? `${WD[new Date(S.y, S.m, dts[0]).getDay()]} ${dts[0]} ${MON}` : 'ไม่มีวันวิ่ง';
+            const more = dts.length > 1 ? `<div style="font-size:9.5px;font-weight:800;color:#6366f1;">+ ${dts.slice(1).join(', ')} ${MON}</div>` : '';
+            return `<div style="width:66px;flex-shrink:0;text-align:left;line-height:1.25;">
+                <div style="font-size:12.5px;font-weight:900;color:${active ? '#111827' : '#9ca3af'};">${main}</div>${more}
+                <div style="font-size:9.5px;font-weight:800;color:#9ca3af;">ช่อง D${num(pos)}</div></div>`;
+        };
+        const rows = S.order.map((old, i) => {
+            const pos = S.base[i];
+            if (!old) {
+                return `<div class="rr-row" data-i="${i}" style="display:flex;align-items:center;gap:8px;padding:9px 10px;margin-bottom:5px;border-radius:12px;
+                        border:1.5px dashed ${i === firstEmpty ? '#6366f1' : '#d1d5db'};background:${i === firstEmpty ? '#eef2ff' : '#fafafa'};">
+                    ${dateBox(pos, i === firstEmpty)}
+                    <span style="flex:1;font-size:11.5px;color:${i === firstEmpty ? '#4338ca' : '#9ca3af'};font-weight:700;">${i === firstEmpty ? '← แตะตลาดด้านล่างเพื่อวางวันนี้' : 'ว่าง'}</span></div>`;
+            }
+            const moved = old !== pos;
+            const mk = ReorderReq._market(old);
+            return `<div class="rr-row" data-i="${i}" style="display:flex;align-items:center;gap:8px;padding:9px 10px;margin-bottom:5px;border-radius:12px;
+                    border:1.5px solid ${moved ? '#fcd34d' : '#e5e7eb'};background:${moved ? '#fffbeb' : '#fff'};">
+                <span class="rr-handle" style="color:#9ca3af;font-size:15px;cursor:grab;touch-action:none;padding:0 2px;">⣿</span>
+                ${dateBox(pos, true)}
+                <div style="flex:1;min-width:0;">
+                    <div style="font-size:12.5px;font-weight:800;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${e(mk || '(ไม่มีชื่อตลาด)')}</div>
+                    <div style="font-size:10.5px;color:#6b7280;">${ReorderReq._count(old)} ร้าน${moved ? ` · <b style="color:#b45309;">มาจาก D${num(old)}</b>` : ''}</div>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:2px;">
+                    <button onclick="ReorderReq.move(${i},-1)" style="border:none;background:#f3f4f6;border-radius:6px;font-size:10px;padding:2px 7px;">▲</button>
+                    <button onclick="ReorderReq.move(${i},1)" style="border:none;background:#f3f4f6;border-radius:6px;font-size:10px;padding:2px 7px;">▼</button>
+                </div>
+                <button onclick="ReorderReq.unplace(${i})" title="เอาออกไปกองรอวาง" style="border:none;background:none;color:#9ca3af;font-size:15px;padding:0 2px;">✕</button>
+            </div>`;
+        }).join('');
+
+        const poolHtml = pool.length ? `
+            <div style="margin:10px 0 4px;font-size:12px;font-weight:900;color:#4338ca;">ตลาดที่ยังไม่ได้วาง ${pool.length} ตลาด — แตะเพื่อวางวันถัดไป (${(() => { const d = ReorderReq._dates(S.base[firstEmpty]); return d.length ? d[0] + ' ' + MON : 'D' + num(S.base[firstEmpty]); })()})</div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                ${pool.map(l => `<button onclick="ReorderReq.place('${l}')"
+                    style="padding:6px 10px;border-radius:10px;border:1.5px solid #c7d2fe;background:#eef2ff;font-size:11.5px;font-weight:800;color:#3730a3;text-align:left;">
+                    D${num(l)} · ${e(ReorderReq._market(l) || '(ไม่มีชื่อ)')} <span style="font-weight:600;color:#6366f1;">${ReorderReq._count(l)}</span></button>`).join('')}
+            </div>` : '';
+
+        const pendingHtml = S.pending ? `
+            <div style="margin-bottom:10px;padding:10px 12px;border-radius:12px;background:#fffbeb;border:1px solid #fde68a;font-size:12px;color:#92400e;">
+                ⏳ มีคำขอจัดลำดับของเดือนนี้รออนุมัติอยู่ (${(S.pending.summary || []).length} ตลาด) — ส่งใหม่จะแทนคำขอเดิม
+                <button onclick="ReorderReq.cancelPending()" style="margin-left:6px;font-size:11px;font-weight:800;padding:2px 9px;border-radius:7px;border:1px solid #fecaca;background:#fef2f2;color:#dc2626;">ยกเลิกคำขอเดิม</button>
+            </div>` : '';
+
+        const canSend = !empties && changed.length > 0;
+        sheet.innerHTML = `
+        <div style="position:absolute;inset:0;background:rgba(0,0,0,0.5);" onclick="ReorderReq.close()"></div>
+        <div style="position:relative;background:#fff;border-radius:20px 20px 0 0;width:100%;max-width:520px;max-height:92dvh;display:flex;flex-direction:column;">
+            <div style="padding:14px 16px 8px;flex-shrink:0;">
+                <div style="display:flex;justify-content:center;padding:0 0 8px;"><div style="width:40px;height:4px;border-radius:2px;background:#e5e7eb;"></div></div>
+                <div style="font-size:15px;font-weight:900;color:#111827;">⇅ ขอจัดลำดับตลาด · ${e(S.route)}</div>
+                <div style="font-size:11.5px;color:#6b7280;margin-top:2px;">${e(ReorderReq._monthLabel(S.ym))} · ${e(modeTxt)}</div>
+                <div style="font-size:11px;color:#9ca3af;margin-top:2px;">ลาก ⣿ หรือกด ▲▼ เพื่อย้ายตลาด ตลาดอื่นเลื่อนตามเอง · ต้องรอแอดมินอนุมัติก่อนมีผล</div>
+                <div style="display:flex;gap:8px;margin-top:10px;">
+                    <button onclick="ReorderReq.reset()" style="flex:1;padding:8px;border-radius:10px;border:1px solid #e5e7eb;background:#f9fafb;font-size:12px;font-weight:800;color:#374151;">↺ คืนค่าเดิม</button>
+                    <button onclick="ReorderReq.clearAll()" style="flex:1;padding:8px;border-radius:10px;border:1px solid #fecaca;background:#fef2f2;font-size:12px;font-weight:800;color:#b91c1c;">🧹 ล้างทั้งหมด แล้ววางเอง</button>
+                </div>
+            </div>
+            <div style="flex:1;overflow-y:auto;padding:4px 16px 10px;">
+                ${pendingHtml}
+                <div id="rr-list">${rows}</div>
+                ${poolHtml}
+                ${warnings.length ? `<div style="margin-top:10px;padding:10px 12px;border-radius:12px;background:#fffbeb;border:1px solid #fde68a;font-size:11.5px;color:#92400e;">${warnings.map(w => '⚠️ ' + e(w)).join('<br>')}</div>` : ''}
+            </div>
+            <div style="padding:10px 16px 22px;border-top:1px solid #f3f4f6;flex-shrink:0;display:flex;gap:8px;">
+                <button onclick="ReorderReq.close()" style="flex:1;padding:12px;border-radius:12px;border:none;background:#f3f4f6;font-size:13px;font-weight:800;color:#374151;">ปิด</button>
+                <button onclick="ReorderReq.submit()" ${canSend ? '' : 'disabled'}
+                    style="flex:2;padding:12px;border-radius:12px;border:none;background:${canSend ? '#4f46e5' : '#e5e7eb'};color:${canSend ? '#fff' : '#9ca3af'};font-size:13px;font-weight:900;">
+                    ${empties ? `วางให้ครบก่อน (เหลือ ${empties} ช่อง)` : changed.length ? `📨 ส่งคำขอ (ย้าย ${changed.length} ตลาด)` : 'ยังไม่ได้ย้ายตลาด'}</button>
+            </div>
+        </div>`;
+
+        try { ReorderReq._sortable?.destroy(); } catch (err) {}
+        ReorderReq._sortable = null;
+        const list = document.getElementById('rr-list');
+        if (list && typeof Sortable !== 'undefined') {
+            ReorderReq._sortable = Sortable.create(list, {
+                handle: '.rr-handle', animation: 150, delay: 0,
+                onEnd: (ev) => {
+                    if (ev.oldIndex === ev.newIndex) return;
+                    const it = S.order.splice(ev.oldIndex, 1)[0];
+                    S.order.splice(ev.newIndex, 0, it);
+                    ReorderReq._render();
+                },
+            });
+        }
+    },
+
+    move: (i, dir) => {
+        const S = ReorderReq.S, j = i + dir;
+        if (!S || j < 0 || j >= S.order.length) return;
+        const t = S.order[i]; S.order[i] = S.order[j]; S.order[j] = t;
+        ReorderReq._render();
+    },
+    unplace: (i) => { if (ReorderReq.S) { ReorderReq.S.order[i] = null; ReorderReq._render(); } },
+    place: (label) => {
+        const S = ReorderReq.S;
+        if (!S) return;
+        const i = S.order.indexOf(null);
+        if (i < 0) return;
+        S.order[i] = label;
+        ReorderReq._render();
+    },
+    reset: () => { const S = ReorderReq.S; if (S) { S.order = S.base.slice(); ReorderReq._render(); } },
+    clearAll: () => { const S = ReorderReq.S; if (S) { S.order = S.base.map(() => null); ReorderReq._render(); } },
+
+    cancelPending: async () => {
+        const S = ReorderReq.S;
+        if (!S?.pending) return;
+        try {
+            await ReorderReq._col().doc(S.pending.id).delete();
+            delete (ReorderReq._pending[S.route] || {})[S.ym];
+            S.pending = null;
+            S.order = S.base.slice();
+            ReorderReq._render();
+            CalendarCtrl.render();
+            showSalesToast('🗑️ ยกเลิกคำขอจัดลำดับเดิมแล้ว');
+            if (typeof NotifCtrl !== 'undefined') NotifCtrl.refresh();
+        } catch (e) { showSalesToast('❌ ยกเลิกไม่สำเร็จ: ' + e.message, true); }
+    },
+
+    submit: async () => {
+        const S = ReorderReq.S;
+        if (!S || S.order.includes(null)) return;
+        const map = ReorderReq._map();
+        if (!Object.keys(map).length) return showSalesToast('ยังไม่ได้ย้ายตลาด', true);
+        const summary = S.order.map((old, i) => (old && old !== S.base[i])
+            ? { from: ReorderReq._num(old), to: ReorderReq._num(S.base[i]), market: ReorderReq._market(old), n: ReorderReq._count(old),
+                fromDates: ReorderReq._dates(old).join(','), toDates: ReorderReq._dates(S.base[i]).join(',') } : null).filter(Boolean)
+            .sort((p, q) => (parseInt(p.toDates, 10) || 99) - (parseInt(q.toDates, 10) || 99));
+        const session = Auth.getSession();
+        const name = session?.displayName || session?.username || S.route;
+        const label = ReorderReq._monthLabel(S.ym);
+        try {
+            // คำขอเดิมของสายนี้ + เดือนนี้ที่ยังรออยู่ → ลบทิ้ง (ส่งใหม่ = แทนของเดิม)
+            const snap = await ReorderReq._col().where('route', '==', S.route).where('status', '==', 'pending').get();
+            await Promise.all(snap.docs.filter(d => d.data().type === 'reorder' && d.data().ym === S.ym).map(d => d.ref.delete()));
+            const doc = {
+                ym: S.ym, route: S.route,
+                storeId: '__reorder__', storeName: `⇅ จัดลำดับตลาด ${label}`,
+                fromDay: 'ลำดับเดิม', toDay: `ลำดับใหม่ (${summary.length} ตลาด)`,
+                requestedBy: name, requestedAt: firebase.firestore.FieldValue.serverTimestamp(), status: 'pending',
+                type: 'reorder', map, order: S.order, mode: S.mode, cycleDays: S.N, basisSig: S.basisSig,
+                summary, warnings: ReorderReq._warnings(map), requestedByRole: session?.role || '',
+            };
+            const ref = await ReorderReq._col().add(doc);
+            // ปฏิทินเดือนนี้แสดงตามที่ขอทันที (ไม่ต้องรอ listener)
+            (ReorderReq._pending[S.route] = ReorderReq._pending[S.route] || {})[S.ym] = { ...doc, id: ref.id };
+            ReorderReq._showReq = true;
+            showSalesToast(`📨 ส่งคำขอจัดลำดับตลาด ${label} แล้ว — ปฏิทินแสดงตามที่ขอ (สีส้ม) รอแอดมินอนุมัติ`);
+            if (typeof writeAuditLog === 'function') writeAuditLog('reorder_request_create', { route: S.route, ym: S.ym, moved: summary.length, reqId: ref.id });
+            if (typeof NotifCtrl !== 'undefined') NotifCtrl.refresh();
+            ReorderReq.close();
+            CalendarCtrl.render();
+        } catch (e) {
+            showSalesToast('❌ ส่งคำขอไม่สำเร็จ: ' + e.message, true);
+        }
     },
 };
 
@@ -1636,7 +2332,12 @@ const CalendarCtrl = {
         const plan  = State.planCache[ym];
         const route = (App.isSupervisor() && SupervisorUI._selectedRoute) ? SupervisorUI._selectedRoute : State.myRoute;
         const override = plan?.routeOverrides?.[route];
-        return override || (plan !== undefined ? plan?.calendarConfig : State.calendarConfig);
+        const base = override || (plan !== undefined ? plan?.calendarConfig : State.calendarConfig);
+        // ✅ RPN V0 (2026-10-08): สายที่มีวันที่จริงจาก RPN (rpnCal) → ใช้ชุดนั้นเป็นหลัก ห่อเป็นโหมด 'rpn'
+        // คงค่าเดิม (holidays ฯลฯ) ไว้ให้ส่วนแสดงผล และเก็บ _base ไว้เผื่อวันที่ไม่มีตลาดไหนวิ่ง (ดู getDayLabelForCfg)
+        const rpn = plan?.routeRpn?.[route];
+        if (rpn) return Object.assign({}, base || {}, { mode: 'rpn', _rpn: rpn, _base: base || null, _baseMode: base?.mode || null });
+        return base;
     },
 
     // ✅ ข้อ 6: คืน dayLabel ของวันนี้ตาม calendarConfig (ของสายตัวเอง ถ้ามี override)
@@ -1724,6 +2425,14 @@ const CalendarCtrl = {
         // ทำให้วันที่ไม่มีร้าน/ตลาดเลย (dayLabel = null) กดเข้าไปดู day sheet ไม่ได้เลย
         // ที่ถูกต้องคือ "Day N" ควรมีอยู่เสมอตามโครงสร้างปฏิทิน ไม่ขึ้นกับว่าวันนั้นมีร้านหรือไม่
         // (การมีร้านหรือไม่ ใช้ตัดสินแค่ "hasRoute" / จุดสีน้ำเงินเท่านั้น ไม่ควรใช้ตัดสินว่าคลิกได้ไหม)
+        // ✅ RPN V0: วันที่จริงจาก RPN (ดู _resolveActiveCfg / RpnCompat) — วันที่ไม่มีตลาดไหนวิ่งเลย ใช้ปฏิทินเดิม
+        // คำนวณ Day ให้กดดูได้ตามเดิม แต่เฉพาะ Day ที่ RPN ไม่ได้วางไว้ที่วันอื่น (กัน Day เดียวโผล่ 2 ที่)
+        if (cfg && cfg.mode === 'rpn') {
+            const hit = RpnCompat.labelOn(cfg._rpn, year, month, dateNum);
+            if (hit) return hit;
+            const fb = cfg._base ? CalendarCtrl.getDayLabelForCfg(dateNum, cfg._base, stores, year, month) : null;
+            return (fb && !cfg._rpn.days[fb]) ? fb : null;
+        }
         if (!cfg || (!cfg.mode && (!cfg.mapping || Object.keys(cfg.mapping).length === 0))) {
             return `Day ${dateNum}`;
         }
@@ -1776,6 +2485,17 @@ const CalendarCtrl = {
         // ✅ FIX (2026-09-05): เดิมอ่าน State.calendarConfig (ศูนย์) ตรงๆ ไม่เช็ค override เฉพาะสาย
         const cfg = CalendarCtrl._resolveActiveCfg(CalendarCtrl._year, CalendarCtrl._month);
         const targetNum = parseInt(String(dayLabel || '').replace('Day ', ''));
+
+        // ✅ RPN V0: วันแรกที่ Day นี้วิ่งจริงในเดือนที่เปิดดู (ไม่มีใน RPN = ถอยไปปฏิทินเดิม เหมือน getDayLabelForCfg)
+        if (cfg && cfg.mode === 'rpn') {
+            if (cfg._rpn.days[dayLabel]) return RpnCompat.datesOf(cfg._rpn, dayLabel, CalendarCtrl._year, CalendarCtrl._month)[0] || null;
+            if (!cfg._base) return null;
+            const _y = CalendarCtrl._year, _m = CalendarCtrl._month, _dim = new Date(_y, _m + 1, 0).getDate();
+            for (let d = 1; d <= _dim; d++) {
+                if (CalendarCtrl.getDayLabelForCfg(d, cfg, State.allStores, _y, _m) === dayLabel) return d;
+            }
+            return null;
+        }
 
         // ✅ FIX: เดิมฟังก์ชันนี้ไม่มี branch สำหรับโหมด date/default/legacy เลย (คืน null เสมอ
         // ทั้งที่เป็นกรณีที่ง่ายที่สุด — Day N ตรงกับวันที่ N ของเดือนตรงๆ) ทำให้ผู้เรียกต้อง
@@ -1846,6 +2566,16 @@ const CalendarCtrl = {
         // ✅ FIX (2026-09-05): เดิมอ่าน State.calendarConfig (ศูนย์) ตรงๆ ไม่เช็ค override เฉพาะสาย
         const cfg = CalendarCtrl._resolveActiveCfg(year, month);
         if (!cfg) return [];
+
+        // ✅ RPN V0: Day หนึ่งวิ่งได้หลายวันในเดือน (รอบสั้น +14 วัน / F2) — RPN บอกมาครบแล้ว
+        if (cfg.mode === 'rpn') {
+            if (cfg._rpn.days[dayLabel]) return RpnCompat.datesOf(cfg._rpn, dayLabel, year, month);
+            const dim = new Date(year, month + 1, 0).getDate(), out = [];
+            for (let d = 1; d <= dim; d++) {
+                if (CalendarCtrl.getDayLabelForCfg(d, cfg, State.allStores, year, month) === dayLabel) out.push(d);
+            }
+            return out;
+        }
 
         if (cfg.mode === 'weekday') {
             const wmap = cfg.weekdayMap || {};
@@ -1942,8 +2672,9 @@ const CalendarCtrl = {
         // ไม่งั้นชื่อตลาด/จุดสีในปฏิทินจะปนกับสายอื่นในศูนย์เดียวกัน (เทียบ salesCode ตรงตัว
         // เพราะ field นี้คงที่ไม่ขึ้นกับเดือน ต่างจาก State.allRoutes ที่มีแค่เดือน active)
         const _renderStoresAll = _renderPlan?.stores || State.allStores;
+        // ✅ RPN V0: ใช้รายการร้านต่อสายจากเอกสารสายจริง (ร้านที่ RPN ย้ายสายยังมี salesCode เดิม)
         const _renderStores = (App.isSupervisor() && SupervisorUI._selectedRoute)
-            ? _renderStoresAll.filter(s => s.salesCode === SupervisorUI._selectedRoute)
+            ? RpnCompat.storesOfRoute(_renderPlan, SupervisorUI._selectedRoute, _renderStoresAll)
             : _renderStoresAll;
 
         const modeEl = document.getElementById('calendar-mode-badge');
@@ -1962,7 +2693,7 @@ const CalendarCtrl = {
                     modeEl.textContent = '⚠️ ยังไม่ได้ตั้งค่าปฏิทิน';
                     modeEl.style.background = '#fef3c7'; modeEl.style.color = '#92400e';
                 }
-            } else if (_renderCfg.mode === 'cycle') {
+            } else if (_renderCfg.mode === 'cycle' || _renderCfg._baseMode === 'cycle') {
                 modeEl.textContent = '🔄 Cycle D1-' + (_renderCfg.cycleDays || 24);
                 modeEl.style.background = '#ede9fe'; modeEl.style.color = '#5b21b6';
             } else {
@@ -1971,12 +2702,21 @@ const CalendarCtrl = {
             }
         }
 
+        // ✅ NEW (2026-10-08): คำขอจัดลำดับตลาดที่รออนุมัติของสาย + เดือนที่กำลังดู (ดู ReorderReq.previewFor)
+        const _pend = (typeof ReorderReq !== 'undefined') ? ReorderReq.previewFor(_renderYM) : null;
+        container.style.outline      = _pend ? '2px solid #f59e0b' : '';
+        container.style.outlineOffset = _pend ? '4px' : '';
+        container.style.borderRadius = _pend ? '12px' : '';
+
         const DOW  = ['อา','จ','อ','พ','พฤ','ศ','ส'];
         let html   = DOW.map(d => `<div style="text-align:center;font-size:10px;font-weight:800;color:#9ca3af;padding:4px 0;">${d}</div>`).join('');
         for (let i = 0; i < firstDow; i++) html += `<div></div>`;
 
         for (let d = 1; d <= daysInMonth; d++) {
-            const dayLabel   = CalendarCtrl.getDayLabelForCfg(d, _renderCfg, _renderStores, year, month);
+            // ✅ NEW (2026-10-08): เดือนนี้มีคำขอจัดลำดับตลาดรออนุมัติ → วาดตามที่ขอ (ช่องวันเดิม แต่ตลาดที่จะย้ายมา)
+            const slotLabel  = CalendarCtrl.getDayLabelForCfg(d, _renderCfg, _renderStores, year, month);
+            const dayLabel   = (_pend && slotLabel && _pend.inv[slotLabel]) ? _pend.inv[slotLabel] : slotLabel;
+            const movedHere  = !!(_pend && dayLabel && dayLabel !== slotLabel);
             const isToday    = (d === now.getDate() && month === now.getMonth() && year === now.getFullYear());
             const dow        = new Date(year, month, d).getDay();
             const isWeekend  = dow === 0 || dow === 6;
@@ -1986,6 +2726,10 @@ const CalendarCtrl = {
             if (isToday)         { bgColor = '#2563eb'; textColor = '#fff';    borderColor = '#2563eb'; }
             else if (isHoliday)  { bgColor = '#fef2f2'; textColor = '#dc2626'; borderColor = '#fecaca'; }
             else if (isWeekend)  { bgColor = '#f9fafb'; textColor = '#6b7280'; }
+            if (_pend && !isToday) {
+                if (movedHere) { bgColor = '#fff7ed'; borderColor = '#f59e0b'; }
+                else if (!isHoliday) borderColor = '#fed7aa';
+            } else if (movedHere) borderColor = '#f59e0b';
 
             const _cellYM       = _renderYM;
             const _hasPlan      = State.planList.some(p => p === _cellYM);
@@ -1999,6 +2743,9 @@ const CalendarCtrl = {
             }
 
             const mktsInCell = (dayLabel && _renderPlan) ? (() => {
+                // ✅ RPN V0: ชื่อตลาดรายวันจาก RPN (ตัวเดียวกับที่ส่งออก DMS) มาก่อน
+                const _rm = _renderCfg?.mode === 'rpn' ? RpnCompat.marketOf(_renderCfg._rpn, dayLabel) : '';
+                if (_rm) return [trimMarketName(_rm)];
                 // ✅ FIX-F2: เหมือน getDayMarketList — นับเฉพาะร้านที่วันนี้เป็นวันแรก (days[0])
                 // ของมัน กันร้าน F2 เอาชื่อตลาดวันแรกไปโผล่ปนในวันที่สอง
                 const names = new Set();
@@ -2018,7 +2765,8 @@ const CalendarCtrl = {
             const isSameAsDate = true; // ไม่แสดงเลข Day badge
             // ✅ FIX: ส่ง year/month/d ที่คลิกจริงไปด้วยเสมอ แทนการให้ showDaySheet เดาวันที่คืนจาก dayLabel เอง
             // (จำเป็นมากในโหมด weekday ที่ 1 dayLabel ตรงกับหลายวันที่ในเดือนเดียวกัน)
-            const clickHandler = dayLabel ? `CalendarCtrl.goToDay('${dayLabel}', ${year}, ${month}, ${d})` : '';
+            const clickHandler = dayLabel ? `CalendarCtrl.goToDay('${dayLabel}', ${year}, ${month}, ${d}${movedHere ? `, '${slotLabel}'` : ''})` : '';
+            const movedLine    = movedHere ? `<div style="font-size:8.5px;font-weight:900;line-height:1.2;padding:0 4px;border-radius:4px;background:${isToday?'rgba(255,255,255,0.25)':'#f59e0b'};color:#fff;flex-shrink:0;">⇅ จาก D${parseInt(dayLabel.replace(/\D/g,''), 10)}</div>` : '';
 
             // 📌 งานที่ต้องส่ง — เช็คตามวันที่ปฏิทินจริง ไม่ขึ้นกับว่าสายวิ่งวันนั้นหรือไม่
             const tasksForDay = TaskCtrl.getForDate(new Date(year, month, d));
@@ -2032,6 +2780,7 @@ const CalendarCtrl = {
                        height:80px;overflow:hidden;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;
                        gap:2px;transition:background 0.1s;-webkit-tap-highlight-color:rgba(0,0,0,0.08);">
                 <div style="font-size:13px;font-weight:${isToday?'900':'700'};color:${textColor};line-height:1.3;flex-shrink:0;">${d}</div>
+                ${movedLine}
                 ${dayLabel ? `
                 ${!isSameAsDate ? `<div style="font-size:9px;font-weight:800;padding:1px 5px;border-radius:5px;background:${isToday?'rgba(255,255,255,0.25)':'#ede9fe'};color:${isToday?'#fff':'#5b21b6'};white-space:nowrap;flex-shrink:0;">${dayLabel.replace('Day ','')}</div>` : ''}
                 ${hasRoute ? `<div style="width:5px;height:5px;border-radius:50%;background:${isToday?'#fff':'#2563eb'};flex-shrink:0;"></div>` : hasPlanNotLoaded ? `<div style="width:5px;height:5px;border-radius:50%;background:#d1d5db;flex-shrink:0;"></div>` : ''}
@@ -2041,9 +2790,19 @@ const CalendarCtrl = {
             </div>`;
         }
         container.innerHTML = html;
+        if (typeof ReorderReq !== 'undefined') ReorderReq.renderBar();
     },
 
-    goToDay: (dayLabel, year, month, day) => { CalendarCtrl.showDaySheet(dayLabel, year, month, day); },
+    goToDay: async (dayLabel, year, month, day, slotLabel) => {
+        await CalendarCtrl.showDaySheet(dayLabel, year, month, day);
+        // ✅ NEW (2026-10-08): ช่องนี้แสดงตามคำขอจัดลำดับที่รออนุมัติ — บอกให้รู้ว่ายังไม่ใช่แผนจริง
+        if (slotLabel) {
+            const body = document.getElementById('cal-day-sheet-body');
+            const note = `<div style="margin:6px 20px 10px;padding:9px 12px;border-radius:12px;background:#fff7ed;border:1px solid #fdba74;font-size:12px;font-weight:700;color:#9a3412;">
+                ⏳ ตามคำขอจัดลำดับ (รออนุมัติ) — ตลาดนี้ย้ายมาจาก D${parseInt(dayLabel.replace(/\D/g, ''), 10)} มาแทน D${parseInt(slotLabel.replace(/\D/g, ''), 10)} · ยังไม่ใช่แผนจริงจนกว่าแอดมินอนุมัติ</div>`;
+            if (body) { const ref = body.children[1]; if (ref) ref.insertAdjacentHTML('beforebegin', note); else body.insertAdjacentHTML('beforeend', note); }
+        }
+    },
 
     navigateToDay: async (dayLabel, market) => {
         CalendarCtrl.closePopup();
@@ -2061,6 +2820,7 @@ const CalendarCtrl = {
         State._filterMarket    = market || '';
         const el = document.getElementById('day-select');
         if (el) el.value = dayLabel;
+        Processor.syncDayLabel(market);
         State.mapNeedsFit = true;
         Processor.routeList();
         UI.switchTab('route');
@@ -2085,6 +2845,9 @@ const CalendarCtrl = {
 
         // ✅ FIX-F2: นับเฉพาะร้านที่วันนี้เป็นวันแรก (days[0]) ของมัน — เหมือน getDayMarketList
         const mkts       = (() => {
+            // ✅ RPN V0: ชื่อตลาดรายวันจาก RPN มาก่อน
+            const _rm = RpnCompat.marketOf(RpnCompat.active(_sy, _sm), dayLabel);
+            if (_rm) return [trimMarketName(_rm)];
             const names = new Set();
             _activeStores.forEach(s => {
                 if (s.days?.[0] === dayLabel && s.marketName)
@@ -2291,7 +3054,7 @@ const CalendarCtrl = {
         const _curYM = State.activePlanYM || '';
         if (_curYM && State.allStores.length > 0 && !State.planCache[_curYM]?._ok) {
             // ✅ FIX (2026-09-05): ใส่ routeOverrides ที่เก็บไว้ตอนโหลดแอปด้วย (เช่นเดียวกับ 2 จุดข้างบน)
-            State.planCache[_curYM] = { stores: State.allStores, calendarConfig: State.calendarConfig, ym: _curYM, _ok: true, routeOverrides: State.activeRouteOverrides || {} };
+            State.planCache[_curYM] = { stores: State.allStores, calendarConfig: State.calendarConfig, ym: _curYM, _ok: true, routeOverrides: State.activeRouteOverrides || {}, routeRpn: State.activeRouteRpn || {} };
         }
         CalendarCtrl.render();
         popup.style.display = 'block';
@@ -2636,8 +3399,9 @@ const SupervisorUI = {
         // ✅ BUGFIX (2026-08-29): merge:true — ดู comment เดียวกันด้านบน (จุดลากสลับลำดับของ
         // สายตัวเอง) จุดนี้คือ Supervisor/ASM ดูสายลูกทีมแล้วลากสลับลำดับแทน มีปัญหาเดียวกัน
         // ✅ NEW: รีเซ็ตสถานะ "ยืนยันรับสายวิ่ง" ของสายที่ถูกแก้ไขด้วย
+        // ✅ RPN V0: ใส่ร้าน "ออกจากแผน" ที่ซ่อนไว้คืนก่อนเขียน (ดู RpnCompat)
         _writeRef.set({
-            stores: updated,
+            stores: RpnCompat.restore(State.activePlanYM, routeId, updated),
             confirmedBy: firebase.firestore.FieldValue.delete(),
             confirmedAt: firebase.firestore.FieldValue.delete(),
         }, { merge: true })
@@ -2854,14 +3618,9 @@ const ActivityCtrl = {
 // ─── Event listeners ──────────────────────────────────────────────────────
 document.getElementById('day-select').addEventListener('change', (e) => {
     State.currentDay  = e.target.value;
-    const _m  = getDayMarkets(State.currentDay);
+    State._filterMarket = '';
     // ✅ FIX (2026-09-14): ตัด #stores-title lookup ออก — id นี้ไม่มีอยู่จริงใน sales.html (ดู comment เดียวกันด้านบน)
-    // ✅ ข้อ 5: sync label display
-    const _lbl = document.getElementById('day-label-display');
-    if (_lbl && State.currentDay) {
-        const _dn = State.currentDay.replace('Day ','');
-        _lbl.textContent = _m ? `Day ${_dn} · ${_m.split(' · ')[0]}` : `Day ${_dn}`;
-    }
+    Processor.syncDayLabel();
     State.mapNeedsFit = true;
     Processor.routeList();
 });

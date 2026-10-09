@@ -27,7 +27,6 @@ const StoreMgr = {
             () => {
                 State.stores = State.stores.filter(x => x.id !== String(id));
                 State.db.routes[State.localActiveRoute] = State.stores;
-                if (typeof AuditLog !== 'undefined') AuditLog.storeRemove(State.localActiveRoute, id);
                 UI.render();
                 App.saveDB();
                 UI.showSaveToast(`🗑️ ลบ "${s.name}" ออกแล้ว`);
@@ -46,9 +45,6 @@ const StoreMgr = {
             s.days = [d, `Day ${pair}`];
         } else { s.days = [d]; }
         s.seqs = {};
-        // ✅ NEW (2026-09-10): ย้ายวันด้วยมือแล้ว sync ชื่อตลาด/Cycle Id ให้ตรงกับวันใหม่ทันที
-        // ไม่ต้องรอจนกว่าจะกด export ถึงจะเห็นค่าที่ถูกต้อง
-        if (typeof FileManager !== 'undefined') FileManager._autoFillMarketNames(State.stores);
         MapCtrl.closePopups();
         UI.render(); App.saveDB();
     },
@@ -68,11 +64,7 @@ const StoreMgr = {
             s.selected = false; s.seqs = {}; changed = true;
         });
         if (!changed) UI.showErrorToast('กรุณาเลือกร้านค้าก่อนครับ');
-        else {
-            // ✅ NEW (2026-09-10): ดู comment เดียวกันใน changeDay ข้างบน
-            if (typeof FileManager !== 'undefined') FileManager._autoFillMarketNames(State.stores);
-            UI.render(); App.saveDB();
-        }
+        else { UI.render(); App.saveDB(); }
     },
     getDistSq: (a, b) => Math.pow(a.lat - b.lat, 2) + Math.pow(a.lng - b.lng, 2),
 };
@@ -86,14 +78,6 @@ const App = {
     plansCol:     () => cloudDB.collection('appData').doc(window.CENTER_DOC || 'v1_main').collection('plans'),
     planRef:      (ym) => App.plansCol().doc(ym),
     planRoutesCol:(ym) => App.plansCol().doc(ym).collection('routes'),
-
-    // ✅ BUGFIX: เดิม localStorage key "last_route_{ym}" ไม่ผูกกับศูนย์เลย มีแค่เดือน — ถ้าแอดมิน/
-    // supervisor เคยดูศูนย์อื่นที่ใช้เดือนเดียวกัน (เกิดขึ้นแทบทุกครั้งเพราะส่วนใหญ่อยู่เดือนปัจจุบัน
-    // เหมือนกันหมด) แล้วสลับมาศูนย์นี้ จะไปอ่านชื่อสายของศูนย์เก่ามาใช้ — สายนั้นไม่มีจริงในศูนย์นี้
-    // (Firestore get() คืน exists:false) แต่ code ก็ยัง set State.db.routes[ชื่อสายนั้น] = [] ไว้อยู่ดี
-    // กลายเป็นสายผีว่างเปล่าโผล่ในหน้า "ภาพรวมทุกสาย" (Object.keys(State.db.routes) เห็นมันด้วย)
-    // แก้โดยผูก key กับศูนย์ (window.CENTER_DOC) ด้วยเสมอ กันข้ามศูนย์ปนกัน
-    _lastRouteKey: (ym) => `last_route_${window.CENTER_DOC || 'v1_main'}_${ym}`,
 
     // ─── State ───────────────────────────────────────────────────────────
     _currentPlanYM:  '',   // YYYY_MM ที่แอดมิน "กำลังดู/แก้ไข" อยู่ (local view เท่านั้น)
@@ -122,12 +106,11 @@ const App = {
         const total = routeList.length;
 
         // ── Step 1: โหลด active route ก่อน → แสดงผลทันที ────────────────
-        const activeRoute = localStorage.getItem(App._lastRouteKey(ym)) || routeList[0];
+        const activeRoute = localStorage.getItem(`last_route_${ym}`) || routeList[0];
         UI.showRouteLoadPopup(0, total);
         try {
             const d = await col.doc(activeRoute).get();
             State.db.routes[activeRoute] = d.exists ? (d.data().stores || []) : [];
-            State.db.routeDayStats[activeRoute] = d.exists ? (d.data().dayStats || {}) : {};
             App.log(`  ✅ ${activeRoute}: ${State.db.routes[activeRoute].length} ร้าน (active)`);
             State.localActiveRoute = activeRoute;
             State.stores = State.db.routes[activeRoute];
@@ -162,7 +145,6 @@ const App = {
             try {
                 const d = await _getWithTimeout(col.doc(name));
                 State.db.routes[name] = d.exists ? (d.data().stores || []) : [];
-                State.db.routeDayStats[name] = d.exists ? (d.data().dayStats || {}) : {};
                 delete State.db._failedRoutes?.[name]; // เคลียร์ failed flag ถ้า retry สำเร็จ
                 App.log(`  ✅ ${name}: ${State.db.routes[name].length} ร้าน`);
                 return true;
@@ -173,7 +155,6 @@ const App = {
                     await new Promise(r => setTimeout(r, 1500));
                     const d2 = await _getWithTimeout(col.doc(name), 15000);
                     State.db.routes[name] = d2.exists ? (d2.data().stores || []) : [];
-                    State.db.routeDayStats[name] = d2.exists ? (d2.data().dayStats || {}) : {};
                     delete State.db._failedRoutes?.[name];
                     App.log(`  ✅ ${name} (retry): ${State.db.routes[name].length} ร้าน`);
                     return true;
@@ -260,6 +241,24 @@ const App = {
             State.db.cycleDays     = data.cycleDays     || 24;
             State.db.calendarConfig = data.calendarConfig || null;
 
+            // V0.5: ซ่อมเดือนที่ routeList หาย (บันทึกปฏิทินในรุ่นก่อน 0.5 เขียนทับเอกสารเดือนทั้งก้อน)
+            // ร้านของแต่ละสายยังอยู่ครบ — ประกอบ routeList กลับจากสายที่มีอยู่จริง แล้วบันทึกคืน
+            if (snap.exists && routeList.length === 0) {
+                try {
+                    const rs = await App.planRoutesCol(ym).get();
+                    const names = (rs.docs || []).filter(d => ((d.data() || {}).stores || []).length).map(d => d.id)
+                        .sort((a, b) => a.localeCompare(b, 'th', { numeric: true }));
+                    if (names.length) {
+                        const cyc = data.cycleDays || (data.calendarConfig && data.calendarConfig.cycleDays) || 24;
+                        await App.planRef(ym).set({ routeList: names, cycleDays: cyc }, { merge: true });
+                        names.forEach(n => routeList.push(n));
+                        State.db.cycleDays = cyc;
+                        App.log(`🛠️ plan ${ym}: ซ่อม routeList ที่หายกลับมา ${names.length} สาย`);
+                        setTimeout(() => { try { UI.showSaveToast(`🛠️ ซ่อมรายชื่อสายของเดือน ${App.ymToLabel(ym)} ที่หายไปกลับมาแล้ว (${names.length} สาย)`); } catch (e) {} }, 1500);
+                    }
+                } catch (e) { console.warn('[loadPlan] ซ่อม routeList ไม่สำเร็จ', e); }
+            }
+
             // ✅ FIX: fallback ถ้า plan ไม่มี หรือ routeList ว่าง หรือมีแค่ route default ปลอม
             const hasFakeRoute = routeList.length === 1 && routeList[0] === 'สายที่ 1';
             if (!snap.exists || routeList.length === 0 || hasFakeRoute) {
@@ -277,15 +276,6 @@ const App = {
                     cycleDays:  State.db.cycleDays,
                     updatedAt:  firebase.firestore.FieldValue.serverTimestamp(),
                 });
-                // ✅ BUGFIX: เดิม auto-สร้าง plan doc ตรงนี้เฉยๆ โดยไม่เพิ่ม ym เข้า planList ของ
-                // centerDoc — แผนใช้งานได้จริง (Sales เห็นปกติถ้าเป็น currentPlanYM) แต่แอดมินจะหา
-                // เดือนนี้ใน dropdown เลือกเดือนไม่เจอไปตลอด (เกิดกับศูนย์ใหม่ที่ยังไม่มี plan เลย
-                // ตอนเปิดหน้าแอดมินครั้งแรก — ดู "New center defaults" ใน CLAUDE.md)
-                if (!(State.db.planList || []).includes(ym)) {
-                    const planList = [...new Set([...(State.db.planList || []), ym])].sort().reverse();
-                    await App.dbRef.set({ planList }, { merge: true });
-                    State.db.planList = planList;
-                }
             } else {
                 State.db.routeList = routeList;
             }
@@ -294,7 +284,7 @@ const App = {
             App.log(`✅ โหลด plan ${ym} เสร็จ — ${State.db.routeList.length} สาย`);
 
             if (!State.localActiveRoute || !State.db.routes[State.localActiveRoute]) {
-                State.localActiveRoute = localStorage.getItem(App._lastRouteKey(ym)) || State.db.routeList[0];
+                State.localActiveRoute = localStorage.getItem(`last_route_${ym}`) || State.db.routeList[0];
             }
             State.stores = State.db.routes[State.localActiveRoute] || [];
 
@@ -336,14 +326,15 @@ const App = {
 
             State.db.planList      = planList;
             State.db.currentPlanYM = currentPlanYM;
+            State.db.maxCycleCode  = d.maxCycleCode || State.db.maxCycleCode || 0;   // v-local: เลข CY ล่าสุด
+            State.db.depot         = d.depot || State.db.depot || null;              // v-local: จุดตั้งต้นกลาง
+            State.db.routeDepots   = d.routeDepots || State.db.routeDepots || {};    // v-local: จุดตั้งต้นรายสาย
+            State.db.masterKm      = d.masterKm || State.db.masterKm || {};          // v-local: ระยะ Master ที่ freeze ไว้
+            State.db.cyPoints      = d.cyPoints || State.db.cyPoints || {};          // v-local: จุดเริ่ม/จบ ต่อ CY
+            State.db.routeBase     = d.routeBase || State.db.routeBase || {};        // v-local: จุดประจำสาย
+            State.db.routeDist     = d.routeDist || State.db.routeDist || {};        // v-local: Distributor Code จากไฟล์
             // ✅ เดือนที่ "Live" จริงให้ Sales เห็น — แยกจาก App._currentPlanYM ซึ่งเป็นแค่เดือนที่แอดมินกำลังดูอยู่
             App._livePlanYM = currentPlanYM;
-
-            // ✅ NEW: จุดเริ่ม-จุดจบ สำหรับ "จัดลำดับการเยี่ยมอัตโนมัติ" — อยู่ระดับศูนย์ ไม่ผูกกับเดือน
-            // depotLocation = พิกัดศูนย์/โกดัง (ใช้ร่วมกันทุกสาย), routeSettings = ตั้งค่าต่อสาย
-            // { [routeCode]: { mode: 'center'|'home'|'none', homeLocation?, returnToStart } }
-            State.db.depotLocation = d.depotLocation || null;
-            State.db.routeSettings = d.routeSettings || {};
 
             App.log(`📋 planList: [${planList.join(', ')}], current: ${currentPlanYM}`);
 
@@ -376,48 +367,21 @@ const App = {
     },
 
     // ─── saveDB ──────────────────────────────────────────────────────────
-    saveDB: async () => {
+    saveDB: () => {
         const ym = App._currentPlanYM;
         if (!ym) return;
         State.db.routes[State.localActiveRoute] = State.stores;
         const routeList = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
-        // ✅ BUGFIX: เดิมเขียน routeList ลง Firestore แต่ไม่เคย sync กลับเข้า State.db.routeList เลย
-        // ทำให้หน้าอื่นที่อ่าน State.db.routeList ตรงๆ (SKU Distribution, Dashboard) เห็นค่าค้าง
-        // จนกว่าจะ reload หน้า — เกิดชัดสุดตอนเพิ่ม/ลบ/import สายใหม่ในเซสชันเดียวกัน
-        State.db.routeList = routeList;
-
-        // ✅ NEW: เดิมทุกครั้งที่กด "บันทึก" จะรีเซ็ตสถานะ "ยืนยันรับสายวิ่ง" ของเซลทิ้งเสมอ ไม่ว่า
-        // จะแก้อะไรจริงหรือไม่ (แม้แต่กดบันทึกซ้ำเฉยๆ) — เช็คก่อนว่า days/seqs/รายชื่อร้านของสายนี้
-        // เปลี่ยนจริงไหม (ไม่นับ field UI เช่น "selected" ที่ไม่ใช่ส่วนของแผนที่เซลต้องยืนยัน) ถ้าไม่
-        // เปลี่ยนเลย ไม่ต้องไปรีเซ็ตสถานะ กันเซลต้องกดยืนยันซ้ำทั้งที่ไม่มีอะไรเปลี่ยนจริง
-        const normalizeForCompare = (stores) => (stores || [])
-            .map(s => ({ id: s.id, days: [...(s.days || [])].sort(), seqs: s.seqs || {} }))
-            .sort((a, b) => String(a.id).localeCompare(String(b.id)));
-
-        let routeChanged = true;
-        try {
-            const existing = await App.planRoutesCol(ym).doc(State.localActiveRoute).get();
-            if (existing.exists) {
-                const prevStores = existing.data().stores || [];
-                routeChanged = JSON.stringify(normalizeForCompare(prevStores)) !== JSON.stringify(normalizeForCompare(State.stores));
-            }
-        } catch (e) {
-            console.warn('saveDB: เช็คการเปลี่ยนแปลงไม่สำเร็จ ถือว่ามีการเปลี่ยนแปลงไว้ก่อน (ปลอดภัยกว่า)', e);
-        }
-
-        const routeDoc = {
-            stores: State.stores,
-            dayStats: State.db.routeDayStats[State.localActiveRoute] || {},
-        };
-        if (routeChanged) {
-            routeDoc.confirmedBy = firebase.firestore.FieldValue.delete();
-            routeDoc.confirmedAt = firebase.firestore.FieldValue.delete();
-        }
 
         Promise.all([
             // ✅ BUGFIX (2026-08-29): เดิม .set({stores}) ไม่มี merge:true — Firestore จะแทนที่
             // เอกสารทั้งก้อน ทำให้ calendarOverride ของสายนั้นหายไปเงียบๆ ทุกครั้งที่กดบันทึก
-            App.planRoutesCol(ym).doc(State.localActiveRoute).set(routeDoc, { merge: true }),
+            // ✅ NEW: แก้ไขร้าน/วันในสายนี้แล้ว = รีเซ็ตสถานะ "ยืนยันรับสายวิ่ง" ของเซลด้วย
+            App.planRoutesCol(ym).doc(State.localActiveRoute).set({
+                stores: State.stores,
+                confirmedBy: firebase.firestore.FieldValue.delete(),
+                confirmedAt: firebase.firestore.FieldValue.delete(),
+            }, { merge: true }),
             App.planRef(ym).set({ routeList, cycleDays: State.db.cycleDays || 24, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true }),
         ])
         .then(() => UI.showSaveToast(`💾 บันทึกเรียบร้อย`))
@@ -440,19 +404,40 @@ const App = {
         UI.initDaySelector();
         UI.switchTab('tab1');
         UI.render();
-        if (typeof UI.renderDayStats === 'function') UI.renderDayStats();
     },
 
     // ─── Switch plan (แค่ "ดู/แก้ไข" ฝั่งแอดมิน — ไม่กระทบ Sales) ──────────
     switchPlan: async (ym) => {
         if (App._currentPlanYM === ym) return;
-        State.localActiveRoute = localStorage.getItem(App._lastRouteKey(ym)) || '';
+        State.localActiveRoute = localStorage.getItem(`last_route_${ym}`) || '';
         await App._loadPlan(ym);
         // ✅ BUGFIX: เดิมเขียน currentPlanYM ลง centerDoc ทันทีทุกครั้งที่แอดมินสลับดูเดือน
         // ทำให้ Sales ทุกคนเห็นเดือนเปลี่ยนตามไปด้วยทั้งที่แอดมินแค่ "ดู" ไม่ได้ตั้งใจให้ live
-        // ✅ FIX (2026-09-14): เดิมมีปุ่ม "ตั้งเป็นเดือนที่ใช้งานจริง" (App.publishPlan) ให้กดยืนยันแยก
-        // ตอนนี้ฟังก์ชันนั้นถูกลบไปแล้ว — ฝั่ง Sales ยึดวันที่ปฏิทินจริงเป็นหลักแทน ไม่มีขั้นตอน publish แยกอีกต่อไป
+        // ตอนนี้แยกออกมา — ต้องกดปุ่ม "ตั้งเป็นเดือนที่ใช้งานจริง" (App.publishPlan) เท่านั้นถึงจะมีผลกับ Sales
         PlanUI.refresh();
+    },
+
+    // ─── Publish plan ให้ Sales เห็นจริง (ต้องกดยืนยันชัดเจน) ──────────────
+    publishPlan: async (ym) => {
+        if (!ym) return;
+        if (ym === App._livePlanYM) {
+            UI.showErrorToast('ℹ️ เดือนนี้ Live อยู่แล้ว');
+            return;
+        }
+        if (!confirm(
+            `⚠️ ยืนยันตั้ง "${App.ymToLabel(ym)}" เป็นเดือนที่ใช้งานจริง?\n\n` +
+            `Sales ทุกคนในศูนย์นี้จะเห็นปฏิทิน/สายวิ่งของเดือนนี้ทันที ` +
+            `(เดือนที่ Live อยู่ตอนนี้คือ ${App.ymToLabel(App._livePlanYM)})`
+        )) return;
+
+        try {
+            await App.dbRef.set({ currentPlanYM: ym }, { merge: true });
+            App._livePlanYM = ym;
+            PlanUI.refresh();
+            UI.showSaveToast(`📢 ตั้ง ${App.ymToLabel(ym)} เป็นเดือนที่ใช้งานจริงแล้ว — Sales เห็นทันที`);
+        } catch(e) {
+            UI.showErrorToast('❌ ตั้งค่าไม่สำเร็จ: ' + ErrorMsg.translate(e));
+        }
     },
 
     // ─── Create new plan ─────────────────────────────────────────────────
@@ -483,6 +468,18 @@ const App = {
             let copyCalendarConfig = srcMeta.calendarConfig || null;
             if (copyCalendarConfig && copyCalendarConfig.mode === 'cycle') {
                 copyCalendarConfig = { ...copyCalendarConfig, holidays: [] };
+                delete copyCalendarConfig.lastDay;      // V0.5: วันวิ่งวันสุดท้ายของไฟล์นำเข้า เป็นของเดือนต้นทางเท่านั้น
+                // V0.6: แบบวันที่ตายตัว — เดือนใหม่เริ่ม D1 ที่วันที่ 1 เสมอ (ตรงวันหยุดประจำสัปดาห์ = เลื่อนไปวันทำงานแรกเอง)
+                // เดิมก๊อปวันเริ่มของเดือนเก่ามา (เช่นเดือนนำเข้าเริ่มวันที่ 3 → เดือนใหม่ D1 = 3 ด้วย)
+                // V0.7.3: ศูนย์รอบสั้น (≤ 14 วัน) เดือนใหม่ใช้ "ตรึงตลาดไว้กับวันที่" เมื่อเจอวันหยุด เป็นค่าเริ่มต้น
+                // (ค่า "เลื่อน" ที่มาจากการนำเข้ามีไว้ให้วันที่ตรงกับไฟล์เท่านั้น) — ถ้าผู้ใช้เลือกเองไว้ในเดือนก่อน คงตามนั้น
+                if ((parseInt(copyCalendarConfig.cycleDays, 10) || 24) <= 14
+                    && (!copyCalendarConfig.holidayMode || copyCalendarConfig.source === 'import')) copyCalendarConfig.holidayMode = 'skip';
+                if (!copyCalendarConfig.anchorType || copyCalendarConfig.anchorType === 'date') {
+                    copyCalendarConfig.anchorType = 'date';
+                    copyCalendarConfig.startDay = 1;
+                    copyCalendarConfig.startDayNum = 1;
+                }
             }
 
             await App.planRef(ym).set({
@@ -500,11 +497,8 @@ const App = {
                 await Promise.all(copyRouteList.map(async name => {
                     const rd = await App.planRoutesCol(srcYM).doc(name).get();
                     const stores = rd.exists ? (rd.data().stores || []) : [];
-                    let override = rd.exists ? (rd.data().calendarOverride || null) : null;
-                    if (override && override.mode === 'cycle') {
-                        override = { ...override, holidays: [] };
-                    }
-                    const payload = override ? { stores, calendarOverride: override } : { stores };
+                    // v-local (โน้ต 14): ปฏิทินเฉพาะสายไม่ติดไปเดือนใหม่ — ทุกสายเริ่มจากปฏิทินระดับเดือน
+                    const payload = { stores, calendarOverride: firebase.firestore.FieldValue.delete() };
                     // ✅ BUGFIX (2026-08-29): เพิ่ม merge:true ให้ปลอดภัยไว้ก่อน เผื่อ ym ปลายทาง
                     // มีเอกสารอยู่แล้วบางส่วน (เช่น รันซ้ำ) — กันเขียนทับ field อื่นที่อาจมีอยู่แล้ว
                     await App.planRoutesCol(ym).doc(name).set(payload, { merge: true });
@@ -532,11 +526,51 @@ const App = {
         }
     },
 
+    // ─── Delete plan ─────────────────────────────────────────────────────
+    deletePlan: async (ym) => {
+        if (!ym) return;
+        UI.showConfirm(`ยืนยันลบ Plan ${App.ymToLabel(ym)}?`, async () => {
+            try {
+                // ลบ routes subcollection
+                const routeDocs = await App.planRoutesCol(ym).get();
+                await Promise.all(routeDocs.docs.map(d => d.ref.delete()));
+                await App.planRef(ym).delete();
+
+                // อัปเดต planList
+                const curDoc  = await App.dbRef.get();
+                const curData = curDoc.exists ? curDoc.data() : {};
+                const planList = (curData.planList || []).filter(p => p !== ym).sort().reverse();
+
+                // ✅ BUGFIX: เดิมเขียนทับ currentPlanYM (เดือน live ของ Sales) ทุกครั้งที่ลบ plan
+                // ไม่ว่าจะลบเดือนที่ live อยู่จริงหรือแค่ลบ draft เดือนอื่นที่ไม่เกี่ยวกับ Sales เลย
+                // ตอนนี้เช็คก่อน — เขียนทับเฉพาะกรณีลบเดือนที่ live อยู่จริงเท่านั้น
+                const isDeletingLive = App._livePlanYM === ym;
+                if (isDeletingLive) {
+                    const newLiveYM = planList[0] || App.currentYM();
+                    await App.dbRef.set({ planList, currentPlanYM: newLiveYM }, { merge: true });
+                    App._livePlanYM = newLiveYM;
+                    UI.showSaveToast(`🗑️ ลบ Plan ${App.ymToLabel(ym)} เรียบร้อย (เดือนนี้เคย Live อยู่ — เปลี่ยน Live เป็น ${App.ymToLabel(newLiveYM)} อัตโนมัติ)`);
+                } else {
+                    await App.dbRef.set({ planList }, { merge: true });
+                    UI.showSaveToast(`🗑️ ลบ Plan ${App.ymToLabel(ym)} เรียบร้อย`);
+                }
+
+                if (App._currentPlanYM === ym) {
+                    const fallbackYM = planList[0] || App.currentYM();
+                    await App._loadPlan(fallbackYM);
+                }
+                PlanUI.refresh();
+            } catch(err) {
+                UI.showErrorToast('❌ ลบ Plan ไม่สำเร็จ: ' + err.message);
+            }
+        });
+    },
+
     // ─── Route management ────────────────────────────────────────────────
     switchRoute: (name) => {
         if (State.localActiveRoute === name) return;
         State.localActiveRoute = name;
-        localStorage.setItem(App._lastRouteKey(App._currentPlanYM), name);
+        localStorage.setItem(`last_route_${App._currentPlanYM}`, name);
         // null = failed ระหว่าง background load, undefined = ยังไม่โหลด → ทั้งคู่ fetch ใหม่
         const needFetch = State.db.routes[name] === undefined || State.db.routes[name] === null;
         if (needFetch) {
@@ -544,7 +578,6 @@ const App = {
             UI.showLoader((isRetry ? '🔄 โหลดใหม่ ' : 'กำลังโหลด ') + name + '...');
             App.planRoutesCol(App._currentPlanYM).doc(name).get().then(d => {
                 State.db.routes[name] = d.exists ? (d.data().stores || []) : [];
-                State.db.routeDayStats[name] = d.exists ? (d.data().dayStats || {}) : {};
                 if (State.db._failedRoutes) delete State.db._failedRoutes[name];
                 State.stores = State.db.routes[name];
                 App.sync(); MapCtrl.fitToStores(); UI.hideLoader();
@@ -578,7 +611,6 @@ const App = {
             const n = inp.value.trim(); close(); if (!n) return;
             State.db.routes[n] = []; State.localActiveRoute = n; State.stores = [];
             App.sync(); App.saveDB();
-            if (typeof AuditLog !== 'undefined') AuditLog.routeAdd(n);
         };
         box.querySelector('#_add-route-cancel').onclick = close;
         box.querySelector('#_add-route-ok').onclick     = confirm;
@@ -586,6 +618,80 @@ const App = {
         overlay.onclick = e => { if (e.target === overlay) close(); };
     },
 
+    renameRoute: () => {
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.55);z-index:9999;display:flex;align-items:center;justify-content:center;';
+        const box = document.createElement('div');
+        box.style.cssText = 'background:#fff;border-radius:16px;padding:24px;max-width:340px;width:90%;font-family:inherit;box-shadow:0 20px 60px rgba(0,0,0,0.3);';
+        box.innerHTML = '<p style="font-size:14px;font-weight:700;color:#111827;margin-bottom:12px;">เปลี่ยนชื่อสาย</p>'
+            + `<input id="_ren-route-inp" type="text" value="${State.localActiveRoute}" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #d1d5db;border-radius:10px;font-size:14px;font-family:inherit;outline:none;margin-bottom:16px;">`
+            + '<div style="display:flex;gap:8px;justify-content:flex-end;">'
+            + '<button id="_ren-cancel" style="padding:8px 18px;border-radius:8px;border:1px solid #d1d5db;background:#fff;color:#6b7280;cursor:pointer;font-size:13px;font-weight:600;">ยกเลิก</button>'
+            + '<button id="_ren-ok" style="padding:8px 18px;border-radius:8px;border:none;background:#4f46e5;color:#fff;cursor:pointer;font-size:13px;font-weight:700;">บันทึก</button>'
+            + '</div>';
+        overlay.appendChild(box); document.body.appendChild(overlay);
+        const inp = box.querySelector('#_ren-route-inp'); inp.focus(); inp.select();
+        const close = () => { if (document.body.contains(overlay)) document.body.removeChild(overlay); };
+        const confirm = () => {
+            const newName = inp.value.trim(); close();
+            if (!newName || newName === State.localActiveRoute) return;
+            const ym = App._currentPlanYM;
+            const oldName = State.localActiveRoute;
+            State.db.routes[newName] = State.db.routes[oldName];
+            delete State.db.routes[oldName];
+            State.localActiveRoute = newName;
+            App.sync();
+            const routeList = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
+            Promise.all([
+                App.planRoutesCol(ym).doc(oldName).delete(),
+                // ✅ BUGFIX (2026-08-29): merge:true — ดู comment เดียวกันใน saveDB() ข้างบน
+                App.planRoutesCol(ym).doc(newName).set({ stores: State.db.routes[newName] || [] }, { merge: true }),
+                App.planRef(ym).set({ routeList }, { merge: true }),
+            ]).then(() => UI.showSaveToast('💾 เปลี่ยนชื่อสายเรียบร้อย'))
+              .catch(err => UI.showErrorToast('❌ เปลี่ยนชื่อไม่สำเร็จ: ' + err.message));
+        };
+        box.querySelector('#_ren-cancel').onclick = close;
+        box.querySelector('#_ren-ok').onclick     = confirm;
+        inp.addEventListener('keydown', e => { if (e.key === 'Enter') confirm(); if (e.key === 'Escape') close(); });
+        overlay.onclick = e => { if (e.target === overlay) close(); };
+    },
+
+    deleteRoute: () => {
+        if (Object.keys(State.db.routes).length <= 1)
+            return UI.showErrorToast('ห้ามลบสายสุดท้ายครับ');
+        UI.showConfirm('ยืนยันลบสาย "' + State.localActiveRoute + '"?', () => {
+            const ym = App._currentPlanYM;
+            const deletedName = State.localActiveRoute;
+            delete State.db.routes[deletedName];
+            const sortedKeys = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
+            State.localActiveRoute = sortedKeys[0];
+            State.stores = State.db.routes[State.localActiveRoute] || [];
+            App.sync(); MapCtrl.fitToStores();
+            Promise.all([
+                App.planRoutesCol(ym).doc(deletedName).delete(),
+                App.planRef(ym).set({ routeList: sortedKeys }, { merge: true }),
+            ]).then(() => UI.showSaveToast('🗑️ ลบสายเรียบร้อย'))
+              .catch(err => UI.showErrorToast('❌ ลบไม่สำเร็จ: ' + err.message));
+        });
+    },
+
+    // ─── calendarConfig ──────────────────────────────────────────────────
+    saveCalendarConfig: async (cfg) => {
+        const ym = App._currentPlanYM;
+        if (!ym) return;
+        try {
+            // ✅ BUGFIX: mergeFields แทน merge:true — กัน field เก่าจากโหมดก่อนหน้า (เช่น mapping)
+            // ค้างอยู่ใน Firestore แล้วไปบัง getDayLabelForCfg() ตอนสลับโหมด (ดู index.html CalendarAdmin.save)
+            await App.planRef(ym).set(
+                { calendarConfig: cfg, updatedAt: firebase.firestore.FieldValue.serverTimestamp() },
+                { mergeFields: ['calendarConfig', 'updatedAt'] }
+            );
+            State.db.calendarConfig = cfg;
+            UI.showSaveToast('📅 บันทึกปฏิทินเรียบร้อย');
+        } catch(err) {
+            UI.showErrorToast('❌ บันทึกปฏิทินไม่สำเร็จ: ' + err.message);
+        }
+    },
 
     // ─── calendarConfig เฉพาะสาย (override) ────────────────────────────────
     // cfg = null → ลบ override ทิ้ง กลับไปใช้ default ของศูนย์ตามปกติ
@@ -644,7 +750,6 @@ const App = {
         try {
             const planSnap  = await App.planRef(ym).get();
             const routeList = ((planSnap.exists ? planSnap.data().routeList : null) || State.db.routeList || [])
-                .filter(r => r !== 'รอจัดสาย')   // ✅ RPN V0: สายเทียม ไม่มีเซลคนไหนยืนยัน
                 .slice().sort((a, b) => a.localeCompare(b, 'th', { numeric: true }));
             const results = [];
             const BATCH = 5;
@@ -667,14 +772,6 @@ const App = {
     // เก็บที่ appData/{centerId}_main/moveRequests/{autoId}
     // ══════════════════════════════════════════════════════════════════════
     _moveRequestsCol: () => cloudDB.collection('appData').doc(window.CENTER_DOC || 'v1_main').collection('moveRequests'),
-
-    // ✅ RPN V0 (2026-10-08): sig ของ rpnCal — ต้องเหมือน hash()/sig() ใน rpn/rpn-online.js และ RpnCompat (sales-app.js) ทุกตัวอักษร
-    _rpnSig: (stores) => {
-        const hash = (str) => { let h = 5381; for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0; return (h >>> 0).toString(36); };
-        return hash((stores || []).filter(s => s && !s.inactive)
-            .map(s => String(s.id) + ':' + (s.days || []).slice().sort().join(','))
-            .sort().join('|'));
-    },
 
     fetchPendingMoveRequests: async () => {
         try {
@@ -710,38 +807,13 @@ const App = {
             if (!store.seqs) store.seqs = {};
             delete store.seqs[req.fromDay];
             store.seqs[req.toDay] = maxSeq + 1;
-            // ✅ RPN V0 (2026-10-08): แผนมาจาก RPN แล้ว — ร้านหนึ่งอยู่ได้หลาย Day (F2 / หลายตลาด)
-            // เดิมเขียน days = [toDay] ทับทั้งหมด ทำให้ Day อื่นของร้านหายเงียบๆ → แทนเฉพาะ fromDay
-            const _days = (store.days || []).filter(d => d !== req.fromDay && d !== req.toDay);
-            store.days = [..._days, req.toDay];
-            // ข้อมูลรายวันของ RPN (CY · F1/F2 · ครั้งที่เลือก · วันที่จากไฟล์ · ช่องที่แยก) ผูกกับ Day —
-            // ลบของ fromDay ออก แล้วใช้ค่าของร้านอื่นที่อยู่ toDay อยู่แล้ว (ตลาดเดียวกันต้องค่าเดียวกัน)
-            const _peer = stores.find(s => s !== store && !s.inactive && (s.days || []).includes(req.toDay));
-            ['cys', 'fqs', 'fqRun', 'vd', 'runOf'].forEach(k => {
-                if (!store[k] || typeof store[k] !== 'object') return;
-                delete store[k][req.fromDay];
-                if (_peer && _peer[k] && _peer[k][req.toDay] !== undefined) store[k][req.toDay] = _peer[k][req.toDay];
-            });
-            // ชื่อตลาดของร้าน = ตลาดของวันที่ร้านอยู่ (RPN อ่านชื่อตลาดของ Day จากร้านในวันนั้น)
-            if (_peer && _peer.marketName && _days.length === 0) store.marketName = _peer.marketName;
+            store.days = [req.toDay]; // ระบบนี้ถือว่า 1 ร้าน = 1 Day ต่อเดือน (ตาม pattern ที่ใช้อยู่ทั้งระบบ)
 
-            // ✅ NEW (2026-09-10): อนุมัติย้ายวันแล้ว sync ชื่อตลาด/Cycle Id ของทั้งสาย (ไม่ใช่แค่ร้าน
-            // นี้) ให้ตรงกับวันปัจจุบัน — route นี้อาจไม่ใช่ route ที่แอดมินกำลังเปิดดูอยู่ตอนนี้เลย
-            // (ดึงตรงจาก Firestore) เลยต้อง sync ที่นี่ ไม่ใช่รอ export หรือ UI.render ของหน้าปัจจุบัน
-            if (typeof FileManager !== 'undefined') FileManager._autoFillMarketNames(stores);
-
-            // ✅ RPN V0: rpnCal (วันที่จริงต่อ Day ที่แอปเซลใช้) — ย้ายร้านไป Day ที่มีอยู่แล้ว วันที่ของแต่ละ Day
-            // ไม่เปลี่ยน แค่อัปเดต sig ให้ตรงกับร้านชุดใหม่ · ถ้า toDay ไม่เคยมีใน rpnCal ปล่อย sig ไม่ตรง
-            // (แอปเซลถอยไปใช้ปฏิทินเดิมของสายนี้ จนกว่าจะเปิดเดือนนั้นใน RPN ซึ่งคำนวณใหม่ให้เอง)
-            const routeDoc = {
+            await routeRef.set({
                 stores,
                 confirmedBy: firebase.firestore.FieldValue.delete(),
                 confirmedAt: firebase.firestore.FieldValue.delete(),
-            };
-            const _cal = routeSnap.data().rpnCal;
-            if (_cal && _cal.days && _cal.days[req.toDay]) routeDoc.rpnCal = Object.assign({}, _cal, { sig: App._rpnSig(stores) });
-
-            await routeRef.set(routeDoc, { merge: true });
+            }, { merge: true });
 
             await reqRef.set({
                 status:     'approved',
@@ -791,30 +863,24 @@ const App = {
         UI.hideLoader();
     },
 
-    // ✅ FIX (2026-09-05 — พบจากรายงานจริงของ user): เดิมใช้ confirm() แบบ native ของเบราว์เซอร์
-    // ซึ่งไม่ยอมเด้งขึ้นมาให้กดยืนยันเลย (กดปุ่มแล้วไม่มีอะไรเกิดขึ้น เพราะ confirm() คืนค่า false/
-    // ไม่เคย resolve แล้วโค้ดก็ return ตั้งแต่บรรทัดแรก) เปลี่ยนไปใช้ UI.showConfirm() ซึ่งเป็น dialog
-    // แบบกำหนดเองของระบบเอง (ตัวเดียวกับที่ปุ่มลบสาย/ลบ Plan อื่นๆ ใช้อยู่แล้ว ทำงานได้จริง)
     clearAllAssignments: () => {
+        if (!confirm('🗑️ ยืนยันการเคลียร์การจัดสายทั้งหมด?')) return;
         if (!State.stores?.length) return UI.showErrorToast('⚠️ ไม่มีข้อมูลร้านค้า');
-        UI.showConfirm('🗑️ ยืนยันการเคลียร์การจัดสายทั้งหมด?', () => {
-            // ✅ UX: เก็บ snapshot ไว้ก่อนลบ เผื่อกดพลาด — undo ได้ภายใน 8 วิ
-            App._undoSnapshot = { route: State.localActiveRoute, stores: JSON.parse(JSON.stringify(State.stores)) };
-            State.stores.forEach(s => { s.days = []; s.seqs = {}; s.selected = false; });
-            MapCtrl?.clearRoad?.(true);
-            MapCtrl?.clearAll?.();
-            UI?.render?.();
-            App?.saveDB?.();
-            UI.showUndoBanner(`✅ เคลียร์การจัดสายเสร็จ (${App._undoSnapshot.stores.length} ร้าน)`);
-        });
+        // ✅ UX: เก็บ snapshot ไว้ก่อนลบ เผื่อกดพลาด — undo ได้ภายใน 8 วิ
+        App._undoSnapshot = { route: State.localActiveRoute, stores: JSON.parse(JSON.stringify(State.stores)) };
+        State.stores.forEach(s => { s.days = []; s.seqs = {}; s.selected = false; });
+        MapCtrl?.clearRoad?.(true);
+        MapCtrl?.clearAll?.();
+        UI?.render?.();
+        App?.saveDB?.();
+        UI.showUndoBanner(`✅ เคลียร์การจัดสายเสร็จ (${App._undoSnapshot.stores.length} ร้าน)`);
     },
 
     // ✅ FIX: เดิมปุ่ม "ล้างสายนี้" ใน Tab 1 เรียกฟังก์ชันนี้ แต่ไม่เคยมีอยู่จริง (บั๊ก — กดแล้วไม่มีอะไรเกิดขึ้น)
     // ลบร้านค้าทั้งหมดออกจากสายที่กำลังเลือกอยู่ (ต่างจาก clearAllAssignments ที่แค่ล้างวันที่จัด แต่ร้านยังอยู่)
-    // ✅ FIX (2026-09-05): confirm() แบบ native เหมือนกัน — ดู comment เดียวกันใน clearAllAssignments
     clearStores: () => {
         if (!State.stores?.length) return UI.showErrorToast('⚠️ สายนี้ไม่มีร้านค้าอยู่แล้ว');
-        UI.showConfirm(`🗑️ ยืนยันลบร้านค้าทั้งหมด (${State.stores.length} ร้าน) ออกจากสาย "${State.localActiveRoute}"?\nการกระทำนี้ลบร้านทิ้งทั้งหมด ไม่ใช่แค่ล้างวันที่จัด`, () => {
+        if (!confirm(`🗑️ ยืนยันลบร้านค้าทั้งหมด (${State.stores.length} ร้าน) ออกจากสาย "${State.localActiveRoute}"?\nการกระทำนี้ลบร้านทิ้งทั้งหมด ไม่ใช่แค่ล้างวันที่จัด`)) return;
         // ✅ UX: เก็บ snapshot ไว้ก่อนลบ เผื่อกดพลาด — undo ได้ภายใน 8 วิ
         App._undoSnapshot = { route: State.localActiveRoute, stores: JSON.parse(JSON.stringify(State.stores)) };
         State.stores = [];
@@ -824,7 +890,6 @@ const App = {
         UI?.render?.();
         App?.saveDB?.();
         UI.showUndoBanner(`✅ ลบร้านค้าออกจากสายนี้เรียบร้อย (${App._undoSnapshot.stores.length} ร้าน)`);
-        });
     },
 
     // ✅ UX: ย้อนกลับการลบล่าสุด (ใช้ได้ครั้งเดียว ภายใน 8 วิหลังลบ)
@@ -860,15 +925,9 @@ const App = {
                 let idCol=-1, nameCol=-1, latCol=-1, lngCol=-1, freqCol=-1, dayCol=-1, seqCol=-1, salesCodeCol=-1, shopTypeCol=-1, subDistrictCol=-1, districtCol=-1, provinceCol=-1, marketNameCol=-1, cyCol=-1, cycleNameCol=-1;
                 for (let i = 0; i < headers.length; i++) {
                     const h = String(headers[i]).toLowerCase();
-                    // ✅ NEW (2026-09-10): "Customer Code" คือชื่อคอลัมน์รหัสร้านจริงในไฟล์บริษัท
-                    // (MST - Customer Master / RoutePlan Detail) — เก็บ "รหัส" (Thai) ไว้ด้วยเพื่อ
-                    // รองรับไฟล์เก่า/เทมเพลตของเราเอง
-                    if      ((h.includes('รหัส') && !h.includes('เซลล์')) || h.includes('customer code')) idCol = i;
-                    // ✅ FIX: ต้องเช็คคอลัมน์ "Cycle Code"/"Cycle Id" (รหัสรอบ) ก่อน "Cycle Name"/
-                    // "cycle" เฉยๆ (ชื่อตลาด) เสมอ ไม่งั้นโดนดักเป็น cycleNameCol ไปหมดเพราะมีคำว่า
-                    // "cycle" ซ้อนอยู่เหมือนกัน — ต้องเช็คก่อน nameCol ด้วยเพราะ "Cycle Name" มีคำว่า
-                    // "name" ซ้อนอยู่ ถ้าเช็ค nameCol ก่อนจะโดนตีความเป็นคอลัมน์ชื่อร้านไปเลย
-                    else if (h.includes('cycle code') || h.includes('cycle id'))                  cyCol = i;
+                    if      (h.includes('รหัส') && !h.includes('เซลล์'))                         idCol = i;
+                    // ✅ FIX: ต้องเช็คก่อน nameCol เสมอ เพราะ "Cycle Name" มีคำว่า "name" ซ้อนอยู่
+                    // ถ้าเช็ค nameCol ก่อน จะโดนตีความเป็นคอลัมน์ชื่อร้านไปเลย ไม่มีทางถึง cycleNameCol
                     else if (h.includes('cycle'))                                                 cycleNameCol = i;
                     else if ((h.includes('ชื่อ') && !h.includes('ตลาด')) || h.includes('name'))  nameCol = i;
                     else if (h.includes('lat') || h.includes('ละติจูด'))                         latCol = i;
@@ -878,30 +937,21 @@ const App = {
                     // เดิม column ชื่อ "สายวิ่ง" ถูก dayCol ดักไปก่อน จับรหัสสายไม่ได้เลย
                     else if (h === 'route' || h === 'สายวิ่ง')                                    salesCodeCol = i;
                     else if (h.includes('day') || h.includes('สายวิ่ง'))                         dayCol = i;
-                    // ✅ BUGFIX (2026-09-10): "ลำดับ" (คนละคำกับ "คิว") คือหัวคอลัมน์ที่ exportTemplate/
-                    // exportAllRoutes ใช้จริงมาตลอด แต่ไม่เคยอยู่ใน keyword ที่เช็คเลย ทำให้ไฟล์ที่เรา
-                    // export ออกไปเอง พอเอากลับมาอัปโหลดใหม่ผ่าน "อัปโหลดพิกัด" ลำดับที่จัดไว้หายทุกครั้ง
-                    else if (h.includes('คิว') || h.includes('ลำดับ') || h.includes('seq'))       seqCol = i;
-                    // ✅ NEW (2026-09-10): "Salesman Code" คือชื่อคอลัมน์จริงในไฟล์ Customer Master
-                    else if ((h.includes('salescode') || h.includes('salesman') || h.includes('รหัสเซลล์') || h === 'sales') && salesCodeCol === -1) salesCodeCol = i;
-                    // ✅ NEW (2026-09-10): "Outlet Category" คือชื่อคอลัมน์ประเภทร้านจริงในไฟล์บริษัท
-                    else if (h.includes('ประเภท') || h.includes('type') || h.includes('category'))  shopTypeCol = i;
-                    // ✅ NEW (2026-09-10): ไฟล์บริษัทปัจจุบันใช้หัวคอลัมน์เปล่าๆ "City"/"District"/
-                    // "State" (ไม่มี "Sold To"/"Address 5" นำหน้าแบบไฟล์ SAP เก่า) — เก็บของเก่าไว้
-                    // รองรับไฟล์รุ่นก่อนหน้าด้วย
-                    else if (h.includes('sold to city') || h.includes('city') || h.includes('ตำบล'))     subDistrictCol = i;
-                    else if (h.includes('sold to state') || h.includes('district') || h.includes('อำเภอ')) districtCol = i;
-                    else if (h.includes('address 5') || h.includes('state') || h.includes('จังหวัด'))    provinceCol = i;
+                    else if (h.includes('คิว') || h.includes('seq'))                              seqCol = i;
+                    else if ((h.includes('salescode') || h.includes('รหัสเซลล์') || h === 'sales') && salesCodeCol === -1) salesCodeCol = i;
+                    else if (h.includes('ประเภท') || h.includes('type'))                         shopTypeCol = i;
+                    else if (h.includes('sold to city') || h.includes('ตำบล'))                   subDistrictCol = i;
+                    else if (h.includes('sold to state') || h.includes('อำเภอ'))                 districtCol = i;
+                    else if (h.includes('address 5') || h.includes('จังหวัด'))                   provinceCol = i;
                     else if (h.includes('ตลาด') || h.includes('market'))                          marketNameCol = i;
                     else if (h === 'cy' || h.startsWith('cy'))                                    cyCol = i;
                 }
                 if (latCol === -1 || lngCol === -1 || idCol === -1)
                     return UI.showErrorToast('ไม่พบคอลัมน์ รหัส / Lat / Lng ในไฟล์ครับ');
 
-                // ✅ NEW: ไม่มีทั้งคอลัมน์ "Cycle Name" และ "Cycle Code"/"Cycle Id" — หยุดถามยืนยันก่อน
-                // (การเรียงจากคอลัมน์ Day แทนเป็นแค่การเดา อาจไม่ตรงกับลำดับตลาดที่ตั้งใจจริงเสมอไป —
-                // ถ้ามี Cycle Id อยู่แล้วไม่ต้องเตือน เพราะเชื่อถือได้กว่าคอลัมน์ Day)
-                if (cycleNameCol === -1 && cyCol === -1) {
+                // ✅ NEW: ไม่มีคอลัมน์ "Cycle Name" — หยุดถามยืนยันก่อน (การเรียงจากคอลัมน์ Day
+                // แทนเป็นแค่การเดา อาจไม่ตรงกับลำดับตลาดที่ตั้งใจจริงเสมอไป)
+                if (cycleNameCol === -1) {
                     const proceed = await new Promise(resolve => {
                         UI.showConfirm(
                             '⚠️ ไม่พบคอลัมน์ "Cycle Name" ในไฟล์นี้\n\n' +
@@ -927,26 +977,10 @@ const App = {
                     const freq = (freqCol !== -1 && String(row[freqCol]||'').trim().toUpperCase().includes('2')) ? 2 : 1;
                     const rawDay = (dayCol !== -1 && row[dayCol]) ? String(row[dayCol]).trim() : '';
                     const dayNum = rawDay ? parseInt(rawDay.replace(/[^0-9]/g,'')) : NaN;
-                    // ✅ FIX: ดึงเลขวันจากรูปแบบ "D{N}" โดยเฉพาะ (ไม่ใช่ strip ตัวเลขทั้งหมดในสตริง) —
-                    // "Cycle Name" มักมีรหัสสาย/ลูกค้าปนอยู่ด้วย (เช่น "40201 D01 ดำเนิน ราชบุรี")
-                    // ถ้า strip ตัวเลขทั้งหมดจะได้ "4020101" ไม่ใช่ 1 — ต้องจับเฉพาะเลขที่ตามหลัง "D"
-                    // เท่านั้น ใช้ regex เดียวกันได้ทั้ง "Cycle Id" (รูปแบบ "D01") และ "Cycle Name"
-                    const extractDayNum = (text) => {
-                        const s = String(text || '');
-                        const m = s.match(/D\s*(\d{1,2})(?!\d)/i);
-                        if (m) return parseInt(m[1], 10);
-                        const digitsOnly = s.replace(/[^0-9]/g, '');
-                        return digitsOnly ? parseInt(digitsOnly, 10) : NaN;
-                    };
-                    // ✅ ลำดับความสำคัญตัวกำหนดวัน: Cycle Id/Code ก่อน (เลขรอบ 1-24 ตรงๆ เชื่อถือ
-                    // ได้สุด) → Cycle Name (ต้องแกะจากข้อความ) → Day (สำรองสุดท้าย ใช้เฉพาะตอนไม่มี
-                    // ทั้ง 2 คอลัมน์บนเลย เพราะ Day ในไฟล์ที่ export จากระบบเราเองคือวันที่ปฏิทินจริง
-                    // ไม่ใช่เลขรอบ — ถ้าเอามาใช้ตรงๆ จะได้เลข Day เพี้ยนเกิน cycleDays)
-                    const rawCyId  = (cyCol !== -1 && row[cyCol]) ? String(row[cyCol]).trim() : '';
-                    const cyIdNum  = rawCyId ? extractDayNum(rawCyId) : NaN;
+                    // ✅ NEW: ถ้ามีคอลัมน์ "Cycle Name" ใช้ค่านี้กำหนดลำดับ D0N แทน dayNum เดิม
                     const rawCycle = (cycleNameCol !== -1 && row[cycleNameCol]) ? String(row[cycleNameCol]).trim() : '';
-                    const cycleNum = rawCycle ? extractDayNum(rawCycle) : NaN;
-                    const seqNum   = !isNaN(cyIdNum) ? cyIdNum : (!isNaN(cycleNum) ? cycleNum : dayNum);
+                    const cycleNum = rawCycle ? parseInt(rawCycle.replace(/[^0-9]/g,'')) : NaN;
+                    const seqNum   = (cycleNameCol !== -1 && !isNaN(cycleNum)) ? cycleNum : dayNum;
                     const assignedDay = !isNaN(seqNum) ? 'Day ' + seqNum : '';
                     const assignedSeq = (seqCol !== -1 && row[seqCol]) ? parseInt(String(row[seqCol]).replace(/[^0-9]/g,'')) : NaN;
                     if (storeMap[idStr]) {
@@ -964,7 +998,7 @@ const App = {
                             province: provinceCol !== -1 ? String(row[provinceCol]||'').trim() : '',
                             marketName: marketNameCol !== -1 ? String(row[marketNameCol]||'').trim() : '',
                             cy: cyCol !== -1 ? String(row[cyCol]||'').trim() : '',
-                            dayOriginal: !isNaN(cyIdNum) ? rawCyId : (!isNaN(cycleNum) ? rawCycle : rawDay),
+                            dayOriginal: cycleNameCol !== -1 ? rawCycle : rawDay,
                         };
                         if (assignedDay) { s.days.push(assignedDay); if (!isNaN(assignedSeq)) s.seqs[assignedDay] = assignedSeq; }
                         storeMap[idStr] = s;
@@ -973,11 +1007,10 @@ const App = {
                 const finalArray = Object.values(storeMap);
                 if (finalArray.length === 0) return UI.showErrorToast('ไม่พบพิกัด (Lat, Lng) ในไฟล์ครับ');
 
-                // ✅ NEW: ไฟล์ไม่มีทั้งคอลัมน์ "Cycle Name" และ "Cycle Id" เลย (เหลือแต่ Day ดิบที่
-                // เชื่อถือไม่ได้) — เรียงเลข Day ที่มีจริงจากน้อยไปมาก แล้วแทนที่เป็นลำดับต่อเนื่อง
-                // D01, D02, D03... (อุดช่องว่าง) หน้านี้อัปโหลดทีละสายอยู่แล้ว เลยทำรวมทั้งก้อนได้เลย
-                // ไม่ต้องแยกตามสายแบบ bulkImport
-                if (cycleNameCol === -1 && cyCol === -1) {
+                // ✅ NEW: ไฟล์ไม่มีคอลัมน์ "Cycle Name" เลย — เรียงเลข Day ที่มีจริงจากน้อยไปมาก
+                // แล้วแทนที่เป็นลำดับต่อเนื่อง D01, D02, D03... (อุดช่องว่าง) หน้านี้อัปโหลดทีละสาย
+                // อยู่แล้ว เลยทำรวมทั้งก้อนได้เลย ไม่ต้องแยกตามสายแบบ bulkImport
+                if (cycleNameCol === -1) {
                     const usedNums = new Set();
                     finalArray.forEach(s => s.days.forEach(d => {
                         const n = parseInt(String(d).replace('Day ', ''));
@@ -1001,9 +1034,6 @@ const App = {
                     });
                 }
 
-                // ✅ NEW: เติมชื่อตลาดที่ขาด (ก็อปจากร้านวันเดียวกันในไฟล์ ถ้าไม่มีเลยก็ generate จากตำบล/อำเภอ/จังหวัด)
-                FileManager._autoFillMarketNames(finalArray);
-
                 MapCtrl.clearAll();
                 State.stores = finalArray;
                 App.sync(); App.saveDB(); MapCtrl.fitToStores();
@@ -1015,284 +1045,6 @@ const App = {
     },
 
     logout: () => { if (typeof Auth !== 'undefined') Auth.logout(); else window.location.replace('login.html'); },
-
-    // ══════════════════════════════════════════════════════════════════════
-    // ✅ NEW: 🧭 จัดลำดับการเยี่ยมอัตโนมัติ — คำนวณเส้นทางจริงผ่าน
-    // /api/optimize-route (proxy ไป OpenRouteService Optimization API ฟรี)
-    // จากจุดเริ่มต้นของสาย → ร้านทั้งหมดในวันนั้น → (กลับจุดเดิม หรือไม่ก็ได้)
-    // แล้วเขียนผลลัพธ์กลับเป็น seqs[day] เหมือนการลากเรียงเอง — แก้มือทีหลังได้เสมอ
-    // ══════════════════════════════════════════════════════════════════════
-
-    // อ่านค่าตั้งค่าจุดเริ่มต้นของสาย "route" ที่ resolve แล้ว (คืนพิกัดจริงพร้อมใช้ หรือ point:null ถ้ายังตั้งไม่ครบ)
-    getRouteStartConfig: (route) => {
-        const rs   = (State.db.routeSettings || {})[route];
-        const mode = rs?.mode || 'none';
-        if (mode === 'none') return { mode: 'none', point: null };
-        if (mode === 'home') {
-            return {
-                mode: 'home',
-                point: rs.homeLocation || null,
-                returnToStart: rs.returnToStart !== false,
-            };
-        }
-        // mode === 'center'
-        return {
-            mode: 'center',
-            point: State.db.depotLocation || null,
-            returnToStart: rs?.returnToStart !== false,
-        };
-    },
-
-    saveDepotLocation: async (lat, lng) => {
-        const latN = parseFloat(lat), lngN = parseFloat(lng);
-        if (isNaN(latN) || isNaN(lngN)) return UI.showErrorToast('⚠️ กรอกพิกัดให้ครบ (ตัวเลขเท่านั้น)');
-        try {
-            await App.dbRef.set({ depotLocation: { lat: latN, lng: lngN } }, { merge: true });
-            State.db.depotLocation = { lat: latN, lng: lngN };
-            UI.showSaveToast('✅ บันทึกพิกัดศูนย์เรียบร้อย');
-        } catch (e) { UI.showErrorToast('❌ บันทึกไม่สำเร็จ: ' + ErrorMsg.translate(e)); }
-    },
-
-    saveRouteStartConfig: async (route, { mode, homeLocation, returnToStart }) => {
-        if (!route) return;
-        try {
-            // ✅ ประกอบ routeSettings เต็มก้อนฝั่ง client ก่อนส่ง กันปัญหาการ merge ซ้อนของ Firestore
-            // กับ map field ที่มีหลายสายอยู่ข้างในเดียวกัน (ชัวร์กว่าพึ่ง merge:true อย่างเดียว)
-            const routeSettings = { ...(State.db.routeSettings || {}) };
-            routeSettings[route] = {
-                mode,
-                ...(mode === 'home' && homeLocation ? { homeLocation } : {}),
-                returnToStart: returnToStart !== false,
-            };
-            await App.dbRef.set({ routeSettings }, { merge: true });
-            State.db.routeSettings = routeSettings;
-            UI.showSaveToast('✅ บันทึกจุดเริ่มต้นของสายเรียบร้อย');
-        } catch (e) { UI.showErrorToast('❌ บันทึกไม่สำเร็จ: ' + ErrorMsg.translate(e)); }
-    },
-
-    optimizeDayOrder: async (day) => {
-        const stores = State.stores.filter(s => s.days && s.days.includes(day) && !s.inactive);
-        if (stores.length < 2) {
-            return UI.showErrorToast('ℹ️ วันนี้มีร้าน ' + stores.length + ' ร้าน ไม่ต้องจัดลำดับ');
-        }
-        if (stores.length > 48) {
-            return UI.showErrorToast('⚠️ วันนี้มี ' + stores.length + ' ร้าน — จัดลำดับอัตโนมัติรองรับสูงสุด 48 ร้าน/วัน (แผนฟรีของ OpenRouteService)');
-        }
-        const noCoord = stores.filter(s => typeof s.lat !== 'number' || typeof s.lng !== 'number' || isNaN(s.lat) || isNaN(s.lng));
-        if (noCoord.length) {
-            return UI.showErrorToast('⚠️ มี ' + noCoord.length + ' ร้านที่ยังไม่มีพิกัด (lat/lng) — เพิ่มพิกัดให้ครบก่อนจัดลำดับอัตโนมัติ');
-        }
-        const cfg = App.getRouteStartConfig(State.localActiveRoute);
-        if (cfg.mode === 'none') {
-            return UI.showErrorToast('⚠️ สายนี้ยังไม่ได้ตั้งจุดเริ่มต้น — กดปุ่ม "📍 จุดเริ่ม-จุดจบ" เพื่อตั้งค่าก่อน');
-        }
-        if (!cfg.point) {
-            return UI.showErrorToast(cfg.mode === 'home'
-                ? '⚠️ ตั้งเป็น "จากที่พัก" ไว้ แต่ยังไม่ได้ปักพิกัดที่พัก — ตั้งค่าที่ปุ่ม "📍 จุดเริ่ม-จุดจบ"'
-                : '⚠️ ยังไม่ได้ตั้งพิกัดศูนย์ — ตั้งค่าที่ปุ่ม "📍 จุดเริ่ม-จุดจบ"');
-        }
-
-        UI.showLoader('กำลังจัดลำดับการเยี่ยม...', `คำนวณเส้นทางจริง ${stores.length} ร้าน (${DAY_COLORS[day]?.name || day})`);
-        try {
-            const res = await fetch('/api/optimize-route', {
-                method:  'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    start: cfg.point,
-                    end:   cfg.returnToStart ? cfg.point : null,
-                    jobs:  stores.map(s => ({ id: s.id, lat: s.lat, lng: s.lng })),
-                }),
-            });
-            const result = await res.json().catch(() => ({}));
-            UI.hideLoader();
-
-            if (!res.ok || !Array.isArray(result.order)) {
-                UI.showErrorToast('❌ จัดลำดับไม่สำเร็จ: ' + (result.error || res.statusText || 'ไม่ทราบสาเหตุ'));
-                return;
-            }
-
-            result.order.forEach((storeId, idx) => {
-                const s = State.stores.find(x => String(x.id) === String(storeId));
-                if (s) { if (!s.seqs) s.seqs = {}; s.seqs[day] = idx + 1; }
-            });
-            // ✅ NEW: เก็บระยะทาง/เวลาจริงที่ ORS คำนวณให้ ไว้โชว์สรุปในแท็บ "1. ข้อมูล"
-            if (!State.db.routeDayStats[State.localActiveRoute]) State.db.routeDayStats[State.localActiveRoute] = {};
-            State.db.routeDayStats[State.localActiveRoute][day] = {
-                distanceKm: typeof result.distanceKm === 'number' ? result.distanceKm : null,
-                durationMin: typeof result.durationMin === 'number' ? result.durationMin : null,
-                storeCount: stores.length,
-                updatedAt: Date.now(),
-            };
-            App.saveDB();
-            UI.render();
-            if (typeof UI.renderDayStats === 'function') UI.renderDayStats();
-            if (State.openDayModal === day) UI.showDayModal(day);
-
-            const unassignedCount = Array.isArray(result.unassigned) ? result.unassigned.length : 0;
-            if (unassignedCount > 0) {
-                UI.showErrorToast(`⚠️ จัดลำดับได้ ${result.order.length} ร้าน แต่มี ${unassignedCount} ร้านที่ระบบคำนวณเส้นทางไม่ได้ (อาจพิกัดผิดปกติ) — เรียงร้านเหล่านั้นด้วยมือเพิ่มเติม`);
-            } else {
-                UI.showSaveToast(`✅ จัดลำดับ ${DAY_COLORS[day]?.name || day} เรียบร้อย (${stores.length} ร้าน)`);
-            }
-            App.writeAuditLog('optimize_day_order', { day, route: State.localActiveRoute, storeCount: stores.length, unassignedCount });
-        } catch (e) {
-            UI.hideLoader();
-            UI.showErrorToast('❌ เชื่อมต่อไม่สำเร็จ: ' + e.message);
-        }
-    },
-
-    // ══════════════════════════════════════════════════════════════════════
-    // ✅ NEW (2026-09-05): แทรกเฉพาะร้านใหม่เข้าไปในลำดับที่มีอยู่แล้ว — ไม่แตะร้านที่
-    // ถูกจัดลำดับไว้แล้ว (ไม่ว่าจะมาจาก optimizeDayOrder หรือเซลล์ลากจัดเองในหน้า sales.html)
-    // ปัญหาที่แก้: เดิม "จัดลำดับการเยี่ยมอัตโนมัติ" คำนวณใหม่ทั้งวันทุกครั้ง ถ้าเซลล์เคยลากจัด
-    // ลำดับเองไว้แล้ว (sales-app.js มี drag-to-reorder เขียนลง seqs[day] เหมือนกัน) พอแอดมินกด
-    // ปุ่มนี้ซ้ำ (เช่น เพิ่มร้านใหม่เข้าวันเดิม) จะเขียนทับลำดับที่เซลล์จัดไว้ทิ้งหมด
-    //
-    // ใช้ cheapest-insertion heuristic (ระยะเส้นตรง ไม่เรียก ORS — เร็ว ไม่กินโควตา) หาตำแหน่ง
-    // ที่แทรกร้านใหม่แล้วเพิ่มระยะทางน้อยที่สุด โดยไม่ขยับร้านเดิมออกจากตำแหน่งเดิมเลย
-    // ข้อจำกัด: ไม่ได้อัปเดต routeDayStats (ระยะทางจริง) เพราะไม่ได้เรียก ORS — ถ้าอยากได้ระยะทาง
-    // จริงที่แม่นยำ ต้องกด "จัดลำดับใหม่ทั้งหมด" แทน
-    // ══════════════════════════════════════════════════════════════════════
-    // ✅ NEW (2026-09-05): cheapest-insertion heuristic แบบล้วน (ระยะเส้นตรง ไม่เรียก ORS) — ใช้ร่วมกัน
-    // ระหว่างปุ่ม "แทรกเฉพาะร้านใหม่" (ด้านล่าง) กับ AI._sequenceAllDays (admin-ai.js) ตอนรันแบบ
-    // "ล็อคร้านที่จัดแล้ว" ที่ไม่ควรไปรบกวนลำดับเดิมที่มีอยู่แล้วในวันที่ไม่ได้เปลี่ยนแปลงอะไร
-    // existing = ร้านที่มีลำดับอยู่แล้ว (เรียงตามลำดับเดิม, ไม่ขยับ), fresh = ร้านใหม่ที่ยังไม่มีลำดับ
-    // คืนค่า: array ของร้านเรียงลำดับใหม่ (existing คงตำแหน่งเดิม, fresh แทรกตรงจุดที่เพิ่มระยะน้อยสุด)
-    cheapestInsertOrder: (existing, fresh, cfg) => {
-        const distKm = (a, b) => {
-            const R = 6371, dLat = (b.lat - a.lat) * Math.PI / 180, dLng = (b.lng - a.lng) * Math.PI / 180;
-            const x = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * Math.PI / 180) * Math.cos(b.lat * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
-            return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
-        };
-        const seq = existing.slice();
-        fresh.forEach(store => {
-            let bestPos = 0, bestCost = Infinity;
-            for (let i = 0; i <= seq.length; i++) {
-                const prev = i === 0 ? cfg.point : seq[i - 1];
-                const next = i === seq.length ? (cfg.returnToStart ? cfg.point : null) : seq[i];
-                const dPrevNew  = distKm(prev, store);
-                const dNewNext  = next ? distKm(store, next) : 0;
-                const dPrevNext = next ? distKm(prev, next) : 0;
-                const added = dPrevNew + dNewNext - dPrevNext;
-                if (added < bestCost) { bestCost = added; bestPos = i; }
-            }
-            seq.splice(bestPos, 0, store);
-        });
-        return seq;
-    },
-
-    insertNewIntoDayOrder: (day) => {
-        const stores = State.stores.filter(s => s.days && s.days.includes(day) && !s.inactive
-            && typeof s.lat === 'number' && typeof s.lng === 'number' && !isNaN(s.lat) && !isNaN(s.lng));
-        if (!stores.length) return UI.showErrorToast('ℹ️ วันนี้ไม่มีร้าน');
-
-        const cfg = App.getRouteStartConfig(State.localActiveRoute);
-        if (cfg.mode === 'none') {
-            return UI.showErrorToast('⚠️ สายนี้ยังไม่ได้ตั้งจุดเริ่มต้น — กดปุ่ม "📍 จุดเริ่ม-จุดจบ" เพื่อตั้งค่าก่อน');
-        }
-        if (!cfg.point) {
-            return UI.showErrorToast(cfg.mode === 'home'
-                ? '⚠️ ตั้งเป็น "จากที่พัก" ไว้ แต่ยังไม่ได้ปักพิกัดที่พัก — ตั้งค่าที่ปุ่ม "📍 จุดเริ่ม-จุดจบ"'
-                : '⚠️ ยังไม่ได้ตั้งพิกัดศูนย์ — ตั้งค่าที่ปุ่ม "📍 จุดเริ่ม-จุดจบ"');
-        }
-
-        const existing = stores.filter(s => s.seqs && s.seqs[day] != null).sort((a, b) => a.seqs[day] - b.seqs[day]);
-        const fresh    = stores.filter(s => !s.seqs || s.seqs[day] == null);
-
-        if (!fresh.length) return UI.showErrorToast('ℹ️ ทุกร้านมีลำดับอยู่แล้ว ไม่มีร้านใหม่ให้แทรก');
-        if (!existing.length) {
-            return UI.showErrorToast('ℹ️ วันนี้ยังไม่มีลำดับเดิมให้คงไว้เลย — กด "จัดลำดับใหม่ทั้งหมด" แทนครับ');
-        }
-
-        const seq = App.cheapestInsertOrder(existing, fresh, cfg);
-        seq.forEach((s, idx) => { if (!s.seqs) s.seqs = {}; s.seqs[day] = idx + 1; });
-
-        App.saveDB();
-        UI.render();
-        if (State.openDayModal === day) UI.showDayModal(day);
-        UI.showSaveToast(`✅ แทรกร้านใหม่ ${fresh.length} ร้าน เข้าลำดับเดิมแล้ว (คงร้านเดิม ${existing.length} ร้านไว้ตำแหน่งเดิม)`);
-        App.writeAuditLog('insert_new_day_order', {
-            day, route: State.localActiveRoute, inserted: fresh.length, keptExisting: existing.length,
-        });
-    },
-
-    // ══════════════════════════════════════════════════════════════════════
-    // ✅ NEW (2026-09-05): คำนวณระยะทางจริงจาก "ลำดับที่มีอยู่แล้ว" — ไม่จัดลำดับใหม่เลย
-    // ต่างจาก optimizeDayOrder (เรียก ORS Optimization API เพื่อหาลำดับที่ดีที่สุด) ตรงที่ฟังก์ชันนี้
-    // ใช้ ORS Directions API (api/route-distance.js) ซึ่งรับลำดับจุดตายตัว แล้วแค่วัดระยะทาง/เวลา
-    // จริงตามลำดับนั้น — เหมาะกับสายที่เซลล์ลากจัดลำดับเองมาแล้วทุกวัน (ไม่อยากให้ระบบไปสลับลำดับ
-    // ที่ใช้งานจริงอยู่ แค่อยากรู้ว่าลำดับที่มีอยู่นี้ระยะทางจริงเท่าไร)
-    // ══════════════════════════════════════════════════════════════════════
-    calcDayDistanceFromExisting: async (day) => {
-        const stores = State.stores.filter(s => s.days && s.days.includes(day) && !s.inactive
-            && typeof s.lat === 'number' && typeof s.lng === 'number' && !isNaN(s.lat) && !isNaN(s.lng));
-        if (stores.length < 2) return { skipped: true, reason: 'too-few' };
-        if (stores.some(s => !s.seqs || s.seqs[day] == null)) return { skipped: true, reason: 'incomplete-order' };
-
-        const cfg = App.getRouteStartConfig(State.localActiveRoute);
-        if (cfg.mode === 'none' || !cfg.point) return { skipped: true, reason: 'no-start' };
-
-        const sorted = stores.slice().sort((a, b) => a.seqs[day] - b.seqs[day]);
-        const points = [cfg.point, ...sorted.map(s => ({ lat: s.lat, lng: s.lng }))];
-        if (cfg.returnToStart) points.push(cfg.point);
-        if (points.length > 50) return { skipped: true, reason: 'too-many' }; // ข้อจำกัด ORS Directions ต่อ request
-
-        try {
-            const res = await fetch('/api/route-distance', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ points }),
-            });
-            const result = await res.json().catch(() => ({}));
-            if (!res.ok || typeof result.distanceKm !== 'number') return { skipped: true, reason: 'api-error', error: result.error };
-
-            if (!State.db.routeDayStats[State.localActiveRoute]) State.db.routeDayStats[State.localActiveRoute] = {};
-            State.db.routeDayStats[State.localActiveRoute][day] = {
-                distanceKm: result.distanceKm,
-                durationMin: result.durationMin,
-                storeCount: stores.length,
-                updatedAt: Date.now(),
-            };
-            return { skipped: false };
-        } catch (e) {
-            return { skipped: true, reason: 'network-error', error: e.message };
-        }
-    },
-
-    // เวอร์ชันรันทุกวันของสายที่เปิดอยู่ในคราวเดียว — ใช้ตอนสายทั้งสายถูกเซลล์จัดลำดับมาแล้วทุกวัน
-    // แล้วอยากรู้ระยะทางจริงของทุกวันโดยไม่ต้องกดทีละวัน 24 ครั้ง
-    calcAllDayDistancesFromExisting: async () => {
-        const cfg = App.getRouteStartConfig(State.localActiveRoute);
-        if (cfg.mode === 'none' || !cfg.point) {
-            return UI.showErrorToast('⚠️ สายนี้ยังไม่ได้ตั้งจุดเริ่มต้น — กดปุ่ม "📍 จุดเริ่ม-จุดจบ" ก่อน');
-        }
-        const k = State.db.cycleDays || 24;
-        const dayKeys = Array.from({ length: k }, (_, i) => `Day ${i + 1}`)
-            .filter(d => State.stores.some(s => s.days && s.days.includes(d)));
-        if (!dayKeys.length) return UI.showErrorToast('ℹ️ สายนี้ยังไม่มีร้านที่จัดวันแล้ว');
-
-        UI.showLoader('กำลังคำนวณระยะทางจริงจากลำดับที่มีอยู่แล้ว...', '');
-        UI.setLoaderProgress(0);
-        let done = 0, skippedIncomplete = 0, skippedOther = 0;
-        for (let i = 0; i < dayKeys.length; i++) {
-            const day = dayKeys[i];
-            UI.setLoaderProgress((i / dayKeys.length) * 100, `กำลังคำนวณ ${DAY_COLORS[day]?.name || day} (${i + 1}/${dayKeys.length})`);
-            const r = await App.calcDayDistanceFromExisting(day);
-            if (r.skipped) {
-                if (r.reason === 'incomplete-order') skippedIncomplete++; else skippedOther++;
-            } else done++;
-        }
-        UI.setLoaderProgress(100, 'เสร็จสิ้น!');
-        App.saveDB();
-        UI.hideLoader();
-        if (typeof UI.renderDayStats === 'function') UI.renderDayStats();
-
-        let msg = `✅ คำนวณระยะทางจริงสำเร็จ ${done}/${dayKeys.length} วัน`;
-        if (skippedIncomplete > 0) msg += ` | ข้าม ${skippedIncomplete} วัน (ลำดับยังไม่ครบทุกร้าน)`;
-        if (skippedOther > 0) msg += ` | ข้าม ${skippedOther} วัน (คำนวณไม่สำเร็จ)`;
-        UI.showSaveToast(msg);
-        App.writeAuditLog('calc_all_day_distance', { route: State.localActiveRoute, done, skippedIncomplete, skippedOther });
-    },
 };
 
 // ==========================================
@@ -1331,10 +1083,32 @@ const PlanUI = {
         await App.switchPlan(ym);
     },
 
+    // ✅ ปุ่ม "ตั้งเป็นเดือนที่ใช้งานจริง" — publish เดือนที่กำลังดูอยู่ให้ Sales เห็น
+    publishCurrent: async () => {
+        await App.publishPlan(App._currentPlanYM);
+    },
+
     updateBadge: () => {
-        const ym  = App._currentPlanYM;
+        const ym    = App._currentPlanYM;
+        const badge = document.getElementById('plan-mode-badge');
+        if (badge) badge.textContent = ym ? `📅 ${App.ymToLabel(ym)}` : '📅 Plan';
         const sel = document.getElementById('plan-selector');
         if (sel && ym) sel.value = ym;
+
+        // ✅ ตัวบอกสถานะ live — เดือนที่แอดมินกำลังดูอยู่ ใช่เดือนที่ Sales เห็นจริงไหม
+        const liveBadge  = document.getElementById('plan-live-badge');
+        const publishBtn = document.getElementById('plan-publish-btn');
+        const isLive = ym && ym === App._livePlanYM;
+        if (liveBadge) {
+            if (isLive) {
+                liveBadge.textContent = '🟢 LIVE';
+                liveBadge.style.background = '#059669'; liveBadge.style.color = '#fff';
+            } else {
+                liveBadge.textContent = `⚪ กำลังดู (Live จริง: ${App.ymToLabel(App._livePlanYM || '')})`;
+                liveBadge.style.background = '#e5e7eb'; liveBadge.style.color = '#4b5563';
+            }
+        }
+        if (publishBtn) publishBtn.classList.toggle('hidden', isLive);
 
         // ✅ UX: badge โหมดปฏิทิน — ไม่ต้องเปิด settings ก็รู้ว่าเดือนนี้ใช้โหมดไหน
         const modeBadge = document.getElementById('cal-mode-badge');
@@ -1398,6 +1172,12 @@ const PlanUI = {
         // ตัวเลือกเดือน) ไม่ใช่เดือนที่แอดมินบังเอิญเปิดดูอยู่ตอนนี้ — กันข้อมูลเพี้ยนถ้าสองอย่างไม่ตรงกัน
         const latestYM = (State.db.planList && State.db.planList[0]) || App._currentPlanYM;
         await App.createPlan(ym, latestYM);
+    },
+
+    confirmDelete: () => {
+        const ym = App._currentPlanYM;
+        if (!ym) return;
+        App.deletePlan(ym);
     },
 };
 
@@ -1489,3 +1269,4 @@ const StoreTrans = {
 };
 
 console.log('✅ admin-data v3 (plans system) loaded');
+

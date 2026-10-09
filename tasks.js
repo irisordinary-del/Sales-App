@@ -74,7 +74,8 @@ const TasksApp = {
             ]);
             TasksApp._tasks = taskSnap.docs.map(d => ({ id: d.id, ...d.data() }))
                 .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
-            TasksApp._routeList = (planSnap.exists ? (planSnap.data().routeList || []) : [])
+            // ✅ RPN V0 (2026-10-08): ตัดกองเทียม "รอจัดสาย" ออก (ไม่ใช่สายวิ่ง)
+            TasksApp._routeList = (planSnap.exists ? (planSnap.data().routeList || []) : []).filter(r => r !== 'รอจัดสาย')
                 .sort((a, b) => a.localeCompare(b, 'th', { numeric: true }));
             TasksApp.renderCalendar();
         } catch (err) {

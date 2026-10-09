@@ -1,18 +1,4 @@
 // ==========================================
-// 🎨 AdminIcons — shared inline-SVG icon set (no CDN, no dependency)
-// Used to replace prominent page-chrome emoji (tab headers/sidebar nav) with the same
-// calm SVG style Dashboard._ICONS introduced. Loaded before dashboard.js/sku-distribution.js/
-// audit-log.js so every page can call it. Purely additive — does not touch Dashboard._ICONS
-// or any of its existing call sites.
-// ==========================================
-const AdminIcons = {
-    chart:     (c='') => `<svg class="${c}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg>`,
-    target:    (c='') => `<svg class="${c}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.3" fill="currentColor" stroke="none"/></svg>`,
-    clipboard: (c='') => `<svg class="${c}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M9 4H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-3"/><line x1="8" y1="11" x2="16" y2="11"/><line x1="8" y1="15" x2="14" y2="15"/></svg>`,
-    refresh:   (c='') => `<svg class="${c}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 15.3-6.4L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.3 6.4L3 16"/><path d="M3 21v-5h5"/></svg>`,
-};
-
-// ==========================================
 // 🧭 Navigation
 // ==========================================
 const Nav = {
@@ -39,9 +25,6 @@ const Nav = {
         if (page === 'planning') {
             setTimeout(() => { if (MapCtrl.map) MapCtrl.map.invalidateSize(); }, 200);
         }
-        if (page === 'cellsplit') {
-            if (typeof CellSplitApp !== 'undefined') CellSplitApp.init();
-        }
     }
 };
 
@@ -59,37 +42,11 @@ const UI = {
             document.getElementById('loader-subtext').innerText = sub || '';
             el.style.display = 'flex';
         }
-        // ✅ NEW: รีเซ็ตแถบ % ทุกครั้งที่เปิด loader ใหม่ (งานที่ไม่เรียก setLoaderProgress จะไม่เห็นแถบนี้เลย)
-        const wrap = document.getElementById('loader-progress-wrap');
-        const bar  = document.getElementById('loader-progress-bar');
-        const pctEl = document.getElementById('loader-progress-pct');
-        if (wrap) wrap.style.display = 'none';
-        if (bar) bar.style.width = '0%';
-        if (pctEl) pctEl.innerText = '0%';
     },
 
     hideLoader: () => {
         const el = document.getElementById('loader');
         if (el) el.style.display = 'none';
-        const wrap = document.getElementById('loader-progress-wrap');
-        if (wrap) wrap.style.display = 'none';
-    },
-
-    // ✅ NEW (2026-09-05): อัปเดตแถบ % ความคืบหน้าบน loader เดิม (ต้องเปิดด้วย showLoader() ก่อนแล้ว)
-    // ใช้กับงานที่มีหลายขั้นตอน/รอ API หลายรอบ (เช่น AI Route Builder) ให้แอดมินเห็นว่าทำถึงไหนแล้ว
-    // แทนที่จะเห็นแค่วงกลมหมุนๆ เฉยๆ โดยไม่รู้ความคืบหน้า
-    setLoaderProgress: (pct, sub) => {
-        const wrap = document.getElementById('loader-progress-wrap');
-        const bar  = document.getElementById('loader-progress-bar');
-        const pctEl = document.getElementById('loader-progress-pct');
-        const p = Math.max(0, Math.min(100, Math.round(pct)));
-        if (wrap) wrap.style.display = 'block';
-        if (bar) bar.style.width = p + '%';
-        if (pctEl) pctEl.innerText = p + '%';
-        if (sub != null) {
-            const subEl = document.getElementById('loader-subtext');
-            if (subEl) subEl.innerText = sub;
-        }
     },
 
     // ✅ UX: Legend สีของแต่ละ Day — toggle เปิด/ปิด panel
@@ -362,80 +319,14 @@ const UI = {
         }, 100);
     },
 
-    // ✅ NEW (2026-09-05): สรุประยะทาง/เวลาจริงต่อวัน (จากผลลัพธ์ ORS ของ "🧭 จัดลำดับการเยี่ยมอัตโนมัติ"
-    // หรือ AI Route Builder ที่จัดลำดับให้อัตโนมัติ) — แสดงในแท็บ "1. ข้อมูล" ก่อนช่องค้นหาร้าน
-    // วันที่ยังไม่เคยจัดลำดับ (ไม่มีข้อมูลระยะทางจริง) จะโชว์ "ยังไม่ได้จัดลำดับ" แทน
-    renderDayStats: () => {
-        const el = document.getElementById('daystats-panel');
-        if (!el) return;
-        const route = State.localActiveRoute;
-        if (!route) { el.innerHTML = ''; return; }
-
-        const stats = (State.db.routeDayStats && State.db.routeDayStats[route]) || {};
-        const k = State.db.cycleDays || 24;
-        const dayKeys = Array.from({ length: k }, (_, i) => `Day ${i + 1}`)
-            .filter(d => State.stores.some(s => s.days && s.days.includes(d)));
-
-        if (!dayKeys.length) { el.innerHTML = ''; return; }
-
-        const fmtDuration = (min) => {
-            if (typeof min !== 'number') return '—';
-            const h = Math.floor(min / 60), m = Math.round(min % 60);
-            return h > 0 ? `${h} ชม. ${m} นาที` : `${m} นาที`;
-        };
-
-        let totalKm = 0, doneCount = 0;
-        const rows = dayKeys.map(d => {
-            const s = stats[d];
-            const storeCount = State.stores.filter(x => x.days && x.days.includes(d)).length;
-            const label = DAY_COLORS[d]?.name || d;
-            const color = DAY_COLORS[d]?.hex || '#94a3b8';
-            if (s && typeof s.distanceKm === 'number') {
-                totalKm += s.distanceKm; doneCount++;
-                return `<tr class="border-b border-gray-100">
-                    <td class="py-1.5 px-2"><span class="inline-block w-2.5 h-2.5 rounded-full mr-1.5" style="background:${color}"></span>${label}</td>
-                    <td class="py-1.5 px-2 text-right">${storeCount}</td>
-                    <td class="py-1.5 px-2 text-right font-bold text-indigo-700">${s.distanceKm.toFixed(1)} กม.</td>
-                    <td class="py-1.5 px-2 text-right text-gray-500">${fmtDuration(s.durationMin)}</td>
-                </tr>`;
-            }
-            // ✅ NEW: แยก 2 กรณี — ยังไม่มีลำดับเลย vs มีลำดับครบแล้ว(เช่น เซลล์ลากจัดเอง) แค่ยังไม่เคยคำนวณระยะทาง
-            const hasFullOrder = storeCount > 0 && State.stores.filter(x => x.days && x.days.includes(d))
-                .every(x => x.seqs && x.seqs[d] != null);
-            const placeholder = hasFullOrder ? 'มีลำดับแล้ว — ยังไม่ได้คำนวณระยะทาง' : 'ยังไม่ได้จัดลำดับ';
-            return `<tr class="border-b border-gray-100">
-                <td class="py-1.5 px-2"><span class="inline-block w-2.5 h-2.5 rounded-full mr-1.5" style="background:${color}"></span>${label}</td>
-                <td class="py-1.5 px-2 text-right">${storeCount}</td>
-                <td class="py-1.5 px-2 text-right text-gray-400 italic" colspan="2">${placeholder}</td>
-            </tr>`;
-        }).join('');
-
-        el.innerHTML = `
-            <div class="bg-white p-4 rounded-2xl border border-gray-200 shadow-sm mb-3">
-                <div class="flex items-center justify-between mb-2">
-                    <h3 class="font-bold text-sm text-gray-800">📏 ระยะทางจริงต่อวัน (${route})</h3>
-                    ${doneCount > 0 ? `<span class="text-xs font-bold text-indigo-700">รวม ${totalKm.toFixed(1)} กม. (${doneCount}/${dayKeys.length} วัน)</span>` : ''}
-                </div>
-                <!-- ✅ NEW (2026-09-05): คำนวณระยะทางจริงจากลำดับที่มีอยู่แล้ว (เช่น เซลล์ลากจัดเองมาแล้ว)
-                     โดยไม่จัดลำดับใหม่ — ใช้ ORS Directions API แทน Optimization API -->
-                <button onclick="App.calcAllDayDistancesFromExisting()"
-                    class="w-full bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg py-1.5 text-xs font-bold transition mb-2">
-                    📏 คำนวณระยะทางจริงจากลำดับที่มีอยู่แล้ว (ไม่จัดลำดับใหม่)
-                </button>
-                <div class="max-h-56 overflow-y-auto">
-                    <table class="w-full text-xs">
-                        <thead>
-                            <tr class="text-gray-500 border-b border-gray-200 sticky top-0 bg-white">
-                                <th class="text-left py-1 px-2 font-bold">วัน</th>
-                                <th class="text-right py-1 px-2 font-bold">ร้าน</th>
-                                <th class="text-right py-1 px-2 font-bold" colspan="2">ระยะทาง/เวลา</th>
-                            </tr>
-                        </thead>
-                        <tbody>${rows}</tbody>
-                    </table>
-                </div>
-                ${doneCount < dayKeys.length ? `<p class="text-[11px] text-gray-400 mt-2">💡 กด "🧭 จัดลำดับการเยี่ยมอัตโนมัติ" ในแต่ละวัน หรือกด AI Route Builder ใหม่ (หลังตั้งจุดเริ่มต้นของสาย) เพื่อให้ได้ระยะทางจริงครบทุกวัน</p>` : ''}
-            </div>`;
+    /** V0.9.1: เติมตัวเลือกวันทั้งหมดให้ช่องเลือกวันของการ์ด ตอนผู้ใช้กดเปิดครั้งแรก */
+    _fillDaySel: (el) => {
+        if (!el || el.dataset.full) return;
+        const cur = el.value;
+        el.innerHTML = Object.keys(DAY_COLORS)
+            .map(d => `<option value="${d}" ${d === cur ? 'selected' : ''}>${DAY_COLORS[d].name}</option>`).join('');
+        el.value = cur;
+        el.dataset.full = '1';
     },
 
     render: () => {
@@ -493,7 +384,7 @@ const UI = {
                     <div class="p-3 bg-gray-50 border border-dashed border-gray-300 rounded-xl shadow-sm opacity-75">
                         <div class="flex justify-between items-start mb-1">
                             <span class="font-bold text-sm text-gray-500">${s.name} ${b}</span>
-                            <span class="text-[9px] font-bold bg-gray-200 text-gray-500 px-1.5 py-0.5 rounded">💤 พัก</span>
+                            <span class="text-[9px] font-bold bg-gray-200 text-gray-500 px-1.5 py-0.5 rounded">🗑️ ออกจากแผน</span>
                         </div>
                         <p class="text-[10px] text-gray-400 font-mono mb-2">ID: ${s.id}</p>
                         <div class="flex gap-2">
@@ -511,22 +402,18 @@ const UI = {
             }
 
             htmlP.push(`
-                <div class="p-3 bg-white border border-gray-200 rounded-xl shadow-sm flex items-start gap-2">
-                    <div class="flex-1 min-w-0">
-                        <div class="flex justify-between items-start">
-                            <span class="font-bold text-sm text-gray-800">${s.name} ${b}</span>
-                            ${kpiBadge}
-                        </div>
-                        <span class="block text-[10px] text-gray-400 font-mono mt-1">${s.marketName ? `<span class="block text-[10px] text-blue-400 font-mono mt-0.5">${s.marketName}</span>` : ''}ID: ${s.id}</span>
+                <div class="p-3 bg-white border border-gray-200 rounded-xl shadow-sm">
+                    <div class="flex justify-between items-start">
+                        <span class="font-bold text-sm text-gray-800">${s.name} ${b}</span>
+                        ${kpiBadge}
                     </div>
-                    <button onclick="StoreMgr.permanentDelete('${s.id}')" title="ลบร้านนี้ถาวร"
-                        class="shrink-0 w-7 h-7 flex items-center justify-center rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 transition">🗑️</button>
+                    <span class="block text-[10px] text-gray-400 font-mono mt-1">${s.marketName ? `<span class="block text-[10px] text-blue-400 font-mono mt-0.5">${s.marketName}</span>` : ''}ID: ${s.id}</span>
                 </div>`);
 
             if (!s.days || !s.days.length) {
                 htmlU.push(`
                     <label class="flex p-3 bg-white border ${s.selected ? 'border-indigo-400 ring-1 ring-indigo-400 bg-indigo-50' : 'border-gray-200'} rounded-2xl cursor-pointer shadow-sm">
-                        <input type="checkbox" ${s.selected ? 'checked' : ''} onchange="StoreMgr.toggleSelect('${s.id}')" class="mr-3 mt-1.5 w-4 h-4 text-indigo-600 rounded">
+                        <input type="checkbox" ${s.selected ? 'checked' : ''} onchange="(StoreMgr.toggleStay || StoreMgr.toggleSelect)('${s.id}')" class="mr-3 mt-1.5 w-4 h-4 text-indigo-600 rounded">
                         <div class="flex-1">
                             <div class="flex justify-between">
                                 <p class="font-bold text-sm text-gray-800">${s.name} ${b}</p>
@@ -534,13 +421,25 @@ const UI = {
                             </div>
                             <p class="text-[10px] text-gray-400 font-mono mt-0.5">ID: ${s.id}</p>
                         </div>
-                        <button onclick="event.preventDefault(); event.stopPropagation(); StoreMgr.permanentDelete('${s.id}')" title="ลบร้านนี้ถาวร"
-                            class="shrink-0 self-start w-7 h-7 flex items-center justify-center rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 transition">🗑️</button>
                     </label>`);
             } else {
-                const dTxt = s.days.join(' & ');
+                // V0.7.6: ร้านที่อยู่ 3 ตลาดขึ้นไป (เช่นเข้ารายสัปดาห์) — โชว์ทุกตลาดแบบย่อ และล็อกช่องเลือกวัน/ปุ่ม ✕
+                //   (ของเดิมเลือกวันใหม่หรือกด ✕ แล้วตลาดอื่นหายหมด เหลือ 1-2 ตลาดโดยไม่เตือน)
+                const nDay = (d) => parseInt(String(d).replace(/\D/g, ''), 10) || 0;
+                const many = s.days.length >= 3;
+                // V0.8.0: ทุกการ์ดเขียนวันแบบเดียวกัน "D2 · D12"
+                const dTxt = s.days.slice().sort((x, y) => nDay(x) - nDay(y)).map(d => 'D' + nDay(d)).join(' · ')
+                    + (many ? ` <span class="text-[9.5px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 rounded px-1">เข้า ${s.days.length} ครั้ง/รอบ</span>` : '');
                 const c = DAY_COLORS[s.days[0]] ? DAY_COLORS[s.days[0]].hex : '#999';
-                const selOpts = opts.replace(`value="${s.days[0]}"`, `value="${s.days[0]}" selected`);
+                // V0.9.1: ใส่ตัวเลือกวันแค่ตัวปัจจุบัน — ที่เหลือเติมตอนกดเปิด (เดิม 30 ตัวเลือก × ทุกการ์ด = หลายหมื่น element ทำให้กดอะไรก็หน่วง)
+                const selOpts = `<option value="${s.days[0]}" selected>${DAY_COLORS[s.days[0]] ? DAY_COLORS[s.days[0]].name : s.days[0]}</option>`;
+                const ctl = many
+                    ? `<span title="ร้านนี้อยู่ ${s.days.length} ตลาด — เอาออกทีละตลาด: เปิดการ์ดวันในแท็บ 3 แล้วกด ➖ ท้ายแถว · ถอดทั้งหมด: เลือกร้านแล้วใช้ Unassign"
+                          class="text-[10.5px] font-bold text-gray-500 bg-gray-50 border border-gray-200 rounded-lg px-2 py-1.5 whitespace-nowrap">🔒 ${s.days.length} ตลาด</span>`
+                    : `<select onchange="StoreMgr.changeDay('${s.id}', this.value)" onmousedown="UI._fillDaySel(this)" onfocus="UI._fillDaySel(this)" onkeydown="UI._fillDaySel(this)" class="text-xs p-1.5 border border-gray-200 rounded-lg shadow-sm outline-none bg-gray-50">
+                                ${selOpts}
+                            </select>
+                            <button onclick="StoreMgr.changeDay('${s.id}','remove')" class="bg-red-50 text-red-500 px-2.5 rounded-lg font-bold hover:bg-red-100 border border-red-100">✕</button>`;
                 htmlA.push(`
                     <div id="card-${s.id}" class="p-3 bg-white border border-gray-200 rounded-2xl flex justify-between items-center shadow-sm">
                         <div class="flex-1 overflow-hidden mr-2">
@@ -553,12 +452,8 @@ const UI = {
                                 <span class="color-dot" style="background:${c}"></span>${dTxt}
                             </p>
                         </div>
-                        <div class="flex gap-1.5">
-                            <select onchange="StoreMgr.changeDay('${s.id}', this.value)" class="text-xs p-1.5 border border-gray-200 rounded-lg shadow-sm outline-none bg-gray-50">
-                                ${selOpts}
-                            </select>
-                            <button onclick="StoreMgr.changeDay('${s.id}','remove')" title="เอาร้านออกจากวันนี้ (ยังไม่ลบร้าน)" class="bg-red-50 text-red-500 px-2.5 rounded-lg font-bold hover:bg-red-100 border border-red-100">✕</button>
-                            <button onclick="StoreMgr.permanentDelete('${s.id}')" title="ลบร้านนี้ถาวร" class="bg-gray-50 text-gray-400 px-2.5 rounded-lg font-bold hover:bg-red-100 hover:text-red-500 border border-gray-200">🗑️</button>
+                        <div class="flex gap-1.5 items-center">
+                            ${ctl}
                         </div>
                     </div>`);
             }
@@ -597,7 +492,7 @@ const UI = {
             }
             elInactive.innerHTML = `
                 <div class="mt-4 mb-1 px-1 flex items-center gap-2">
-                    <span class="text-xs font-bold text-gray-400 uppercase tracking-wide">💤 ร้านที่พัก (${htmlI.length})</span>
+                    <span class="text-xs font-bold text-gray-400 uppercase tracking-wide">🗑️ ออกจากแผน (${htmlI.length})</span>
                     <div class="flex-1 h-px bg-gray-200"></div>
                 </div>
                 <div class="flex flex-col gap-2">${htmlI.join('')}</div>`;
@@ -606,28 +501,14 @@ const UI = {
         }
 
         const sumH = [];
-        // ✅ FIX-F2: บางสายมีร้าน F2 เยอะมากจนบางวัน "ไม่มีร้านไหนถือเป็นวันแรกเลย" — วันแบบนี้ไม่มี
-        // ร้านไหนเก็บชื่อตลาดที่ถูกต้องของมันไว้ถาวรได้ (ร้าน F2 มีช่อง marketName ค่าเดียว ผูกกับ
-        // วันแรกไปแล้ว) ใช้ FileManager._dayMarketNameMap ซึ่งมี fallback generate สดให้กรณีนี้ด้วย
-        const dayMarketMap = (typeof FileManager !== 'undefined')
-            ? FileManager._dayMarketNameMap(State.stores.filter(s => !s.inactive))
-            : {};
         Object.keys(sums).forEach(d => {
             if (sums[d] > 0) {
                 const c = DAY_COLORS[d].hex;
                 const act = State.activeRoadDay === d;
-                // ✅ NEW: แสดง Cycle Name (ชื่อตลาด รวม D{N} ในตัว) แทนป้าย "วันที่ N" เดิม — เฉพาะแท็บ
-                // "4. สรุป" นี้จุดเดียว (ไม่แตะ DAY_COLORS ที่ใช้ร่วมกับ dropdown/legend จุดอื่น เพราะ
-                // ชื่อตลาดผูกกับสาย/เดือนนี้เท่านั้น ไม่ใช่ค่าคงที่ระดับระบบ)
-                // ✅ ตัดแค่ "รหัสเซลล์" (token แรก เช่น "402V05") ออก — เก็บ D{N} ไว้ เพราะยังบอกลำดับ Day ได้
-                const stripRouteCode = (n) => (n || '').replace(/^\S+\s+/, '').trim();
-                const cycleNameLabel = dayMarketMap[d]
-                    ? stripRouteCode(dayMarketMap[d])
-                    : DAY_COLORS[d].name;
                 sumH.push(`
                     <div onclick="UI.showDayModal('${d}')" class="p-4 bg-white border ${act ? 'border-indigo-500 ring-2 ring-indigo-200' : 'border-gray-200'} rounded-2xl flex flex-col items-center cursor-pointer relative shadow-sm hover:shadow-md transition">
                         <div class="absolute top-0 left-0 w-full h-1.5 rounded-t-2xl" style="background:${c}"></div>
-                        <p class="text-xs font-bold text-gray-500 text-center truncate w-full px-1 mt-1" title="${cycleNameLabel}">${cycleNameLabel}</p>
+                        <p class="text-xs font-bold mt-1 text-gray-500">${DAY_COLORS[d].name}</p>
                         <p class="text-3xl font-black mt-1" style="color:${c}">${sums[d]}</p>
                     </div>`);
             }
@@ -647,9 +528,6 @@ const UI = {
         if (el('stat-done')) el('stat-done').innerText = aCnt;
         if (el('stat-pending')) el('stat-pending').innerText = wait;
         if (el('progress-bar')) el('progress-bar').style.width = tot ? `${Math.round(((tot - wait) / tot) * 100)}%` : '0%';
-
-        // ✅ NEW: อัปเดตคำแนะนำ "ขั้นต่ำร้าน/วัน" ของ AI Route Builder ให้ตรงกับจำนวนร้านที่ยังไม่จัดวันเสมอ
-        if (typeof AI !== 'undefined' && AI.refreshMinHint) AI.refreshMinHint();
 
         MapCtrl.renderMarkers();
         MapCtrl.drawLines();
@@ -716,29 +594,14 @@ const UI = {
     },
 
     renderAllRoutes: () => {
-        // ✅ RPN V0 (2026-10-08): ไม่นับสายเทียม "รอจัดสาย" และร้าน "ออกจากแผน" (s.inactive) — ดูแค่ไม่แก้ข้อมูล
-        const routes = {};
-        Object.keys(State.db.routes || {}).forEach(r => {
-            if (r !== 'รอจัดสาย') routes[r] = (State.db.routes[r] || []).filter(s => !s.inactive);
-        });
-        // ✅ BUGFIX: เดิมใช้ Object.keys(routes) ตรงๆ — ถ้ามี key แปลกปลอมหลุดเข้ามาใน State.db.routes
-        // จากที่ไหนก็ตาม (เช่น localStorage "last route" ข้ามศูนย์ปนกัน — ดู _lastRouteKey ใน
-        // admin-data.js) จะโผล่เป็น "สายผี" ในหน้านี้ด้วย ทั้งที่ไม่มีอยู่จริงในศูนย์นี้เลย กรองด้วย
-        // State.db.routeList (รายชื่อสายจริงที่ยืนยันจาก Firestore) ให้เหลือแต่สายที่มีอยู่จริงเท่านั้น
-        const validRoutes = new Set(State.db.routeList || []);
-        const routeKeys = Object.keys(routes).filter(r => validRoutes.has(r));
+        const routes = State.db.routes;
+        const routeKeys = Object.keys(routes);
 
         // ✅ Populate month dropdown จาก planList
         const sel = document.getElementById('export-month-sel');
         const planList = State.db?.planList || [];
         if (sel && planList.length > 0) {
             const currentVal = sel.value;
-            // ✅ BUGFIX: เดิม "จำ" ค่าที่เคยเลือกไว้ (currentVal) กลับเข้าไปเสมอทุกครั้งที่ฟังก์ชันนี้
-            // render (เรียกซ้ำบ่อยจาก UI.render()) ทำให้ export ค้างอยู่เดือนเก่าตลอดไปแม้แอดมินจะ
-            // สลับ "เดือนที่ดูอยู่" (App._currentPlanYM) ไปเดือนอื่นแล้วก็ตาม — Export กดกี่ครั้งก็ได้
-            // ข้อมูลเดือนเก่าซ้ำๆ ทั้งที่หน้าจอโชว์เดือนใหม่อยู่ ต้องเลิกจำค่าเดิมเมื่อเดือนที่ดูอยู่เปลี่ยนไป
-            const lastYm = sel.dataset.lastCurrentYm;
-            const currentYmChanged = lastYm !== undefined && lastYm !== App._currentPlanYM;
             sel.innerHTML = '<option value="">-- เดือนปัจจุบัน --</option>' +
                 planList.map(ym => {
                     const [y, m] = ym.split('_');
@@ -747,26 +610,25 @@ const UI = {
                     const isCurrent = ym === App._currentPlanYM;
                     return `<option value="${ym}"${isCurrent ? ' selected' : ''}>${label}${isCurrent ? ' (ปัจจุบัน)' : ''}</option>`;
                 }).join('');
-            if (currentVal && !currentYmChanged) sel.value = currentVal;
-            sel.dataset.lastCurrentYm = App._currentPlanYM || '';
+            if (currentVal) sel.value = currentVal;
         }
 
         const summaryEl = document.getElementById('allroutes-summary');
         const totalStores = routeKeys.reduce((sum, r) => sum + (routes[r] || []).length, 0);
         if (summaryEl) {
             let summaryHTML = `
-                <div class="db-panel p-4 flex flex-col items-center">
+                <div class="bg-white rounded-xl shadow-sm p-4 flex flex-col items-center">
                     <div class="text-2xl font-black text-indigo-600">${routeKeys.length}</div>
                     <div class="text-sm text-gray-500 mt-1">สายวิ่งทั้งหมด</div>
                 </div>
-                <div class="db-panel p-4 flex flex-col items-center">
+                <div class="bg-white rounded-xl shadow-sm p-4 flex flex-col items-center">
                     <div class="text-2xl font-black text-emerald-600">${totalStores}</div>
                     <div class="text-sm text-gray-500 mt-1">ร้านค้าทั้งหมด</div>
                 </div>`;
             routeKeys.forEach(r => {
                 const storeCount = (routes[r] || []).length;
                 const assigned = (routes[r] || []).filter(s => s.days && s.days.length > 0).length;
-                summaryHTML += `<div class="db-panel p-4 flex flex-col border-l-4 border-indigo-400">
+                summaryHTML += `<div class="bg-white rounded-xl shadow-sm p-4 flex flex-col border-l-4 border-indigo-400">
                     <div class="text-sm font-black text-gray-800">${r}</div>
                     <div class="text-xl font-black text-indigo-500 mt-1">${storeCount}</div>
                     <div class="text-xs text-gray-400">ร้านค้า / จัดแล้ว: ${assigned}</div>
@@ -785,11 +647,11 @@ const UI = {
         routeKeys.forEach(routeName => {
             (routes[routeName] || []).forEach(store => {
                 const dayText = store.days && store.days.length > 0 ? store.days.join(',') : (store.dayOriginal || '-');
-                allRows.push('<tr><td class="text-indigo-700 font-bold text-xs">' + routeName + '</td>' +
-                    '<td class="text-xs text-gray-600">' + (store.code || '') + '</td>' +
-                    '<td class="text-gray-800">' + (store.name || '') + '</td>' +
-                    '<td class="text-xs text-gray-500">' + (store.salesCode || '') + '</td>' +
-                    '<td class="text-center text-xs text-indigo-600">' + dayText + '</td></tr>');
+                allRows.push('<tr><td class="px-3 py-2 text-indigo-700 font-bold text-xs">' + routeName + '</td>' +
+                    '<td class="px-3 py-2 text-xs text-gray-600">' + (store.code || '') + '</td>' +
+                    '<td class="px-3 py-2 text-gray-800">' + (store.name || '') + '</td>' +
+                    '<td class="px-3 py-2 text-xs text-gray-500">' + (store.salesCode || '') + '</td>' +
+                    '<td class="px-3 py-2 text-center text-xs text-blue-600">' + dayText + '</td></tr>');
             });
         });
 
@@ -810,13 +672,20 @@ const UI = {
 // 📤 ExportCtrl — จัดการ Export Modal
 // ==========================================
 const ExportCtrl = {
+    // V0.9.4: หน้าต่าง "📝 แก้แผนใน Excel" — Export แผนที่กำลังแก้ (excel-rt.js) + นำกลับเข้า
     openModal: () => {
-        // populate route selector
         const routeSel = document.getElementById('export-route-sel');
         if (routeSel) {
-            routeSel.innerHTML = '<option value="ALL">📦 ทุกสาย</option>' +
-                (State.db.routeList || Object.keys(State.db.routes || {}))
-                    .map(r => `<option value="${r}">${r}</option>`).join('');
+            const all = (State.db.routeList || Object.keys(State.db.routes || {}))
+                .filter(r => r !== 'รอจัดสาย' && Array.isArray((State.db.routes || {})[r]))
+                .sort((a, b) => a.localeCompare(b, 'th', { numeric: true }));
+            let open = [];
+            try { open = (typeof MultiRoute !== 'undefined' ? MultiRoute.open : []).filter(r => all.includes(r)); } catch (e) {}
+            if (!open.length && State.localActiveRoute && all.includes(State.localActiveRoute)) open = [State.localActiveRoute];
+            const lbl = open.length > 3 ? open.slice(0, 3).join(', ') + ` +${open.length - 3}` : open.join(', ');
+            routeSel.innerHTML = (open.length && open.length < all.length ? `<option value="OPEN">📍 สายที่เปิดอยู่ (${lbl})</option>` : '')
+                + '<option value="ALL">📦 ทุกสาย</option>'
+                + all.map(r => `<option value="${r}">${r}</option>`).join('');
         }
         document.getElementById('export-modal')?.classList.remove('hidden');
     },
@@ -827,12 +696,12 @@ const ExportCtrl = {
 
     doExport: () => {
         const routeSel = document.getElementById('export-route-sel');
-        const selectedRoute = routeSel?.value || 'ALL';
-        ExportCtrl.closeModal();
-        // ✅ FIX: ตัด fallback ของ ExcelIO ออก (2026-09-14) — ไฟล์/object นี้ไม่มีอยู่จริงในระบบแล้ว
-        // (ถูกแทนที่ด้วย FileManager ทั้งหมด) branch นี้ไปไม่ถึงตลอดมา
-        if (typeof FileManager !== 'undefined' && FileManager.exportAllRoutes) {
-            FileManager.exportAllRoutes(selectedRoute);
+        let v = routeSel?.value || 'ALL';
+        if (v === 'OPEN') {
+            try { v = MultiRoute.open.length ? MultiRoute.open : [State.localActiveRoute]; } catch (e) { v = [State.localActiveRoute]; }
         }
+        ExportCtrl.closeModal();
+        if (typeof ExcelRT !== 'undefined') ExcelRT.export(v);
     },
 };
+
