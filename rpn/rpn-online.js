@@ -263,9 +263,13 @@
             return !!(curYM() && calReady() && !cal.loading && (!loader || !loader.style.display || loader.style.display === 'none'));
         } catch (e) { return false; }
     };
-    /** "402V01 D04 บ้านไร่" → เลขวันในชื่อเปลี่ยนตาม map (คงจำนวนหลักเดิม) — ไม่มีเลขวันในชื่อ = ไม่แตะ */
-    const renameDay = (name, map) => String(name || '').replace(/D(\d{1,2})(?!\d)/, (all, n) => {
-        const to = map['Day ' + parseInt(n, 10)];
+    /** "402V01 D04 บ้านไร่" → เลขวันในชื่อเปลี่ยนตาม map (คงจำนวนหลักเดิม) — ไม่มีเลขวันในชื่อ = ไม่แตะ
+     *  ✅ FIX (2026-10-09): แก้เฉพาะเมื่อเลขในชื่อ "ตรงกับช่องเดิมของร้านนั้น" — สายที่ชื่อเหลื่อมอยู่แล้ว
+     *  (402V09 พ.ย.: ช่อง D20 ชื่อ "D21 หนองตากยา") เคยโดนแก้ผิดทั้งที่ร้านไม่ได้ย้าย */
+    const renameDay = (name, map, oldDays) => String(name || '').replace(/D(\d{1,2})(?!\d)/, (all, n) => {
+        const k = 'Day ' + parseInt(n, 10);
+        if (!(oldDays || []).includes(k)) return all;
+        const to = map[k];
         if (!to) return all;
         const v = String(dn(to));
         return 'D' + (n.length >= 2 ? v.padStart(2, '0') : v);
@@ -285,6 +289,18 @@
         for (let i = 0; i < 80 && !(Array.isArray(State.db.routes[route]) && bridge.ready()); i++) await sleep(250);
         const arr = State.db.routes[route];
         if (!Array.isArray(arr)) return { ok: false, msg: 'ไม่พบสาย ' + route + ' ในแผนเดือนนี้' };
+        // ✅ FIX (2026-10-09): ห้ามสลับบนข้อมูลในหน่วยความจำ — หลังสลับเดือน RPN อาจถือข้อมูลจากแคช IndexedDB
+        // ของเบราว์เซอร์ (เก่ากว่า server) อยู่หลายวินาที เคยทำให้ 402V09 พ.ย. ถูกสลับบนข้อมูลเก่าแล้วบันทึกทับ
+        // ของใหม่บน server → อ่านเอกสารสายจาก server ตรง ๆ ก่อนเสมอ แล้วใช้ชุดนั้นแทนของในหน่วยความจำ
+        let fresh;
+        try { fresh = await App.planRoutesCol(ym).doc(route).get({ source: 'server' }); }
+        catch (e) { return { ok: false, msg: 'อ่านแผนล่าสุดจาก server ไม่ได้ (' + (e.code || e.message) + ') — ตรวจอินเทอร์เน็ตแล้วลองใหม่' }; }
+        if (!fresh.exists) return { ok: false, msg: 'ไม่พบสาย ' + route + ' บน server' };
+        const serverStores = fresh.data().stores || [];
+        if (sigOf(serverStores) !== sigOf(arr) || serverStores.length !== arr.length) {
+            arr.length = 0;
+            serverStores.forEach(s => arr.push(s));                     // แทนที่ในอาร์เรย์เดิม (State.stores อาจชี้อาร์เรย์นี้อยู่)
+        }
         if (req.basisSig && req.basisSig !== sigOf(arr) && !req.force) return { ok: false, stale: true, msg: 'แผนสายนี้ถูกแก้หลังจากส่งคำขอ' };
 
         try { if (window.EditHistory) EditHistory.mark('จัดลำดับตลาดตามคำขอ ' + route); } catch (e) {}
@@ -313,7 +329,7 @@
             const nc = {};
             s.days.forEach(t => { if (cyBySlot[t]) nc[t] = cyBySlot[t]; });
             if (s.cys || Object.keys(nc).length) { s.cys = nc; s.cy = nc[s.days[0]] || ''; }
-            if (s.marketName) s.marketName = renameDay(s.marketName, map);
+            if (s.marketName) s.marketName = renameDay(s.marketName, map, old);
         });
         let ptsChanged = false;
         const pts = State.db.cyPoints && State.db.cyPoints[route];

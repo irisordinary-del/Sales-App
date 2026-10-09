@@ -63,6 +63,25 @@
         };
     });
 
+    // ✅ FIX (2026-10-09): อ่านจาก server ก่อนเสมอ — Firestore เปิด persistence ไว้ (enablePersistence) และในช่วง
+    // ไม่กี่วินาทีแรกหลังเปิดหน้า/สลับเดือน get() แบบไม่ระบุ source คืนข้อมูลเก่าจากแคช IndexedDB ได้ (เจอจริงกับ
+    // RPN 402V09 พ.ย. — แก้บนข้อมูลเก่าแล้วบันทึกทับของใหม่บน server) → get() ที่ไม่ระบุ options ลอง server ก่อน
+    // ถ้าออฟไลน์/ไม่ได้ค่อยถอยไปแบบเดิม (แคช) · get({source:...}) ที่ระบุมาเองไม่แตะ
+    if (Doc && typeof Doc.get === 'function' && !Doc.get._serverFirst) {
+        const origGet = Doc.get;
+        Doc.get = function (opts) {
+            if (opts) return origGet.call(this, opts);
+            const self = this;
+            return new Promise((resolve, reject) => {
+                let done = false;
+                const fallback = () => { if (done) return; done = true; origGet.call(self).then(resolve, reject); };
+                origGet.call(self, { source: 'server' }).then(v => { if (!done) { done = true; resolve(v); } }, fallback);
+                setTimeout(fallback, 8000);                                     // รอ server ไม่เกิน 8 วิ
+            });
+        };
+        Doc.get._serverFirst = true;
+    }
+
     // ฟังรายการล็อกของศูนย์ที่เปิดอยู่ — รอจน app-config.js ตั้ง CENTER_DOC และ initializeApp แล้ว
     // (index.html เปลี่ยน CENTER_DOC ทีหลังสำหรับ supervisor — เช็คซ้ำเป็นระยะ ถ้าเปลี่ยนก็ย้ายไปฟังเอกสารใหม่)
     let watching = '', loaded = false, unsub = null;

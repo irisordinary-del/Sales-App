@@ -33,6 +33,26 @@ const firebaseConfig = {
 };
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
+// ✅ FIX (2026-10-09): get() แบบไม่ระบุ source อ่านจาก server ก่อน (ออฟไลน์ค่อยใช้แคช) — แคช IndexedDB
+// (enablePersistence ด้านล่าง) เคยทำให้ซุปเห็นแผนเดือนหน้าเป็นข้อมูลเก่า แล้วส่งคำขอจัดลำดับบนข้อมูลนั้น
+// (402V09 พ.ย. 2026-10-08) · ลากสลับลำดับร้านก็เขียน stores ทั้งก้อนจากข้อมูลที่ get() มา จึงต้องสดเสมอ
+(function () {
+    const D = firebase.firestore.DocumentReference && firebase.firestore.DocumentReference.prototype;
+    if (!D || typeof D.get !== 'function' || D.get._serverFirst) return;
+    const orig = D.get;
+    // สัญญาณอ่อนในพื้นที่: รอ server ไม่เกิน 4 วิ แล้วถอยไปแบบเดิม (แคช) — แอปยังเปิดได้แม้เน็ตไม่ดี
+    D.get = function (opts) {
+        if (opts) return orig.call(this, opts);
+        const self = this;
+        return new Promise((resolve, reject) => {
+            let done = false;
+            const fallback = () => { if (done) return; done = true; orig.call(self).then(resolve, reject); };
+            orig.call(self, { source: 'server' }).then(v => { if (!done) { done = true; resolve(v); } }, fallback);
+            setTimeout(fallback, 4000);
+        });
+    };
+    D.get._serverFirst = true;
+})();
 
 // ✅ FIX (2026-07-12): เจอ error ซ้ำๆ ตลอด "WebChannelConnection RPC 'Listen' stream
 // transport errored" + 404 บน google.firestore.v1.Firestore/Listen ในทุกอุปกรณ์/เบราว์เซอร์
