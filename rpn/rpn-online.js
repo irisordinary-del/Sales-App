@@ -91,6 +91,22 @@
     const sigOf = (stores) => hash((stores || []).filter(s => s && !s.inactive)
         .map(s => String(s.id) + ':' + (s.days || []).slice().sort().join(','))
         .sort().join('|'));
+    // ✅ NEW (2026-10-09): ลายนิ้วมือของปฏิทินที่ใช้คำนวณ (override ของสาย › ของเดือน) — แอปเซลเทียบกับปฏิทิน
+    // ปัจจุบันของสายก่อนใช้ rpnCal · เคยค้าง: ตั้งปฏิทิน 402C02 พ.ย. ตอน RPN เปิดเดือนอื่นอยู่ (reconcile คำนวณ
+    // ใหม่แค่เดือนที่เปิด) แอปเซลจึงยังใช้วันที่ชุดเก่าเพราะร้านไม่เปลี่ยน sig เลยตรง — ต้องตรงกับ RpnCompat.cfgSig
+    const CFG_KEYS = ['mode', 'cycleDays', 'anchorType', 'startDay', 'startDayNum', 'anchorWeekday', 'anchorDate',
+        'anchorDayNum', 'holidays', 'weeklyHolidays', 'holidayMode', 'mapping', 'weekdayMap'];
+    const cfgSig = (c) => {
+        c = c || {};
+        return hash(JSON.stringify(CFG_KEYS.map(k => {
+            let v = c[k];
+            if (k === 'holidayMode' && !v) v = 'shift';
+            if (Array.isArray(v)) v = v.map(Number).sort((a, b) => a - b);
+            else if (v && typeof v === 'object') v = Object.keys(v).sort().map(x => [x, v[x]]);
+            return v === undefined ? null : v;
+        })));
+    };
+    const cfgOfRoute = (rt) => ((State.db.routeCal || {})[rt]) || State.db.calendarConfig || null;
     const ROUTE_RE = /^appData\/([^/]+)\/plans\/(\d{4}_\d{2})\/routes\/([^/]+)$/;
     const PLAN_RE  = /^appData\/([^/]+)\/plans\/(\d{4}_\d{2})$/;
     const curYM = () => (typeof App !== 'undefined' && App._currentPlanYM) || '';
@@ -109,9 +125,9 @@
             const m = (typeof RoadMaster !== 'undefined' && RoadMaster.marketName) ? (RoadMaster.marketName(rt, d, list) || '') : '';
             days[d] = { d: ds, m };
         }
-        return { v: 1, ym: curYM(), sig: sigOf(list), days, at: new Date().toISOString() };
+        return { v: 1, ym: curYM(), sig: sigOf(list), cfg: cfgSig(cfgOfRoute(rt)), days, at: new Date().toISOString() };
     };
-    const calHash = (cal) => cal ? hash(cal.sig + JSON.stringify(cal.days)) : '';
+    const calHash = (cal) => cal ? hash(cal.sig + '|' + (cal.cfg || '') + JSON.stringify(cal.days)) : '';
 
     const cal = { written: {}, index: {}, indexYM: '', done: {}, need: false, busy: false, loading: 0, gen: 0 };
 

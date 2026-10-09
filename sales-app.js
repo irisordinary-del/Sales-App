@@ -881,11 +881,32 @@ const RpnCompat = {
     },
     marketOf: (rpn, dayLabel) => (rpn && rpn.days && rpn.days[dayLabel] && rpn.days[dayLabel].m) || '',
 
+    // ✅ NEW (2026-10-09): ลายนิ้วมือปฏิทิน — ต้องตรงกับ cfgSig ใน rpn/rpn-online.js ทุกตัวอักษร
+    // rpnCal ใช้ได้ก็ต่อเมื่อคำนวณจากปฏิทินเดียวกับที่สายนี้ตั้งอยู่ตอนนี้ (ตั้งปฏิทินใหม่แล้ว RPN ยังไม่ได้คำนวณ
+    // วันที่ใหม่ = ใช้ตัวคำนวณปฏิทินของแอปนี้แทน) · rpnCal รุ่นเก่าที่ไม่มี cfg ใช้ไม่ได้ (บอกไม่ได้ว่าตรงไหม)
+    _CFG_KEYS: ['mode', 'cycleDays', 'anchorType', 'startDay', 'startDayNum', 'anchorWeekday', 'anchorDate',
+        'anchorDayNum', 'holidays', 'weeklyHolidays', 'holidayMode', 'mapping', 'weekdayMap'],
+    cfgSig: (c) => {
+        c = c || {};
+        return RpnCompat.hash(JSON.stringify(RpnCompat._CFG_KEYS.map(k => {
+            let v = c[k];
+            if (k === 'holidayMode' && !v) v = 'shift';
+            if (Array.isArray(v)) v = v.map(Number).sort((a, b) => a - b);
+            else if (v && typeof v === 'object') v = Object.keys(v).sort().map(x => [x, v[x]]);
+            return v === undefined ? null : v;
+        })));
+    },
+    /** rpn ใช้ได้กับปฏิทินปัจจุบันของสาย (base = override ของสาย › ปฏิทินของเดือน) ไหม */
+    fresh: (rpn, base) => !!(rpn && rpn.cfg && rpn.cfg === RpnCompat.cfgSig(base)),
+
     /** rpnCal ของสายที่กำลังดูในเดือนนั้น (เลือกสายแบบเดียวกับ CalendarCtrl._resolveActiveCfg) */
     active: (year, month) => {
         const ym = `${year}_${String(month + 1).padStart(2, '0')}`;
         const route = (App.isSupervisor() && SupervisorUI._selectedRoute) ? SupervisorUI._selectedRoute : State.myRoute;
-        return State.planCache[ym]?.routeRpn?.[route] || null;
+        const plan = State.planCache[ym];
+        const rpn = plan?.routeRpn?.[route] || null;
+        const base = plan?.routeOverrides?.[route] || (plan !== undefined ? plan?.calendarConfig : State.calendarConfig);
+        return RpnCompat.fresh(rpn, base) ? rpn : null;
     },
     /** ร้านของสายที่กำลังดู — Supervisor ใช้รายการต่อสายจากเอกสารสายจริง (salesCode ของร้านที่ RPN ย้ายสาย
      *  ยังเป็นรหัสเดิมจนกว่าจะส่งออก DMS จึงกรองด้วย salesCode ไม่ได้แล้ว) */
@@ -2336,7 +2357,7 @@ const CalendarCtrl = {
         // ✅ RPN V0 (2026-10-08): สายที่มีวันที่จริงจาก RPN (rpnCal) → ใช้ชุดนั้นเป็นหลัก ห่อเป็นโหมด 'rpn'
         // คงค่าเดิม (holidays ฯลฯ) ไว้ให้ส่วนแสดงผล และเก็บ _base ไว้เผื่อวันที่ไม่มีตลาดไหนวิ่ง (ดู getDayLabelForCfg)
         const rpn = plan?.routeRpn?.[route];
-        if (rpn) return Object.assign({}, base || {}, { mode: 'rpn', _rpn: rpn, _base: base || null, _baseMode: base?.mode || null });
+        if (RpnCompat.fresh(rpn, base)) return Object.assign({}, base || {}, { mode: 'rpn', _rpn: rpn, _base: base || null, _baseMode: base?.mode || null });
         return base;
     },
 
