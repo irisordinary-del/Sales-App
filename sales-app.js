@@ -1383,8 +1383,29 @@ const MoveRequest = {
         const stores = (App.isSupervisor() && SupervisorUI._selectedRoute) ? (State.allRoutes[route] || []) : State.allStores;
         const store  = stores.find(s => String(s.id) === String(storeId));
         if (!store) return showSalesToast('⚠️ ไม่พบร้านนี้', true);
-        const days = Array.from(new Set(stores.flatMap(s => s.days || []))).filter(d => d && d !== fromDay).sort();
+        const days = Array.from(new Set(stores.flatMap(s => s.days || []))).filter(d => d && d !== fromDay);
         if (!days.length) return showSalesToast('⚠️ ไม่มี Day อื่นให้ย้ายไปในสายนี้', true);
+
+        // ✅ NEW (2026-10-09): แต่ละ Day แสดงวันที่จริง + ชื่อตลาด + จำนวนร้าน และเรียงตามวันที่ในเดือนที่ใช้งานอยู่
+        // (เดิมเรียงแบบตัวอักษร: Day 1, Day 10, Day 11 … และไม่บอกว่าเป็นตลาดอะไร วันไหน)
+        const [ay, am1] = String(State.activePlanYM || '').split('_').map(Number);
+        const y = ay || new Date().getFullYear(), m = am1 ? am1 - 1 : new Date().getMonth();
+        const dim = new Date(y, m + 1, 0).getDate();
+        const cfg = CalendarCtrl._resolveActiveCfg(y, m);
+        const datesOf = (label) => {
+            let a = CalendarCtrl.getDatesFromDayInMonth(label, y, m);
+            if (!a.length) { a = []; for (let d = 1; d <= dim; d++) if (CalendarCtrl.getDayLabelForCfg(d, cfg, stores, y, m) === label) a.push(d); }
+            return a;
+        };
+        const MON = new Date(y, m, 1).toLocaleDateString('th-TH', { month: 'short' });
+        const WD = ['อา.', 'จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.', 'ส.'];
+        const num = (l) => parseInt(String(l).replace(/\D/g, ''), 10) || 0;
+        const info = days.map(l => {
+            const dts = datesOf(l);
+            return { l, dts, first: dts.length ? Math.min(...dts) : 99, mk: getDayMarketList(l)[0] || '', n: stores.filter(s => (s.days || []).includes(l)).length };
+        }).sort((a, b) => a.first - b.first || num(a.l) - num(b.l));
+        const fromDts = datesOf(fromDay);
+        const fromTxt = fromDts.length ? `${fromDts.join(', ')} ${MON} (${fromDay})` : fromDay;
 
         let sheet = document.getElementById('move-request-sheet');
         if (!sheet) {
@@ -1398,10 +1419,22 @@ const MoveRequest = {
         <div style="position:relative;background:#fff;border-radius:20px 20px 0 0;width:100%;max-width:480px;max-height:70vh;overflow-y:auto;padding:16px 16px 28px;">
             <div style="display:flex;justify-content:center;padding:0 0 10px;"><div style="width:40px;height:4px;border-radius:2px;background:#e5e7eb;"></div></div>
             <div style="font-size:15px;font-weight:900;color:#111827;margin-bottom:2px;">🔁 ขอย้ายวัน — ${store.name}</div>
-            <div style="font-size:12px;color:#6b7280;margin-bottom:14px;">ตอนนี้อยู่ ${fromDay} · เลือกวันปลายทาง (ต้องรอแอดมินอนุมัติก่อน มีผลจริง)</div>
+            <div style="font-size:12px;color:#6b7280;margin-bottom:14px;">ตอนนี้อยู่ ${fromTxt} · เลือกวันปลายทาง (ต้องรอแอดมินอนุมัติก่อน มีผลจริง)</div>
             <div style="display:flex;flex-direction:column;gap:8px;">
-                ${days.map(d => `<button onclick="MoveRequest.submit('${storeId}','${fromDay}','${d}')"
-                    style="width:100%;padding:12px 16px;border-radius:14px;border:1.5px solid #e5e7eb;background:#f9fafb;text-align:left;font-size:14px;font-weight:700;color:#111827;cursor:pointer;">${d}</button>`).join('')}
+                ${info.map(x => {
+                    const dateMain = x.dts.length ? `${WD[new Date(y, m, x.dts[0]).getDay()]} ${x.dts[0]} ${MON}` : 'ไม่มีวันวิ่งเดือนนี้';
+                    const more = x.dts.length > 1 ? `<div style="font-size:10px;font-weight:800;color:#6366f1;">+ ${x.dts.slice(1).join(', ')} ${MON}</div>` : '';
+                    return `<button onclick="MoveRequest.submit('${storeId}','${fromDay}','${x.l}')"
+                    style="width:100%;padding:10px 14px;border-radius:14px;border:1.5px solid #e5e7eb;background:#f9fafb;text-align:left;cursor:pointer;display:flex;align-items:center;gap:12px;">
+                        <div style="width:74px;flex-shrink:0;line-height:1.25;">
+                            <div style="font-size:13px;font-weight:900;color:#111827;">${dateMain}</div>${more}
+                            <div style="font-size:10px;font-weight:800;color:#9ca3af;">${x.l}</div>
+                        </div>
+                        <div style="flex:1;min-width:0;">
+                            <div style="font-size:13px;font-weight:800;color:#1d4ed8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${x.mk || '(ไม่มีชื่อตลาด)'}</div>
+                            <div style="font-size:11px;color:#6b7280;">${x.n} ร้าน</div>
+                        </div></button>`;
+                }).join('')}
             </div>
         </div>`;
     },
