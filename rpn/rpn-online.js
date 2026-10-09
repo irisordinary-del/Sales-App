@@ -218,7 +218,15 @@
                 if (!c) continue;
                 const h = calHash(c);
                 if (cal.index[rt] === h) continue;
-                if (cal.written[rt] !== h) await origSet.call(App.planRoutesCol(ym).doc(rt), { rpnCal: c }, { merge: true });
+                if (cal.written[rt] !== h) {
+                    // ✅ FIX (2026-10-09): เทียบกับเอกสารสายบน server ก่อนเขียนเสมอ — เคยเขียน rpnCal ของ 402V08 พ.ย.
+                    // จากข้อมูลเดือน ก.ย. ที่ยังค้างใน State ระหว่างสลับเดือน (ตัวกันช่วงโหลดใน wrapLoad ไม่พอ เพราะ
+                    // โมดูลอื่นของ RPN ยังแตะ State.db.routes ได้) — ไม่ตรง = ข้ามไว้ รอบหน้าค่อยลองใหม่
+                    let srv = null;
+                    try { srv = await App.planRoutesCol(ym).doc(rt).get({ source: 'server' }); } catch (e) { srv = null; }
+                    if (!srv || !srv.exists || sigOf(srv.data().stores) !== c.sig || !still()) { cal.done[rt] = false; continue; }
+                    await origSet.call(App.planRoutesCol(ym).doc(rt), { rpnCal: c }, { merge: true });
+                }
                 cal.written[rt] = h;
                 cal.index[rt] = h;
                 changed = true;
