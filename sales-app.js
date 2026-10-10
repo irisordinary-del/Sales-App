@@ -449,8 +449,20 @@ const App = {
     },
 
     switchToPlan: async (ym) => {
-        const data = await App.loadPlanData(ym);
-        State.allStores      = data.stores;
+        // ✅ FIX (2026-10-10): Supervisor/ASM — planCache ของเดือนเก็บร้าน "ทุกสาย" (loadPlanDataForSup) เดิมใช้
+        // data.stores ตรง ๆ ทำให้เลือกสายไว้ (402C02) แล้วกดวันที่ในปฏิทินข้ามเดือน → รายชื่อ/แผนที่ขึ้นร้านทุกสาย
+        // (Day 16 = 275 ร้าน) · และเดิมเรียก loadPlanData ซึ่งโหลดแค่สายเดียวมาเก็บเป็นแคชของทั้งเดือน
+        const sup  = App.isSupervisor();
+        const data = sup ? await App.loadPlanDataForSup(ym) : await App.loadPlanData(ym);
+        if (sup) {
+            if (data.routeStores) State.allRoutes = data.routeStores;
+            State.activeRouteOverrides = data.routeOverrides || {};
+            State.activeRouteRpn       = data.routeRpn || {};
+            const _r = SupervisorUI._selectedRoute;
+            State.allStores = _r ? (RpnCompat.storesOfRoute(data, _r, data.stores || []) || []) : (data.stores || []);
+        } else {
+            State.allStores = data.stores;
+        }
         State.calendarConfig = data.calendarConfig;
         State.activePlanYM   = data.ym;
         State._filterMarket  = '';

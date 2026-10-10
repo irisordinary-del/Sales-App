@@ -462,7 +462,52 @@
     };
     bridge.legacyName = legacyName;
 
+    // ── 9) หน้าตั้งค่าปฏิทิน (CalendarAdmin + CalUI ของ cal-ui.js) — แก้ 2 จุดที่ทำให้ "ตั้งแล้วเปิดใหม่ไม่ตรง" ──
+    // (2026-10-10, 402C02 พ.ย.) ① ติ๊กสายในโหมด "เลือกเฉพาะสาย" ไม่โหลดปฏิทินของสายนั้น (มีแต่ปุ่ม "แก้ไข" ที่โหลด)
+    // ฟอร์มยังเป็นค่าของศูนย์ → เห็นเหมือนค่าที่ตั้งไว้หาย และถ้ากดบันทึกก็เขียนค่าศูนย์ทับของสาย
+    // ② เลื่อนเดือนด้วยลูกศร ป้าย "✓ ตั้งค่าแล้ว" ยังเป็นของเดือนที่เปิด modal (loadOverrides ของ cal-ui โหลดตอน open เท่านั้น)
+    const wireCal = () => {
+        if (typeof CalendarAdmin === 'undefined' || !window.CalUI || !CalendarAdmin._calUiWired) return false;
+        if (CalendarAdmin._rpnOnlineWired) return true;
+        CalendarAdmin._rpnOnlineWired = true;
+        const S = CalUI._state;
+        const reloadOverrides = async () => {
+            const ym = CalendarAdmin._ym;
+            if (!ym) return;
+            const names = (State.db.routeList || []).filter(r => r && r !== UNASSIGNED);
+            const out = {};
+            await Promise.all(names.map(async (n) => {
+                try { const d = await App.planRoutesCol(ym).doc(n).get(); if (d.exists && d.data().calendarOverride) out[n] = true; } catch (e) {}
+            }));
+            if (CalendarAdmin._ym !== ym) return;                      // เลื่อนเดือนต่อไปแล้ว
+            S.overrides = out;
+            CalUI.refresh();
+        };
+        const origShift = CalendarAdmin.shiftMonth;
+        CalendarAdmin.shiftMonth = async function () {
+            const r = await origShift.apply(this, arguments);
+            await reloadOverrides();
+            return r;
+        };
+        // สายตัวแทน (ตัวแรกที่ติ๊ก) เปลี่ยน → โหลดปฏิทินของสายนั้น (ไม่มี override = ค่าศูนย์เป็นจุดเริ่ม เหมือนปุ่ม "แก้ไข")
+        ['tick', 'tickAll'].forEach((name) => {
+            const o = CalUI[name];
+            if (typeof o !== 'function') return;
+            CalUI[name] = function () {
+                const before = CalendarAdmin._targetRoute;
+                const r = o.apply(this, arguments);
+                if (CalendarAdmin._targetRoute !== before) {
+                    Promise.resolve(CalendarAdmin._loadConfig()).then(() => CalUI.refresh()).catch(e => console.warn('[CalUI]', e));
+                }
+                return r;
+            };
+        });
+        return true;
+    };
+
     document.addEventListener('DOMContentLoaded', () => {
+        const tryCal = (k) => { if (!wireCal() && k < 40) setTimeout(() => tryCal(k + 1), 500); };
+        setTimeout(() => tryCal(0), 1500);
         [0, 400, 1600, 3000].forEach(t => setTimeout(wireImport, t));
         setInterval(reconcile, 4000);
         setInterval(lockBanner, 1000);
