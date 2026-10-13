@@ -155,12 +155,10 @@
                 <span class="text-xl md:text-lg md:mr-3">📊</span>
                 <span class="hidden md:inline">Dashboard</span>
             </button>
-            <!-- 2026-10-14: ปุ่ม "วิเคราะห์สายวิ่ง" (nav-routeanalysis) และ "ภาพรวมทุกสาย" (nav-allroutes) ถูกเอาออกตามที่ผู้ใช้ขอ
-                 หน้าและโค้ดยังอยู่ครบ (#page-routeanalysis / #page-allroutes, Nav.go('routeanalysis'|'allroutes')) — คืนปุ่มได้จาก git history -->
-            <button onclick="Nav.go('cellsplit')" id="nav-cellsplit" class="sidebar-menu w-full flex items-center justify-center md:justify-start px-0 md:px-5 py-3 md:py-3.5 text-sm font-bold">
-                <span class="md:mr-3 flex items-center justify-center"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></span>
-                <span class="hidden md:inline">แบ่งเซลล์</span>
-            </button>
+            <!-- 2026-10-14: ปุ่ม "วิเคราะห์สายวิ่ง" (nav-routeanalysis), "ภาพรวมทุกสาย" (nav-allroutes) และ "แบ่งเซลล์" (nav-cellsplit)
+                 ถูกเอาออกตามที่ผู้ใช้ขอ — หน้าและโค้ดยังอยู่ครบ (#page-routeanalysis / #page-allroutes / #page-cellsplit,
+                 Nav.go('routeanalysis'|'allroutes'|'cellsplit')) คืนปุ่มได้จาก git history -->
+
             <!-- วางแผนคิวงาน + ภาพรวมแผน = RPN V0 (rpn/, ฝังเป็น iframe ใน #page-rpn) — ดู rpn/SYNC.md -->
             <button onclick="Nav.go('rpn')" id="nav-rpn" class="sidebar-menu w-full flex items-center justify-center md:justify-start px-0 md:px-5 py-3 md:py-3.5 text-sm font-bold">
                 <span class="md:mr-3 flex items-center justify-center"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s7-7.58 7-12.5A7 7 0 0 0 5 9.5C5 14.42 12 22 12 22Z"/><circle cx="12" cy="9.5" r="2.3"/></svg></span>
