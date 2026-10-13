@@ -2985,12 +2985,19 @@
                 out.innerHTML = `
                     <div class="p-3 rounded-xl bg-gray-50 border border-gray-200 text-xs text-gray-700">
                         <b>${e(p.route)}</b> · เซลหยุด <b>${e(th(p.date))}</b> = <b>${e(p.day)}</b> ${e(p.market || '')} · ${p.stores.length} ร้าน
+                        <div class="mt-0.5 text-[11px] text-gray-500">คำนวณจาก${p.calSource === 'route' ? '<b>ปฏิทินเฉพาะสาย</b>' : 'ปฏิทินของศูนย์'}ล่าสุดบน server · เทียบกับปฏิทินในแอปเซลก่อนกดยืนยัน</div>
                         ${cnt('stay') ? `<div class="mt-1 text-amber-700 font-bold">⚠️ ${cnt('stay')} ร้านคงอยู่ที่เดิม (สีเทา — ร้าน F2 ที่อยู่วันปลายทางอยู่แล้ว หรือไม่มีวันให้ย้าย) วันที่เซลหยุดจะไม่มีคนไปร้านนี้</div>` : ''}
                     </div>
                     ${multi}
                     <div class="flex gap-2">${side('prev', '← ก่อนหน้า')}${side('next', 'ถัดไป →')}</div>
                     <div id="dayoff-map" style="height:260px;border-radius:14px;overflow:hidden;border:1px solid #e5e7eb;"></div>
-                    <p class="text-[11px] text-gray-500">แตะจุดบนแผนที่หรือปุ่มในรายการเพื่อสลับวันปลายทาง · ร้านที่ย้ายจะต่อท้ายคิวของวันปลายทาง (จัดลำดับต่อได้ใน RPN)</p>
+                    <div class="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-gray-600">
+                        <span class="flex items-center gap-1.5"><span style="display:inline-block;width:11px;height:11px;border-radius:50%;background:#2563eb;border:2px solid #fff;box-shadow:0 0 0 1px #2563eb"></span>ร้าน ${e(p.day)} → ก่อนหน้า</span>
+                        <span class="flex items-center gap-1.5"><span style="display:inline-block;width:11px;height:11px;border-radius:50%;background:#f97316;border:2px solid #fff;box-shadow:0 0 0 1px #f97316"></span>ร้าน ${e(p.day)} → ถัดไป</span>
+                        ${p.prev ? `<span class="flex items-center gap-1.5"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#fff;border:2px solid #2563eb"></span>ตลาดเดิม ${e(p.prev.day)} (${e(th(p.prev.date))})</span>` : ''}
+                        ${p.next ? `<span class="flex items-center gap-1.5"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#fff;border:2px solid #f97316"></span>ตลาดเดิม ${e(p.next.day)} (${e(th(p.next.date))})</span>` : ''}
+                    </div>
+                    <p class="text-[11px] text-gray-500">แตะจุดใหญ่บนแผนที่หรือปุ่มในรายการเพื่อสลับวันปลายทาง · ร้านที่ย้ายจะต่อท้ายคิวของวันปลายทาง (จัดลำดับต่อได้ใน RPN)</p>
                     <div class="border border-gray-200 rounded-xl divide-y divide-gray-100 max-h-64 overflow-y-auto">
                         ${p.stores.map(s => {
                             const v = DayOffUI._to[s.id];
@@ -3014,6 +3021,16 @@
                 if (!pts.length) { el.innerHTML = '<div class="text-center text-xs text-gray-400 py-10">ไม่มีพิกัดร้าน</div>'; return; }
                 const map = L.map(el, { attributionControl: false }).setView([pts[0].lat, pts[0].lng], 12);
                 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(map);
+                // ร้านเดิมของวันก่อนหน้า/ถัดไป (จุดเล็กขอบสี ไส้ขาว) — ให้เห็นว่าตลาดของวันนั้นอยู่ตรงไหน · กดไม่ได้
+                const ctx = [];
+                ['prev', 'next'].forEach(k => {
+                    if (!p[k] || !Array.isArray(p[k].stores)) return;
+                    p[k].stores.forEach(s => {
+                        L.circleMarker([s.lat, s.lng], { radius: 4, fillColor: '#fff', fillOpacity: 0.9, color: DayOffUI._color(k), weight: 2, opacity: 0.8, interactive: true })
+                            .bindTooltip(`${p[k].day}: ${s.name}`, { direction: 'top' }).addTo(map);
+                        ctx.push([s.lat, s.lng]);
+                    });
+                });
                 pts.forEach(s => {
                     const mk = L.circleMarker([s.lat, s.lng], { radius: 8, fillColor: DayOffUI._color(DayOffUI._to[s.id]), fillOpacity: 0.9, color: '#fff', weight: 2 }).addTo(map);
                     mk.bindTooltip(s.name, { direction: 'top' });
@@ -3024,7 +3041,10 @@
                         DayOffUI.set(s.id, cur === 'prev' ? 'next' : 'prev');
                     });
                 });
-                try { map.fitBounds(L.latLngBounds(pts.map(s => [s.lat, s.lng])), { padding: [20, 20] }); } catch (e) {}
+                const fit = () => { try { map.fitBounds(L.latLngBounds(pts.map(s => [s.lat, s.lng]).concat(ctx)), { padding: [20, 20] }); } catch (e) {} };
+                fit();
+                // หน้าต่างยังจัดวางไม่เสร็จตอนสร้างแผนที่ → ขนาดผิด (ครึ่งขวาเป็นสีเทา) — วัดใหม่แล้วจัดมุมมองอีกครั้ง
+                setTimeout(() => { if (DayOffUI._map !== map) return; map.invalidateSize(); fit(); }, 200);
                 DayOffUI._map = map;
             },
             set: (id, side) => {
