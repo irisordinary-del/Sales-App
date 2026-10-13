@@ -155,10 +155,8 @@
                 <span class="text-xl md:text-lg md:mr-3">📊</span>
                 <span class="hidden md:inline">Dashboard</span>
             </button>
-            <button onclick="Nav.go('routeanalysis')" id="nav-routeanalysis" class="sidebar-menu w-full flex items-center justify-center md:justify-start px-0 md:px-5 py-3 md:py-3.5 text-sm font-bold">
-                <span class="md:mr-3 flex items-center justify-center"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg></span>
-                <span class="hidden md:inline">วิเคราะห์สายวิ่ง</span>
-            </button>
+            <!-- 2026-10-14: ปุ่ม "วิเคราะห์สายวิ่ง" (nav-routeanalysis) และ "ภาพรวมทุกสาย" (nav-allroutes) ถูกเอาออกตามที่ผู้ใช้ขอ
+                 หน้าและโค้ดยังอยู่ครบ (#page-routeanalysis / #page-allroutes, Nav.go('routeanalysis'|'allroutes')) — คืนปุ่มได้จาก git history -->
             <button onclick="Nav.go('cellsplit')" id="nav-cellsplit" class="sidebar-menu w-full flex items-center justify-center md:justify-start px-0 md:px-5 py-3 md:py-3.5 text-sm font-bold">
                 <span class="md:mr-3 flex items-center justify-center"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></span>
                 <span class="hidden md:inline">แบ่งเซลล์</span>
@@ -191,10 +189,6 @@
                 <span class="text-lg md:mr-3">✅</span>
                 <span class="hidden md:inline">เช็คการยืนยัน</span>
                 <span id="route-confirm-badge" class="hidden" style="position:absolute;top:6px;right:10px;background:#dc2626;color:#fff;font-size:10px;font-weight:900;min-width:16px;height:16px;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:0 3px;">0</span>
-            </button>
-            <button onclick="Nav.go('allroutes')" id="nav-allroutes" class="sidebar-menu w-full flex items-center justify-center md:justify-start px-0 md:px-5 py-3 md:py-3.5 text-sm font-bold">
-                <span class="md:mr-3 flex items-center justify-center"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8 12 3 3 8l9 5 9-5Z"/><path d="M3 8v8l9 5 9-5V8"/><line x1="12" y1="13" x2="12" y2="21"/></svg></span>
-                <span class="hidden md:inline">ภาพรวมทุกสาย</span>
             </button>
             <button onclick="Nav.go('skudist')" id="nav-skudist" class="sidebar-menu w-full flex items-center justify-center md:justify-start px-0 md:px-5 py-3 md:py-3.5 text-sm font-bold">
                 <span class="md:mr-3 flex items-center justify-center"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.3" fill="currentColor" stroke="none"/></svg></span>
