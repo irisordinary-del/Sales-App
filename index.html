@@ -2900,16 +2900,17 @@
                     <div class="overflow-y-auto flex-1 p-5 space-y-3">
                         <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
                             <label class="text-xs font-bold text-gray-500">เดือน
-                                <select id="dayoff-ym" onchange="DayOffUI._syncDate()" class="mt-1 w-full border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold">
+                                <select id="dayoff-ym" onchange="DayOffUI._syncDate(); DayOffUI._loadRecords()" class="mt-1 w-full border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold">
                                     ${months.map(ym => `<option value="${ym}" ${ym === (App._currentPlanYM || nowYM) ? 'selected' : ''}>${e(App.ymToLabel(ym))}</option>`).join('')}
                                 </select></label>
                             <label class="text-xs font-bold text-gray-500">สาย
-                                <select id="dayoff-route" class="mt-1 w-full border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold">
+                                <select id="dayoff-route" onchange="DayOffUI._loadRecords()" class="mt-1 w-full border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold">
                                     ${routes.map(r => `<option value="${e(r)}">${e(r)}</option>`).join('')}
                                 </select></label>
                             <label class="text-xs font-bold text-gray-500">วันที่เซลหยุด
                                 <input type="date" id="dayoff-date" class="mt-1 w-full border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold"></label>
                         </div>
+                        <div id="dayoff-records"></div>
                         <button onclick="DayOffUI.check()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl py-2.5 text-sm font-bold">🔍 ตรวจสอบ</button>
                         <div id="dayoff-result"></div>
                     </div>
@@ -2921,6 +2922,55 @@
                 m.classList.remove('hidden');
                 DayOffUI._p = null;
                 DayOffUI._syncDate();
+                DayOffUI._loadRecords();
+            },
+            // รายการเซลหยุดที่แบ่งไว้แล้วของสาย+เดือนที่เลือก (plans/{ym}/routes/{สาย}.dayOffs — เขียนโดย RPNBridge.applyDayOff)
+            _recs: [],
+            _loadRecords: async () => {
+                const box = document.getElementById('dayoff-records');
+                const ym = document.getElementById('dayoff-ym')?.value, route = document.getElementById('dayoff-route')?.value;
+                if (!box || !ym || !route) return;
+                box.innerHTML = '';
+                let list = [];
+                try { const d = await App.planRoutesCol(ym).doc(route).get(); list = (d.exists && Array.isArray(d.data().dayOffs)) ? d.data().dayOffs : []; }
+                catch (e) { return; }
+                if (document.getElementById('dayoff-ym')?.value !== ym || document.getElementById('dayoff-route')?.value !== route) return;
+                DayOffUI._recs = list;
+                if (!list.length) return;
+                const e = DayOffUI._esc, th = DayOffUI._thDate;
+                box.innerHTML = `<div class="p-3 rounded-xl bg-amber-50 border border-amber-200">
+                    <div class="text-[11px] font-black text-amber-800 mb-1.5">📌 เซลหยุดที่แบ่งร้านไว้แล้ว · ${e(route)} ${e(App.ymToLabel(ym))}</div>
+                    ${list.slice().sort((a, b) => String(a.date).localeCompare(String(b.date))).map(r => {
+                        const tos = [...new Set((r.moves || []).map(m => m.to))].join(', ');
+                        return `<div class="flex items-center gap-2 py-1">
+                            <div class="flex-1 min-w-0 text-xs text-gray-800"><b>${e(th(r.date))}</b> · ${e(r.day)} → ${e(tos)} · ${(r.moves || []).length} ร้าน
+                            <span class="text-[10px] text-gray-500">${r.by ? 'โดย ' + e(r.by) : ''}</span></div>
+                            <button onclick="DayOffUI.restore('${e(r.rid)}')" class="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-white border border-amber-300 text-amber-800 hover:bg-amber-100">↩️ คืนร้านกลับวันเดิม</button>
+                        </div>`;
+                    }).join('')}
+                    <div class="text-[10px] text-amber-700 mt-1">คัดลอกแผนนี้ไปเดือนใหม่ ระบบจะถามให้คืนร้านในเดือนใหม่ให้เอง</div></div>`;
+            },
+            restore: async (rid) => {
+                const ym = document.getElementById('dayoff-ym')?.value, route = document.getElementById('dayoff-route')?.value;
+                const r = (DayOffUI._recs || []).find(x => x.rid === rid);
+                if (!r || !ym || !route) return;
+                if (!confirm(`คืนร้าน ${(r.moves || []).length} ร้านของ ${route} กลับ ${r.day} (เซลหยุด ${DayOffUI._thDate(r.date)})?\n\nร้านที่ถูกแก้ต่อหลังแบ่ง (ย้ายวันอีก / ออกจากแผน) จะข้ามไว้ · เซลต้องกดรับทราบสายวิ่งใหม่ · ต้องส่งออก DMS เดือนนี้ใหม่`)) return;
+                UI.showLoader('↩️ กำลังคืนร้านใน RPN...', `สาย ${route} · ${App.ymToLabel(ym)}`);
+                try {
+                    const w = await RpnHost.ensure();
+                    const res = await w.RPNBridge.restoreDayOff({ route, ym, rid });
+                    UI.hideLoader();
+                    if (!res.ok) return UI.showErrorToast('❌ ' + (res.msg || 'คืนไม่สำเร็จ'));
+                    const details = { route, ym, date: r.date, day: r.day, restored: res.restored, skipped: (res.skipped || []).length };
+                    if (typeof AuditLog !== 'undefined' && AuditLog.write) AuditLog.write('DAY_OFF_RESTORE', details);
+                    else App.writeAuditLog('DAY_OFF_RESTORE', details);
+                    if (App._currentPlanYM === ym) App._loadPlan(ym, true);
+                    UI.showSaveToast(`↩️ คืน ${res.restored} ร้านกลับ ${r.day} แล้ว${res.skipped && res.skipped.length ? ` (ข้าม ${res.skipped.length}: ${res.skipped.slice(0, 3).join(', ')}${res.skipped.length > 3 ? ' …' : ''})` : ''} — อย่าลืมส่งออก DMS ใหม่`);
+                    DayOffUI._p = null;
+                    const out = document.getElementById('dayoff-result'); if (out) out.innerHTML = '';
+                    document.getElementById('dayoff-confirm').disabled = true;
+                    DayOffUI._loadRecords();
+                } catch (e) { UI.hideLoader(); UI.showErrorToast('❌ คืนไม่สำเร็จ: ' + (e && e.message)); }
             },
             close: () => {
                 DayOffUI._modal().classList.add('hidden');
@@ -3069,7 +3119,7 @@
                 UI.showLoader('📆 กำลังย้ายร้านใน RPN...', `สาย ${p.route} · ${App.ymToLabel(p.ym)}`);
                 try {
                     const w = await RpnHost.ensure();
-                    const res = await w.RPNBridge.applyDayOff({ route: p.route, ym: p.ym, day: p.day, moves, basisSig: p.basisSig,
+                    const res = await w.RPNBridge.applyDayOff({ route: p.route, ym: p.ym, day: p.day, date: p.date, moves, basisSig: p.basisSig,
                         label: `เซลหยุด ${p.date} แบ่งร้าน ${p.route} ${p.day}` });
                     UI.hideLoader();
                     if (!res.ok) return UI.showErrorToast('❌ ' + (res.msg || 'ย้ายไม่สำเร็จ'));

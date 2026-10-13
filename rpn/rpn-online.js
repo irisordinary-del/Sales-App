@@ -470,7 +470,7 @@
         };
     };
     /** moves = { storeId: 'Day ปลายทาง' } — ร้านที่ไม่อยู่ใน moves คงอยู่ที่ day เดิม */
-    bridge.applyDayOff = async ({ route, ym, day, moves, basisSig, label }) => {
+    bridge.applyDayOff = async ({ route, ym, day, date, moves, basisSig, label }) => {
         if (!route || !ym || !day || !moves) return { ok: false, msg: 'ข้อมูลไม่ครบ' };
         if (window.PlanLock && PlanLock.isLocked(ym)) return { ok: false, msg: PlanLock.message(ym) };
         const o = await openRoute(route, ym);
@@ -489,10 +489,14 @@
         };
         const seqOf = (s) => (s.seqs && s.seqs[day]) || 9999;
         let moved = 0; const skipped = [];
+        const log = [];      // จำค่าเดิมไว้คืนทีหลัง (restoreDayOff / ตอนคัดลอกแผนไปเดือนใหม่)
         arr.filter(s => s && moving.has(String(s.id)) && (s.days || []).includes(day)).sort((a, b) => seqOf(a) - seqOf(b)).forEach(s => {
             const t = moves[s.id] || moves[String(s.id)];
             if (!t || t === day) return;
             if ((s.days || []).includes(t)) { skipped.push(s.name || s.id); return; }   // อยู่วันปลายทางอยู่แล้ว (F2) — ไม่ย้าย
+            const pd = {};
+            PER_DAY.forEach(k => { if (s[k] && typeof s[k] === 'object' && s[k][day] !== undefined) pd[k] = s[k][day]; });
+            log.push({ id: s.id, to: t, seq: (s.seqs && s.seqs[day]) || null, mk: s.marketName || '', pd });
             const peer = peerOf(t);
             s.days = s.days.filter(d => d !== day).concat(t).sort((a, b) => dn(a) - dn(b));
             if (!s.seqs) s.seqs = {};
@@ -508,15 +512,115 @@
             moved++;
         });
         if (!moved) return { ok: false, msg: 'ไม่มีร้านที่ย้ายได้' + (skipped.length ? ` (${skipped.length} ร้านอยู่วันปลายทางอยู่แล้ว)` : '') };
+        let by = '';
+        // Auth (../auth.js) ประกาศเป็น const ระดับบนสุด — ไม่อยู่บน window
+        try { const ss = (typeof Auth !== 'undefined' && Auth.getSession) ? Auth.getSession() : null; by = (ss && (ss.displayName || ss.username)) || ''; } catch (e) {}
+        // plans/{ym}/routes/{สาย}.dayOffs = [{ rid, date, day, at, by, moves:[{ id, to, seq, mk, pd }] }]
+        const rec = JSON.parse(JSON.stringify({ rid: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), date: date || '', day, at: new Date().toISOString(), by, moves: log }));
         await App.planRoutesCol(ym).doc(route).set({
             stores: arr,
+            dayOffs: firebase.firestore.FieldValue.arrayUnion(rec),
             confirmedBy: firebase.firestore.FieldValue.delete(),
             confirmedAt: firebase.firestore.FieldValue.delete(),
         }, { merge: true });
+        afterSave();
+        return { ok: true, moved, skipped, rid: rec.rid };
+    };
+    const afterSave = () => {
         try { Runs.bump && Runs.bump(); } catch (e) {}
         try { if (typeof MultiRoute !== 'undefined' && MultiRoute.rebuild) MultiRoute.rebuild(); } catch (e) {}
         try { UI.render(); } catch (e) {}
-        return { ok: true, moved, skipped };
+    };
+
+    /** คืนร้านของรายการเซลหยุด rec กลับวันเดิม (แก้ arr ในที่) — ร้านที่ถูกแก้ต่อหลังแบ่ง (ไม่อยู่วันปลายทางแล้ว
+     *  หรือกลับไปอยู่วันเดิมเองแล้ว / ออกจากแผน / หายจากสาย) ข้ามไว้ ไม่เดา */
+    const restoreRec = (arr, rec) => {
+        const PER_DAY = ['cys', 'fqs', 'fqRun', 'vd', 'runOf'];
+        let restored = 0; const skipped = [];
+        (rec.moves || []).forEach(m => {
+            const s = arr.find(x => x && String(x.id) === String(m.id));
+            if (!s || s.inactive || !(s.days || []).includes(m.to) || (s.days || []).includes(rec.day)) { skipped.push((s && s.name) || m.id); return; }
+            s.days = s.days.filter(d => d !== m.to).concat(rec.day).sort((a, b) => dn(a) - dn(b));
+            if (!s.seqs) s.seqs = {};
+            delete s.seqs[m.to];
+            if (m.seq != null) s.seqs[rec.day] = m.seq;
+            PER_DAY.forEach(k => {
+                if (s[k] && typeof s[k] === 'object') delete s[k][m.to];
+                if (m.pd && m.pd[k] !== undefined) { if (!s[k] || typeof s[k] !== 'object') s[k] = {}; s[k][rec.day] = m.pd[k]; }
+            });
+            if (s.cys && typeof s.cys === 'object') s.cy = s.cys[s.days[0]] || s.cy || '';
+            if (m.mk && s.days.length === 1) s.marketName = m.mk;
+            restored++;
+        });
+        return { restored, skipped };
+    };
+    /** คืนรายการเซลหยุด rid ของสายนี้ในเดือนนั้น แล้วลบรายการออกจาก dayOffs */
+    bridge.restoreDayOff = async ({ route, ym, rid }) => {
+        if (!route || !ym || !rid) return { ok: false, msg: 'ข้อมูลไม่ครบ' };
+        if (window.PlanLock && PlanLock.isLocked(ym)) return { ok: false, msg: PlanLock.message(ym) };
+        const o = await openRoute(route, ym);
+        if (!o.ok) return o;
+        const doc = (await App.planRoutesCol(ym).doc(route).get({ source: 'server' })).data() || {};
+        const list = Array.isArray(doc.dayOffs) ? doc.dayOffs : [];
+        const rec = list.find(r => r && r.rid === rid);
+        if (!rec) return { ok: false, msg: 'ไม่พบรายการนี้ (อาจถูกคืนไปแล้ว)' };
+        try { if (window.EditHistory) EditHistory.mark('คืนร้านเซลหยุด ' + route + ' ' + rec.date); } catch (e) {}
+        const r = restoreRec(o.arr, rec);
+        await App.planRoutesCol(ym).doc(route).set({
+            stores: o.arr,
+            dayOffs: list.filter(x => x && x.rid !== rid),
+            confirmedBy: firebase.firestore.FieldValue.delete(),
+            confirmedAt: firebase.firestore.FieldValue.delete(),
+        }, { merge: true });
+        afterSave();
+        return { ok: true, restored: r.restored, skipped: r.skipped };
+    };
+
+    // คัดลอกแผนไปเดือนใหม่ (App.createPlan ของ RPN คัดลอก stores ทั้งก้อน) → การแบ่งร้านเพราะเซลหยุดของเดือนต้นทาง
+    // จะติดไปทั้งเดือนใหม่ (วันนั้นว่าง ร้านค้างอยู่วันข้างเคียง) → ถามแล้วคืนร้านกลับวันเดิมในเดือนใหม่ให้
+    // (รายการ dayOffs ไม่ถูกคัดลอกไป — createPlan เขียนแค่ stores; เดือนต้นทางไม่ถูกแตะ)
+    const wireCopy = () => {
+        if (typeof App === 'undefined' || typeof App.createPlan !== 'function') return false;
+        if (App.createPlan._dayOffWrapped) return true;
+        const orig = App.createPlan;
+        const fn = async function (ym, srcOverride) {
+            const src = srcOverride || App._currentPlanYM;
+            let existed = true;
+            try { existed = (await App.planRef(ym).get({ source: 'server' })).exists; } catch (e) {}
+            const recs = [];
+            if (!existed && src) {
+                try {
+                    const snap = await App.planRoutesCol(src).get();
+                    snap.forEach(d => (d.data().dayOffs || []).forEach(rec => { if (rec && rec.moves && rec.moves.length) recs.push({ route: d.id, rec }); }));
+                } catch (e) { console.warn('[dayOff] อ่านรายการเซลหยุดของเดือนต้นทางไม่ได้', e); }
+            }
+            const r = await orig.apply(this, arguments);
+            if (existed || !recs.length) return r;
+            try { if (!(await App.planRef(ym).get({ source: 'server' })).exists) return r; } catch (e) { return r; }
+            const lines = recs.map(x => `• ${x.route} ${x.rec.date} (${x.rec.day} · ${x.rec.moves.length} ร้าน)`).join('\n');
+            if (!confirm(`แผนต้นทาง (${src}) มีการแบ่งร้านเพราะเซลหยุด ${recs.length} รายการ:\n${lines}\n\n` +
+                `คืนร้านกลับวันเดิมในแผนใหม่ (${ym}) เลยไหม?\nแนะนำ "ตกลง" — เซลหยุดเป็นเรื่องของเดือนนั้นเท่านั้น (แผนเดือนต้นทางไม่เปลี่ยน)`)) return r;
+            let restored = 0; const skipped = [];
+            const byRoute = {};
+            recs.forEach(x => { (byRoute[x.route] = byRoute[x.route] || []).push(x.rec); });
+            for (const route of Object.keys(byRoute)) {
+                const o = await openRoute(route, ym);
+                if (!o.ok) { skipped.push(route + ': ' + o.msg); continue; }
+                byRoute[route].sort((a, b) => String(b.at).localeCompare(String(a.at))).forEach(rec => {   // ล่าสุดก่อน (ย้อนลำดับที่ทำ)
+                    const res = restoreRec(o.arr, rec);
+                    restored += res.restored;
+                    res.skipped.forEach(n => skipped.push(route + ': ' + n));
+                });
+                await App.planRoutesCol(ym).doc(route).set({ stores: o.arr }, { merge: true });
+            }
+            afterSave();
+            try { UI.showSaveToast(`↩️ คืนร้านเซลหยุดในแผนใหม่แล้ว ${restored} ร้าน` + (skipped.length ? ` · ข้าม ${skipped.length}` : '')); } catch (e) {}
+            if (skipped.length) console.warn('[dayOff] ข้ามตอนคืนร้านในแผนใหม่:', skipped);
+            return r;
+        };
+        fn._dayOffWrapped = true;
+        App.createPlan = fn;
+        return true;
     };
 
     // ── 8) ชื่อตลาด "สูตรเดิม" ของระบบเรา (FileManager._autoFillMarketNames ใน ../file-manager.js) ─────
@@ -654,6 +758,8 @@
     };
 
     document.addEventListener('DOMContentLoaded', () => {
+        const tryCopy = (k) => { if (!wireCopy() && k < 40) setTimeout(() => tryCopy(k + 1), 500); };
+        setTimeout(() => tryCopy(0), 1500);
         const tryCal = (k) => { if (!wireCal() && k < 40) setTimeout(() => tryCal(k + 1), 500); };
         setTimeout(() => tryCal(0), 1500);
         [0, 400, 1600, 3000].forEach(t => setTimeout(wireImport, t));
