@@ -57,6 +57,7 @@ const AuditLog = {
         PLAN_MODE_SWITCH:    { icon: '🔀', label: 'เปลี่ยน Plan Mode' },
         PLAN_LOCK:           { icon: '🔒', label: 'ล็อกแผนรายเดือน' },
         PLAN_UNLOCK:         { icon: '🔓', label: 'ปลดล็อกแผนรายเดือน' },
+        DAY_OFF_SPLIT:       { icon: '📆', label: 'เซลหยุด แบ่งร้านไปวันก่อน/หลัง' },
         // AI
         AI_RUN:              { icon: '🤖', label: 'รัน AI จัดสาย' },
         // KPI / Data

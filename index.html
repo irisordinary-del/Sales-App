@@ -183,6 +183,10 @@
                 <span class="hidden md:inline">ล็อกแผน</span>
                 <span id="plan-lock-badge" class="hidden" style="position:absolute;top:6px;right:10px;background:#991b1b;color:#fff;font-size:10px;font-weight:900;min-width:16px;height:16px;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:0 3px;">0</span>
             </button>
+            <button onclick="DayOffUI.open()" id="nav-dayoff" class="sidebar-menu w-full flex items-center justify-center md:justify-start px-0 md:px-5 py-3 md:py-3.5 text-sm font-bold" title="เซลหยุด 1 วัน — แบ่งร้านของวันนั้นไปวันก่อนหน้า/ถัดไป">
+                <span class="text-lg md:mr-3">📆</span>
+                <span class="hidden md:inline">เซลหยุด / แบ่งร้าน</span>
+            </button>
             <button onclick="RouteConfirmAdmin.open()" id="nav-routeconfirm" class="sidebar-menu w-full flex items-center justify-center md:justify-start px-0 md:px-5 py-3 md:py-3.5 text-sm font-bold" style="position:relative;" title="เช็คว่าสายไหนยืนยันรับสายวิ่งแล้วบ้าง">
                 <span class="text-lg md:mr-3">✅</span>
                 <span class="hidden md:inline">เช็คการยืนยัน</span>
@@ -1315,7 +1319,7 @@
             }
 
             if (_session.role === 'sales') {
-                ['nav-rpn', 'nav-rpnoverview', 'nav-moverequest', 'nav-planlock', 'nav-routeconfirm', 'nav-allroutes', 'nav-cellsplit'].forEach(id => {
+                ['nav-rpn', 'nav-rpnoverview', 'nav-moverequest', 'nav-planlock', 'nav-dayoff', 'nav-routeconfirm', 'nav-allroutes', 'nav-cellsplit'].forEach(id => {
                     const el = document.getElementById(id);
                     if (el) el.style.display = 'none';
                 });
@@ -2853,6 +2857,212 @@
                 if (!b || typeof PlanLock === 'undefined') return;
                 const n = [...new Set([...(State.db.planList || []), ...PlanLock.months()])].filter(ym => PlanLock.isLocked(ym)).length;
                 if (n > 0) { b.textContent = n; b.classList.remove('hidden'); } else b.classList.add('hidden');
+            },
+        };
+
+        // ═════════════════════════════════════════════════════════════════
+        // ✅ NEW (2026-10-13): DayOffUI — เซลหยุด 1 วัน → แบ่งร้านของวันนั้นไปวันทำงานก่อนหน้า/ถัดไป (เมนู "📆 เซลหยุด / แบ่งร้าน")
+        // แทน HolidayException เดิม (ใช้ได้แค่โหมด weekday ทั้งศูนย์ และไม่มีปุ่มเปิดแล้ว) — งานจริงทำใน RPN ผ่าน
+        // RPNBridge.dayOffPreview / applyDayOff (rpn/rpn-online.js §7b) ย้าย days/seqs ของร้านในแผนจริง
+        // วันที่ในแอปเซลและไฟล์ DMS จึงตรงกัน · ค่าเริ่มต้นแบ่งครึ่งตามระยะทาง (ร้านที่ใกล้ตลาดวันก่อนหน้ามากกว่า → วันก่อนหน้า)
+        // ผู้ใช้สลับรายร้านได้บนแผนที่/รายการ
+        // ═════════════════════════════════════════════════════════════════
+        const DayOffUI = {
+            _p: null,        // ผลจาก dayOffPreview
+            _to: {},         // storeId -> 'prev' | 'next'
+            _map: null,
+            _esc: (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])),
+            _thDate: (iso) => { if (!iso) return ''; const [y, m, d] = iso.split('-').map(Number); return new Date(y, m - 1, d).toLocaleDateString('th-TH', { weekday: 'short', day: 'numeric', month: 'short' }); },
+            _modal: () => {
+                let m = document.getElementById('dayoff-modal');
+                if (!m) {
+                    m = document.createElement('div');
+                    m.id = 'dayoff-modal';
+                    m.className = 'hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4';
+                    m.addEventListener('click', (e) => { if (e.target === m) DayOffUI.close(); });
+                    document.body.appendChild(m);
+                }
+                return m;
+            },
+            open: () => {
+                const m = DayOffUI._modal();
+                const nowYM = App.currentYM ? App.currentYM() : '';
+                const months = [...(State.db.planList || [])].filter(ym => ym >= nowYM).sort();
+                const routes = (State.db.routeList || []).filter(r => r && r !== 'รอจัดสาย').slice().sort((a, b) => a.localeCompare(b, 'th', { numeric: true }));
+                const e = DayOffUI._esc;
+                m.innerHTML = `
+                <div class="bg-white rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden" style="max-height:92dvh;display:flex;flex-direction:column;">
+                    <div class="p-5 border-b flex justify-between items-start bg-gray-50 flex-shrink-0">
+                        <div><h2 class="text-base font-black text-gray-900">📆 เซลหยุด / แบ่งร้าน · ศูนย์ ${e(window.CENTER_ID || '')}</h2>
+                        <p class="text-xs text-gray-500 mt-0.5">เลือกสายและวันที่เซลหยุด → ร้านของวันนั้นถูกแบ่งไปวันทำงานก่อนหน้า/ถัดไปของสายเดียวกัน · ย้ายในแผนจริง (แอปเซล + DMS เปลี่ยนตาม)</p></div>
+                        <button onclick="DayOffUI.close()" class="w-8 h-8 rounded-full border border-gray-200 text-gray-400 hover:bg-gray-100 font-bold flex-shrink-0">✕</button>
+                    </div>
+                    <div class="overflow-y-auto flex-1 p-5 space-y-3">
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                            <label class="text-xs font-bold text-gray-500">เดือน
+                                <select id="dayoff-ym" onchange="DayOffUI._syncDate()" class="mt-1 w-full border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold">
+                                    ${months.map(ym => `<option value="${ym}" ${ym === (App._currentPlanYM || nowYM) ? 'selected' : ''}>${e(App.ymToLabel(ym))}</option>`).join('')}
+                                </select></label>
+                            <label class="text-xs font-bold text-gray-500">สาย
+                                <select id="dayoff-route" class="mt-1 w-full border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold">
+                                    ${routes.map(r => `<option value="${e(r)}">${e(r)}</option>`).join('')}
+                                </select></label>
+                            <label class="text-xs font-bold text-gray-500">วันที่เซลหยุด
+                                <input type="date" id="dayoff-date" class="mt-1 w-full border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold"></label>
+                        </div>
+                        <button onclick="DayOffUI.check()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl py-2.5 text-sm font-bold">🔍 ตรวจสอบ</button>
+                        <div id="dayoff-result"></div>
+                    </div>
+                    <div class="p-4 border-t flex gap-3 flex-shrink-0">
+                        <button onclick="DayOffUI.close()" class="flex-1 border border-gray-200 rounded-xl py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-50">ปิด</button>
+                        <button id="dayoff-confirm" onclick="DayOffUI.confirm()" disabled class="flex-1 bg-amber-500 hover:bg-amber-600 disabled:opacity-40 text-white rounded-xl py-2.5 text-sm font-bold">✅ ยืนยันย้ายร้าน</button>
+                    </div>
+                </div>`;
+                m.classList.remove('hidden');
+                DayOffUI._p = null;
+                DayOffUI._syncDate();
+            },
+            close: () => {
+                DayOffUI._modal().classList.add('hidden');
+                if (DayOffUI._map) { try { DayOffUI._map.remove(); } catch (e) {} DayOffUI._map = null; }
+            },
+            _syncDate: () => {
+                const ym = document.getElementById('dayoff-ym')?.value, inp = document.getElementById('dayoff-date');
+                if (!ym || !inp) return;
+                const [y, m] = ym.split('_').map(Number);
+                const last = new Date(y, m, 0).getDate();
+                inp.min = `${y}-${String(m).padStart(2, '0')}-01`;
+                inp.max = `${y}-${String(m).padStart(2, '0')}-${last}`;
+                if (!inp.value || inp.value < inp.min || inp.value > inp.max) inp.value = inp.min;
+            },
+            check: async () => {
+                const ym = document.getElementById('dayoff-ym')?.value;
+                const route = document.getElementById('dayoff-route')?.value;
+                const date = document.getElementById('dayoff-date')?.value;
+                const out = document.getElementById('dayoff-result');
+                document.getElementById('dayoff-confirm').disabled = true;
+                if (!ym || !route || !date) return UI.showErrorToast('⚠️ เลือกเดือน สาย และวันที่ให้ครบ');
+                if (date.slice(0, 7).replace('-', '_') !== ym) return UI.showErrorToast('⚠️ วันที่ต้องอยู่ในเดือนที่เลือก');
+                out.innerHTML = '<div class="text-center text-xs text-gray-400 py-6">⏳ กำลังเปิดแผนใน RPN และคำนวณวันที่...</div>';
+                try {
+                    const w = await RpnHost.ensure();
+                    const p = await w.RPNBridge.dayOffPreview({ route, ym, date });
+                    if (!p.ok) { out.innerHTML = `<div class="p-3 rounded-xl bg-red-50 border border-red-200 text-xs font-bold text-red-700">❌ ${DayOffUI._esc(p.msg)}</div>`; return; }
+                    DayOffUI._p = p;
+                    // ค่าเริ่มต้น: แบ่งครึ่งตามระยะทาง — เรียงร้านจาก "ใกล้ตลาดวันก่อนหน้า" ไป "ใกล้ตลาดวันถัดไป"
+                    // (ระยะถึงจุดกลางของร้านวันนั้น) แล้วครึ่งแรก → ก่อนหน้า · ไม่มีพิกัด/จุดกลาง = ใช้ลำดับคิวเดิม
+                    // ร้าน F2 ที่อยู่วันปลายทางอยู่แล้ว → อีกฝั่ง
+                    const to = {}, half = Math.ceil(p.stores.length / 2);
+                    const dist = (s, c) => (c && s.lat && s.lng) ? Math.hypot(s.lat - c.lat, (s.lng - c.lng) * Math.cos(c.lat * Math.PI / 180)) : null;
+                    const lean = (s) => { const a = dist(s, p.prev && p.prev.center), b = dist(s, p.next && p.next.center); return (a == null || b == null) ? null : a - b; };
+                    const order = p.stores.map((s, i) => ({ s, i, l: lean(s) }));
+                    if (order.every(o => o.l != null)) order.sort((x, y) => x.l - y.l);
+                    order.forEach(({ s }, i) => {
+                        let side = !p.prev ? 'next' : !p.next ? 'prev' : (i < half ? 'prev' : 'next');
+                        const has = (k) => p[k] && s.days.includes(p[k].day);
+                        if (has(side)) side = side === 'prev' ? 'next' : 'prev';
+                        to[s.id] = has(side) || !p[side] ? 'stay' : side;
+                    });
+                    DayOffUI._to = to;
+                    DayOffUI._render();
+                    document.getElementById('dayoff-confirm').disabled = false;
+                } catch (e) {
+                    out.innerHTML = `<div class="p-3 rounded-xl bg-red-50 border border-red-200 text-xs font-bold text-red-700">❌ ${DayOffUI._esc(e && e.message)}</div>`;
+                }
+            },
+            _color: (side) => side === 'prev' ? '#2563eb' : side === 'next' ? '#f97316' : '#9ca3af',
+            _render: () => {
+                const p = DayOffUI._p, e = DayOffUI._esc, th = DayOffUI._thDate, out = document.getElementById('dayoff-result');
+                if (!p || !out) return;
+                const cnt = (k) => Object.values(DayOffUI._to).filter(v => v === k).length;
+                const side = (k, lab) => p[k] ? `<div class="flex-1 min-w-0 p-2.5 rounded-xl border-2" style="border-color:${DayOffUI._color(k)}">
+                    <div class="text-[11px] font-black" style="color:${DayOffUI._color(k)}">${lab} · ${e(th(p[k].date))} · ${e(p[k].day)}</div>
+                    <div class="text-[11px] text-gray-600 truncate">${e(p[k + 'Market'] || '')}</div>
+                    <div class="text-sm font-black text-gray-900">+${cnt(k)} ร้าน</div></div>`
+                    : `<div class="flex-1 p-2.5 rounded-xl border border-dashed border-gray-300 text-[11px] text-gray-400">${lab}: ไม่มีวันทำงานในเดือนนี้</div>`;
+                const multi = p.dayDates.length > 1
+                    ? `<div class="p-3 rounded-xl bg-red-50 border border-red-300 text-xs text-red-800 leading-snug">⚠️ <b>${e(p.day)} วิ่ง ${p.dayDates.length} วันในเดือนนี้</b> (${p.dayDates.map(th).map(e).join(', ')}) — ย้ายร้านออกจาก ${e(p.day)} จะหายจาก<b>ทุกวัน</b>ข้างต้น ไม่ใช่แค่วันที่เซลหยุด</div>` : '';
+                out.innerHTML = `
+                    <div class="p-3 rounded-xl bg-gray-50 border border-gray-200 text-xs text-gray-700">
+                        <b>${e(p.route)}</b> · เซลหยุด <b>${e(th(p.date))}</b> = <b>${e(p.day)}</b> ${e(p.market || '')} · ${p.stores.length} ร้าน
+                        ${cnt('stay') ? `<div class="mt-1 text-amber-700 font-bold">⚠️ ${cnt('stay')} ร้านคงอยู่ที่เดิม (สีเทา — ร้าน F2 ที่อยู่วันปลายทางอยู่แล้ว หรือไม่มีวันให้ย้าย) วันที่เซลหยุดจะไม่มีคนไปร้านนี้</div>` : ''}
+                    </div>
+                    ${multi}
+                    <div class="flex gap-2">${side('prev', '← ก่อนหน้า')}${side('next', 'ถัดไป →')}</div>
+                    <div id="dayoff-map" style="height:260px;border-radius:14px;overflow:hidden;border:1px solid #e5e7eb;"></div>
+                    <p class="text-[11px] text-gray-500">แตะจุดบนแผนที่หรือปุ่มในรายการเพื่อสลับวันปลายทาง · ร้านที่ย้ายจะต่อท้ายคิวของวันปลายทาง (จัดลำดับต่อได้ใน RPN)</p>
+                    <div class="border border-gray-200 rounded-xl divide-y divide-gray-100 max-h-64 overflow-y-auto">
+                        ${p.stores.map(s => {
+                            const v = DayOffUI._to[s.id];
+                            const btn = (k, lab) => p[k] && !s.days.includes(p[k].day)
+                                ? `<button onclick="DayOffUI.set('${e(s.id)}','${k}')" class="px-2 py-1 rounded-lg text-[11px] font-bold border" style="${v === k ? `background:${DayOffUI._color(k)};color:#fff;border-color:${DayOffUI._color(k)}` : 'background:#fff;color:#374151;border-color:#e5e7eb'}">${lab}</button>` : '';
+                            return `<div class="flex items-center gap-2 px-3 py-1.5">
+                                <span class="w-6 text-[11px] font-black text-gray-400 text-right">${s.seq < 9999 ? s.seq : '-'}</span>
+                                <span class="flex-1 min-w-0 text-xs font-bold text-gray-800 truncate">${e(s.name)}${s.days.length > 1 ? ` <span class="text-[10px] text-indigo-600">(${s.days.map(e).join(', ')})</span>` : ''}</span>
+                                ${btn('prev', '← ก่อน')}${btn('next', 'ถัดไป →')}
+                                ${v === 'stay' ? '<span class="text-[11px] font-bold text-gray-400">คงเดิม</span>' : ''}
+                            </div>`;
+                        }).join('')}
+                    </div>`;
+                setTimeout(DayOffUI._drawMap, 30);
+            },
+            _drawMap: () => {
+                const p = DayOffUI._p, el = document.getElementById('dayoff-map');
+                if (DayOffUI._map) { try { DayOffUI._map.remove(); } catch (e) {} DayOffUI._map = null; }
+                if (!p || !el || typeof L === 'undefined') return;
+                const pts = p.stores.filter(s => isFinite(s.lat) && isFinite(s.lng) && s.lat && s.lng);
+                if (!pts.length) { el.innerHTML = '<div class="text-center text-xs text-gray-400 py-10">ไม่มีพิกัดร้าน</div>'; return; }
+                const map = L.map(el, { attributionControl: false }).setView([pts[0].lat, pts[0].lng], 12);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(map);
+                pts.forEach(s => {
+                    const mk = L.circleMarker([s.lat, s.lng], { radius: 8, fillColor: DayOffUI._color(DayOffUI._to[s.id]), fillOpacity: 0.9, color: '#fff', weight: 2 }).addTo(map);
+                    mk.bindTooltip(s.name, { direction: 'top' });
+                    mk.on('click', () => {
+                        const cur = DayOffUI._to[s.id];
+                        const opts = ['prev', 'next'].filter(k => p[k] && !s.days.includes(p[k].day));
+                        if (opts.length < 2) return;
+                        DayOffUI.set(s.id, cur === 'prev' ? 'next' : 'prev');
+                    });
+                });
+                try { map.fitBounds(L.latLngBounds(pts.map(s => [s.lat, s.lng])), { padding: [20, 20] }); } catch (e) {}
+                DayOffUI._map = map;
+            },
+            set: (id, side) => {
+                const key = Object.keys(DayOffUI._to).find(k => String(k) === String(id));
+                if (key === undefined) return;
+                DayOffUI._to[key] = side;
+                DayOffUI._render();
+            },
+            confirm: async () => {
+                const p = DayOffUI._p;
+                if (!p) return;
+                const moves = {};
+                Object.entries(DayOffUI._to).forEach(([id, side]) => { if (side === 'prev' || side === 'next') moves[id] = p[side].day; });
+                const nPrev = Object.values(DayOffUI._to).filter(v => v === 'prev').length, nNext = Object.values(DayOffUI._to).filter(v => v === 'next').length;
+                if (!nPrev && !nNext) return UI.showErrorToast('⚠️ ไม่มีร้านที่จะย้าย');
+                const th = DayOffUI._thDate;
+                if (!confirm(`ยืนยันย้ายร้านสาย ${p.route} (${App.ymToLabel(p.ym)})?\n\nเซลหยุด ${th(p.date)} (${p.day} — ${p.stores.length} ร้าน)\n` +
+                    (p.prev ? `→ ${nPrev} ร้านไป ${p.prev.day} (${th(p.prev.date)})\n` : '') +
+                    (p.next ? `→ ${nNext} ร้านไป ${p.next.day} (${th(p.next.date)})\n` : '') +
+                    (p.dayDates.length > 1 ? `\n⚠️ ${p.day} วิ่ง ${p.dayDates.length} วันในเดือนนี้ — ร้านจะหายจากทุกวันของ ${p.day}\n` : '') +
+                    `\nแก้ในแผนจริง (ย้อนได้ด้วย Ctrl+Z ในหน้าวางแผน) · เซลต้องกดรับทราบสายวิ่งใหม่ · ต้องส่งออก DMS เดือนนี้ใหม่`)) return;
+                UI.showLoader('📆 กำลังย้ายร้านใน RPN...', `สาย ${p.route} · ${App.ymToLabel(p.ym)}`);
+                try {
+                    const w = await RpnHost.ensure();
+                    const res = await w.RPNBridge.applyDayOff({ route: p.route, ym: p.ym, day: p.day, moves, basisSig: p.basisSig,
+                        label: `เซลหยุด ${p.date} แบ่งร้าน ${p.route} ${p.day}` });
+                    UI.hideLoader();
+                    if (!res.ok) return UI.showErrorToast('❌ ' + (res.msg || 'ย้ายไม่สำเร็จ'));
+                    const details = { route: p.route, ym: p.ym, date: p.date, day: p.day, toPrev: p.prev ? `${p.prev.day} ${p.prev.date} (${nPrev})` : '', toNext: p.next ? `${p.next.day} ${p.next.date} (${nNext})` : '', moved: res.moved };
+                    if (typeof AuditLog !== 'undefined' && AuditLog.write) AuditLog.write('DAY_OFF_SPLIT', details);
+                    else App.writeAuditLog('DAY_OFF_SPLIT', details);
+                    if (App._currentPlanYM === p.ym) App._loadPlan(p.ym, true);
+                    UI.showSaveToast(`✅ ย้าย ${res.moved} ร้านของ ${p.route} ${p.day} แล้ว${res.skipped && res.skipped.length ? ` (ข้าม ${res.skipped.length})` : ''} — อย่าลืมส่งออก DMS ${App.ymToLabel(p.ym)} ใหม่`);
+                    DayOffUI.close();
+                } catch (e) {
+                    UI.hideLoader();
+                    UI.showErrorToast('❌ ย้ายไม่สำเร็จ: ' + (e && e.message));
+                }
             },
         };
         if (typeof PlanLock !== 'undefined') PlanLock.onChange(() => {

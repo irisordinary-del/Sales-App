@@ -371,6 +371,128 @@
         return { ok: true, moved: from.length };
     };
 
+    // ── 7b) เซลหยุด 1 วัน → แบ่งร้านของวันนั้นไปวันทำงานก่อนหน้า/ถัดไปของสายเดียวกัน (เพิ่ม 2026-10-13) ────
+    // หน้า admin (DayOffUI ใน ../index.html) เรียก dayOffPreview → ให้ผู้ใช้ปรับกลุ่มบนแผนที่ → applyDayOff
+    // ย้ายใน "แผนจริง" (days/seqs ของร้าน) ไม่ใช่ข้อยกเว้นแบบ HolidayException เดิมของ RPN (ใช้ได้แค่โหมด weekday
+    // ทั้งศูนย์ และไม่ไปถึงไฟล์ DMS) → วันที่ของแอปเซล (rpnCal) และ DMS ตรงกันเสมอ
+    // วันที่ของแต่ละ Day มาจาก Runs.datesOf ตัวเดียวกับ DMS · ข้อมูลสายอ่านจาก server ก่อนเสมอ (เหมือน applyReorder)
+    const openRoute = async (route, ym) => {
+        if (curYM() !== ym) {
+            if (!(State.db.planList || []).includes(ym)) return { ok: false, msg: 'ไม่มีแผนเดือน ' + ym + ' ในศูนย์นี้' };
+            await App.switchPlan(ym);
+        }
+        for (let i = 0; i < 80 && !(Array.isArray(State.db.routes[route]) && bridge.ready()); i++) await sleep(250);
+        const arr = State.db.routes[route];
+        if (!Array.isArray(arr)) return { ok: false, msg: 'ไม่พบสาย ' + route + ' ในแผนเดือนนี้' };
+        let fresh;
+        try { fresh = await App.planRoutesCol(ym).doc(route).get({ source: 'server' }); }
+        catch (e) { return { ok: false, msg: 'อ่านแผนล่าสุดจาก server ไม่ได้ (' + (e.code || e.message) + ')' }; }
+        if (!fresh.exists) return { ok: false, msg: 'ไม่พบสาย ' + route + ' บน server' };
+        const serverStores = fresh.data().stores || [];
+        if (sigOf(serverStores) !== sigOf(arr) || serverStores.length !== arr.length) {
+            arr.length = 0;
+            serverStores.forEach(s => arr.push(s));
+        }
+        try { Runs._memoClear && Runs._memoClear(); Runs.bump && Runs.bump(); } catch (e) {}
+        return { ok: true, arr };
+    };
+    /** { 'YYYY-MM-DD': ['Day 3', ...] } ของสายนี้ในเดือนที่เปิดอยู่ */
+    const dateDays = (route, arr) => {
+        const set = new Set();
+        arr.forEach(s => { if (s && !s.inactive) (s.days || []).forEach(d => set.add(d)); });
+        const out = {};
+        set.forEach(d => (Runs.datesOf(route, d) || []).map(x => Runs._iso(x)).filter(Boolean)
+            .forEach(iso => { (out[iso] = out[iso] || []).push(d); }));
+        return out;
+    };
+    bridge.dayOffPreview = async ({ route, ym, date }) => {
+        if (!route || !ym || !date) return { ok: false, msg: 'ข้อมูลไม่ครบ (สาย / เดือน / วันที่)' };
+        if (window.PlanLock && PlanLock.isLocked(ym)) return { ok: false, msg: PlanLock.message(ym) };
+        const o = await openRoute(route, ym);
+        if (!o.ok) return o;
+        const arr = o.arr;
+        const map = dateDays(route, arr);
+        const here = (map[date] || []).sort((a, b) => dn(a) - dn(b));
+        if (!here.length) return { ok: false, msg: `วันที่ ${date} สาย ${route} ไม่มีตลาดวิ่งอยู่แล้ว (วันหยุดหรือไม่มีแผน)` };
+        if (here.length > 1) return { ok: false, msg: `วันที่ ${date} มีหลายตลาดวิ่งพร้อมกัน (${here.join(', ')}) — แบ่งอัตโนมัติไม่ได้ ให้ย้ายใน RPN เอง` };
+        const day = here[0];
+        const all = Object.keys(map).filter(k => k.slice(0, 7) === date.slice(0, 7)).sort();
+        const others = all.filter(k => k !== date && !map[k].includes(day));
+        const before = others.filter(k => k < date), after = others.filter(k => k > date);
+        const pick = (k) => k ? { date: k, day: map[k].slice().sort((a, b) => dn(a) - dn(b))[0], also: map[k].length > 1 ? map[k] : null } : null;
+        const prev = pick(before[before.length - 1]), next = pick(after[0]);
+        if (!prev && !next) return { ok: false, msg: 'ไม่มีวันทำงานอื่นในเดือนนี้ให้ย้ายไป' };
+        const dayDates = all.filter(k => map[k].includes(day));
+        const seqOf = (s) => (s.seqs && s.seqs[day]) || 9999;
+        const stores = arr.filter(s => s && !s.inactive && (s.days || []).includes(day)).sort((a, b) => seqOf(a) - seqOf(b))
+            .map(s => ({ id: s.id, name: s.name || '', lat: s.lat, lng: s.lng, seq: seqOf(s), days: (s.days || []).slice() }));
+        // จุดกลางของร้านในวันก่อนหน้า/ถัดไป — หน้า admin ใช้แบ่งร้านตามระยะทางเป็นค่าเริ่มต้น
+        const centroid = (d) => {
+            if (!d) return null;
+            const pts = arr.filter(s => s && !s.inactive && (s.days || []).includes(d) && isFinite(s.lat) && isFinite(s.lng) && s.lat && s.lng);
+            if (!pts.length) return null;
+            return { lat: pts.reduce((a, s) => a + +s.lat, 0) / pts.length, lng: pts.reduce((a, s) => a + +s.lng, 0) / pts.length };
+        };
+        if (prev) prev.center = centroid(prev.day);
+        if (next) next.center = centroid(next.day);
+        return {
+            ok: true, route, ym, date, day, dayDates, prev, next, stores,
+            market: (RoadMaster.marketName && RoadMaster.marketName(route, day, arr)) || '',
+            prevMarket: prev && RoadMaster.marketName ? (RoadMaster.marketName(route, prev.day, arr) || '') : '',
+            nextMarket: next && RoadMaster.marketName ? (RoadMaster.marketName(route, next.day, arr) || '') : '',
+            basisSig: sigOf(arr),
+        };
+    };
+    /** moves = { storeId: 'Day ปลายทาง' } — ร้านที่ไม่อยู่ใน moves คงอยู่ที่ day เดิม */
+    bridge.applyDayOff = async ({ route, ym, day, moves, basisSig, label }) => {
+        if (!route || !ym || !day || !moves) return { ok: false, msg: 'ข้อมูลไม่ครบ' };
+        if (window.PlanLock && PlanLock.isLocked(ym)) return { ok: false, msg: PlanLock.message(ym) };
+        const o = await openRoute(route, ym);
+        if (!o.ok) return o;
+        const arr = o.arr;
+        if (basisSig && basisSig !== sigOf(arr)) return { ok: false, stale: true, msg: 'แผนสายนี้ถูกแก้ระหว่างที่ตรวจสอบ — กด "ตรวจสอบ" ใหม่' };
+        try { if (window.EditHistory) EditHistory.mark(label || ('เซลหยุด แบ่งร้าน ' + route + ' ' + day)); } catch (e) {}
+        const PER_DAY = ['cys', 'fqs', 'fqRun', 'vd', 'runOf'];
+        const moving = new Set(Object.keys(moves).map(String));
+        const peerOf = (t) => arr.find(p => p && !p.inactive && !moving.has(String(p.id)) && (p.days || [])[0] === t)
+            || arr.find(p => p && !p.inactive && !moving.has(String(p.id)) && (p.days || []).includes(t));
+        const nextSeq = {};
+        const seqStart = (t) => {
+            if (!(t in nextSeq)) nextSeq[t] = arr.reduce((m, p) => Math.max(m, (p.days || []).includes(t) && p.seqs && p.seqs[t] ? p.seqs[t] : 0), 0);
+            return ++nextSeq[t];
+        };
+        const seqOf = (s) => (s.seqs && s.seqs[day]) || 9999;
+        let moved = 0; const skipped = [];
+        arr.filter(s => s && moving.has(String(s.id)) && (s.days || []).includes(day)).sort((a, b) => seqOf(a) - seqOf(b)).forEach(s => {
+            const t = moves[s.id] || moves[String(s.id)];
+            if (!t || t === day) return;
+            if ((s.days || []).includes(t)) { skipped.push(s.name || s.id); return; }   // อยู่วันปลายทางอยู่แล้ว (F2) — ไม่ย้าย
+            const peer = peerOf(t);
+            s.days = s.days.filter(d => d !== day).concat(t).sort((a, b) => dn(a) - dn(b));
+            if (!s.seqs) s.seqs = {};
+            delete s.seqs[day];
+            s.seqs[t] = seqStart(t);
+            PER_DAY.forEach(k => {
+                if (!s[k] || typeof s[k] !== 'object') return;
+                delete s[k][day];
+                if (peer && peer[k] && peer[k][t] !== undefined) s[k][t] = JSON.parse(JSON.stringify(peer[k][t]));
+            });
+            if (s.cys && typeof s.cys === 'object') s.cy = s.cys[s.days[0]] || s.cy || '';
+            if (s.days.length === 1 && peer && peer.marketName) s.marketName = peer.marketName;
+            moved++;
+        });
+        if (!moved) return { ok: false, msg: 'ไม่มีร้านที่ย้ายได้' + (skipped.length ? ` (${skipped.length} ร้านอยู่วันปลายทางอยู่แล้ว)` : '') };
+        await App.planRoutesCol(ym).doc(route).set({
+            stores: arr,
+            confirmedBy: firebase.firestore.FieldValue.delete(),
+            confirmedAt: firebase.firestore.FieldValue.delete(),
+        }, { merge: true });
+        try { Runs.bump && Runs.bump(); } catch (e) {}
+        try { if (typeof MultiRoute !== 'undefined' && MultiRoute.rebuild) MultiRoute.rebuild(); } catch (e) {}
+        try { UI.render(); } catch (e) {}
+        return { ok: true, moved, skipped };
+    };
+
     // ── 8) ชื่อตลาด "สูตรเดิม" ของระบบเรา (FileManager._autoFillMarketNames ใน ../file-manager.js) ─────
     //   {สาย} D{NN} {2 ตำบลที่มีร้านมากสุด} {อำเภอที่มากสุด} {จังหวัดที่มากสุด} — ตัดคำนำหน้า ต./ตำบล ฯลฯ ก่อน
     //   อำเภอซ้ำกับตำบลก็ใส่ซ้ำ (ตั้งใจ ตามสูตรเดิม) · ใช้รหัสสายแทน salesCode ของร้าน (ร้านที่ RPN ย้ายสาย
