@@ -65,10 +65,11 @@
 | 5 | **rpnCal** — คำนวณวันที่จริงของแต่ละ Day ส่งให้แอปเซล (รายละเอียดหัวข้อ 6) | แอปเซลไม่คำนวณวันที่แบบ RPN เอง |
 | 6 | แถบแดง "ดูได้อย่างเดียว" เดือนที่ล็อก | คู่กับ `../plan-lock.js` |
 | 7 | `RPNBridge.applyReorder` — อนุมัติคำขอจัดลำดับตลาดจากแอปเซล | ดู CLAUDE.md หัวข้อ market reorder |
+| 7b | `RPNBridge.dayOffPreview` / `applyDayOff` — เซลหยุด 1 วัน แบ่งร้านของวันนั้นไปวันทำงานก่อนหน้า/ถัดไปของสายเดียวกัน (หน้า admin เมนู "📆 เซลหยุด / แบ่งร้าน" = `DayOffUI` ใน `../index.html`) | `HolidayException` เดิมใน RPN ใช้ได้แค่โหมด weekday ทั้งศูนย์ ไม่มีปุ่มเปิด และไม่ย้ายร้านจริง (DMS ไม่เปลี่ยน) — อันนี้ย้าย `days`/`seqs` ในแผนจริง |
 | 8 | ชื่อตลาด "สูตรเดิม" ในหน้าแนะนำชื่อตลาดของ RPN | ผู้ใช้ขอให้เลือกสูตรเดิมของเราได้ทั้งรายวันและทั้งสาย |
 | 9 | อุดบัคหน้าตั้งค่าปฏิทิน (ติ๊กสาย / เลื่อนเดือน) | ดูหัวข้อ 5 |
 
-`RPNBridge` (หน้า admin เรียกผ่าน iframe): `dirty`, `go`, `reload`, `ready`, `applyReorder`, `reconcileCal`, `legacyName`
+`RPNBridge` (หน้า admin เรียกผ่าน iframe): `dirty`, `go`, `reload`, `ready`, `applyReorder`, `dayOffPreview`, `applyDayOff`, `reconcileCal`, `legacyName`
 
 ### `SYNC.md` — ไฟล์นี้
 
@@ -81,10 +82,10 @@
 
 | ของ RPN | ใช้ทำอะไร (§) |
 |---|---|
-| `App._loadPlan`, `App.switchPlan`, `App._currentPlanYM` | รู้ว่ากำลังสลับเดือน / เดือนที่เปิดอยู่ (§5, §7) |
+| `App._loadPlan`, `App.switchPlan`, `App._currentPlanYM` | รู้ว่ากำลังสลับเดือน / เดือนที่เปิดอยู่ (§5, §7, §7b) |
 | `App.planRef(ym)`, `App.planRoutesCol(ym)`, `App.dbRef` | อ่าน/เขียนเอกสารแผนและสาย (§5, §7, §9) |
 | `State.db.routes`, `.routeList`, `.planList`, `.calendarConfig`, `.routeCal`, `.cyPoints`, `.routeDist`, `._failedRoutes` | ข้อมูลที่ RPN ถืออยู่ในหน่วยความจำ (§5, §7) — `routeCal` = override ปฏิทินรายสาย (โหลดโดย `day-date.js`) |
-| `Runs.datesOf(route, day)`, `Runs._iso`, `Runs._memoClear`, `Runs.bump` | คำนวณวันที่จริง = ตัวเดียวกับที่ส่งออก DMS (§5, §7) |
+| `Runs.datesOf(route, day)`, `Runs._iso`, `Runs._memoClear`, `Runs.bump` | คำนวณวันที่จริง = ตัวเดียวกับที่ส่งออก DMS (§5, §7, §7b — หาว่าวันที่เซลหยุดคือ Day ไหน และวันทำงานก่อน/หลัง) |
 | `RoadMaster.marketName`, `.daysOf`, `.dayPanelHTML`, `.setMarketName`, `.render` | ชื่อตลาดรายวัน + ชิป "สูตรเดิม" (§5, §8) |
 | `MarketSuggest.bulk`, `.bulkApply`, `.bulkAll`, `.use`, `.closeBulk` + element `#mk-bulk`, `mkb-s{i}`, `mkb-c{i}` | ตาราง "🗂 ทั้งสาย" + ปุ่ม "📛 สูตรเดิมทุกวัน" (§8) |
 | `CalendarAdmin.shiftMonth`, `._loadConfig`, `._ym`, `._targetRoute`, `._calUiWired` | หน้าตั้งค่าปฏิทิน (§9) |
@@ -143,14 +144,14 @@ plans/{ym}.rpnCalIndex        = { สาย: hash }
 ### ตามไฟล์
 | ไฟล์ | สิ่งที่เพิ่ม/แก้ |
 |---|---|
-| `index.html` | แท็บ "วางแผนคิวงาน"/"ภาพรวมแผน" = iframe RPN (`#page-rpn`, `RpnHost`) · เมนูข้าง "คำขอย้ายวัน" (`MoveRequestAdmin` — การ์ดมีวันที่ + ชื่อตลาด, อนุมัติทั้งชุดเมื่อร้านเดียวกันขอหลายรอบ, อนุมัติจัดลำดับตลาดผ่าน `RPNBridge.applyReorder`) · "ล็อกแผน" (`PlanLockUI`) · "เช็คการยืนยัน" · โหลด `plan-lock.js` |
+| `index.html` | แท็บ "วางแผนคิวงาน"/"ภาพรวมแผน" = iframe RPN (`#page-rpn`, `RpnHost`) · เมนูข้าง "📆 เซลหยุด / แบ่งร้าน" (`DayOffUI` — แบ่งตามระยะทางเป็นค่าเริ่มต้น สลับรายร้านบนแผนที่/รายการ, audit `DAY_OFF_SPLIT`) · เมนูข้าง "คำขอย้ายวัน" (`MoveRequestAdmin` — การ์ดมีวันที่ + ชื่อตลาด, อนุมัติทั้งชุดเมื่อร้านเดียวกันขอหลายรอบ, อนุมัติจัดลำดับตลาดผ่าน `RPNBridge.applyReorder`) · "ล็อกแผน" (`PlanLockUI`) · "เช็คการยืนยัน" · โหลด `plan-lock.js` |
 | `plan-lock.js` (ใหม่) | ล็อกเดือนรายศูนย์ (`lockedMonths`) / ทุกศูนย์ (`LOCKED`) · `get()` แบบลอง server ก่อน |
 | `sales-app.js` | `RpnCompat` (rpnCal, ซ่อน `รอจัดสาย`/inactive) · โหมดปฏิทิน `'rpn'` ใน `CalendarCtrl._resolveActiveCfg` · `ReorderReq` (ขอจัดลำดับตลาด + ปฏิทินโหมดรออนุมัติ) · `MoveRequest` (เลือกวันพร้อมวันที่/ชื่อตลาด, ถามรอบอื่นของร้าน F2/F4) · `get()` ลอง server ก่อน 4 วิ · `Processor.syncDayLabel` · `switchToPlan` ฝั่งหัวหน้าคงสายที่เลือก |
 | `sales.html` | `#calendar-reorder-bar` |
 | `admin-data.js` | `approveMoveRequest` รองรับหลาย Day + อัปเดต `rpnCal.sig` · `App._rpnSig` · `getRouteConfirmStatus` ข้าม `รอจัดสาย` |
 | `admin-cellsplit.js` | ข้าม `รอจัดสาย`/inactive, ร้านที่จอดไว้ไปเซลล์ที่ใกล้สุด, เขียนแบบ merge และล้าง rpnCal + การยืนยัน |
 | `admin-ui.js`, `users.js`, `tasks.js`, `center-select.html` | ข้าม `รอจัดสาย` (และ inactive ในภาพรวมทุกสาย) |
-| `audit-log.js` | action `PLAN_LOCK` / `PLAN_UNLOCK` |
+| `audit-log.js` | action `PLAN_LOCK` / `PLAN_UNLOCK` / `DAY_OFF_SPLIT` |
 | `tools/sync-rpn.mjs` (ใหม่) | สคริปต์ซิงก์ (หัวข้อ 2) |
 
 `moveRequests` แบบ `type:'reorder'` ใส่ field หลอก (`storeId:'__reorder__'` ฯลฯ) ให้ผ่าน `firestore.rules` เดิม · คำขอย้ายร้านหลายรอบใช้ `groupId`/`groupSize`
@@ -169,6 +170,7 @@ plans/{ym}.rpnCalIndex        = { สาย: hash }
 - [ ] แอปเซลหัวหน้า: เลือกสาย แล้วกดวันที่ข้ามเดือน → ยังเป็นร้านของสายนั้นสายเดียว
 - [ ] ขอย้ายวัน (ร้าน F2) → ถามรอบอื่น · การ์ดฝั่งแอดมินขึ้นวันที่ + ชื่อตลาด (ทดสอบแบบไม่ส่งจริง หรือใช้ศูนย์ TEST_)
 - [ ] ขอจัดลำดับตลาด (เดือนหน้า) → ปฏิทินโหมดรออนุมัติ → แอดมินอนุมัติ (ศูนย์ TEST_ เท่านั้น)
+- [ ] เซลหยุด / แบ่งร้าน: ตรวจสอบสายหนึ่งในวันทำงาน → ขึ้นวันก่อน/หลัง + แผนที่แบ่งสองสี · วันอาทิตย์ → แจ้งว่าไม่มีตลาด (ยืนยันย้ายจริงเฉพาะศูนย์ TEST_ หรือดัก `set` ไว้แบบที่ทดสอบ 2026-10-13)
 - [ ] ชื่อตลาด "สูตรเดิม": ชิปในแผงรายวัน + ตัวเลือกในตาราง "🗂 ทั้งสาย" + ปุ่ม "📛 สูตรเดิมทุกวัน"
 - [ ] ส่งออก DMS ของ RPN ยังทำงาน
 - [ ] `node --check` ทุกไฟล์ที่แก้
@@ -194,6 +196,7 @@ plans/{ym}.rpnCalIndex        = { สาย: hash }
 | 2026-10-09 | `cd68f3b` | หัว "Day · ตลาด" ไม่เปลี่ยนเมื่อกดวันจากปฏิทิน |
 | 2026-10-09 | `b69562d` | rpnCal เก็บ `cfg` — แก้ปฏิทินแล้วแอปเซลเปลี่ยนตามทันที (402C02 พ.ย.) · คำนวณ rpnCal 402 ก.ย.–ธ.ค. ใหม่ |
 | 2026-10-10 | `d4d0b0c` | หัวหน้าเลือกสายแล้วขึ้นร้านทุกสายเมื่อข้ามเดือน · อุดบัคหน้าตั้งค่าปฏิทินของ RPN (§9) |
+| 2026-10-13 | — | คู่มือนี้ · เมนู "📆 เซลหยุด / แบ่งร้าน" (§7b + `DayOffUI`) แทน `HolidayException` ที่หายไป |
 
 **แก้ข้อมูลโดยตรง (ไม่ใช่โค้ด) ที่ควรรู้:** 402V09 พ.ย. ย้อนการสลับ D1↔D21 และทำให้เรียงตาม ต.ค. · 402V09 ธ.ค. เรียงตาม พ.ย. ·
 402V08 พ.ย. ย้าย 10 ร้านกลับวันเดิมแบบ ต.ค. (2026-10-09)
