@@ -393,8 +393,19 @@
             arr.length = 0;
             serverStores.forEach(s => arr.push(s));
         }
+        // ✅ FIX (2026-10-13): ปฏิทินที่ Runs ใช้ต้องเป็นของ server ด้วย — State.db.routeCal (override รายสาย) และ
+        // State.db.calendarConfig ในหน่วยความจำของ RPN ค้างได้ (เจอจริง: 402V05 พ.ย. ในเครื่องผู้ใช้คิดว่า 14 พ.ย. = D13
+        // ตามปฏิทินศูนย์ ทั้งที่สายตั้งปฏิทินเฉพาะไว้ = D16) → วันที่เซลหยุดชี้ผิดตลาด ย้ายร้านผิดชุด
+        try {
+            const ov = fresh.data().calendarOverride || null;
+            if (!State.db.routeCal) State.db.routeCal = {};
+            if (ov) State.db.routeCal[route] = ov; else delete State.db.routeCal[route];
+            const ps = await App.planRef(ym).get({ source: 'server' });
+            if (ps.exists && ps.data().calendarConfig) State.db.calendarConfig = ps.data().calendarConfig;
+        } catch (e) { return { ok: false, msg: 'อ่านปฏิทินล่าสุดจาก server ไม่ได้ (' + (e.code || e.message) + ')' }; }
         try { Runs._memoClear && Runs._memoClear(); Runs.bump && Runs.bump(); } catch (e) {}
-        return { ok: true, arr };
+        try { if (window.DayDate && DayDate._clear) DayDate._clear(); } catch (e) {}
+        return { ok: true, arr, cal: fresh.data().calendarOverride ? 'route' : 'plan' };
     };
     /** { 'YYYY-MM-DD': ['Day 3', ...] } ของสายนี้ในเดือนที่เปิดอยู่ */
     const dateDays = (route, arr) => {
@@ -416,6 +427,16 @@
         if (!here.length) return { ok: false, msg: `วันที่ ${date} สาย ${route} ไม่มีตลาดวิ่งอยู่แล้ว (วันหยุดหรือไม่มีแผน)` };
         if (here.length > 1) return { ok: false, msg: `วันที่ ${date} มีหลายตลาดวิ่งพร้อมกัน (${here.join(', ')}) — แบ่งอัตโนมัติไม่ได้ ให้ย้ายใน RPN เอง` };
         const day = here[0];
+        // ด่านกันอีกชั้น: ถ้าบน server มี rpnCal ที่ยังตรงกับร้าน + ปฏิทินปัจจุบัน (= ที่แอปเซลใช้อยู่) ต้องบอกวันเดียวกัน
+        try {
+            const sv = (await App.planRoutesCol(ym).doc(route).get({ source: 'server' })).data() || {};
+            const rc = sv.rpnCal;
+            if (rc && rc.days && rc.sig === sigOf(arr) && rc.cfg && rc.cfg === cfgSig(cfgOfRoute(route))) {
+                const sales = Object.keys(rc.days).filter(k => (rc.days[k].d || []).includes(date));
+                if (sales.length && !sales.includes(day))
+                    return { ok: false, msg: `วันที่ ${date} คำนวณได้ ${day} แต่ปฏิทินเซลบอก ${sales.join(', ')} — ไม่ตรงกัน หยุดไว้ก่อน (ปิดแล้วเปิดหน้า admin ใหม่แล้วลองอีกครั้ง)` };
+            }
+        } catch (e) { /* อ่านไม่ได้ = ข้ามด่านนี้ ข้อมูลหลักอ่านจาก server แล้ว */ }
         const all = Object.keys(map).filter(k => k.slice(0, 7) === date.slice(0, 7)).sort();
         const others = all.filter(k => k !== date && !map[k].includes(day));
         const before = others.filter(k => k < date), after = others.filter(k => k > date);
@@ -435,8 +456,13 @@
         };
         if (prev) prev.center = centroid(prev.day);
         if (next) next.center = centroid(next.day);
+        // ร้านเดิมของวันก่อนหน้า/ถัดไป — แผนที่ฝั่ง admin วาดเป็นจุดจาง ๆ ให้เห็นว่าตลาดของวันนั้นอยู่ตรงไหน
+        const ptsOf = (d) => !d ? [] : arr.filter(s => s && !s.inactive && (s.days || []).includes(d) && !(s.days || []).includes(day)
+            && isFinite(s.lat) && isFinite(s.lng) && s.lat && s.lng).map(s => ({ name: s.name || '', lat: +s.lat, lng: +s.lng }));
+        if (prev) prev.stores = ptsOf(prev.day);
+        if (next) next.stores = ptsOf(next.day);
         return {
-            ok: true, route, ym, date, day, dayDates, prev, next, stores,
+            ok: true, route, ym, date, day, dayDates, prev, next, stores, calSource: o.cal,
             market: (RoadMaster.marketName && RoadMaster.marketName(route, day, arr)) || '',
             prevMarket: prev && RoadMaster.marketName ? (RoadMaster.marketName(route, prev.day, arr) || '') : '',
             nextMarket: next && RoadMaster.marketName ? (RoadMaster.marketName(route, next.day, arr) || '') : '',
