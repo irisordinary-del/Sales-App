@@ -90,6 +90,46 @@ const TasksApp = {
         return TasksApp._tasks.filter(t => t.dateType === 'monthly' ? t.dayOfMonth === d : t.date === iso);
     },
 
+    // ─── วันหยุดตามแผน (2026-10-15) ──────────────────────────────────────
+    // ปฏิทินของแต่ละสาย = calendarOverride ของสาย › calendarConfig ของเดือน (เหมือน CalendarCtrl._resolveActiveCfg)
+    // วันหยุด = วันหยุดประจำสัปดาห์ + วันหยุดเฉพาะกิจ (weekday-rolling ไม่มีวันหยุดเฉพาะกิจ) · ไม่มีแผนเดือนนั้น = ไม่รู้ ไม่ระบาย
+    // _holCache[ym] = { all: Set(วันที่ที่ทุกสายหยุด), routes: จำนวนสาย } | 'loading'
+    _holCache: {},
+    _holKey: () => `${TasksApp._centerId}|${TasksApp._calYear}_${String(TasksApp._calMonth + 1).padStart(2, '0')}`,
+    _loadHolidays: async (key) => {
+        TasksApp._holCache[key] = 'loading';
+        const [cid, ym] = key.split('|');
+        const [y, m] = ym.split('_').map(Number);
+        try {
+            const planRef = TasksApp._db().collection('appData').doc(cid + '_main').collection('plans').doc(ym);
+            const ps = await planRef.get();
+            if (!ps.exists) { TasksApp._holCache[key] = { all: new Set(), routes: 0 }; return; }
+            const plan = ps.data();
+            const routes = (plan.routeList || []).filter(r => r && r !== 'รอจัดสาย');
+            const docs = await Promise.all(routes.map(r => planRef.collection('routes').doc(r).get().catch(() => null)));
+            const dim = new Date(y, m, 0).getDate();
+            const offOf = (cfg) => {
+                const s = new Set();
+                if (!cfg) return s;
+                const wk = cfg.weeklyHolidays || [], ad = cfg.anchorType === 'weekday-rolling' ? [] : (cfg.holidays || []);
+                for (let d = 1; d <= dim; d++) if (wk.includes(new Date(y, m - 1, d).getDay()) || ad.includes(d)) s.add(d);
+                return s;
+            };
+            let all = null, n = 0;
+            docs.forEach(d => {
+                if (!d || !d.exists) return;
+                const off = offOf(d.data().calendarOverride || plan.calendarConfig);
+                all = all ? new Set([...all].filter(x => off.has(x))) : off;
+                n++;
+            });
+            TasksApp._holCache[key] = { all: all || new Set(), routes: n };
+        } catch (e) {
+            console.warn('[Tasks] โหลดวันหยุดไม่สำเร็จ', e);
+            TasksApp._holCache[key] = { all: new Set(), routes: 0 };
+        }
+        if (key === TasksApp._holKey()) TasksApp.renderCalendar();
+    },
+
     // ─── Calendar navigation ─────────────────────────────────────────────
     prevMonth: () => {
         TasksApp._calMonth--;
@@ -118,6 +158,13 @@ const TasksApp = {
         // ✅ Dark mode: สีเซลล์ปฏิทินเป็น inline style (ไม่ใช่ Tailwind class) เลยต้องคำนวณเองตามธีมปัจจุบัน
         const isDarkMode = document.documentElement.classList.contains('dark');
 
+        // วันหยุดที่ตรงกันทุกสาย — โหลดครั้งแรกของเดือนนั้นแล้ววาดใหม่ (ระหว่างโหลดวาดแบบไม่มีสีก่อน)
+        const hk = TasksApp._holKey();
+        if (!TasksApp._holCache[hk] && TasksApp._centerId) TasksApp._loadHolidays(hk);
+        const hol = (TasksApp._holCache[hk] && TasksApp._holCache[hk] !== 'loading') ? TasksApp._holCache[hk] : null;
+        const note = document.getElementById('task-cal-holiday-note');
+        if (note) note.textContent = !hol ? 'กำลังโหลดวันหยุด…' : (hol.routes ? `วันหยุดจากแผน ${hol.routes} สาย` : 'ยังไม่มีแผนเดือนนี้');
+
         let html = '';
         for (let i = 0; i < firstDow; i++) html += '<div></div>';
 
@@ -131,11 +178,13 @@ const TasksApp = {
 
             let cellBg = isDarkMode ? '#1e293b' : '#fff';
             let cellBorder = isDarkMode ? '#334155' : '#f3f4f6';
-            if (hasActiveTask)      { cellBg = isDarkMode ? '#4a3510' : '#fffbeb'; cellBorder = '#fcd34d'; }
+            const isHoliday = !!(hol && hol.routes && hol.all.has(d));
+            if (isHoliday)          { cellBg = isDarkMode ? '#3f1d1d' : '#fef2f2'; cellBorder = isDarkMode ? '#7f1d1d' : '#fca5a5'; }
+            else if (hasActiveTask) { cellBg = isDarkMode ? '#4a3510' : '#fffbeb'; cellBorder = '#fcd34d'; }
             else if (hasTask)       { cellBg = isDarkMode ? '#0f172a' : '#f9fafb'; cellBorder = isDarkMode ? '#475569' : '#e5e7eb'; }
             if (isToday) cellBorder = '#6366f1';
 
-            const dayNumColor  = isToday ? '#818cf8' : (isDarkMode ? '#e2e8f0' : '#111827');
+            const dayNumColor  = isToday ? '#818cf8' : isHoliday ? (isDarkMode ? '#fca5a5' : '#dc2626') : (isDarkMode ? '#e2e8f0' : '#111827');
             const taskColorOn  = isDarkMode ? '#fcd34d' : '#92400e';
             const taskColorOff = isDarkMode ? '#64748b' : '#9ca3af';
 
@@ -150,7 +199,7 @@ const TasksApp = {
                 style="min-height:66px;border-radius:10px;border:1.5px solid ${cellBorder};background:${cellBg};
                        padding:5px 4px;cursor:pointer;display:flex;flex-direction:column;gap:2px;transition:transform .1s,box-shadow .1s;"
                 onmouseover="this.style.boxShadow='0 2px 6px rgba(0,0,0,0.08)'" onmouseout="this.style.boxShadow='none'">
-                <div style="font-size:12px;font-weight:${isToday ? '900' : '700'};color:${dayNumColor};">${d}${isToday ? ' •' : ''}</div>
+                <div style="font-size:12px;font-weight:${isToday ? '900' : '700'};color:${dayNumColor};">${d}${isToday ? ' •' : ''}${isHoliday ? `<span style="font-size:9px;font-weight:800;margin-left:4px;color:${isDarkMode ? '#fca5a5' : '#dc2626'};">หยุด</span>` : ''}</div>
                 ${taskLines}
             </div>`;
         }
