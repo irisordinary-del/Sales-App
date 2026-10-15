@@ -873,7 +873,13 @@ const RpnCompat = {
     calOf: (data, visible) => {
         const c = data && data.rpnCal;
         if (!c || c.v !== 1 || !c.days) return null;
-        return c.sig === RpnCompat.sig(visible) ? c : null;
+        if (c.sig !== RpnCompat.sig(visible)) return null;
+        // ✅ FIX (2026-10-15): rpnCal เคยถูกเขียนแบบ merge ลึก → Day ที่ไม่มีร้านแล้วค้างอยู่พร้อมวันที่เก่า
+        // (402C02 พ.ย.: D5 "อู่ทอง สวนแตง" ค้างที่ 21 พ.ย. ซึ่งเป็นวันหยุด) → ใช้เฉพาะ Day ที่ร้านในสายยังมีอยู่จริง
+        const live = new Set((visible || []).flatMap(s => s.days || []));
+        const days = {};
+        Object.keys(c.days).forEach(k => { if (live.has(k)) days[k] = c.days[k]; });
+        return Object.assign({}, c, { days });
     },
 
     _iso: (y, m, d) => `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`,

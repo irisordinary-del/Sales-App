@@ -162,7 +162,17 @@
         }
         let c = null;
         try { if (sigOf(data.stores) === sigOf(State.db.routes[m[3]])) c = calPayload(m[3]); } catch (e) { console.warn('[rpnCal]', e); }
-        if (c) { cal.written[m[3]] = calHash(c); return Object.assign({}, data, { rpnCal: c }); }
+        if (c) {
+            cal.written[m[3]] = calHash(c);
+            // ✅ FIX (2026-10-15): บันทึกสายของ RPN เป็น merge:true → rpnCal ถูกผสมลึก Day ที่ไม่มีร้านแล้วค้างพร้อมวันที่เก่า
+            // (402C02 พ.ย. D5) → ใส่คำสั่งลบ Day ที่ไม่อยู่ในชุดใหม่ไปด้วย (เฉพาะคำสั่งที่เป็น merge)
+            if (opts && opts.merge) {
+                const days = Object.assign({}, c.days);
+                for (let i = 1; i <= 62; i++) { const k = 'Day ' + i; if (!(k in days)) days[k] = fs.FieldValue.delete(); }
+                return Object.assign({}, data, { rpnCal: Object.assign({}, c, { days }) });
+            }
+            return Object.assign({}, data, { rpnCal: c });
+        }
         // ข้อมูลที่เขียนไม่ใช่ชุดใน State — คำนวณไม่ได้ ล้างของเดิมทิ้งกันแอปเซลใช้วันที่ค้าง
         if (opts && (opts.merge || opts.mergeFields)) return Object.assign({}, data, { rpnCal: fs.FieldValue.delete() });
         return data;
@@ -241,7 +251,8 @@
                     let srv = null;
                     try { srv = await App.planRoutesCol(ym).doc(rt).get({ source: 'server' }); } catch (e) { srv = null; }
                     if (!srv || !srv.exists || sigOf(srv.data().stores) !== c.sig || !still()) { cal.done[rt] = false; continue; }
-                    await origSet.call(App.planRoutesCol(ym).doc(rt), { rpnCal: c }, { merge: true });
+                    // ✅ FIX (2026-10-15): mergeFields = แทนที่ rpnCal ทั้งก้อน (merge:true เดิมผสมลึก Day ที่หายไปแล้วจึงค้าง)
+                    await origSet.call(App.planRoutesCol(ym).doc(rt), { rpnCal: c }, { mergeFields: ['rpnCal'] });
                 }
                 cal.written[rt] = h;
                 cal.index[rt] = h;
