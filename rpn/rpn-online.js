@@ -197,12 +197,23 @@
         return !!(m && 'calendarOverride' in data && !Array.isArray(data.stores));
     };
 
+    // ✅ FIX (2026-10-16): RPN ใส่ค่า undefined ในร้าน (เช่น removed.js: wasPlan.fqs / wasPlan.runOf ของร้านที่ไม่มีค่านั้น)
+    // local-firebase.js ของ RPN ยอม แต่ Firestore จริงปฏิเสธทั้งคำสั่ง ("Unsupported field value: undefined")
+    // → ปุ่ม "เอาออกจากแผน" บันทึกไม่ได้เงียบ ๆ (เจอ 402 พ.ย. 109 ร้าน) · ตัด key ที่เป็น undefined ออกก่อนเขียน stores
+    const stripUndef = (v) => {
+        if (Array.isArray(v)) { for (let i = 0; i < v.length; i++) { if (v[i] === undefined) v[i] = null; else stripUndef(v[i]); } }
+        else if (v && typeof v === 'object' && Object.getPrototypeOf(v) === Object.prototype) {
+            Object.keys(v).forEach(k => { if (v[k] === undefined) delete v[k]; else stripUndef(v[k]); });
+        }
+        return v;
+    };
     if (DocProto) {
         ['set', 'update', 'delete'].forEach(n => {
             const orig = DocProto[n];
             if (typeof orig !== 'function' || orig._rpnWrapped) return;
             DocProto[n] = function (data, opts) {
                 mark();
+                if (n !== 'delete' && data && Array.isArray(data.stores) && ROUTE_RE.test(this.path || '')) stripUndef(data.stores);
                 if (n === 'set') data = injectCal(this, data, opts);
                 const p = (n === 'delete') ? orig.call(this) : orig.call(this, data, opts);
                 if (n !== 'delete' && touchesCalendar(this, data)) {
