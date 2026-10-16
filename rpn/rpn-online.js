@@ -197,6 +197,48 @@
         return !!(m && 'calendarOverride' in data && !Array.isArray(data.stores));
     };
 
+    // ✅ FIX (2026-10-16): ด่านสุดท้ายกันบันทึก "ร้านของสายอื่น" ทับสายนี้ (บัค 402V12 พ.ย. ถูกทับด้วยร้าน 402V01 — ดู §10)
+    // ร้านที่จะเขียนลงสาย X เกือบทั้งหมด (≥ 90% ทั้งสองฝั่ง) เป็นชุดเดียวกับที่สาย Y อื่นถืออยู่ในหน่วยความจำ = ผิดแน่
+    // (ย้ายร้านข้ามสาย / สร้างสายใหม่จากร้านสายอื่น ร้านจะออกจากสายต้นทางไปแล้ว ชุดจึงไม่ซ้ำกัน)
+    const aliasGuard = (ref, data) => {
+        try {
+            const m = ROUTE_RE.exec((ref && ref.path) || '');
+            if (!m || !data || !Array.isArray(data.stores) || m[3] === UNASSIGNED) return '';
+            if (typeof State === 'undefined' || !State.db || !State.db.routes || m[2] !== curYM()) return '';
+            const act = data.stores.filter(s => s && !s.inactive);
+            const ids = new Set(act.map(s => String(s.id)));
+            if (ids.size < 5) return '';
+            // เจ้าของจริงของชุดร้าน = Salesman Code ที่มากสุด — ตอนสองสายชี้อาร์เรย์เดียวกัน (saveOpen เขียนทั้งคู่)
+            // ต้องปล่อยสายเจ้าของผ่าน ไม่งั้นงานที่แก้ในสายนั้นหายไปด้วย
+            const tally = {};
+            act.forEach(s => { const c = s.salesCode || s.route; if (c) tally[c] = (tally[c] || 0) + 1; });
+            const owner = (Object.entries(tally).sort((a, b) => b[1] - a[1])[0] || [])[0];
+            if (!owner || owner === m[3]) return '';
+            for (const [rt, list] of Object.entries(State.db.routes)) {
+                if (rt !== owner || !Array.isArray(list)) continue;
+                const other = list.filter(s => s && !s.inactive).map(s => String(s.id));
+                if (!other.length) continue;
+                const both = other.filter(id => ids.has(id)).length;
+                if (both >= 0.9 * ids.size && both >= 0.9 * other.length) {
+                    console.error(`[rpn-online] กันบันทึก: ร้านที่จะเขียนลง ${m[3]} เป็นชุดเดียวกับสาย ${rt} (${both} ร้าน)`);
+                    reloadRoute(m[2], m[3]);
+                    try { UI.showErrorToast(`⛔ ไม่บันทึก ${m[3]} — ร้านที่จะบันทึกเป็นของสาย ${rt} (หน้าจอสลับสายไม่ตรงกัน) โหลดสาย ${m[3]} จาก server ใหม่แล้ว`); } catch (e) {}
+                    return `ไม่บันทึก ${m[3]}: ร้านเป็นชุดเดียวกับสาย ${rt}`;
+                }
+            }
+        } catch (e) { console.warn('[aliasGuard]', e); }
+        return '';
+    };
+    // App.saveDB ของ RPN ทำ State.db.routes[สายที่แก้] = State.stores ก่อนเขียน → หน่วยความจำของสายนั้นเสียไปแล้ว ต้องโหลดคืนจาก server
+    const reloadRoute = (ym, rt) => {
+        App.planRoutesCol(ym).doc(rt).get({ source: 'server' }).then(d => {
+            if (curYM() !== ym) return;
+            State.db.routes[rt] = d.exists ? (d.data().stores || []) : [];
+            try { if (typeof MultiRoute !== 'undefined' && MultiRoute.rebuild) MultiRoute.rebuild(); } catch (e) {}
+            try { Runs._memoClear && Runs._memoClear(); UI.render(); } catch (e) {}
+        }).catch(e => console.warn('[aliasGuard] reload', e));
+    };
+
     // ✅ FIX (2026-10-16): RPN ใส่ค่า undefined ในร้าน (เช่น removed.js: wasPlan.fqs / wasPlan.runOf ของร้านที่ไม่มีค่านั้น)
     // local-firebase.js ของ RPN ยอม แต่ Firestore จริงปฏิเสธทั้งคำสั่ง ("Unsupported field value: undefined")
     // → ปุ่ม "เอาออกจากแผน" บันทึกไม่ได้เงียบ ๆ (เจอ 402 พ.ย. 109 ร้าน) · ตัด key ที่เป็น undefined ออกก่อนเขียน stores
@@ -212,6 +254,7 @@
             const orig = DocProto[n];
             if (typeof orig !== 'function' || orig._rpnWrapped) return;
             DocProto[n] = function (data, opts) {
+                if (n !== 'delete') { const why = aliasGuard(this, data); if (why) return Promise.reject(new Error(why)); }
                 mark();
                 if (n !== 'delete' && data && Array.isArray(data.stores) && ROUTE_RE.test(this.path || '')) stripUndef(data.stores);
                 if (n === 'set') data = injectCal(this, data, opts);
@@ -801,7 +844,56 @@
         return true;
     };
 
+    // ── 10) กัน "บันทึกร้านของสายอื่นทับสายที่กำลังแก้" (บัคของ RPN — 402V12 พ.ย. ถูกทับด้วยร้าน 402V01, 2026-10-16) ──
+    // ต้นเหตุ: multi-route.js — เมื่อตัวกรองเหลือสายเดียว MultiRoute.rebuild() ตั้ง State.stores = ร้านของสายในตัวกรอง
+    // (open[0]) แต่ไม่เปลี่ยน State.localActiveRoute · App.saveDB (admin-data.js) ทำ State.db.routes[localActiveRoute] = State.stores
+    // แล้วเขียนลงเอกสารของ localActiveRoute → เช่น เปิด V01+V12 เลือกแก้ V12 แล้วติ๊ก V12 ออก → แก้อะไรก็ตาม → V12 = ร้าน V01
+    // ① ตัวกรองเหลือสายเดียว → ตั้งสายที่กำลังแก้เป็นสายนั้น (หน้าจอกับสายที่แก้ตรงกันเสมอ)
+    // ② App.saveDB ตอนสองค่านี้ไม่ตรงกัน → บันทึกลงสายที่แสดงอยู่ (ร้านที่แก้อยู่ในอาร์เรย์ของสายนั้น) แทนการทับสายอื่น
+    // ③ ด่านสุดท้ายที่ตัวเขียน Firestore (aliasGuard ใน §5)
+    const shownRoute = () => {
+        try {
+            if (typeof MultiRoute === 'undefined' || MultiRoute.multi) return '';
+            const o = MultiRoute.open || [];
+            return o.length === 1 ? o[0] : '';
+        } catch (e) { return ''; }
+    };
+    const wireActive = () => {
+        if (typeof MultiRoute === 'undefined' || typeof App === 'undefined' || !App.saveDB || !App.switchRoute) return false;
+        if (MultiRoute._rpnActiveWired) return true;
+        MultiRoute._rpnActiveWired = true;
+        const syncActive = () => {
+            const r = shownRoute();
+            if (r && r !== State.localActiveRoute && Array.isArray(State.db.routes[r])) {
+                console.warn(`[rpn-online] ตัวกรองเหลือ ${r} แต่สายที่กำลังแก้เป็น ${State.localActiveRoute} → สลับสายที่แก้เป็น ${r}`);
+                App.switchRoute(r);
+            }
+        };
+        ['setOpen', 'toggleRoute', 'openOne', 'openAll', 'openSuggested'].forEach(n => {
+            const o = MultiRoute[n];
+            if (typeof o !== 'function') return;
+            MultiRoute[n] = function () { const r = o.apply(this, arguments); try { syncActive(); } catch (e) {} return r; };
+        });
+        const origSave = App.saveDB;
+        App.saveDB = function () {
+            const r = shownRoute(), act = State.localActiveRoute;
+            if (r && act && r !== act && State.stores === State.db.routes[r]) {
+                console.warn(`[rpn-online] saveDB: หน้าจอแสดง ${r} แต่สายที่แก้เป็น ${act} → บันทึกลง ${r}`);
+                State.localActiveRoute = r;
+                try { localStorage.setItem(`last_route_${App._currentPlanYM}`, r); } catch (e) {}
+            }
+            return origSave.apply(this, arguments);
+        };
+        return true;
+    };
+
     document.addEventListener('DOMContentLoaded', () => {
+        // multi-route.js ครอบ App.saveDB / switchRoute หลัง DOMContentLoaded + setTimeout — รอให้ครอบเสร็จก่อน แล้วค่อยครอบชั้นนอก
+        const tryActive = (k) => {
+            const ready = typeof App !== 'undefined' && App.switchRoute && (String(App.switchRoute).includes('open.push') || k >= 20);
+            if (!(ready && wireActive()) && k < 40) setTimeout(() => tryActive(k + 1), 500);
+        };
+        setTimeout(() => tryActive(0), 1500);
         const tryCopy = (k) => { if (!wireCopy() && k < 40) setTimeout(() => tryCopy(k + 1), 500); };
         setTimeout(() => tryCopy(0), 1500);
         const tryCal = (k) => { if (!wireCal() && k < 40) setTimeout(() => tryCal(k + 1), 500); };
