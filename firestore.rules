@@ -170,6 +170,18 @@ service cloud.firestore {
                      && (!request.resource.data.keys().hasAll(['dayOfMonth']) || request.resource.data.dayOfMonth is number);
       }
 
+      // ─── meta/geoTree — ✅ NEW (2026-10-16) CUSTOMER_GEO_TREE ที่ RPN นำเข้า (rpn/geo-tree.js) ──
+      // เดิมไม่มีกฎ → deny ทั้งอ่านและเขียน: นำเข้า Geo Tree ในหน้าออนไลน์ไม่สำเร็จ และส่งออก DMS ถูกบล็อก
+      // ("มี N ร้านย้ายเซลล์ — นำเข้า CUSTOMER_GEO_TREE ก่อนส่งออก") ทุกครั้งที่มีร้านอยู่สายที่ไม่ตรง Salesman Code
+      match /meta/{docId} {
+        allow read: if docId == 'geoTree';
+        allow delete: if docId == 'geoTree';
+        allow write: if docId == 'geoTree'
+                     && request.resource.data.keys().hasAll(['dist','cust','nodes'])
+                     && request.resource.data.cust is map
+                     && request.resource.data.nodes is map;
+      }
+
       // ─── moveRequests/{reqId} — ✅ NEW (2026-08-31) ────────────────
       // เซล/แอดมิน/หัวหน้างาน ขอย้ายร้านค้าจาก Day เดิม → Day ใหม่ "ภายในสายเดียวกัน"
       // คำขอต้องรอแอดมินอนุมัติก่อนถึงจะมีผลจริงกับ stores ใน plans/{ym}/routes/{routeId}

@@ -249,14 +249,54 @@
         }
         return v;
     };
+    // ✅ FIX (2026-10-16): Geo Tree (geo-tree.js) เก็บ cust[รหัสร้าน] = [[Node, วันเริ่ม, วันจบ], ...] = array ซ้อน array
+    // local-firebase.js ยอม แต่ Firestore จริงไม่รองรับ (และเดิม firestore.rules ไม่มีกฎของ meta/ เลย) → นำเข้า Geo Tree
+    // ออนไลน์ไม่สำเร็จ ส่งออก DMS ถูกบล็อกเมื่อมีร้านอยู่สายที่ไม่ตรง Salesman Code
+    // → ตอนเขียน แปลงแต่ละรายการเป็นข้อความ "Node\tวันเริ่ม\tวันจบ" · ตอนอ่านแปลงกลับ (geo-tree.js เห็นรูปเดิม)
+    const GEO_RE = /^appData\/[^/]+\/meta\/geoTree$/;
+    const geoEncode = (data) => {
+        if (!data || !data.cust || typeof data.cust !== 'object' || data._enc) return data;
+        const cust = {};
+        Object.keys(data.cust).forEach(c => {
+            const v = data.cust[c];
+            cust[c] = Array.isArray(v) ? v.map(x => Array.isArray(x) ? x.map(y => y == null ? '' : String(y)).join('\t') : String(x)) : v;
+        });
+        return Object.assign({}, data, { cust, _enc: 'tsv1' });
+    };
+    const geoDecode = (data) => {
+        if (!data || data._enc !== 'tsv1' || !data.cust) return data;
+        const cust = {};
+        Object.keys(data.cust).forEach(c => {
+            const v = data.cust[c];
+            cust[c] = Array.isArray(v) ? v.map(x => typeof x === 'string' ? x.split('\t') : x) : v;
+        });
+        const out = Object.assign({}, data, { cust });
+        delete out._enc;
+        return out;
+    };
+    if (DocProto && typeof DocProto.get === 'function' && !DocProto.get._rpnGeo) {
+        const origGet = DocProto.get;
+        DocProto.get = function () {
+            const p = origGet.apply(this, arguments);
+            if (!GEO_RE.test(this.path || '')) return p;
+            return Promise.resolve(p).then(snap => (snap && snap.exists) ? {
+                exists: true, id: snap.id, ref: snap.ref, metadata: snap.metadata,
+                data: () => geoDecode(snap.data()), get: (f) => geoDecode(snap.data())[f],
+            } : snap);
+        };
+        DocProto.get._rpnGeo = true;
+    }
+
     if (DocProto) {
         ['set', 'update', 'delete'].forEach(n => {
             const orig = DocProto[n];
             if (typeof orig !== 'function' || orig._rpnWrapped) return;
             DocProto[n] = function (data, opts) {
                 if (n !== 'delete') { const why = aliasGuard(this, data); if (why) return Promise.reject(new Error(why)); }
+                if (n === 'set' && GEO_RE.test(this.path || '')) data = geoEncode(data);
                 mark();
-                if (n !== 'delete' && data && Array.isArray(data.stores) && ROUTE_RE.test(this.path || '')) stripUndef(data.stores);
+                // ตัด undefined ทุกคำสั่งเขียนใต้ appData/ (เดิมเฉพาะ stores ของเอกสารสาย) — เอกสารแผน/ศูนย์ก็โดนปฏิเสธทั้งคำสั่งได้เหมือนกัน
+                if (n !== 'delete' && data && typeof data === 'object' && /^appData\//.test(this.path || '')) stripUndef(data);
                 if (n === 'set') data = injectCal(this, data, opts);
                 const p = (n === 'delete') ? orig.call(this) : orig.call(this, data, opts);
                 if (n !== 'delete' && touchesCalendar(this, data)) {
