@@ -207,6 +207,31 @@
                 go: () => focus([rt], []),
             });
         });
+        // V0.9.9: ตลาดที่มีร้านแต่ไม่มีวันวิ่งในเดือนนี้ (ไม่นับช่องเกินรอบ — มีคำเตือนของมันเองด้านบน)
+        try {
+            if (typeof Runs !== 'undefined' && Runs.datesOf) {
+                const miss = [], missRt = new Set(), ids = new Set();
+                rs.forEach(rt => {
+                    if (rt === UNASSIGNED || !Runs.hasCal(rt)) return;
+                    const k = Runs.cycleOf(rt);
+                    Runs.daysOf(rt).forEach(d => {
+                        const det = Runs.isDetached(rt, d);
+                        if (!det && (parseInt(String(d).replace(/\D/g, ''), 10) || 0) > k) return;
+                        const ss = (State.db.routes[rt] || []).filter(s => !s.inactive && (s.days || []).includes(d));
+                        if (!ss.length || Runs.datesOf(rt, d).length) return;
+                        // ตลาดหลักที่ทุกครั้งแยกออกไปเป็นช่องอื่นแล้ว ไม่ใช่ปัญหา
+                        if (!det && Runs.potential(rt, d).length && Runs.potential(rt, d).every(p => p.to)) return;
+                        miss.push(`${rt} ${(Runs.tagOf(rt, d) || 'D' + (parseInt(String(d).replace(/\D/g, ''), 10) || 0))}`);
+                        missRt.add(rt); ss.forEach(s => ids.add(s.id));
+                    });
+                });
+                if (miss.length) out.push({
+                    t: `${miss.length} ตลาดมีร้านแต่ไม่มีวันวิ่งเดือนนี้ (${ids.size.toLocaleString()} ร้าน)`,
+                    s: miss.slice(0, 8).join(' · ') + (miss.length > 8 ? ' …' : '') + ' — ตลาดนี้จะไม่อยู่ในไฟล์ส่งออก (เช่น วันที่ตกหลังวันทำงานสุดท้ายของเดือน) · ร้านที่อยู่ตลาดอื่นด้วยยังได้เข้าที่ตลาดนั้น · ตรวจปฏิทิน / ความถี่ของตลาด',
+                    go: () => focus([...missRt], [...ids]),
+                });
+            }
+        } catch (e) { console.warn('[overview] no-date', e); }
         // ปฏิทินยังไม่ตั้ง
         const noCal = rs.filter(rt => !(State.db.routeCal || {})[rt]
             && !(State.db.calendarConfig && (State.db.calendarConfig.mode || State.db.calendarConfig.mapping)));
@@ -216,6 +241,8 @@
         const odd = [], oddRt = new Set();
         rs.forEach(rt => (State.db.routes[rt] || []).forEach(s => {
             if (s.inactive || (s.days || []).length !== 2) return;
+            // V0.9.9: ร้านที่อยู่ตลาดเกินรอบของปฏิทิน มีคำเตือนของมันเอง (รวมตลาดตามปฏิทิน) — ไม่นับซ้ำที่นี่
+            if (typeof Runs !== 'undefined' && Runs.cycleOf && s.days.some(d => (parseInt(String(d).replace(/\D/g, ''), 10) || 0) > Runs.cycleOf(rt) && !Runs.isDetached(rt, d))) return;
             if (typeof Freq !== 'undefined' && Freq.canonical && !Freq.canonical(s) && !s.f2custom) { odd.push(s.id); oddRt.add(rt); }
         }));
         if (odd.length) out.push({
@@ -227,10 +254,12 @@
             if (typeof Month !== 'undefined' && Month.cycleCheck) {
                 const c = Month.cycleCheck();
                 const st = c.stranded.filter(x => rs.includes(x.rt)).length;
+                // V0.9.9: ใช้ "รวมตลาดตามปฏิทิน" — เทียบร้าน+ลำดับกับตลาดหลักก่อน ไม่ล้างลำดับคิว
+                //   (ตัวเดิม Month.fixCycle วนเลขช่องกลับต้นรอบแล้วล้างลำดับคิว)
                 if (st) out.push({
-                    t: `${st.toLocaleString()} ร้านอยู่วันที่เกินรอบของสาย`,
-                    s: 'เกิดตอนรอบสั้นลงหลังยกยอดเดือน — กดเพื่อวนกลับมาต้นรอบให้อัตโนมัติ',
-                    go: () => Month.fixCycle(),
+                    t: `${st.toLocaleString()} ร้านอยู่ตลาดที่เกินรอบของปฏิทิน`,
+                    s: 'เช่น ไฟล์เดิมมี D13–D24 แต่ปฏิทินตั้งรอบ 12 วัน — ตลาดเหล่านี้ไม่มีวันวิ่ง · กดเพื่อรวมเข้าตลาดหลัก (D13 → D1 …)',
+                    go: () => (typeof CalFold !== 'undefined' ? CalFold.open(rs) : Month.fixCycle()),
                 });
             }
         } catch (e) {}
@@ -388,6 +417,7 @@
             + ` <button onclick="PlanOverview.openCal()" class="ml-1 text-indigo-600 font-bold hover:underline">ตั้งค่า →</button>`;
     };
 
+    const dTag = (rt, day) => ((typeof Runs !== 'undefined' && Runs.tagOf && Runs.tagOf(rt, day)) || ('D' + dayNum(day)));
     const calendarHTML = () => {
         const p = ymParts();
         if (!p) return '<p class="text-xs text-gray-400">ยังไม่ได้เลือกเดือน</p>';
@@ -410,7 +440,8 @@
             const bg = n ? `background:rgba(99,102,241,${(0.08 + heat * 0.45).toFixed(3)})` : '';
             const off = (isWk || isAd) && !n;
             const showHol = isAd && !n;            // มีร้านอยู่ = วันนั้นยังวิ่ง ไม่ต้องติดป้ายหยุด
-            const tags = [...new Set(list.map(x => 'D' + dayNum(x.day)))].slice(0, 3).join(' ');
+            // V0.9.12: ช่องที่เป็นครั้งอื่นของตลาดหลัก เรียกชื่อตลาดหลัก (16 พ.ย. = D1 ไม่ใช่ D13)
+            const tags = [...new Set(list.map(x => dTag(x.route, x.day)))].slice(0, 3).join(' ');
             const mk = list.length === 1 ? list[0].market : (list.length > 1 ? list.length + ' สาย' : '');
             html += `<div class="rounded-lg border ${off ? 'border-gray-100 bg-gray-50' : 'border-gray-200'} px-1.5 py-1 min-h-[72px] flex flex-col"
                           style="${bg}" title="${esc(tags)} ${esc(mk)}${n ? ' · ' + n + ' ร้าน' : ''}">
@@ -435,6 +466,29 @@
     const holOf = (rt) => {
         const c = (State.db.routeCal || {})[rt] || State.db.calendarConfig || {};
         return { weekly: c.weeklyHolidays || [], adhoc: (c.holidays || []).map(Number) };
+    };
+    // V0.9.10: ระยะทางของตลาด (สาย × ช่องวัน) ตามลำดับคิว — ตัวเดียวกับตัวเลข กม. ในหน้าต่างรายวัน
+    //   missing = ยังไม่มีจุดเริ่มหรือจุดจบ (ระยะเป็นระหว่างร้านอย่างเดียว) → ช่องพื้นฟ้า
+    let distMemo = new Map();
+    const distClear = () => { distMemo = new Map(); };
+    const distSlot = (rt, day) => {
+        const k = rt + '|' + day;
+        if (distMemo.has(k)) return distMemo.get(k);
+        let o = { m: 0, missing: true };
+        try {
+            if (typeof RoadMaster !== 'undefined' && RoadMaster.dayM) {
+                const x = RoadMaster.dayM(rt, day, (State.db.routes || {})[rt] || []);
+                o = { m: x.m || 0, missing: !(x.start && x.end) };
+            }
+        } catch (e) {}
+        distMemo.set(k, o);
+        return o;
+    };
+    /** ระยะของสายในวันที่หนึ่ง (รวมทุกช่องวันที่วิ่งวันนั้น) — { km, missing } */
+    const distOf = (rt, days) => {
+        let m = 0, missing = false;
+        (days || []).forEach(d => { const x = distSlot(rt, d); m += x.m; if (x.missing) missing = true; });
+        return { km: Math.round(m / 100) / 10, missing };
     };
     const dailyData = () => {
         const p = ymParts();
@@ -465,10 +519,12 @@
         }
         h1 += `<th style="${td};background:#1f3864;color:#fff" rowspan="2">Total</th>`;
         const colT = {}; let grand = 0;
+        const colK = {}; let grandK = 0, nMiss = 0;
+        distClear();
         window.__ovGrid = {};
         const body = rts.map(rt => {
             const hol = holOf(rt), pv = isPVRoute(rt), r = rows[rt] || {};
-            let tot = 0, cellsH = '';
+            let tot = 0, totK = 0, cellsH = '';
             for (let d = 1; d <= last; d++) {
                 const o = r[d], n = o ? o.n : 0;
                 const isHol = hol.weekly.includes(new Date(p.y, p.m0, d).getDay()) || hol.adhoc.includes(d);
@@ -477,25 +533,32 @@
                     tot += n; colT[d] = (colT[d] || 0) + n;
                     window.__ovGrid[rt + '|' + d] = o.days;
                     const low = pv && n < LOAD_MIN, high = pv && n > LOAD_MAX;
+                    const dk = distOf(rt, o.days);
+                    totK += dk.km; colK[d] = (colK[d] || 0) + dk.km;
+                    if (dk.missing) nMiss++;
                     st = isHol ? 'background:#9ca3af;color:#fff;font-weight:700'
                        : high ? 'background:#fecaca;color:#991b1b;font-weight:800'
-                       : low ? 'background:#fed7aa;color:#9a3412;font-weight:800' : '';
-                    const tip = `${rt} ${d} ${TH_MON[p.m0]} · ${o.days.map(x => x.replace('Day ', 'D')).join('+')} · ${n} ร้าน`
+                       : low ? 'background:#fed7aa;color:#9a3412;font-weight:800'
+                       : dk.missing ? 'background:#dbeafe' : '';
+                    const tip = `${rt} ${d} ${TH_MON[p.m0]} · ${o.days.map(x => dTag(rt, x)).join('+')} · ${n} ร้าน · ${dk.km.toFixed(1)} กม.`
+                        + (dk.missing ? ' (ยังไม่ใส่จุดเริ่ม/จุดจบ — เป็นระยะระหว่างร้าน)' : '')
                         + (isHol ? ' · ⚠️ ตรงวันหยุด' : high ? ` · เกิน ${LOAD_MAX}` : low ? ` · ต่ำกว่า ${LOAD_MIN}` : '');
+                    const kmCss = 'display:block;font-size:9px;font-weight:600;line-height:1.1;'
+                        + (dk.missing ? 'color:#1d4ed8;' + ((isHol || high || low) ? 'background:#dbeafe;border-radius:3px;' : '') : 'color:#6b7280;');
                     txt = `<button onclick="PlanOverview.goDay('${esc(rt)}',${d})" title="${esc(tip)}"
-                              style="all:unset;cursor:pointer;display:block;width:100%">${n}${isHol ? '⚠️' : ''}</button>`;
+                              style="all:unset;cursor:pointer;display:block;width:100%">${n}${isHol ? '⚠️' : ''}<span style="${kmCss}">${dk.km.toFixed(dk.km >= 100 ? 0 : 1)}</span></button>`;
                 } else {
                     st = isHol ? 'background:#9ca3af' : 'background:#f3f4f6';
                 }
                 cellsH += `<td style="${td};${st}">${txt}</td>`;
             }
-            grand += tot;
+            grand += tot; grandK += totK;
             return `<tr><td style="${stick}background:#fff;${td};text-align:left;font-weight:800;font-family:monospace">${esc(rt)}</td>${cellsH}
-                    <td style="${td};font-weight:800">${tot.toLocaleString()}</td></tr>`;
+                    <td style="${td};font-weight:800">${tot.toLocaleString()}<span style="display:block;font-size:9px;font-weight:600;color:#6b7280">${Math.round(totK).toLocaleString()} กม.</span></td></tr>`;
         }).join('');
         let foot = `<td style="${stick}background:#eef2ff;${td};text-align:left;font-weight:900">Total</td>`;
-        for (let d = 1; d <= last; d++) foot += `<td style="${td};background:#eef2ff;font-weight:800">${colT[d] ? colT[d].toLocaleString() : ''}</td>`;
-        foot += `<td style="${td};background:#eef2ff;font-weight:900">${grand.toLocaleString()}</td>`;
+        for (let d = 1; d <= last; d++) foot += `<td style="${td};background:#eef2ff;font-weight:800">${colT[d] ? colT[d].toLocaleString() + `<span style="display:block;font-size:9px;font-weight:600;color:#6b7280">${Math.round(colK[d] || 0).toLocaleString()}</span>` : ''}</td>`;
+        foot += `<td style="${td};background:#eef2ff;font-weight:900">${grand.toLocaleString()}<span style="display:block;font-size:9px;font-weight:600;color:#6b7280">${Math.round(grandK).toLocaleString()} กม.</span></td>`;
         return `<div class="overflow-x-auto"><table style="border-collapse:collapse;font-size:12px;width:100%">
               <thead><tr>${h1}</tr><tr>${h2}</tr></thead><tbody>${body}<tr>${foot}</tr></tbody></table></div>
             <p class="text-[10.5px] text-gray-500 mt-1 leading-snug">
@@ -503,7 +566,10 @@
               <span style="display:inline-block;width:10px;height:10px;background:#9ca3af;vertical-align:middle"></span> วันหยุด (ตัวเลข + ⚠️ = มีเข้าเยี่ยมตรงวันหยุด) ·
               <span style="display:inline-block;width:10px;height:10px;background:#fed7aa;vertical-align:middle"></span> ต่ำกว่า ${LOAD_MIN} ร้าน ·
               <span style="display:inline-block;width:10px;height:10px;background:#fecaca;vertical-align:middle"></span> เกิน ${LOAD_MAX} ร้าน
-              — เตือนเฉพาะสาย Pre (P) / Van (V) · สาย C / E ไม่เตือน</p>`;
+              — เตือนเฉพาะสาย Pre (P) / Van (V) · สาย C / E ไม่เตือน<br>
+              ตัวเลขเล็กใต้จำนวนร้าน = ระยะทาง (กม.) ตามลำดับคิว ·
+              <span style="display:inline-block;width:10px;height:10px;background:#dbeafe;border:1px solid #93c5fd;vertical-align:middle"></span> ยังไม่ใส่จุดเริ่ม/จุดจบ (ระยะเป็นระหว่างร้านอย่างเดียว)${nMiss ? ` · ${nMiss.toLocaleString()} ช่อง` : ''}
+              · ใส่จุดได้ที่หน้าต่างรายวัน (🚩 เริ่ม / 🏁 จบ) หรือ 📍 จุดประจำสาย</p>`;
     };
 
     const issueRow = (x, i) => `
@@ -640,7 +706,7 @@
                         data.seen.add(c);
                         if (name !== UNASSIGNED && !s.inactive && (s.days || []).length && !data.route[c]) {
                             data.route[c] = name; data.routes.add(name);
-                            data.info[c] = { id: s.id, code: s.code, name: s.name, days: s.days || [], marketName: s.marketName || '', shopType: s.shopType || '' };
+                            data.info[c] = { id: s.id, code: s.code, name: s.name, days: s.days || [], marketName: s.marketName || '', shopType: s.shopType || '', openDate: s.openDate || '' };
                         }
                     });
                 });
@@ -675,8 +741,9 @@
             const was = b.route[c];
             if (was === rt) return;
             const s = where[c].s;
-            if (!b.seen.has(c)) g(rt).nw.push({ c, s, to: rt });
-            else g(rt).inn.push({ c, s, from: was || 'รอจัดสาย/ไม่มีวัน', to: rt });
+            // V0.9.6: ย้ายเข้า = เดือนฐานอยู่ Route Code อื่นเท่านั้น · ไม่อยู่แผนเดือนฐาน (รวมร้านจากกองรอจัดสาย) = ร้านใหม่
+            if (!was) g(rt).nw.push({ c, s, from: b.seen.has(c) ? 'รอจัดสาย / ไม่อยู่แผนเดือนฐาน' : 'ไม่มีในเดือนฐาน', to: rt });
+            else g(rt).inn.push({ c, s, from: was, to: rt });
         });
         Object.entries(b.route).forEach(([c, was]) => {
             g(was).base++;
@@ -684,9 +751,10 @@
             if (now === was) return;
             const w = where[c];
             const s = (w && w.s) || b.info[c] || { id: c, code: c, name: '' };
+            // V0.9.8: ย้ายออก = ไปอยู่ Route Code อื่น (มีวันแล้ว) เท่านั้น · ไปกองรอจัดสาย / ยังไม่มีวัน = Remove (ยังไม่อยู่ในแผน)
             if (now) g(was).out.push({ c, s, from: was, to: now });
-            else if (w && w.st === 'parked') g(was).out.push({ c, s, from: was, to: 'กองรอจัดสาย', toRt: UNASSIGNED });
-            else if (w && w.st === 'noday') g(was).out.push({ c, s, from: was, to: w.rt === was ? 'รอจัดวัน (สายเดิม)' : w.rt + ' (ยังไม่มีวัน)', toRt: w.rt });
+            else if (w && w.st === 'parked') g(was).rem.push({ c, s, from: was, to: 'กองรอจัดสาย', toRt: UNASSIGNED, was: b.info[c] });
+            else if (w && w.st === 'noday') g(was).rem.push({ c, s, from: was, to: w.rt === was ? 'รอจัดวัน (สายเดิม)' : w.rt + ' (ยังไม่มีวัน)', toRt: w.rt, was: b.info[c] });
             else g(was).rem.push({ c, s, from: was, to: w ? 'ออกจากแผน' : 'ไม่มีในข้อมูลแล้ว', gone: !w, was: b.info[c] });
         });
         return by;
@@ -716,7 +784,7 @@
         const scopeTxt = det.rt === '__total' ? 'ทุกสายในตาราง' : 'สาย ' + det.rt;
         const move = k === 'inn' || k === 'out' || k === 'rem' || k === 'nw';
         const canEdit = items.some(x => !x.gone);
-        const btn = k === 'rem' ? `🗑️ เปิดกองออกจากแผน (เลือกไว้ ${items.filter(x => !x.gone).length} ร้าน)`
+        const btn = k === 'rem' ? (items.some(x => !x.gone && !x.toRt) ? `🗑️ เปิดกองออกจากแผน (เลือกไว้ ${items.filter(x => !x.gone && !x.toRt).length} ร้าน)` : `✏️ ไปจัดต่อในหน้าวางแผนคิวงาน (เลือกไว้ ${items.filter(x => !x.gone).length} ร้าน)`)
                                 : `✏️ ไปแก้ในหน้าวางแผนคิวงาน (เลือกไว้ ${items.length} ร้าน)`;
         const MAX = 400;
         const rows = items.slice(0, MAX).map((x, i) => {
@@ -724,10 +792,15 @@
             const days = (k === 'rem' && x.was) ? 'เดิม ' + daysTxt(x.was.days) : daysTxt(s.days);
             const vis = k === 'revisit' ? ` <span class="text-red-600 font-bold">×${visitsOf(s)}</span>` : '';
             const path = move ? `${esc(x.from || '—')} <span class="text-gray-400">→</span> <b>${esc(x.to || '—')}</b>` : esc(x.to);
+            // V0.9.6: วันเปิดบัญชี (Open Account Date จาก Customer Master)
+            const od = String(s.openDate || (x.was && x.was.openDate) || '');
+            const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(od);
+            const odTxt = m ? `${m[3]}/${m[2]}/${m[1]}` : (od || '—');
             return `<tr class="border-t border-gray-100">
                 <td class="px-2 py-0.5 text-right text-gray-400 tabular-nums">${i + 1}</td>
                 <td class="px-2 py-0.5 font-mono text-gray-600">${esc(s.code || s.id || x.c)}</td>
                 <td class="px-2 py-0.5 text-gray-800 max-w-[260px] truncate">${esc(s.name || '')}${x.gone ? ' <span class="text-[9px] text-gray-400">(ไม่มีในข้อมูลเดือนนี้)</span>' : ''}</td>
+                <td class="px-2 py-0.5 text-gray-600 whitespace-nowrap tabular-nums">${esc(odTxt)}</td>
                 <td class="px-2 py-0.5 text-gray-600 whitespace-nowrap">${esc(days || '—')}${vis}${s.marketName ? ' <span class="text-gray-400">' + esc(s.marketName) + '</span>' : ''}</td>
                 <td class="px-2 py-0.5 whitespace-nowrap font-mono">${path}</td>
               </tr>`;
@@ -744,7 +817,7 @@
             ${items.length ? `<div class="max-h-80 overflow-y-auto"><table class="w-full text-[11px]">
               <thead class="sticky top-0 bg-white"><tr class="text-gray-500">
                 <th class="px-2 py-1 text-right font-bold">#</th><th class="px-2 py-1 text-left font-bold">รหัส</th>
-                <th class="px-2 py-1 text-left font-bold">ชื่อร้าน</th><th class="px-2 py-1 text-left font-bold">วัน / ตลาด</th>
+                <th class="px-2 py-1 text-left font-bold">ชื่อร้าน</th><th class="px-2 py-1 text-left font-bold whitespace-nowrap">Open Account Date</th><th class="px-2 py-1 text-left font-bold">วัน / ตลาด</th>
                 <th class="px-2 py-1 text-left font-bold">${move ? 'จาก → ไป' : 'สาย'}</th></tr></thead>
               <tbody>${rows}</tbody></table>
               ${items.length > MAX ? `<p class="text-[10px] text-gray-400 px-3 py-1">แสดง ${MAX} ร้านแรก จาก ${items.length.toLocaleString()} ร้าน</p>` : ''}</div>`
@@ -843,7 +916,7 @@
           </tr>
           </tbody></table></div>
           <p class="text-[11px] text-gray-400 mt-1 leading-snug">Working Day = วันที่สายนั้นมีการเข้าเยี่ยม (Grand Total = วันในปฏิทินที่มีอย่างน้อย 1 สายวิ่ง) · Re-Visit = ร้านที่ถูกเข้า ≥ 2 ครั้ง · Visit/Day = Visit ÷ Working Day ปัดขึ้น (Grand Total = Visit รวม ÷ Working Day รวมทุกสาย)
-            · ย้ายเข้า = เดือนฐานอยู่สายอื่น/กองรอจัดสาย · ย้ายออก = ไปอยู่สายอื่น หรือกองรอจัดสาย/ยังไม่มีวัน · Remove = อยู่ในกอง "ออกจากแผน" หรือไม่มีในข้อมูลแล้ว · ร้านใหม่ = ไม่มีในเดือนฐานเลย
+            · ย้ายเข้า = เดือนฐานอยู่ Route Code อื่น · ย้ายออก = ไปอยู่ Route Code อื่น · Remove = ไม่อยู่ในแผนแล้ว (กอง "ออกจากแผน" · กองรอจัดสาย · ยังไม่มีวัน · ไม่มีในข้อมูลแล้ว) · ร้านใหม่ = ไม่อยู่แผนเดือนฐาน (รวมร้านจากกองรอจัดสายที่เพิ่งจัดเข้าสาย)
             · <b>ตัวเลขขีดเส้นใต้กดดูรายชื่อร้านได้</b></p>
           ${detailHTML(cmp, det && det.rt === TT ? allRts : det ? [det.rt] : [])}`;
     };
@@ -907,7 +980,14 @@
             const d = window.__ovDet;
             if (!d || !d.items.length) return;
             const live = d.items.filter(x => !x.gone);
-            if (d.kind === 'rem') { if (window.Removed) Removed.open(live.map(x => x.s.id)); return; }
+            if (d.kind === 'rem') {
+                // V0.9.8: Remove รวมร้านที่ไปกองรอจัดสาย / ยังไม่มีวัน — กลุ่มนั้นพาไปหน้าจัดสาย ที่เหลือเปิดกองออกจากแผน
+                const pend = live.filter(x => x.toRt), rmv = live.filter(x => !x.toRt);
+                if (rmv.length || !pend.length) { if (window.Removed) Removed.open(rmv.map(x => x.s.id)); return; }
+                const valid = Object.keys(State.db.routes || {});
+                return focus([...new Set(pend.map(x => x.toRt))].filter(r => valid.includes(r)), pend.map(x => x.s.id),
+                             { note: 'ร้านที่ยังไม่อยู่ในแผน (กองรอจัดสาย / ยังไม่มีวัน) — จัดวันหรือจัดสายต่อได้เลย' });
+            }
             const rts = d.kind === 'out' ? live.map(x => x.toRt || x.to) : live.map(x => x.to);
             const valid = Object.keys(State.db.routes || {});
             focus(rts.filter(r => valid.includes(r)), live.map(x => x.s.id),
@@ -922,6 +1002,7 @@
             if (days.length) setTimeout(() => { try { MultiRoute.openDay(rt, days[0]); } catch (e) {} }, 500);
         },
         _stats: stats, _issues: issues, _monthMap: monthMap, _daily: () => dailyData(),
+        _distOf: distOf, _distClear: distClear,
         _holOf: holOf, _isPV: isPVRoute, _scopeRoutes: () => scopeRoutes(), _holidayInfo: () => holidayInfo(), _ymParts: () => ymParts(), _ymLabel: (ym) => ymLabel(ym), loadBase: () => loadBase(), LOAD_MIN, LOAD_MAX, _compare: () => compare(), _base: () => baseCache,
     };
 

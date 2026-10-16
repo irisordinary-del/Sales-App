@@ -200,7 +200,7 @@ const DmsExport = (() => {
                         // ติดกันไม่เว้นวรรค ตามไฟล์ DMS ต้นแบบ · ตลาดที่แตกหลาย CY ต่อท้ายด้วยครั้งที่
                         desc: `${rt}D${pad2(baseN)}${market || ''}` + (split ? `(ครั้ง${p.k})` : ''),
                         date: p.date, dates: p.dates, vf: p.vf,
-                        visits: p.dates.length, split, orphan: !!p.orphan, merged: p.merged || [],
+                        visits: p.dates.length, split, orphan: !!p.orphan, merged: p.merged || [], pairs: p.pairs || [],
                         stores: arr, cy: '',
                         start: RoadMaster.startOf(rt, p.day, list),
                         end: RoadMaster.endOf(rt, p.day),
@@ -279,6 +279,12 @@ const DmsExport = (() => {
                 const cl = Runs.clashes();
                 if (cl.length) out.push(`${cl.length} วันที่สายเดียวมี 2 ตลาด (${cl.slice(0, 3).map(c => c.route + ' ' + Runs._short(c.date) + ' ' + c.days.map(d => d.replace('Day ', 'D')).join('+')).join(', ')}${cl.length > 3 ? ' …' : ''}) — ดูที่หน้าภาพรวมแผน`);
             } catch (e) {}
+            // V0.9.8: คู่ตลาดข้ามช่องที่เกือบรวมเป็น CY เดียวได้ — แจ้งให้แก้ (ไม่แก้ให้อัตโนมัติ)
+            try {
+                const nr = [];
+                [...new Set(rows.map(r => r.route))].forEach(rt => (Runs.pairCheck(rt).near || []).forEach(x => nr.push(rt + ' ' + x.a.replace('Day ', 'D') + '+' + x.b.replace('Day ', 'D') + ' (' + x.why + ')')));
+                if (nr.length) out.push(`${nr.length} คู่ตลาดเกือบรวมเป็น CY เดียวได้ (เงื่อนไข: ร้าน+ลำดับเหมือนกัน · ห่าง 14 วันพอดี · ไม่มีครั้งถัดไปก่อน End date) — ตอนนี้ส่งออกแยกเป็นแบบ 9: ${nr.slice(0, 4).join(' · ')}${nr.length > 4 ? ' …' : ''}`);
+            } catch (e) {}
             const orphan = rows.filter(r => r.orphan).length;
             if (orphan) out.push(`${orphan} ครั้งที่แยกไว้ ไม่ตรงกับครั้งของตลาดเดิมแล้ว (ปฏิทินเปลี่ยน) — ส่งออกเป็น CY แบบ 9 ตามวันที่ของมันเอง`);
             return out;
@@ -326,6 +332,7 @@ const DmsExport = (() => {
                     CY แบบ 5 (Fortnightly) ${nFort} · แบบ 9 (Monthly) ${rows.length - nFort}
                     · ครั้งเข้าเยี่ยมรวม ${nVisit.toLocaleString()} ครั้ง
                     ${nSplit ? `<br><span class="text-amber-700">${nSplit} ตลาดแตกเป็นหลาย CY เพราะแต่ละครั้งไม่เหมือนกัน</span>` : ''}
+                    ${rows.some(r => r.pairs && r.pairs.length) ? `<br><span class="text-emerald-700">🔗 ${rows.filter(r => r.pairs && r.pairs.length).length} คู่ตลาดคนละช่องรวมเป็น CY เดียว (ร้าน+ลำดับเหมือนกัน ห่าง 14 วัน)</span>` : ''}
                 </p>
                 <p class="text-[10.5px] text-gray-400 mb-3 leading-snug">
                     ส่งออก <b>ทุกสายในศูนย์</b> เสมอ — ไม่ขึ้นกับสายที่ติ๊กไว้ในตัวกรอง
@@ -451,7 +458,8 @@ const DmsExport = (() => {
         async _writeBackCY(rows) {
             const R = State.db.routes || {};
             const first = {};                         // สาย|ช่องวัน → CY แถวแรกของช่องนั้น
-            rows.forEach(r => { const k = r.route + '|' + r.day; if (!first[k]) first[k] = r.cy; });
+            // V0.9.8: ช่องที่รวมเป็น CY เดียวกัน (pairs / merged) ได้เลข CY เดียวกับช่องหลัก
+            rows.forEach(r => [r.day].concat(r.pairs || [], r.merged || []).forEach(d => { const k = r.route + '|' + d; if (!first[k]) first[k] = r.cy; }));
             const touched = new Set();
             Object.keys(R).forEach(rt => (R[rt] || []).forEach(s => {
                 (s.days || []).forEach(d => {

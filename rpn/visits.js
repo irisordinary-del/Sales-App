@@ -104,12 +104,14 @@
     const chip = (on, txt, js, tip, dis) => `<button ${dis ? 'disabled' : ''} onclick="${js}" title="${esc(tip || '')}"
         style="flex:1;padding:4px 0;border-radius:6px;font-size:11px;font-weight:800;border:1px solid ${on ? '#ef4444' : '#e5e7eb'};
                background:${on ? '#ef4444' : '#fff'};color:${on ? '#fff' : (dis ? '#d1d5db' : '#4b5563')};cursor:${dis ? 'not-allowed' : 'pointer'}">${txt}</button>`;
-    const rowSel = (label, cur, opts, onchange, del) => `
+    // V0.9.8: ตัวเลือกวัน = วันที่ในเดือนเป็นหลัก "พ. 1 ต.ค. · D1" (rt = สายที่ใช้ดูปฏิทิน)
+    const DL = (rt, d) => (rt && typeof DayDate !== 'undefined' && DayDate.opt) ? DayDate.opt(rt, d) : D(d);
+    const rowSel = (label, cur, opts, onchange, del, rt) => `
         <div style="display:flex;align-items:center;gap:4px;margin-top:4px">
           <span style="width:46px;font-size:10px;font-weight:800;color:#6b7280">${label}</span>
           <select onchange="${onchange}" style="flex:1;border:1px solid #e5e7eb;border-radius:6px;padding:3px 4px;font-size:12px">
             ${cur ? '' : '<option value="">— เลือก Day —</option>'}
-            ${opts.map(d => `<option value="${d}" ${d === cur ? 'selected' : ''}>${D(d)}</option>`).join('')}
+            ${opts.map(d => `<option value="${d}" ${d === cur ? 'selected' : ''}>${esc(DL(rt, d))}</option>`).join('')}
           </select>
           ${del ? `<button onclick="${del}" title="เอาครั้งนี้ออก" style="width:22px;height:22px;border-radius:6px;border:1px solid #fecaca;background:#fef2f2;color:#dc2626;font-weight:900;font-size:11px">✕</button>` : '<span style="width:22px"></span>'}
         </div>`;
@@ -127,7 +129,7 @@
         const id = esc(s.id);
         const gap = n === 2 ? (pairOf(days[0], rt) === days[1] ? 'ห่างครึ่งรอบ' : `กำหนดเอง ห่าง ${nDay(days[1]) - nDay(days[0])} ตลาด`) : '';
         const rows = (n ? days : ['']).map((d, i) => rowSel('Visit ' + (i + 1), d, opts.filter(o => o === d || !days.includes(o)),
-            `Visits.pSet('${id}',${i},this.value)`, i > 0 ? `Visits.pDel('${id}',${i})` : ''));
+            `Visits.pSet('${id}',${i},this.value)`, i > 0 ? `Visits.pDel('${id}',${i})` : '', rt));
         return `
           <div data-visits style="margin-bottom:6px">
             <div style="display:flex;align-items:baseline;gap:4px">
@@ -189,7 +191,7 @@
             if (!host || host.querySelector('[data-vnew]')) return;
             const opts = dayOpts(cycleOf(f.rt)).filter(o => !days.includes(o));
             host.insertAdjacentHTML('beforeend', `<div data-vnew>${rowSel('Visit ' + (days.length + 1), '', opts,
-                `Visits.pAdd('${esc(id)}',this.value)`, `this.closest('[data-vnew]').remove()`)}</div>`);
+                `Visits.pAdd('${esc(id)}',this.value)`, `this.closest('[data-vnew]').remove()`, f.rt)}</div>`);
         },
         pAdd(id, v) {
             const f = find(id); if (!f || !v) return;
@@ -222,6 +224,11 @@
     };
     const picked = () => (State.stores || []).filter(s => s.selected && !s.inactive);
 
+    /** สายที่ใช้ดูวันที่ในแถบจัดลงวัน: ร้านที่เลือกอยู่สายเดียว → สายนั้น · ไม่งั้นสายที่กำลังแก้ */
+    const barRoute = () => {
+        const rs = [...new Set(picked().map(s => (typeof MultiRoute !== 'undefined' && MultiRoute.routeOf) ? MultiRoute.routeOf(s) : s.route).filter(r => r && r !== UNASSIGNED))];
+        return rs.length === 1 ? rs[0] : State.localActiveRoute;
+    };
     const barHTML = (key) => {
         const st = stateOf(key);
         const k = maxCycle();
@@ -232,7 +239,7 @@
         const sel = picked().length;
         const kk = esc(key);
         const rows = st.v.map((d, i) => rowSel('Visit ' + (i + 1), d, opts.filter(o => o === d || !st.v.includes(o)),
-            `Visits.bSet('${kk}',${i},this.value)`, i > 0 ? `Visits.bDel('${kk}',${i})` : ''));
+            `Visits.bSet('${kk}',${i},this.value)`, i > 0 ? `Visits.bDel('${kk}',${i})` : '', barRoute()));
         const radio = (m, txt, tip) => `<label title="${esc(tip)}" style="display:flex;align-items:center;gap:3px;font-size:10.5px;font-weight:700;color:${st.mode === m ? '#3730a3' : '#6b7280'};cursor:pointer">
             <input type="radio" name="vmode-${kk}" ${st.mode === m ? 'checked' : ''} onchange="Visits.bMode('${kk}','${m}')"> ${txt}</label>`;
         return `
@@ -274,6 +281,9 @@
             }
             // แถบนี้ต้องอยู่บนสุดของแท็บ 2 เสมอ (กล่องแบ่งกลุ่มแทรกตัวเองต่อจากแถวเดิมทีหลัง)
             if (b && row && row.nextElementSibling !== b) row.insertAdjacentElement('afterend', b);
+            // V0.9.6: กล่องแบ่งกลุ่มร้านที่เลือก อยู่ใต้แถบนี้เสมอ (ไม่ให้แถบจัดลงวันเด้งขึ้นลงตามความสูงกล่อง)
+            const sp = $('split-card');
+            if (b && sp && b.nextElementSibling !== sp) b.insertAdjacentElement('afterend', sp);
             if (b && !b.contains(document.activeElement)) b.innerHTML = barHTML('tab2');
         }
         // หัวรายการรอจัดวัน (แท็บ 1)
@@ -374,7 +384,7 @@
         // ติ๊กร้านในรายการรอจัดวัน = เลือกอยู่ที่เดิม ไม่เด้งไปแท็บ 2 (แถบจัดลงวันอยู่บนหัวรายการแล้ว)
         if (typeof StoreMgr !== 'undefined') StoreMgr.toggleStay = (id) => {
             const s = (State.stores || []).find(x => String(x.id) === String(id));
-            if (s) { s.selected = !s.selected; UI.render(); }
+            if (s) { s.selected = !s.selected; UI.render(); if (s.selected && typeof MapCtrl !== 'undefined' && MapCtrl.reveal) MapCtrl.reveal(s); }
         };
         paintBars();
     };

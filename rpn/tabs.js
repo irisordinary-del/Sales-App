@@ -408,7 +408,10 @@
         [...t2.querySelectorAll('div.bg-amber-50')].forEach(d => { if (/2 วิธีจัดสาย/.test(d.textContent)) d.remove(); });
         if (badge && badge.parentNode === t2 && t2.firstElementChild !== badge) t2.insertBefore(badge, t2.firstChild);
         if (bar && bar.parentNode === t2 && badge && badge.nextElementSibling !== bar) t2.insertBefore(bar, badge.nextSibling);
-        if (split && bar && split.parentNode === t2 && bar.nextElementSibling !== split) t2.insertBefore(split, bar.nextSibling);
+        // V0.9.6: แถบจัดลงวันตัวใหม่ (vbar-tab2) อยู่ต่อจากแถวเดิม — กล่องแบ่งกลุ่มต้องต่อจากแถบนั้น
+        //   เดิมวางต่อจากแถวเดิม แล้ว visits.js ย้ายแถบมาแทรก → สองตัวสลับที่กันไปมา กล่องเด้งขึ้นลง
+        const after = ($('vbar-tab2') && $('vbar-tab2').parentNode === t2) ? $('vbar-tab2') : bar;
+        if (split && after && split.parentNode === t2 && after.nextElementSibling !== split) t2.insertBefore(split, after.nextSibling);
         const hint = $('tab2-hint');
         if (hint && !hint.dataset.v2) {
             hint.dataset.v2 = '1';

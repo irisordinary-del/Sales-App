@@ -504,8 +504,12 @@
         const box = document.createElement('div');
         box.id = 'split-card';
         box.className = 'bg-white border-2 border-amber-200 rounded-2xl p-4 shadow-sm';
-        const anchor = $('selected-count-badge');
-        if (anchor && anchor.parentNode === t2) t2.insertBefore(box, anchor);
+        // V0.9.6: กล่องนี้อยู่ใต้แถบ "จัดลงวัน" เสมอ — เดิมอยู่เหนือแถบ พอเลือก/ยกเลิกร้าน กล่องสูงขึ้นลง แถบจัดลงวันเลยเด้งตาม
+        const bar = $('vbar-tab2');
+        const ad = $('assign-day');
+        const row = ad && ad.parentElement;
+        if (bar && bar.parentNode === t2) bar.insertAdjacentElement('afterend', box);
+        else if (row && row.parentNode === t2) row.insertAdjacentElement('afterend', box);
         else t2.appendChild(box);
         paint();
     };

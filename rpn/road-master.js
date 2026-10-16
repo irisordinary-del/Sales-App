@@ -310,6 +310,11 @@ const RoadMaster = (() => {
                 <input id="rm-nm" class="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm"
                        placeholder="เช่น คลังขอนแก่น / ที่พักภูเวียง" value="${cur ? esc(cur.name || '') : ''}">
                 <p class="text-[10px] text-gray-400 mt-2">เว้นช่องพิกัดว่างแล้วกดตกลง = ล้างจุดนี้</p>`;
+            // V0.9.10: หน้าต่างรายวันอยู่ชั้นบนกว่า — ปิดไว้ก่อน ให้หน้าใส่จุดขึ้นมาข้างหน้า แล้วเปิดกลับเมื่อเสร็จ/ยกเลิก
+            const dm = document.getElementById('dayModal');
+            const wasOpen = !!(dm && !dm.classList.contains('hidden'));
+            if (wasOpen) dm.classList.add('hidden');
+            const back = () => { if (wasOpen) { try { UI.showDayModal(day); } catch (e) {} } };
             M._modal((which === 'start' ? '🚩 จุดเริ่ม' : '🏁 จุดจบ') + ' — ' +
                      ((typeof DAY_COLORS !== 'undefined' && DAY_COLORS[day]) ? DAY_COLORS[day].name : day), html,
                 async () => {
@@ -317,8 +322,8 @@ const RoadMaster = (() => {
                     const nm = (document.getElementById('rm-nm').value || '').trim();
                     const p = M.parseLatLng(raw);
                     await M.setPoint(route, day, which, p ? { ...p, name: nm } : null);
-                    M.render(); UI.showDayModal(day);
-                });
+                    M.render(); back();
+                }, back);
         },
 
         /** รับได้ทั้ง "16.43, 102.82" และลิงก์ Google Maps ที่มี @lat,lng หรือ !3dlat!4dlng */
@@ -338,6 +343,7 @@ const RoadMaster = (() => {
             M._closeModal();
             await M.setPoint(State.localActiveRoute, day, which, { lat: s.lat, lng: s.lng, name: s.name });
             M.render(); UI.showDayModal(day);
+            try { if (typeof PlanOverview !== 'undefined' && PlanOverview._distClear) PlanOverview._distClear(); } catch (e) {}
         },
 
         _pickOnMap(day, which) {
@@ -347,7 +353,7 @@ const RoadMaster = (() => {
             const banner = document.createElement('div');
             banner.id = 'rm-pick-banner';
             banner.className = 'fixed top-3 left-1/2 -translate-x-1/2 z-[9999] bg-gray-900 text-white px-4 py-2 rounded-full text-xs font-bold shadow-2xl';
-            banner.textContent = 'คลิกบนแผนที่เพื่อวางจุด — กด ESC เพื่อยกเลิก';
+            banner.innerHTML = 'คลิกบนแผนที่เพื่อวางจุด — กด ESC หรือ <button id="rm-pick-cancel" class="underline">ยกเลิก</button> แล้วกลับหน้าต่างรายวัน';
             document.body.appendChild(banner);
             const map = MapCtrl.map;
             const done = () => {
@@ -363,6 +369,8 @@ const RoadMaster = (() => {
                 M.render(); UI.showDayModal(day);
             };
             const onKey = (e) => { if (e.key === 'Escape') { done(); UI.showDayModal(day); } };
+            const cb = document.getElementById('rm-pick-cancel');
+            if (cb) cb.onclick = (ev) => { ev.stopPropagation(); done(); UI.showDayModal(day); };
             map.getContainer().style.cursor = 'crosshair';
             map.on('click', onClick);
             document.addEventListener('keydown', onKey);
@@ -448,12 +456,13 @@ const RoadMaster = (() => {
             const el = document.getElementById('rm-modal');
             if (el) { el.classList.add('hidden'); el.classList.remove('flex'); }
         },
-        _modal(title, bodyHTML, onOK) {
+        _modal(title, bodyHTML, onOK, onCancel) {
             let el = document.getElementById('rm-modal');
             if (!el) {
                 el = document.createElement('div');
                 el.id = 'rm-modal';
-                el.className = 'fixed inset-0 bg-black/40 z-[9998] hidden items-center justify-center p-4';
+                // V0.9.10: ชั้นบนกว่าหน้าต่างรายวัน (z 9999) — เดิมเปิดแล้วไปอยู่ข้างหลัง กดเริ่ม/จบแล้วเหมือนไม่มีอะไรขึ้น
+                el.className = 'fixed inset-0 bg-black/40 z-[10000] hidden items-center justify-center p-4';
                 el.innerHTML = `<div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-4">
                         <h3 id="rm-title" class="font-black text-gray-800 mb-2"></h3>
                         <div id="rm-body"></div>
@@ -465,7 +474,7 @@ const RoadMaster = (() => {
             }
             document.getElementById('rm-title').textContent = title;
             document.getElementById('rm-body').innerHTML = bodyHTML;
-            document.getElementById('rm-cancel').onclick = M._closeModal;
+            document.getElementById('rm-cancel').onclick = () => { M._closeModal(); if (onCancel) onCancel(); };
             document.getElementById('rm-ok').onclick = async () => { M._closeModal(); await onOK(); };
             el.classList.remove('hidden'); el.classList.add('flex');
         },

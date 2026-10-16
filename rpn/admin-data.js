@@ -4,7 +4,7 @@
 const StoreMgr = {
     toggleSelect: (id) => {
         const s = State.stores.find(x => x.id === String(id));
-        if (s) { s.selected = !s.selected; UI.switchTab('tab2'); UI.render(); App.saveDB(); }
+        if (s) { s.selected = !s.selected; UI.switchTab('tab2'); UI.render(); App.saveDB(); if (s.selected && MapCtrl.reveal) MapCtrl.reveal(s); }
     },
     clearSelection: () => { State.stores.forEach(s => s.selected = false); UI.render(); App.saveDB(); },
 

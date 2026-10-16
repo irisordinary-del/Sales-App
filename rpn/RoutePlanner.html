@@ -8,7 +8,7 @@
 
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 
-    <title>Route Planner V0.9.5</title>
+    <title>Route Planner V1.0.0</title>
 
 
 
@@ -44,7 +44,7 @@
     <meta name="apple-mobile-web-app-title" content="RoutePlan">
     <link rel="apple-touch-icon" href="/icons/icon-192.png">
 
-    <link rel="stylesheet" href="admin-style.css?v=1791450000">
+    <link rel="stylesheet" href="admin-style.css?v=1792061000">
     <style>
         /* Sidebar collapse */
         #sidebar { transition: width 0.25s cubic-bezier(0.4,0,0.2,1); }
@@ -128,7 +128,7 @@
                 Route<span class="text-white"> Planner</span>
             </h1>
             <p id="app-version" class="text-[10px] font-bold text-gray-400 tracking-wide leading-tight" title="เวอร์ชันโปรแกรม · วันที่ build — รายละเอียดใน CHANGELOG.md">
-                V0.9.5 <span class="font-normal opacity-70">· 7 ต.ค. 2569</span>
+                V1.0.0 <span class="font-normal opacity-70">· 16 ต.ค. 2569</span>
             </p>
             </div>
             <button id="sidebar-toggle-btn" onclick="SidebarCtrl.toggle()"
@@ -769,61 +769,62 @@
     <!-- ===== SCRIPTS (ลำดับสำคัญมาก) ===== -->
 
     <!-- 0. Auth (ต้องก่อน app-config เพราะ app-config redirect ถ้าไม่มี center) -->
-    <script src="diag.js?v=1791450000"></script>
+    <script src="diag.js?v=1792061000"></script>
     <script src="../auth.js"></script>
     <script src="rpn-online-pre.js"></script>
 
     <!-- 1. Config + Firebase + State (ต้องก่อนสุด) -->
 
-    <script src="app-config.js?v=1791450000"></script>
+    <script src="app-config.js?v=1792061000"></script>
 
     <!-- 2. UI (ต้องก่อน Map เพราะ Map เรียก UI.focusOnEditTab) -->
 
-    <script src="admin-ui.js?v=1791450000"></script>
+    <script src="admin-ui.js?v=1792061000"></script>
 
     <!-- 3. Map + Lasso -->
 
-    <script src="admin-map.js?v=1791450000"></script>
+    <script src="admin-map.js?v=1792061000"></script>
 
     <!-- 4. Data: StoreMgr, App, FileManager -->
 
-    <script src="admin-data.js?v=1791450000"></script>
+    <script src="admin-data.js?v=1792061000"></script>
 
     <!-- 5. AI (ต้องหลัง StoreMgr) -->
 
-    <script src="admin-ai.js?v=1791450000"></script>
+    <script src="admin-ai.js?v=1792061000"></script>
 
-    <script src="file-manager.js?v=1791450000"></script>
-    <script src="cycle-code.js?v=1791450000"></script>
-    <script src="road-master.js?v=1791450000"></script>
-    <script src="dms-export.js?v=1791450000"></script>
-    <script src="runs.js?v=1791450000"></script>
-    <script src="geo-tree.js?v=1791450000"></script>
-    <script src="multi-route.js?v=1791450000"></script>
-    <script src="route-builder.js?v=1791450000"></script>
-    <script src="unify.js?v=1791450000"></script>
-    <script src="basemap-draw.js?v=1791450000"></script>
+    <script src="file-manager.js?v=1792061000"></script>
+    <script src="cycle-code.js?v=1792061000"></script>
+    <script src="road-master.js?v=1792061000"></script>
+    <script src="dms-export.js?v=1792061000"></script>
+    <script src="runs.js?v=1792061000"></script>
+    <script src="geo-tree.js?v=1792061000"></script>
+    <script src="multi-route.js?v=1792061000"></script>
+    <script src="route-builder.js?v=1792061000"></script>
+    <script src="unify.js?v=1792061000"></script>
+    <script src="basemap-draw.js?v=1792061000"></script>
     <script src="map-key.js?v=1790835115"></script>
-    <script src="basemap.js?v=1791450000"></script>
-    <script src="tabs.js?v=1791450000"></script>
-    <script src="ux-fix.js?v=1791450000"></script>
-    <script src="history.js?v=1791450000"></script>
-    <script src="split-sel.js?v=1791450000"></script>
-    <script src="day-date.js?v=1791450000"></script>
-    <script src="reorder.js?v=1791450000"></script>
-    <script src="cal-ui.js?v=1791450000"></script>
-    <script src="freq.js?v=1791450000"></script>
-    <script src="cover.js?v=1791450000"></script>
-    <script src="overview.js?v=1791450000"></script>
-    <script src="month.js?v=1791450000"></script>
-    <script src="unassign.js?v=1791450000"></script>
-    <script src="removed.js?v=1791450000"></script>
-    <script src="multi-day.js?v=1791450000"></script>
-    <script src="visits.js?v=1791450000"></script>
-    <script src="market-suggest.js?v=1791450000"></script>
-    <script src="exec-report.js?v=1791450000"></script>
-    <script src="excel-rt.js?v=1791450000"></script>
-    <script src="route-analysis.js?v=1791450000"></script>
+    <script src="basemap.js?v=1792061000"></script>
+    <script src="tabs.js?v=1792061000"></script>
+    <script src="ux-fix.js?v=1792061000"></script>
+    <script src="history.js?v=1792061000"></script>
+    <script src="split-sel.js?v=1792061000"></script>
+    <script src="day-date.js?v=1792061000"></script>
+    <script src="reorder.js?v=1792061000"></script>
+    <script src="cal-ui.js?v=1792061000"></script>
+    <script src="freq.js?v=1792061000"></script>
+    <script src="cover.js?v=1792061000"></script>
+    <script src="overview.js?v=1792061000"></script>
+    <script src="month.js?v=1792061000"></script>
+    <script src="cal-fold.js?v=1792061000"></script>
+    <script src="unassign.js?v=1792061000"></script>
+    <script src="removed.js?v=1792061000"></script>
+    <script src="multi-day.js?v=1792061000"></script>
+    <script src="visits.js?v=1792061000"></script>
+    <script src="market-suggest.js?v=1792061000"></script>
+    <script src="exec-report.js?v=1792061000"></script>
+    <script src="excel-rt.js?v=1792061000"></script>
+    <script src="route-analysis.js?v=1792061000"></script>
 
     <!-- 6. Init -->
 
@@ -2049,9 +2050,9 @@
         };
         document.addEventListener('DOMContentLoaded', SidebarCtrl.restore);
     </script>
-    <script src="local-import.js?v=1791450000"></script>
-    <script src="road-dist.js?v=1791450000"></script>
-    <script src="seq-tools.js?v=1791450000"></script>
+    <script src="local-import.js?v=1792061000"></script>
+    <script src="road-dist.js?v=1792061000"></script>
+    <script src="seq-tools.js?v=1792061000"></script>
     
     <script src="rpn-online.js"></script>
 </body>

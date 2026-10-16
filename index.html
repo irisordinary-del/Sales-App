@@ -1161,7 +1161,7 @@
 
         // App is defined in admin-data.js
 
-        // ─── RpnHost: แท็บวางแผนคิวงาน / ภาพรวมแผน = RPN V0 ใน iframe (rpn/RoutePlannerV0.html) ───
+        // ─── RpnHost: แท็บวางแผนคิวงาน / ภาพรวมแผน = RPN V0 ใน iframe (rpn/RoutePlanner.html) ───
         // RPN V0 กับหน้านี้อ่าน/เขียน Firestore ชุดเดียวกัน แต่ต่างคนต่างถือข้อมูลไว้ในหน่วยความจำ
         //   • ออกจากแท็บ RPN หลัง RPN เขียนอะไรไป → โหลดแผนของหน้านี้ใหม่ (Dashboard/ภาพรวมทุกสาย/แบ่งเซลล์เห็นของล่าสุด)
         //   • หน้านี้เขียนแผน (เช่น แบ่งเซลล์) แล้วกลับเข้าแท็บ RPN → โหลด RPN ใหม่
@@ -1178,7 +1178,7 @@
                     RpnHost._hostDirty = false;
                     f.addEventListener('load', () => RpnHost._go(RpnHost._want), { once: false });
                     RpnHost._want = sub;
-                    f.src = 'rpn/RoutePlannerV0.html?embed=1&center=' + encodeURIComponent(window.CENTER_ID || '');
+                    f.src = 'rpn/RoutePlanner.html?embed=1&center=' + encodeURIComponent(window.CENTER_ID || '');
                     return;
                 }
                 RpnHost._want = sub;
@@ -1206,7 +1206,7 @@
                     RpnHost._hostDirty = false;
                     RpnHost._want = 'planning';
                     f.addEventListener('load', () => RpnHost._go(RpnHost._want));
-                    f.src = 'rpn/RoutePlannerV0.html?embed=1&center=' + encodeURIComponent(window.CENTER_ID || '');
+                    f.src = 'rpn/RoutePlanner.html?embed=1&center=' + encodeURIComponent(window.CENTER_ID || '');
                 }
                 for (let i = 0; i < 120; i++) {
                     const w = RpnHost.win();

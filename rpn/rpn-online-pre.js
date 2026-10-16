@@ -18,7 +18,7 @@
         try { (window.top || window).location.replace(url); } catch (e) { location.replace(url); }
     };
 
-    // RoutePlannerV0.html ส่ง ['admin','supervisor','sales'] มา (โหมด local ทุกคนเป็น admin) —
+    // RoutePlanner.html ส่ง ['admin','supervisor','sales'] มา (โหมด local ทุกคนเป็น admin) —
     // ออนไลน์ให้เข้าได้เฉพาะ admin / supervisor เหมือนหน้า admin ของระบบ ไม่ว่าจะส่งอะไรมา
     const ALLOWED = ['admin', 'supervisor'];
     Auth.guard = () => {
@@ -36,7 +36,7 @@
         goTop('login.html');
     };
 
-    // ศูนย์: supervisor ใช้ศูนย์ของบัญชีเสมอ (ตรงกับ guard ใน RoutePlannerV0.html) — คนอื่นต้องมี ?center=
+    // ศูนย์: supervisor ใช้ศูนย์ของบัญชีเสมอ (ตรงกับ guard ใน RoutePlanner.html) — คนอื่นต้องมี ?center=
     const s = Auth.getSession();
     const cid = (params.get('center') || '').trim();
     if (s && !cid && !(s.role === 'supervisor' && s.centerId)) {

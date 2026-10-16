@@ -323,8 +323,10 @@ const UI = {
     _fillDaySel: (el) => {
         if (!el || el.dataset.full) return;
         const cur = el.value;
+        const rt = el.dataset.rt || State.localActiveRoute;
+        const lb = (d) => (typeof DayDate !== 'undefined' && DayDate.opt) ? DayDate.opt(rt, d) : DAY_COLORS[d].name;   // V0.9.8
         el.innerHTML = Object.keys(DAY_COLORS)
-            .map(d => `<option value="${d}" ${d === cur ? 'selected' : ''}>${DAY_COLORS[d].name}</option>`).join('');
+            .map(d => `<option value="${d}" ${d === cur ? 'selected' : ''}>${lb(d)}</option>`).join('');
         el.value = cur;
         el.dataset.full = '1';
     },
@@ -370,7 +372,11 @@ const UI = {
         const htmlU = [], htmlA = [], htmlP = [], htmlI = [];
 
         State.stores.forEach(s => {
-            const b = s.freq === 2 ? `<span class="f2-badge">F2</span>` : '';
+            // V1.0.0 (J1/J2): ป้าย Master Inactive (ร้านในแผน) · วันเปิดบัญชี (ร้านใหม่ที่ยังไม่จัดวัน)
+            const mIn = s.masterInactive || /inactive/i.test(s.status || '');
+            const b = (s.freq === 2 ? `<span class="f2-badge">F2</span>` : '')
+                + (mIn ? ` <span title="Customer Master ระบุ Inactive แต่ร้านอยู่ใน Route Plan — เอาเข้าตามแผน ตรวจว่าจะเก็บไว้หรือเอาออกจากแผน" class="text-[9.5px] font-bold bg-rose-50 text-rose-700 border border-rose-200 rounded px-1 align-middle">Master: Inactive</span>` : '');
+            const openTxt = s.openDate ? UI._thDate(s.openDate) : '';
             const kpi = State.sales[s.id];
             const kpiBadge = kpi
                 ? (kpi.active
@@ -419,7 +425,7 @@ const UI = {
                                 <p class="font-bold text-sm text-gray-800">${s.name} ${b}</p>
                                 ${kpiBadge}
                             </div>
-                            <p class="text-[10px] text-gray-400 font-mono mt-0.5">ID: ${s.id}</p>
+                            <p class="text-[10px] text-gray-400 font-mono mt-0.5">ID: ${s.id}${openTxt ? ` <span class="font-sans text-emerald-700 font-bold">· เปิดบัญชี ${openTxt}</span>` : ''}</p>
                         </div>
                     </label>`);
             } else {
@@ -432,28 +438,33 @@ const UI = {
                     + (many ? ` <span class="text-[9.5px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 rounded px-1">เข้า ${s.days.length} ครั้ง/รอบ</span>` : '');
                 const c = DAY_COLORS[s.days[0]] ? DAY_COLORS[s.days[0]].hex : '#999';
                 // V0.9.1: ใส่ตัวเลือกวันแค่ตัวปัจจุบัน — ที่เหลือเติมตอนกดเปิด (เดิม 30 ตัวเลือก × ทุกการ์ด = หลายหมื่น element ทำให้กดอะไรก็หน่วง)
-                const selOpts = `<option value="${s.days[0]}" selected>${DAY_COLORS[s.days[0]] ? DAY_COLORS[s.days[0]].name : s.days[0]}</option>`;
+                const rtS = s.route || State.localActiveRoute;
+                const dLbl = (d) => (typeof DayDate !== 'undefined' && DayDate.opt) ? DayDate.opt(rtS, d) : (DAY_COLORS[d] ? DAY_COLORS[d].name : d);   // V0.9.8: "พ. 1 ต.ค. · D1"
+                const selOpts = `<option value="${s.days[0]}" selected>${dLbl(s.days[0])}</option>`;
                 const ctl = many
                     ? `<span title="ร้านนี้อยู่ ${s.days.length} ตลาด — เอาออกทีละตลาด: เปิดการ์ดวันในแท็บ 3 แล้วกด ➖ ท้ายแถว · ถอดทั้งหมด: เลือกร้านแล้วใช้ Unassign"
                           class="text-[10.5px] font-bold text-gray-500 bg-gray-50 border border-gray-200 rounded-lg px-2 py-1.5 whitespace-nowrap">🔒 ${s.days.length} ตลาด</span>`
-                    : `<select onchange="StoreMgr.changeDay('${s.id}', this.value)" onmousedown="UI._fillDaySel(this)" onfocus="UI._fillDaySel(this)" onkeydown="UI._fillDaySel(this)" class="text-xs p-1.5 border border-gray-200 rounded-lg shadow-sm outline-none bg-gray-50">
+                    : `<select data-rt="${rtS}" title="เปลี่ยนวัน (ตลาด) ของร้านนี้" onchange="StoreMgr.changeDay('${s.id}', this.value)" onmousedown="UI._fillDaySel(this)" onfocus="UI._fillDaySel(this)" onkeydown="UI._fillDaySel(this)" class="text-xs p-1.5 border border-gray-200 rounded-lg shadow-sm outline-none bg-gray-50 max-w-[11rem]">
                                 ${selOpts}
                             </select>
-                            <button onclick="StoreMgr.changeDay('${s.id}','remove')" class="bg-red-50 text-red-500 px-2.5 rounded-lg font-bold hover:bg-red-100 border border-red-100">✕</button>`;
+                            <button onclick="StoreMgr.changeDay('${s.id}','remove')" title="ถอดออกทุกตลาด — ร้านยังอยู่สายนี้ แต่ไปรอจัดวัน" class="bg-red-50 text-red-500 px-2.5 rounded-lg font-bold hover:bg-red-100 border border-red-100">✕</button>`;
+                // V0.9.9: ชื่อร้านเต็มบรรทัดบน · ID / ตลาด กับปุ่มอยู่บรรทัดล่าง (เดิมปุ่ม + ช่องเลือกวันที่ยาวขึ้นเบียดชื่อจนเหลือไม่กี่ตัวอักษร)
                 htmlA.push(`
-                    <div id="card-${s.id}" class="p-3 bg-white border border-gray-200 rounded-2xl flex justify-between items-center shadow-sm">
-                        <div class="flex-1 overflow-hidden mr-2">
-                            <div class="flex justify-between pr-2">
-                                <p class="font-bold text-sm text-gray-800 truncate">${s.name} ${b}</p>
-                                ${kpiBadge}
-                            </div>
-                            <p class="text-[10px] text-gray-400 font-mono mt-0.5">ID: ${s.id}</p>
-                            <p class="text-[11px] font-bold mt-1.5">
-                                <span class="color-dot" style="background:${c}"></span>${dTxt}
-                            </p>
+                    <div id="card-${s.id}" class="p-3 bg-white border border-gray-200 rounded-2xl shadow-sm">
+                        <div class="flex justify-between items-start gap-2">
+                            <p class="font-bold text-sm text-gray-800 leading-snug break-words min-w-0" title="${String(s.name || '').replace(/"/g, '&quot;')}">${s.name} ${b}</p>
+                            ${kpiBadge ? `<span class="shrink-0">${kpiBadge}</span>` : ''}
                         </div>
-                        <div class="flex gap-1.5 items-center">
-                            ${ctl}
+                        <div class="flex justify-between items-end gap-2 mt-1">
+                            <div class="min-w-0">
+                                <p class="text-[10px] text-gray-400 font-mono whitespace-nowrap">ID: ${s.id}</p>
+                                <p class="text-[11px] font-bold mt-1">
+                                    <span class="color-dot" style="background:${c}"></span>${dTxt}
+                                </p>
+                            </div>
+                            <div class="flex gap-1.5 items-center shrink-0">
+                                ${ctl}
+                            </div>
                         </div>
                     </div>`);
             }
@@ -671,6 +682,14 @@ const UI = {
 // ==========================================
 // 📤 ExportCtrl — จัดการ Export Modal
 // ==========================================
+// V1.0.0: วันที่แบบไทยสั้น "3 ต.ค. 2569" จาก YYYY-MM-DD
+UI._thDate = (v) => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(v || ''));
+    if (!m) return String(v || '');
+    const TH = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+    return (+m[3]) + ' ' + TH[+m[2] - 1] + ' ' + (+m[1] + 543);
+};
+
 const ExportCtrl = {
     // V0.9.4: หน้าต่าง "📝 แก้แผนใน Excel" — Export แผนที่กำลังแก้ (excel-rt.js) + นำกลับเข้า
     openModal: () => {

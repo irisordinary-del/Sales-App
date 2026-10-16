@@ -28,12 +28,15 @@ const MultiRoute = (() => {
     const FLAG_OK = '<span style="position:absolute;top:-5px;right:-5px;width:12px;height:12px;border-radius:9999px;background:#059669;color:#fff;font-size:8px;line-height:12px;font-weight:900;text-align:center">✓</span>';
     const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
     const dayName = d => (typeof DAY_COLORS !== 'undefined' && DAY_COLORS[d]) ? DAY_COLORS[d].name : d;
+    const WDs = ['อา.', 'จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.', 'ส.'];
+    const THM = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
 
     let open = [];                 // สายที่เปิดอยู่
     let dayFilter = null;          // null = ทุกวัน · Set = เฉพาะวันที่เลือก
     let showNew = true;            // แสดงร้านที่ยังไม่จัดวัน
     let colorMode = 'route';
     let layer = null;
+    let dots = new Map(), hidden = new Set();      // V0.9.6: id → จุด · id ที่ถูกหมุดเต็มบังอยู่
 
     const M = {
         get isOn() { return open.length !== 1 || !!dayFilter || !showNew; },
@@ -54,6 +57,19 @@ const MultiRoute = (() => {
         colorOf(route) {
             const i = M.routeList().indexOf(route);
             return route === UNASSIGNED ? '#94a3b8' : PALETTE[((i < 0 ? 0 : i) * 7) % PALETTE.length];
+        },
+        /** V0.9.13: แถวครั้งเข้าเยี่ยม (1 แถว = 1 วันที่) ของสายที่เปิดอยู่ — รวมทุกสาย ซ้ำ key ให้ใช้ของสายแรก */
+        visitKeys() {
+            const out = new Map();
+            if (typeof Runs === 'undefined' || !Runs.visitRows) return out;
+            open.forEach(rt => { if (rt === UNASSIGNED) return; Runs.visitRows(rt).forEach(r => { if (!out.has(r.key)) out.set(r.key, { ...r, rt }); }); });
+            return new Map([...out.entries()].sort((a, b) => ((a[1].date ? a[1].date.getTime() : Infinity) - (b[1].date ? b[1].date.getTime() : Infinity)) || (parseInt(a[1].slot.replace(/\D/g, ''), 10) - parseInt(b[1].slot.replace(/\D/g, ''), 10)) || (a[1].k - b[1].k)));
+        },
+        /** key ของแถวที่ช่องวันนี้ของร้านอยู่ (ร้านช่องเดียววิ่ง 2 รอบ = 2 key) */
+        _rowKeys(rt, slot) {
+            if (typeof Runs === 'undefined' || !Runs.rowsOfSlot) return [slot + '|1'];
+            const r = Runs.rowsOfSlot(rt, slot);
+            return r.length ? r.map(x => x.key) : [slot + '|1'];
         },
         dayList() {
             const n = State.db.cycleDays || 24;
@@ -76,7 +92,7 @@ const MultiRoute = (() => {
             open.forEach(name => (R[name] || []).forEach(s => {
                 const assigned = s.days && s.days.length;
                 if (!assigned) { if (showNew) out.push(s); return; }
-                if (!dayFilter || s.days.some(d => dayFilter.has(d))) out.push(s);
+                if (!dayFilter || s.days.some(d => M._rowKeys(name, d).some(k => dayFilter.has(k)))) out.push(s);
             }));
             return out;
         },
@@ -150,10 +166,11 @@ const MultiRoute = (() => {
         },
         openOne() { M.setOpen([State.localActiveRoute]); },
 
-        toggleDay(day) {
-            if (!dayFilter) dayFilter = new Set(M.dayList());
-            if (dayFilter.has(day)) dayFilter.delete(day); else dayFilter.add(day);
-            if (dayFilter.size === M.dayList().length) dayFilter = null;
+        toggleDay(key) {
+            const all = [...M.visitKeys().keys()];
+            if (!dayFilter) dayFilter = new Set(all);
+            if (dayFilter.has(key)) dayFilter.delete(key); else dayFilter.add(key);
+            if (all.every(k => dayFilter.has(k))) dayFilter = null;
             M.refresh();
         },
         allDays() { dayFilter = null; M.refresh(); },
@@ -186,7 +203,8 @@ const MultiRoute = (() => {
             if (!MapCtrl || !MapCtrl.map) return;
             const show = M.isOn ? M.filtered() : (State.stores || []);
             try { MapCtrl.renderMarkers(); } catch (e) { console.warn('[MultiRoute] markers', e); }
-            try { M.render(show); } catch (e) { console.warn('[MultiRoute] dots', e); }
+            // V0.9.6: ซูม/เลื่อนแผนที่ ข้อมูลร้านไม่ได้เปลี่ยน — ไม่ต้องสร้างจุดใหม่ทั้งหมด แค่สลับจุดที่ถูกหมุดเต็มบัง
+            try { if (layer) M.syncDots(); else M.render(show); } catch (e) { console.warn('[MultiRoute] dots', e); }
         },
 
         async apply() {
@@ -274,6 +292,14 @@ const MultiRoute = (() => {
                 (keep.length ? ` (คง ${keep.join(', ')})` : ' (ยังไม่ได้จัดวัน)'));
         },
 
+        /** V0.9.6: ซ่อน/คืนจุดตามชุดหมุดเต็มปัจจุบัน (ไม่สร้างชั้นจุดใหม่) */
+        syncDots() {
+            if (!layer) return;
+            const pins = M._pinIds || new Set();
+            hidden.forEach(id => { if (!pins.has(id)) { const mk = dots.get(id); if (mk) layer.addLayer(mk); hidden.delete(id); } });
+            pins.forEach(id => { if (!hidden.has(id)) { const mk = dots.get(id); if (mk) { layer.removeLayer(mk); hidden.add(id); } } });
+        },
+
         /** ย้อมหมุดเต็มเป็นสีสาย (ยกเว้นร้านที่เลือกไว้ = เหลืองเหมือนเดิม) */
         tintPins(list) {
             (list || []).forEach(s => {
@@ -282,8 +308,10 @@ const MultiRoute = (() => {
                 const el = m && m.getElement && m.getElement();
                 const path = el && el.querySelector('svg path');
                 if (!path) return;
-                path.setAttribute('fill', M.colorOf(M.routeOf(s)));
+                const col = M.colorOf(M.routeOf(s));
+                path.setAttribute('fill', col);
                 path.setAttribute('stroke', '#fff');
+                m._tinted = col;
             });
         },
 
@@ -291,6 +319,7 @@ const MultiRoute = (() => {
         render(stores) {
             if (!MapCtrl || !MapCtrl.map) return;
             if (layer) { MapCtrl.map.removeLayer(layer); layer = null; }
+            dots = new Map(); hidden = new Set();
             const src = stores || [];
             if (!src.length) return;
             const pins = M._pinIds;
@@ -300,7 +329,6 @@ const MultiRoute = (() => {
             const marks = [];
             src.forEach(s => {
                 if (s.inactive || !isFinite(s.lat) || !isFinite(s.lng)) return;
-                if (pins && pins.has(s.id)) return;                    // ร้านนี้ได้หมุดเต็มแล้ว
                 const assigned = s.days && s.days.length;
                 const sel = !!s.selected;
                 let opt;
@@ -319,9 +347,11 @@ const MultiRoute = (() => {
                 }
                 const mk = L.circleMarker([s.lat, s.lng], opt);
                 mk.__store = s;
+                dots.set(s.id, mk);
+                if (pins && pins.has(s.id)) { hidden.add(s.id); return; }      // ร้านนี้ได้หมุดเต็มแล้ว (เก็บจุดไว้ เผื่อเลื่อนออกนอกจอ)
                 marks.push(mk);
             });
-            if (!marks.length) return;
+            if (!dots.size) return;
             layer = L.featureGroup(marks, { renderer });
             layer.on('click', (ev) => {
                 const s = ev.layer && ev.layer.__store;
@@ -368,7 +398,9 @@ const MultiRoute = (() => {
                               style="background:${M.colorOf(s.route)}">${esc(s.route)}</span>
                         ${isNew ? `<span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-50 text-red-600 border border-red-200">
                             ${s.route === UNASSIGNED ? '⊕ ร้านใหม่' : '⊕ ยังไม่จัดวัน'}</span>` : ''}
+                        ${(s.masterInactive || /inactive/i.test(s.status || '')) ? `<span title="Customer Master ระบุ Inactive แต่ร้านอยู่ใน Route Plan" class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200">Master: Inactive</span>` : ''}
                     </div>
+                    ${s.openDate ? `<div class="text-[10.5px] text-gray-500 mb-1.5">เปิดบัญชี <b class="text-emerald-700">${esc(UI._thDate ? UI._thDate(s.openDate) : s.openDate)}</b></div>` : ''}
                     ${sug ? `<div class="bg-amber-50 border border-amber-200 rounded-md px-2 py-1.5 mb-1.5">
                         <div class="text-[10px] text-amber-700 font-bold leading-tight mb-1">
                             Salesman Code ในไฟล์ Master = <b>${esc(sug)}</b></div>
@@ -422,22 +454,30 @@ const MultiRoute = (() => {
                 // ทำให้ตลาดที่ 2 เป็นต้นไปดูเหมือนไม่มีร้านนั้น และตัวเลขบนหัวตลาดนับขาด
                 const nd = (d) => parseInt(String(d).replace(/\D/g, ''), 10) || 0;
                 const all = (s.days && s.days.length) ? s.days.slice().sort((a, b) => nd(a) - nd(b)) : [];
-                const vis = all.filter(d => !dayFilter || dayFilter.has(d));
-                const keys = vis.length ? vis : [all.length ? all[0] : '__new'];
-                keys.forEach((dk, i) => {
+                // V0.9.13: 1 กลุ่ม = 1 วันที่ (ช่องที่วิ่ง 2 รอบ → ร้านขึ้น 2 กลุ่ม) · key = "ช่อง|ครั้ง"
+                const rowKeys = [];
+                all.forEach(d => M._rowKeys(rt, d).forEach(key => { if (!dayFilter || dayFilter.has(key)) rowKeys.push({ key, dk: d }); }));
+                const keys = rowKeys.length ? rowKeys : (all.length ? [{ key: M._rowKeys(rt, all[0])[0], dk: all[0] }] : [{ key: '__new', dk: '__new' }]);
+                keys.forEach(({ key, dk }, i) => {
                     let node = k;
-                    if (i > 0) { node = k.cloneNode(true); node.dataset.dupOf = dk; }
+                    if (i > 0) { node = k.cloneNode(true); node.dataset.dupOf = key; }
                     // V0.8.0: ร้านที่อยู่หลาย Day — ปุ่ม ➖ เอาออกจาก Day ของกลุ่มนี้ Day เดียว
                     if (all.length >= 2 && dk !== '__new' && /^card-/.test(node.id || '')) {
                         const old = node.querySelector('[data-rmday]'); if (old) old.remove();
                         const bar = node.querySelector('.flex.gap-1\\.5');
                         if (bar) bar.insertAdjacentHTML('afterbegin',
                             `<button data-rmday="1" onclick="event.stopPropagation();Runs.removeDayOnly('${esc(rt)}','${esc(dk)}','${esc(s.id)}')"
-                                title="เอาออกจาก D${nd(dk)} ตลาดเดียว — Day อื่นยังอยู่"
+                                title="เอาออกจาก ${esc((typeof Runs !== 'undefined' && Runs.tagOf && Runs.tagOf(rt, dk)) || 'D' + nd(dk))} ตลาดเดียว — ร้านยังอยู่ตลาดอื่น (${esc(all.filter(x => x !== dk).map(x => (typeof Runs !== 'undefined' && Runs.tagOf && Runs.tagOf(rt, x)) || 'D' + nd(x)).join(' · '))})"
                                 class="bg-red-50 hover:bg-red-100 text-red-600 px-2 rounded-lg font-black border border-red-200 text-sm leading-none">➖</button>`);
                     }
-                    if (!dm.has(dk)) dm.set(dk, []);
-                    dm.get(dk).push(node);
+                    // V0.9.12: ร้านที่ไม่เหมือนอีกครั้งของตลาดเดียวกัน (เช่น D1 วันที่ 2 กับ 16) — พื้นเหลือง ชี้ดูเหตุผล
+                    if (dk !== '__new' && typeof Runs !== 'undefined' && Runs.roundDiff) {
+                        const why = Runs.roundDiff(rt).get(dk + '|' + s.id);
+                        if (why) { node.style.background = '#FEF3C7'; node.style.borderColor = '#F59E0B'; node.title = '⚠️ ' + why; node.dataset.rdiff = '1'; }
+                        else if (node.dataset.rdiff) { node.style.background = ''; node.style.borderColor = ''; node.title = ''; delete node.dataset.rdiff; }
+                    }
+                    if (!dm.has(key)) dm.set(key, []);
+                    dm.get(key).push(node);
                 });
             });
             if (!tree.size) return;
@@ -460,34 +500,46 @@ const MultiRoute = (() => {
                 const sRoute = document.createElement('summary');
                 sRoute.className = 'cursor-pointer select-none px-2.5 py-1.5 text-xs font-black text-white flex items-center gap-2';
                 sRoute.style.background = M.colorOf(rt);
-                const nMk = [...dm.keys()].filter(k => k !== '__new').length;
+                // V0.9.12: นับตลาดตามชื่อ (ช่องที่เป็นครั้งอื่นของตลาดหลักนับรวมกับตลาดหลัก) · V0.9.13: key = "ช่อง|ครั้ง"
+                const slotOf = (key) => key.split('|')[0];
+                const nMk = new Set([...dm.keys()].filter(k => k !== '__new').map(k => (typeof Runs !== 'undefined' && Runs.metaOf && (Runs.metaOf(rt, slotOf(k)) || {}).src) || slotOf(k))).size;
+                const rowOf = (key) => (typeof Runs !== 'undefined' && Runs.visitRows ? Runs.visitRows(rt).find(r => r.key === key) : null)
+                    || { key, slot: slotOf(key), k: 1, date: null, base: slotOf(key), label: 'D' + (parseInt(slotOf(key).replace(/\D/g, ''), 10) || 0) };
                 sRoute.innerHTML = `<span class="mr-chev inline-block w-3 text-center opacity-80" aria-hidden="true">▶</span>`
                     + `<span class="flex-1">${esc(rt)}${rt === State.localActiveRoute ? ' ◀ กำลังแก้' : ''}</span>`
                     + `<span class="tabular-nums text-[10.5px] font-bold opacity-90">${nMk} ตลาด · ${total} ร้าน</span>`;
                 dRoute.appendChild(sRoute);
                 const body = document.createElement('div');
                 body.className = 'p-1.5 bg-gray-50 space-y-1.5';
+                // V0.9.8: เรียงตามวันที่วิ่งจริงในเดือน (เดือนส่วนใหญ่ = ลำดับ D เดิม · ท้ายเดือนที่รอบวนกลับ / ช่องที่แยกครั้ง จะอยู่ตามวันจริง)
+                const fd = (key) => { const r = rowOf(key); return r.date ? r.date.getTime() : Infinity; };
                 const keys = [...dm.keys()].sort((a, b) => {
                     if (a === '__new') return 1; if (b === '__new') return -1;
-                    return (parseInt(a.replace(/\D/g, ''), 10) || 0) - (parseInt(b.replace(/\D/g, ''), 10) || 0);
+                    return (fd(a) - fd(b)) || ((parseInt(slotOf(a).replace(/\D/g, ''), 10) || 0) - (parseInt(slotOf(b).replace(/\D/g, ''), 10) || 0)) || (rowOf(a).k - rowOf(b).k);
                 });
-                keys.forEach(dk => {
+                keys.forEach(key => {
+                    const dk = slotOf(key), row = rowOf(key);
                     const dDay = document.createElement('details');
                     // พับไว้ก่อน เห็นแค่จำนวน กดค่อยกาง (กลุ่มร้านที่ยังไม่จัดวันเปิดไว้เลย)
-                    dDay.open = (dk === '__new') || M._openDay === (rt + '|' + dk);
+                    dDay.open = (dk === '__new') || M._openDay === (rt + '|' + key);
                     dDay.className = 'bg-white border border-gray-200 rounded-lg overflow-hidden';
                     const sDay = document.createElement('summary');
+                    sDay.dataset.vkey = key;
                     sDay.className = 'cursor-pointer select-none px-2 py-1 text-[11px] font-bold flex items-center gap-2 '
                         + (dk === '__new' ? 'text-red-600 bg-red-50' : 'text-gray-600');
                     const info = M._dayInfo(rt, dk, all);
+                    let pb = '';
                     sDay.innerHTML =
                         `<span class="mr-chev inline-block w-2.5 text-center text-[9px] text-gray-400" aria-hidden="true">▶</span>`
-                        + `<span class="shrink-0 text-gray-700">${dk === '__new' ? '⊕ ยังไม่จัดวัน' : 'D' + (parseInt(String(dk).replace(/\D/g, ''), 10) || 0)}</span>`
+                        // V0.9.8: วันที่ในเดือนเป็นหลัก แล้วกำกับตลาด (Dn) ไว้หลังวันที่
+                        // V0.9.13: 1 แถว = 1 วันที่ "จ. 16 พ.ย. · D1" (ไม่มี D13–D24 · รอบ 2 ของตลาดหลักใช้ชื่อเดียวกัน)
+                        + (dk === '__new' ? `<span class="shrink-0 text-gray-700">⊕ ยังไม่จัดวัน</span>`
+                            : `<span class="shrink-0 font-black ${row.date ? 'text-gray-800' : 'text-red-600'}">${esc(row.date ? WDs[row.date.getDay()] + ' ' + row.date.getDate() + ' ' + THM[row.date.getMonth()] : 'ไม่วิ่งเดือนนี้')}</span>`
+                              + `<span class="shrink-0 text-gray-400">· ${esc(row.label)}</span>`)
                         + `<span class="flex-1 min-w-0 truncate font-normal text-gray-500">${esc(info.market || '—')}</span>`
-                        + (info.was ? `<span class="shrink-0 text-[9px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded px-1">เดิม ${esc(info.was)}</span>` : '')
-                        + (typeof DayDate !== 'undefined' && dk !== '__new'
-                            ? `<span class="shrink-0 text-[9.5px] text-gray-400">${(DayDate.dateOf(rt, dk) || {}).txt || ''}</span>` : '')
-                        + `<span class="tabular-nums text-gray-400 shrink-0">${dm.get(dk).length}</span>`;
+                        + (pb = dk !== '__new' ? M._pairBadge(rt, dk, row) : '')
+                        + (info.was && !pb && !row.fold ? `<span class="shrink-0 text-[9px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded px-1">เดิม ${esc(info.was)}</span>` : '')
+                        + `<span class="tabular-nums text-gray-400 shrink-0">${dm.get(key).length}</span>`;
                     if (dk !== '__new') {
                         // ปักจุดเริ่ม/จุดจบได้จากหน้ารายชื่อเลย ไม่ต้องเข้าไปในหน้าต่างรายวัน
                         const info2 = M._pointInfo(rt, dk);
@@ -499,11 +551,11 @@ const MultiRoute = (() => {
                                 title="จุดจบของวันนี้${info2.end ? ' — ' + esc(info2.end) : ''}"
                                 class="shrink-0 px-1 rounded" style="${flagCss(info2.end)}">🏁${info2.end ? FLAG_OK : ''}</button>`);
                     }
-                    dDay.addEventListener('toggle', () => { M._openDay = dDay.open ? (rt + '|' + dk) : null; });
+                    dDay.addEventListener('toggle', () => { M._openDay = dDay.open ? (rt + '|' + key) : null; });
                     dDay.appendChild(sDay);
                     const inner = document.createElement('div');
                     inner.className = 'p-1.5 space-y-1.5';
-                    dm.get(dk).forEach(n => inner.appendChild(n));
+                    dm.get(key).forEach(n => inner.appendChild(n));
                     dDay.appendChild(inner);
                     body.appendChild(dDay);
                 });
@@ -549,6 +601,29 @@ const MultiRoute = (() => {
             }
         },
         /** ชื่อตลาดของกลุ่ม + วันเดิมที่ร้านกลุ่มนี้เคยอยู่ (อ่านจาก Cycle Name ในไฟล์ที่นำเข้า) */
+        /** V0.9.8: ป้าย 🔗 CY เดียวกับช่องอื่น (ร้าน+ลำดับเหมือนกัน ห่าง 14 วัน) · ⚠️ เกือบเป็น CY เดียวกัน */
+        _pairBadge(route, dk, row) {
+            if (typeof Runs === 'undefined' || !Runs.pairOfDay) return '';
+            let p;
+            try { p = Runs.pairOfDay(route, dk); } catch (e) { return ''; }
+            // V0.9.13: ช่องที่วิ่ง 2 รอบแล้วเหมือนกัน (แถวรอบ 2 ของช่องเดียวกัน) ไม่ต้องติดป้าย 🔗
+            if (row && !row.fold && row.k > 1 && !p.near.length) return '';
+            const nm = (d) => (typeof DayDate !== 'undefined' && DayDate.dateOf)
+                ? (DayDate.wtxt(DayDate.dateOf(route, d)) || d.replace('Day ', 'D')) : d.replace('Day ', 'D');
+            const WDs = ['อา.', 'จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.', 'ส.'];
+            const sh = (d) => {       // ป้ายสั้น ให้ชื่อตลาดยังมีที่โชว์: "จ.16"
+                const dd = (typeof DayDate !== 'undefined' && DayDate.dateOf) ? DayDate.dateOf(route, d) : null;
+                const x = dd && dd.dates && dd.dates[0];
+                return x ? WDs[x.getDay()] + x.getDate() : d.replace('Day ', 'D');
+            };
+            if (p.merged.length) return `<span class="shrink-0 text-[9px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1"
+                title="CY เดียวกับ ${esc(p.merged.map(nm).join(', '))} — ร้าน+ลำดับเหมือนกัน ห่าง 14 วัน → ส่งออก DMS เป็น CY เดียว (แบบ 5)">🔗${esc(p.merged.map(sh).join(','))}</span>`;
+            // V0.9.12: ป้ายเหลืองเฉย ๆ — ชี้เมาส์ดูว่าไม่เข้าเงื่อนไขตรงไหน
+            if (p.near.length) return `<span class="shrink-0 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-300 rounded px-1 cursor-help"
+                title="ไม่เข้าเงื่อนไข CY เดียวกับ ${esc(p.near.map(x => nm(x.other) + ' — ' + x.why).join(' · '))} · ส่งออกแยก CY · ร้านที่ไม่เหมือนกันเป็นพื้นเหลืองในรายชื่อร้าน">⚠️</span>`;
+            return '';
+        },
+
         _dayInfo(route, dk, all) {
             if (dk === '__new') return { market: '', was: '' };
             const src = (State.db.routes || {})[route] || all || [];
@@ -675,7 +750,7 @@ const MultiRoute = (() => {
 
         // ── แผงตัวกรอง ───────────────────────────────────────────────────
         label() {
-            const nd = dayFilter ? dayFilter.size : M.dayList().length;
+            const nd = dayFilter ? dayFilter.size : M.visitKeys().size;
             if (!open.length) return 'ยังไม่ได้เลือกสาย';
             const parts = [State.localActiveRoute || '—'];
             if (open.length > 1) parts.push(open.length + ' สาย');
@@ -693,14 +768,16 @@ const MultiRoute = (() => {
             if (pop && pop.classList.contains('hidden')) return;
             const R = State.db.routes || {};
             const routes = M.routeList();
-            const days = M.dayList();
+            // V0.9.13: กรองเป็นรายวันที่ (1 แถว = 1 วันที่) ไม่ใช่รายช่อง
+            const vk = M.visitKeys();
             const dayCount = {};
             let newCount = 0;
             open.forEach(r => (R[r] || []).forEach(s => {
                 if (s.inactive) return;
                 if (!(s.days && s.days.length)) { newCount++; return; }
-                s.days.forEach(d => { dayCount[d] = (dayCount[d] || 0) + 1; });
+                s.days.forEach(d => M._rowKeys(r, d).forEach(k => { dayCount[k] = (dayCount[k] || 0) + 1; }));
             }));
+            const vLabel = (r) => (r.date ? WDs[r.date.getDay()] + ' ' + r.date.getDate() + ' ' + THM[r.date.getMonth()] : 'ไม่วิ่งเดือนนี้') + ' · ' + r.label;
             // กล่องรายชื่อสาย/วันถูกสร้างใหม่ทุกครั้งที่ติ๊ก → จำตำแหน่งเลื่อนไว้แล้วใส่กลับ ไม่งั้นเด้งขึ้นบนทุกที
             const scrolls = [...host.querySelectorAll('.overflow-y-auto')].map(e => e.scrollTop);
             host.innerHTML = `
@@ -734,12 +811,12 @@ const MultiRoute = (() => {
                         <button onclick="MultiRoute.noDays()" class="flex-1 bg-gray-100 hover:bg-gray-200 rounded-md py-1 text-[10px] font-bold">ล้าง</button>
                     </div>
                     <div class="max-h-60 overflow-y-auto space-y-0.5 pr-0.5">
-                    ${days.map(d => `
-                        <label class="flex items-center gap-1.5 text-[11px] px-1 py-0.5 rounded hover:bg-gray-50 cursor-pointer">
-                            <input type="checkbox" ${(!dayFilter || dayFilter.has(d)) ? 'checked' : ''} onchange="MultiRoute.toggleDay('${d}')">
-                            <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background:${(typeof DAY_COLORS!=='undefined'&&DAY_COLORS[d])?DAY_COLORS[d].hex:'#94a3b8'}"></span>
-                            <span class="flex-1 min-w-0 truncate">${esc(dayName(d))}</span>
-                            <span class="text-gray-400 tabular-nums">${dayCount[d] || 0}</span>
+                    ${[...vk.values()].map(r => `
+                        <label data-dd-done="1" class="flex items-center gap-1.5 text-[11px] px-1 py-0.5 rounded hover:bg-gray-50 cursor-pointer">
+                            <input type="checkbox" ${(!dayFilter || dayFilter.has(r.key)) ? 'checked' : ''} onchange="MultiRoute.toggleDay('${esc(r.key)}')">
+                            <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background:${(typeof DAY_COLORS!=='undefined'&&DAY_COLORS[r.base])?DAY_COLORS[r.base].hex:'#94a3b8'}"></span>
+                            <span class="flex-1 min-w-0 truncate ${r.date ? '' : 'text-red-500'}">${esc(vLabel(r))}</span>
+                            <span class="text-gray-400 tabular-nums">${dayCount[r.key] || 0}</span>
                         </label>`).join('')}
                     </div>
                   </div>
@@ -837,6 +914,8 @@ const MultiRoute = (() => {
                         delete MapCtrl.markers[id];
                     }
                 }
+                // หมุดที่เคยย้อมสีสายไว้ แต่รอบนี้ไม่ย้อม (สลับเป็นสีวัน / เหลือสายเดียว) → ให้สร้างไอคอนใหม่
+                if (!(colorMode === 'route' && open.length > 1)) pinned.forEach(s => { const m = MapCtrl.markers[s.id]; if (m && m._tinted) { m._sig = null; m._tinted = null; } });
                 State.stores = pinned;
                 try { return origMarkers.apply(this, arguments); }
                 finally {

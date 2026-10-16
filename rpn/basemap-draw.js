@@ -65,6 +65,50 @@
         return out;
     }
 
+    // ── V0.9.6: ดัชนีตาราง — แยกเส้นตามกลุ่ม (ชนิด+ชั้น) แล้วแบ่งเป็นช่อง 0.25° ──────────
+    //   เดิมทุกครั้งที่ซูม/เลื่อน วนเส้นทั้งประเทศหลายรอบ (ทุกกลุ่มวนทั้งก้อน) — ตอนนี้หยิบเฉพาะช่องที่อยู่ในจอ
+    const CELL = 0.25;
+    let index = null, stamp = 0;
+    const gkey = (kind, cls) => kind + (cls || 0);
+    function buildIndex(all) {
+        const groups = {};
+        for (const L2 of all) {
+            const k = gkey(L2.kind, L2.cls);
+            const gp = groups[k] || (groups[k] = { cells: new Map(), list: [] });
+            L2._st = 0;
+            gp.list.push(L2);
+            const cy0 = Math.floor(L2.s / CELL), cy1 = Math.floor(L2.n / CELL);
+            const cx0 = Math.floor(L2.w / CELL), cx1 = Math.floor(L2.e / CELL);
+            if ((cy1 - cy0 + 1) * (cx1 - cx0 + 1) > 400) { (gp.big || (gp.big = [])).push(L2); continue; }  // รูปใหญ่มาก (ขอบประเทศ) เก็บแยก
+            for (let y = cy0; y <= cy1; y++) for (let x = cx0; x <= cx1; x++) {
+                const key = y * 4096 + x;
+                let a = gp.cells.get(key); if (!a) gp.cells.set(key, a = []);
+                a.push(L2);
+            }
+        }
+        return groups;
+    }
+    /** เส้นของกลุ่มนี้ที่อยู่ในกรอบ s,w,n,e (ไม่ซ้ำ) */
+    function inView(kind, cls, s, w, n, e) {
+        const gp = index && index[gkey(kind, cls)];
+        if (!gp) return [];
+        const st = ++stamp, out = [];
+        const take = (L2) => {
+            if (L2._st === st) return; L2._st = st;
+            if (L2.n < s || L2.s > n || L2.e < w || L2.w > e) return;
+            out.push(L2);
+        };
+        if (gp.big) gp.big.forEach(take);
+        const cy0 = Math.floor(s / CELL), cy1 = Math.floor(n / CELL);
+        const cx0 = Math.floor(w / CELL), cx1 = Math.floor(e / CELL);
+        if ((cy1 - cy0 + 1) * (cx1 - cx0 + 1) > gp.cells.size) { gp.list.forEach(take); return out; }  // ซูมออกกว้าง: วนรายการตรง ๆ เร็วกว่า
+        for (let y = cy0; y <= cy1; y++) for (let x = cx0; x <= cx1; x++) {
+            const a = gp.cells.get(y * 4096 + x);
+            if (a) for (const L2 of a) take(L2);
+        }
+        return out;
+    }
+
     function load() {
         if (lines) return Promise.resolve(true);
         if (loading) return loading;
@@ -73,6 +117,7 @@
                 if (!window.__BASEMAP_DATA) return resolve(false);
                 data = window.__BASEMAP_DATA;
                 lines = prepare(data);
+                index = buildIndex(lines);
                 resolve(true);
             };
             if (window.__BASEMAP_DATA) return go();
@@ -124,9 +169,52 @@
             const s = b.getSouth(), w = b.getWest(), n = b.getNorth(), e = b.getEast();
             const origin = map.getPixelOrigin();
             const off = map.containerPointToLayerPoint([0, 0]);
-            const px = (lat, lng) => {
-                const p = map.project([lat, lng], z);
-                return [p.x - origin.x - off.x, p.y - origin.y - off.y];
+            // V0.9.6: คำนวณ Web Mercator เอง (เท่ากับ map.project) ไม่ต้องสร้างวัตถุทุกจุด
+            const SC = 256 * Math.pow(2, z), ox = origin.x + off.x, oy = origin.y + off.y;
+            const D2R = Math.PI / 180, MAXLAT = 85.0511287798;
+            const pxX = (lng) => (lng + 180) / 360 * SC - ox;
+            const pxY = (lat) => {
+                const la = lat > MAXLAT ? MAXLAT : lat < -MAXLAT ? -MAXLAT : lat;
+                const sn = Math.sin(la * D2R);
+                return (0.5 - Math.log((1 + sn) / (1 - sn)) / (4 * Math.PI)) * SC - oy;
+            };
+            const px = (lat, lng) => [pxX(lng), pxY(lat)];
+            // ลากเส้นหนึ่งเส้น — ข้ามจุดที่ห่างจากจุดก่อนไม่ถึง ~0.8 px (ซูมออกแล้วจุดซ้อนกันเยอะ วาดไปก็มองไม่เห็น)
+            // ซูมออก (≤ 11): ใช้ชุดจุดที่ตัดให้บางลงแล้วของระดับซูมนั้น (ทำครั้งแรกครั้งเดียว แล้วเก็บไว้)
+            const zb = z <= 11 ? Math.max(5, Math.floor(z)) : 0;
+            const tol = zb ? 0.8 * 360 / (256 * Math.pow(2, zb)) : 0, tol2 = tol * tol;
+            const ptsOf = (L2) => {
+                if (!zb || L2.pts.length <= 8) return L2.pts;
+                const cache = L2._simp || (L2._simp = {});
+                let q = cache[zb];
+                if (q) return q;
+                const p = L2.pts, out = [p[0], p[1]];
+                let a0 = p[0], b0 = p[1];
+                for (let i = 2; i < p.length - 2; i += 2) {
+                    const da = p[i] - a0, db = p[i + 1] - b0;
+                    if (da * da + db * db < tol2) continue;
+                    out.push(p[i], p[i + 1]); a0 = p[i]; b0 = p[i + 1];
+                }
+                out.push(p[p.length - 2], p[p.length - 1]);
+                return (cache[zb] = Float64Array.from(out));
+            };
+            // ชิ้นที่เล็กกว่า ~1.5 px บนจอ (บ่อ/สระเล็ก ๆ ตอนซูมออก) ข้ามไป — มองไม่เห็นอยู่แล้ว แต่กินเวลาวาดมากสุด
+            const minDeg = 1.5 * 360 / SC;
+            const tiny = (L2) => (L2.n - L2.s) < minDeg && (L2.e - L2.w) < minDeg;
+            const minFill = (z <= 11 ? 3 : 1.5) * 360 / SC;           // พื้นที่ระบายสี ตอนซูมออกต้องใหญ่ 3 px ขึ้นไปถึงวาด
+            const tinyFill = (L2) => (L2.n - L2.s) < minFill && (L2.e - L2.w) < minFill;
+            const trace = (p0, close) => {
+                const p = p0.pts ? ptsOf(p0) : p0;
+                let x0 = pxX(p[1]), y0 = pxY(p[0]);
+                g.moveTo(x0, y0);
+                const last = p.length - 2;
+                for (let i = 2; i < p.length; i += 2) {
+                    const x = pxX(p[i + 1]), y = pxY(p[i]);
+                    const dx = x - x0, dy = y - y0;
+                    if (i !== last && dx * dx + dy * dy < 0.64) continue;
+                    g.lineTo(x, y); x0 = x; y0 = y;
+                }
+                if (close) g.closePath();
             };
 
             // ลากทีละกลุ่มสี เพื่อลดการสลับสถานะของ canvas
@@ -134,15 +222,7 @@
             const fillGroup = (kind, color) => {
                 g.fillStyle = color;
                 g.beginPath();
-                for (const L2 of lines) {
-                    if (L2.kind !== kind) continue;
-                    if (L2.n < s || L2.s > n || L2.e < w || L2.w > e) continue;
-                    const p = L2.pts;
-                    let q = px(p[0], p[1]);
-                    g.moveTo(q[0], q[1]);
-                    for (let i = 2; i < p.length; i += 2) { q = px(p[i], p[i + 1]); g.lineTo(q[0], q[1]); }
-                    g.closePath();
-                }
+                for (const L2 of inView(kind, 0, s, w, n, e)) { if (!tinyFill(L2)) trace(L2, true); }
                 g.fill('evenodd');
             };
             fillGroup('L', STYLE.land);       // พื้นดิน (บนพื้นหลังสีทะเล)
@@ -155,14 +235,7 @@
                 g.setLineDash(dash);
                 g.strokeStyle = color; g.lineWidth = 1;
                 g.beginPath();
-                for (const L2 of lines) {
-                    if (L2.kind !== 'B' || L2.cls !== lvl) continue;
-                    if (L2.n < s || L2.s > n || L2.e < w || L2.w > e) continue;
-                    const p = L2.pts;
-                    let q = px(p[0], p[1]);
-                    g.moveTo(q[0], q[1]);
-                    for (let i = 2; i < p.length; i += 2) { q = px(p[i], p[i + 1]); g.lineTo(q[0], q[1]); }
-                }
+                for (const L2 of inView('B', lvl, s, w, n, e)) { if (!tiny(L2)) trace(L2, false); }
                 g.stroke();
                 g.restore();
             };
@@ -171,20 +244,14 @@
 
             const order = [{ kind: 'c' }, { kind: 'w' }].concat(
                 [5, 4, 3, 2, 1, 0].filter(i => i <= maxCls).map(i => ({ kind: 'r', cls: i })));
+            const vis = new Map();
+            const listOf = (grp) => { const k = grp.kind + (grp.cls || 0); if (!vis.has(k)) vis.set(k, inView(grp.kind, grp.cls || 0, s, w, n, e)); return vis.get(k); };
             const strokeGroup = (grp, width, color) => {
                 g.beginPath();
                 g.strokeStyle = color;
                 g.lineWidth = width;
                 g.lineJoin = 'round'; g.lineCap = 'round';
-                for (const L2 of lines) {
-                    if (L2.kind !== grp.kind) continue;
-                    if (grp.kind === 'r' && L2.cls !== grp.cls) continue;
-                    if (L2.n < s || L2.s > n || L2.e < w || L2.w > e) continue;
-                    const p = L2.pts;
-                    let q = px(p[0], p[1]);
-                    g.moveTo(q[0], q[1]);
-                    for (let i = 2; i < p.length; i += 2) { q = px(p[i], p[i + 1]); g.lineTo(q[0], q[1]); }
-                }
+                for (const L2 of listOf(grp)) { if (!tiny(L2)) trace(L2, false); }
                 g.stroke();
             };
             // เส้นขอบก่อน แล้วค่อยทับด้วยสีจริง — ถนนจะอ่านง่ายขึ้นบนพื้นเบจ
@@ -198,20 +265,7 @@
                          : grp.kind === 'c' ? STYLE.coast : STYLE.road[grp.cls];
                 const width = (grp.kind === 'w' || grp.kind === 'c') ? st.width : st.w[wi];
                 if (!width) continue;
-                g.beginPath();
-                g.strokeStyle = st.color;
-                g.lineWidth = width;
-                g.lineJoin = 'round'; g.lineCap = 'round';
-                for (const L2 of lines) {
-                    if (L2.kind !== grp.kind) continue;
-                    if (grp.kind === 'r' && L2.cls !== grp.cls) continue;
-                    if (L2.n < s || L2.s > n || L2.e < w || L2.w > e) continue;   // นอกจอ
-                    const p = L2.pts;
-                    let q = px(p[0], p[1]);
-                    g.moveTo(q[0], q[1]);
-                    for (let i = 2; i < p.length; i += 2) { q = px(p[i], p[i + 1]); g.lineTo(q[0], q[1]); }
-                }
-                g.stroke();
+                strokeGroup(grp, width, st.color);
             }
 
             // ชื่อเมือง

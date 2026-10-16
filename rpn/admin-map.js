@@ -17,6 +17,35 @@ const MapCtrl = {
         }).addTo(MapCtrl.map);
     },
 
+    // V0.9.17: ติ๊กเลือกร้านในรายการ → แมพเลื่อนไปหาหมุด (เฉพาะเมื่อหมุดอยู่นอกจอ) + หมุดกะพริบให้เห็น
+    //   ไม่เปลี่ยนซูม ยกเว้นซูมออกไกลมาก (< 13) ค่อยซูมเข้าให้เห็นร้านรอบ ๆ · ติ๊กออกไม่เลื่อน
+    reveal: (store) => {
+        try {
+            const map = MapCtrl.map;
+            if (!map || !store) return;
+            const lat = +store.lat, lng = +store.lng;
+            if (!isFinite(lat) || !isFinite(lng) || (!lat && !lng)) return;
+            const ll = L.latLng(lat, lng);
+            const inView = map.getBounds().pad(-0.08).contains(ll);
+            if (map.getZoom() < 13) map.setView(ll, 15, { animate: true });
+            else if (!inView) map.panTo(ll, { animate: true, duration: 0.5 });
+            const pulse = (n) => {
+                const m = MapCtrl.markers[store.id];
+                const el = m && m.getElement && m.getElement();
+                if (!el) { if (n > 0) setTimeout(() => pulse(n - 1), 120); return; }
+                el.classList.remove('rp-reveal'); void el.offsetWidth; el.classList.add('rp-reveal');
+                setTimeout(() => el.classList.remove('rp-reveal'), 1600);
+            };
+            setTimeout(() => pulse(6), 60);
+            if (!document.getElementById('rp-reveal-css')) {
+                const st = document.createElement('style'); st.id = 'rp-reveal-css';
+                st.textContent = `@keyframes rpReveal{0%{transform:translateY(0) scale(1)}30%{transform:translateY(-10px) scale(1.35)}60%{transform:translateY(0) scale(1)}80%{transform:translateY(-5px) scale(1.15)}100%{transform:translateY(0) scale(1)}}
+.leaflet-marker-icon.rp-reveal{z-index:10000!important}.leaflet-marker-icon.rp-reveal>svg{animation:rpReveal 1.4s ease-out;transform-origin:50% 100%}`;
+                document.head.appendChild(st);
+            }
+        } catch (e) { console.warn('[MapCtrl.reveal]', e); }
+    },
+
     // แก้บัค: clearAll ล้าง markers ทั้งหมดก่อน render ใหม่เสมอ
     clearAll: () => {
         if (!MapCtrl.map) return;
@@ -126,7 +155,9 @@ const MapCtrl = {
                 iconTxt = `<circle cx="12" cy="9" r="3.5" fill="#fff"/>`;
             }
 
-            const icon = L.divIcon({
+            // V0.9.6: สร้างไอคอนใหม่เฉพาะหมุดที่หน้าตาเปลี่ยน — เดิมทุกครั้งที่ซูม/เลื่อนสร้างใหม่ทุกหมุดในจอ
+            const sig = [fill, border, stroke, svgW, svgH, iconTxt, kpiStar].join('|');
+            const icon = MapCtrl.markers[store.id] && MapCtrl.markers[store.id]._sig === sig ? null : L.divIcon({
                 html: `<svg viewBox="0 0 24 24" width="${svgW}" height="${svgH}" style="filter:drop-shadow(0px 3px 4px rgba(0,0,0,0.3));overflow:visible;">
                     <path d="M12 0C7.5 0 4 3.5 4 8c0 5.25 8 16 8 16s8-10.75 8-16c0-4.42-3.58-8-8-8z" fill="${fill}" stroke="${border}" stroke-width="${stroke}"/>
                     ${iconTxt}${kpiStar}
@@ -155,8 +186,8 @@ const MapCtrl = {
             const m = MapCtrl.markers[store.id];
             m.customId = store.id;
             m.customAssigned = isAssigned;
-            m.setIcon(icon);
-            m.setZIndexOffset(zIdx);
+            if (icon) { m.setIcon(icon); m._sig = sig; m._tinted = null; }
+            if (m._zi !== zIdx) { m.setZIndexOffset(zIdx); m._zi = zIdx; }
 
             const badge = store.freq === 2 ? `<span class="f2-badge">F2</span>` : '';
             const kpiHtml = kpi
@@ -183,13 +214,22 @@ const MapCtrl = {
                             </select>
                         </div>
                     </div>`;
-                if (!m.getPopup()) m.bindPopup(html, { autoPan: false, className: 'custom-popup' });
-                else m.setPopupContent(html);
+                if (m._popHtml !== html) {
+                    if (m.getTooltip()) m.unbindTooltip();
+                    m._ttHtml = null;
+                    if (!m.getPopup()) m.bindPopup(html, { autoPan: false, className: 'custom-popup' });
+                    else m.setPopupContent(html);
+                    m._popHtml = html;
+                }
             } else {
                 if (m.getPopup()) m.unbindPopup();
+                m._popHtml = null;
                 const tooltipContent = `<b>${store.name}</b> ${badge}<br><span class="text-[10px] font-mono text-gray-400">${store.id}</span>${kpiHtml}`;
-                if (!m.getTooltip()) m.bindTooltip(tooltipContent, { direction: 'top', offset: [0, -svgH] });
-                else m.setTooltipContent(tooltipContent);
+                if (m._ttHtml !== tooltipContent) {
+                    if (!m.getTooltip()) m.bindTooltip(tooltipContent, { direction: 'top', offset: [0, -svgH] });
+                    else m.setTooltipContent(tooltipContent);
+                    m._ttHtml = tooltipContent;
+                }
             }
         });
 

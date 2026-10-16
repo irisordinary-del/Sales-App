@@ -153,13 +153,25 @@
     const DocProto = fs.DocumentReference && fs.DocumentReference.prototype;
     const origSet = DocProto && DocProto.set;
 
+    // ✅ FIX (2026-10-16): rpnCal ของสายถูกลบ/ไม่ได้แนบ → ต้องลบ entry ใน rpnCalIndex ของเดือนนั้นด้วย
+    // ไม่งั้น reconcile เห็น index ตรงกับที่คำนวณได้แล้วข้ามไปตลอด เอกสารสายจึงไม่มี rpnCal ค้างถาวร
+    // (เจอ TEST_DAYOFF ธ.ค. 402V05: index มี hash แต่เอกสารไม่มี rpnCal — แอปเซลถอยไปใช้ CalendarCtrl)
+    const dropIndex = (ref, m) => {
+        if (m[2] === cal.indexYM) { if (cal.index) delete cal.index[m[3]]; delete cal.written[m[3]]; cal.done[m[3]] = false; }
+        try {
+            const planRef = ref.parent && ref.parent.parent;
+            if (planRef && origSet) origSet.call(planRef, { rpnCalIndex: { [m[3]]: fs.FieldValue.delete() } }, { merge: true }).catch(() => {});
+        } catch (e) {}
+    };
+    const noCal = (ref, m, data, opts) => {
+        dropIndex(ref, m);
+        return (opts && (opts.merge || opts.mergeFields)) ? Object.assign({}, data, { rpnCal: fs.FieldValue.delete() }) : data;
+    };
     // บันทึกสาย (เดือนที่เปิดอยู่) → แนบ rpnCal ไปในคำสั่งเขียนเดียวกัน
     const injectCal = (ref, data, opts) => {
         const m = ROUTE_RE.exec(ref.path || '');
         if (!m || !data || !Array.isArray(data.stores) || m[3] === UNASSIGNED || !calReady()) return data;
-        if (m[2] !== curYM() || cal.loading) {                           // เดือนอื่น / กำลังสลับเดือน — คำนวณไม่ได้ ล้างของเดิมกันค้าง
-            return (opts && (opts.merge || opts.mergeFields)) ? Object.assign({}, data, { rpnCal: fs.FieldValue.delete() }) : data;
-        }
+        if (m[2] !== curYM() || cal.loading) return noCal(ref, m, data, opts);   // เดือนอื่น / กำลังสลับเดือน — คำนวณไม่ได้ ล้างของเดิมกันค้าง
         let c = null;
         try { if (sigOf(data.stores) === sigOf(State.db.routes[m[3]])) c = calPayload(m[3]); } catch (e) { console.warn('[rpnCal]', e); }
         if (c) {
@@ -174,8 +186,7 @@
             return Object.assign({}, data, { rpnCal: c });
         }
         // ข้อมูลที่เขียนไม่ใช่ชุดใน State — คำนวณไม่ได้ ล้างของเดิมทิ้งกันแอปเซลใช้วันที่ค้าง
-        if (opts && (opts.merge || opts.mergeFields)) return Object.assign({}, data, { rpnCal: fs.FieldValue.delete() });
-        return data;
+        return noCal(ref, m, data, opts);
     };
     // เขียนปฏิทิน (ของเดือน หรือ override รายสาย) → วันที่ของทุกสายในเดือนนั้นอาจเปลี่ยน
     const touchesCalendar = (ref, data) => {
@@ -233,7 +244,18 @@
             const planRef = App.planRef(ym);
             if (!cal.index) {
                 const snap = await planRef.get();
-                cal.index = (snap.exists && snap.data().rpnCalIndex) || {};
+                const idx = Object.assign({}, (snap.exists && snap.data().rpnCalIndex) || {});
+                // ✅ FIX (2026-10-16): index ที่ค้างจากก่อนมี dropIndex — สายที่เอกสารไม่มี rpnCal (หรือไม่มี cfg = รุ่นก่อน 2026-10-09)
+                // ให้ถือว่ายังไม่ได้เขียน (อ่านเอกสารสายครั้งเดียวต่อการเปิดเดือน ไม่เขียนถ้าไม่จำเป็น)
+                await Promise.all(routes.filter(r => idx[r]).map(async (r) => {
+                    try {
+                        const d = await App.planRoutesCol(ym).doc(r).get();
+                        const rc = d.exists && d.data().rpnCal;
+                        if (!rc || !rc.cfg || !rc.days) delete idx[r];
+                    } catch (e) {}
+                }));
+                if (!still()) return;
+                cal.index = idx;
             }
             cal.need = false;
             let changed = false;

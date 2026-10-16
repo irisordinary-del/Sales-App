@@ -19,6 +19,8 @@
 
     /** จำนวนวันในรอบของสายนี้ — ปฏิทินรายสายมาก่อน ไม่มีค่อยใช้ของศูนย์ */
     const cycleOf = (route) => {
+        // V0.9.9: ใช้ตัวเดียวกับ Runs (ปฏิทินรายสาย › ปฏิทินระดับเดือน › ค่าตอนนำเข้า)
+        try { if (typeof Runs !== 'undefined' && Runs.cycleOf) return Runs.cycleOf(route); } catch (e) {}
         const ov = (State.db && State.db.routeCal && State.db.routeCal[route]) || null;
         const n = parseInt((ov && ov.cycleDays) || (State.db && State.db.cycleDays) || 24, 10);
         return (n >= 2 && n <= 31) ? n : 24;
@@ -60,7 +62,8 @@
         //   (ความถี่ของตลาด · รอบสั้นนับ +14 วัน · ครั้งที่แยกออกไปเป็นช่องอื่นไม่นับที่นี่)
         try {
             if (typeof Runs !== 'undefined') {
-                if (!Runs.potential(route, day).length) return 1;      // ยังไม่มีปฏิทิน
+                // ยังไม่ตั้งปฏิทิน = นับ 1 ไปก่อน · V0.9.9: ตั้งแล้วแต่ช่องนี้ไม่มีวันวิ่งเดือนนี้ = 0 (เดิมนับ 1 ทำให้ครั้งเข้าเยี่ยมเกินจริง)
+                if (!Runs.potential(route, day).length) return (Runs.hasCal && Runs.hasCal(route)) ? 0 : 1;
                 return Runs.datesOf(route, day).length;
             }
         } catch (e) {}
@@ -429,6 +432,8 @@
             const m = /pointFor\('([^']+)','([^']+)'/.exec(btn.getAttribute('onclick') || '');
             if (!m) return;
             const rt = m[1], dk = m[2];
+            // V0.9.13: แถวรอบ 2 ของช่องเดียวกัน (key "ช่อง|2") ไม่ติดป้ายซ้ำ — ป้ายความถี่อยู่ที่แถวรอบแรก
+            if (/\|(?:[2-9]|\d\d)$/.test(sm.dataset.vkey || '')) { sm.dataset.fqDone = '1'; return; }
             // ป้ายเงา F2 — บอกว่าในวันนี้มีกี่ร้านที่เป็นร้าน F2 (สายรอบยาว: ร้านอยู่ 2 ช่องวัน)
             const arr = storesOfDay(rt, dk);
             const nF2 = shortCycle(rt) ? 0 : arr.filter(s2 => realDays(s2).length > 1).length;
@@ -440,19 +445,21 @@
             // ครั้งที่แยกออกมา — บอกว่ามาจากตลาดไหน ครั้งที่เท่าไหร่
             const meta = Runs.metaOf(rt, dk);
             const TH = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
-            if (meta) {
-                const d = Runs._parse(meta.date);
+            // V0.9.12: ช่องที่ได้จากการรวมตลาดตามปฏิทิน — ไม่ติดป้าย ✂️ (เรียก D1 ตรง ๆ · ป้าย ⚠️ บอกความต่างแทน)
+            if (meta && !meta.fold) {
+                const d = Runs.metaDate ? Runs.metaDate(rt, dk) : Runs._parse(meta.date);
                 sm.insertAdjacentHTML('beforeend',
                     `<button onclick="event.preventDefault();event.stopPropagation();Runs.open('${rt}','${dk}')"
-                        title="ครั้งที่ ${meta.run} ของ ${meta.src.replace('Day ', 'D')} ที่แยกออกมาแก้เอง · ส่งออกเป็น CY แบบ 9&#10;กดเพื่อเปลี่ยนวันที่ หรือรวมกลับ"
+                        title="${meta.fold ? 'รอบที่ ' + meta.run + ' ของ ' + meta.src.replace('Day ', 'D') + ' (รวมตลาดตามปฏิทิน) — ร้าน/ลำดับไม่เหมือนรอบแรก ส่งออกแยก CY' : 'ครั้งที่ ' + meta.run + ' ของ ' + meta.src.replace('Day ', 'D') + ' ที่แยกออกมาแก้เอง · ส่งออกเป็น CY แบบ 9'}&#10;กดเพื่อเปลี่ยนวันที่ หรือรวมกลับ"
                         class="beat-fq shrink-0 text-[9px] font-black rounded-md px-1.5 py-[1px] border-2 shadow-sm cursor-pointer text-amber-800 bg-amber-50 border-amber-300 hover:bg-amber-100">
-                        ✂️ ${meta.src.replace('Day ', 'D')}·ครั้ง${meta.run}${d ? ' · ' + d.getDate() + ' ' + TH[d.getMonth()] : ''}</button>`
+                        ✂️ ${meta.src.replace('Day ', 'D')} ครั้ง${meta.run}${d ? ' · ' + d.getDate() + ' ' + TH[d.getMonth()] : ''}</button>`
                     // V0.7.3: เอาร้านที่เลือกออกจากครั้งนี้เท่านั้น (ครั้งแรกไม่ถูกแตะ)
                     + `<button onclick="event.preventDefault();event.stopPropagation();Runs.removeSel('${rt}','${dk}')"
                         title="เอาร้านที่เลือกไว้ออกจากครั้งนี้เท่านั้น — ครั้งแรกและลำดับคิวเดิมไม่ถูกแตะ&#10;เลือกร้านในรายการหรือบนแผนที่ก่อน"
                         class="beat-fq shrink-0 text-[9px] font-black rounded-md px-1.5 py-[1px] border-2 shadow-sm cursor-pointer text-red-700 bg-white border-red-300 hover:bg-red-50">➖ เอาที่เลือกออก</button>`);
                 return;
             }
+            if (meta) return;
             if (!F.beatCanToggle(rt, dk)) return;
             const pot = Runs.potential(rt, dk);
             const once = Runs.fqOf(rt, dk) === 'F1';

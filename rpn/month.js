@@ -65,7 +65,8 @@
             const list = (State.db.routes[rt] || []).filter(s => !s.inactive);
             const st = [], pr = [];
             list.forEach(s => {
-                const ds = (s.days || []);
+                // V0.9.9: ช่องที่เป็น "รอบ 2 ของตลาดหลัก" (แยกมา / รวมตามปฏิทิน) อยู่เกินรอบได้ ไม่นับว่าค้าง
+                const ds = (s.days || []).filter(d => !(typeof Runs !== 'undefined' && Runs.isDetached && Runs.isDetached(rt, d)));
                 if (ds.some(d => dayNum(d) > k)) { st.push(s); return; }
                 if (ds.length === 2 && typeof Freq !== 'undefined' && Freq.canonical
                     && !Freq.canonical(s) && !s.f2custom) pr.push(s);
@@ -199,11 +200,14 @@
             const cur = inPlan.get(g.id);
             const active = !/inactive/i.test(g.status || '');
             const hasGeo = isFinite(g.lat) && isFinite(g.lng) && !(g.lat === 0 && g.lng === 0);
-            if (!cur) { if (active && hasGeo) add.push(g); return; }
+            // V1.0.0 (J2): ร้านใหม่เฉพาะ Salesman Code P/V/C/E (เหมือนการนำเข้า)
+            const rty = (typeof SysImport !== 'undefined' && SysImport._rtype) || (() => 'P');
+            if (!cur) { if (active && hasGeo && rty(g.sales) !== 'X') add.push(g); return; }
             if (!active && !cur.s.inactive) { close.push({ g, ...cur }); return; }
             if (active && g.sales && cur.rt !== UNASSIGNED && g.sales !== cur.rt
                 && routeNames().includes(g.sales)) move.push({ g, ...cur });
         });
+        add.sort((a, b) => String(b.open || '').localeCompare(String(a.open || '')));
         return { master, add, close, move };
     };
 
@@ -310,8 +314,10 @@
                 if (Object.keys(nv).some(k => (s[k] || '') !== (nv[k] || ''))) { Object.assign(s, nv); touched.add(rt); }
             }));
             let mA = 0, mI = 0;
-            d.master.forEach(g => { /inactive/i.test(g.status || '') ? mI++ : mA++; });
-            try { await App.dbRef.set({ masterInfo: { at: new Date().toISOString(), ym: App._currentPlanYM, mActive: mA, mInactive: mI } }, { merge: true }); } catch (e) {}
+            const mAB = { P: 0, V: 0, C: 0, E: 0, X: 0 };          // V0.9.10: Active แยกตามประเภทสายของ Salesman Code
+            const rty = (typeof SysImport !== 'undefined' && SysImport._rtype) || (() => 'X');
+            d.master.forEach(g => { if (/inactive/i.test(g.status || '')) mI++; else { mA++; mAB[rty(g.sales)]++; } });
+            try { await App.dbRef.set({ masterInfo: { at: new Date().toISOString(), ym: App._currentPlanYM, mActive: mA, mInactive: mI, mActiveBy: mAB } }, { merge: true }); } catch (e) {}
             await Promise.all([...touched].map(saveRoute));
             await App.planRef(App._currentPlanYM).set({
                 routeList: Object.keys(R).sort((a, b) => a.localeCompare(b, 'th', { numeric: true })),

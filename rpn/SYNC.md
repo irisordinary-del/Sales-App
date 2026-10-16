@@ -1,10 +1,10 @@
-# rpn/ — RPN V0 ฉบับออนไลน์ · คู่มือรับเวอร์ชันใหม่จากส่วนกลาง
+# rpn/ — RPN ฉบับออนไลน์ · คู่มือรับเวอร์ชันใหม่จากส่วนกลาง
 
-> อัปเดตล่าสุด 2026-10-15 · เวอร์ชัน RPN ที่ฝังอยู่ตอนนี้: **V0.9.5** (`rpn/VERSION`)
+> อัปเดตล่าสุด 2026-10-16 · เวอร์ชัน RPN ที่ฝังอยู่ตอนนี้: **V1.0.0** (`rpn/VERSION`) · หน้าหลัก = `rpn/RoutePlanner.html` (ชื่อคงที่ ไม่ตามเลขเวอร์ชัน)
 
-**RPN V0** คือโปรแกรมวางแผนที่ส่วนกลางพัฒนาต่อจากหน้า admin เดิมของเรา ต้นฉบับรันในเครื่องและเก็บข้อมูลใน IndexedDB
+**RPN** (V0 ช่วง Pre-Launch → V1 ใช้งานจริงตั้งแต่ 16 ต.ค. 2569) คือโปรแกรมวางแผนที่ส่วนกลางพัฒนาต่อจากหน้า admin เดิมของเรา ต้นฉบับรันในเครื่องและเก็บข้อมูลใน IndexedDB
 เรายกมาทั้งชุดไว้ในโฟลเดอร์นี้ แล้วต่อเข้ากับ Firestore จริง (`route-plan-71e2e`) ใช้เป็นแท็บ **วางแผนคิวงาน** และ **ภาพรวมแผน**
-ใน `index.html` โดยฝังเป็น iframe `rpn/RoutePlannerV0.html?embed=1&center=…` (ดู `RpnHost` ใน `index.html`)
+ใน `index.html` โดยฝังเป็น iframe `rpn/RoutePlanner.html?embed=1&center=…` (ดู `RpnHost` ใน `index.html`)
 
 **หลักสำคัญ:** เราไม่แก้ไฟล์ของ RPN เลย งานต่อเชื่อมทั้งหมดอยู่ใน **2 ไฟล์ของเรา** (`rpn-online-pre.js`, `rpn-online.js`)
 และในไฟล์ของระบบเราที่อยู่นอก `rpn/` เวอร์ชันใหม่จากส่วนกลางจึงวางทับได้ด้วยสคริปต์เดียว แล้วไล่เช็คตามรายการด้านล่าง
@@ -13,12 +13,13 @@
 
 ## 1. ขั้นตอนรับเวอร์ชันใหม่ (ทำตามลำดับ)
 
-1. **สร้าง branch ใหม่** จาก `staging2` เช่น `rpn-v0.9.6`
+1. **สร้าง branch ใหม่** จาก `staging2` เช่น `rpn-v1.0.1`
 2. **ซิงก์ไฟล์:**
    ```bash
-   node tools/sync-rpn.mjs "C:\Users\...\Desktop\RPN V0 Pre-Launch"
+   node tools/sync-rpn.mjs "C:\Users\...\Desktop\RPN V1 Launch"
    ```
-   - สคริปต์ลบทุกไฟล์ใน `rpn/` ยกเว้นไฟล์ของเรา 3 ไฟล์ (หัวข้อ 3) คัดลอกชุดใหม่มา แล้วแก้ `RoutePlannerV0.html` ให้เป็นออนไลน์ (หัวข้อ 2)
+   - สคริปต์ลบทุกไฟล์ใน `rpn/` ยกเว้นไฟล์ของเรา 3 ไฟล์ (หัวข้อ 3) คัดลอกชุดใหม่มา แล้วแก้หน้าหลัก `RoutePlannerV{N}.html` ให้เป็นออนไลน์ เขียนเป็น `rpn/RoutePlanner.html` (หัวข้อ 2)
+   - ชื่อหน้าหลักของต้นฉบับเปลี่ยนตามเลข MAJOR (`RoutePlannerV0.html` → `RoutePlannerV1.html` เมื่อ V1.0.0) แต่ฝั่งเราเป็น `rpn/RoutePlanner.html` เสมอ — iframe ใน `index.html` ไม่ต้องแก้ตามเวอร์ชัน
    - ถ้าสคริปต์หยุดพร้อมข้อความ "หาจุดแก้ไม่เจอ" แปลว่าส่วนกลางเปลี่ยนโครง HTML ให้แก้ regex ใน `tools/sync-rpn.mjs`
 3. **ดูว่าส่วนกลางเปลี่ยนอะไร:** อ่าน `rpn/CHANGELOG.md` ใหม่ และดู `git diff --stat rpn/`
 4. **เช็คจุดที่เราเกาะ (หัวข้อ 4):** ค้นชื่อฟังก์ชันและ id ในตารางกับไฟล์ใหม่ ถ้าหายหรือเปลี่ยนชื่อ ให้แก้ใน `rpn-online.js`
@@ -83,7 +84,7 @@
 ## 4. จุดของ RPN ที่ `rpn-online.js` เกาะอยู่ — เช็คทุกครั้งที่รับเวอร์ชันใหม่
 
 ถ้าชื่อในตารางนี้หายหรือเปลี่ยนในเวอร์ชันใหม่ ฟีเจอร์ในคอลัมน์ขวาจะพังเงียบ ๆ (ส่วนใหญ่ไม่มี error ขึ้น)
-ค้นเร็ว ๆ ได้ด้วย `grep -rn "ชื่อ" rpn/*.js rpn/RoutePlannerV0.html`
+ค้นเร็ว ๆ ได้ด้วย `grep -rn "ชื่อ" rpn/*.js rpn/RoutePlanner.html`
 
 | ของ RPN | ใช้ทำอะไร (§) |
 |---|---|
@@ -116,7 +117,10 @@
 | `cal-ui.js` — ติ๊กสายในโหมด "เลือกเฉพาะสาย" ไม่โหลดปฏิทินของสายนั้น ฟอร์มยังเป็นค่าศูนย์ กดบันทึกแล้วเขียนค่าศูนย์ทับของสาย | §9 ครอบ `CalUI.tick`/`tickAll` ให้เรียก `CalendarAdmin._loadConfig()` เมื่อสายตัวแทนเปลี่ยน | `CalUI.tick` เรียก `_loadConfig` เองแล้ว |
 | `cal-ui.js` — ป้าย "✓ ตั้งค่าแล้ว" โหลดตอนเปิด modal ครั้งเดียว เลื่อนเดือนด้วยลูกศรแล้วยังเป็นของเดือนเดิม | §9 ครอบ `CalendarAdmin.shiftMonth` ให้โหลดรายการ override ของเดือนใหม่ | `loadOverrides` ถูกเรียกหลัง `shiftMonth` แล้ว |
 | `admin-data.js` ของ RPN — หลังเปิดหน้า/สลับเดือน `get()` อาจคืนข้อมูลเก่าจากแคช IndexedDB ทำให้แก้บนข้อมูลเก่าแล้วบันทึกทับของใหม่ | `../plan-lock.js` ครอบ `DocumentReference.get()` ให้ลอง server ก่อน (รอ 8 วิ แล้วค่อยใช้แคช) + §7 อ่านสายจาก server ก่อนสลับลำดับ | — (เป็นพฤติกรรมของ Firestore persistence ควรคงไว้) |
-| `reorder.js` — `Reorder.apply` ใช้ cycleDays ของศูนย์ และไม่ย้าย `fqs` | §7 ไม่เรียก `Reorder.apply` | ดูหัวข้อ 4 |
+| ~~`reorder.js` — `Reorder.apply` ใช้ cycleDays ของศูนย์ และไม่ย้าย `fqs`~~ **แก้แล้วใน V0.9.6** (ใช้ `Runs.cycleOf(สาย)` + ย้าย `fqs`/`fqRun`/`runOf.src`) | §7 ยังไม่เรียก `Reorder.apply` — ไม่ใช่ patch แต่เป็นตัวอนุมัติคำขอจากแอปเซล (รับ `req.map`, เขียนชื่อตลาด D.. ใหม่, อ่าน server ก่อน) เก็บไว้ตามเดิม | — |
+
+**เช็คกับ V1.0.0 (2026-10-16):** `cal-ui.js` ไม่เปลี่ยนเลย (2 ข้อแรกยังต้องอุด) · `day-date.js` ยังล้าง `routeCal = {}` ตอนสลับเดือน (ข้อสุดท้ายยังต้องอุด) ·
+ปัญหาปฏิทิน ก1–ก4 ใน `RPN-ISSUES-FOR-HQ.md` ยังเหมือนเดิมทุกข้อ (`createPlan` ลบ `calendarOverride`, `CalendarAdmin.save` โหมดวันที่ = `{mode:'date'}`, weekday-rolling ไม่เก็บ `holidays`, override `merge:true`)
 | `day-date.js` — ตอนสลับเดือนล้าง `State.db.routeCal` (ปฏิทินเฉพาะสาย) ก่อน แล้วค่อยโหลดใหม่หลังโหลดแผน ช่วงนั้น `Runs.datesOf` ใช้ปฏิทินของศูนย์กับทุกสาย | §7b (`openRoute`) ตั้ง `routeCal[สาย]` + `calendarConfig` จาก server เองก่อนคำนวณ · rpnCal ปลอดภัยเพราะ `cfg` ไม่ตรง → แอปเซลไม่ใช้ | ระหว่างสลับเดือน `routeCal` ไม่ถูกล้างเป็น `{}` แล้ว |
 
 ---
@@ -137,6 +141,10 @@ plans/{ym}.rpnCalIndex        = { สาย: hash }
 - แอปเซล (`RpnCompat` ใน `sales-app.js`) ใช้ rpnCal **เฉพาะเมื่อทั้ง `sig` และ `cfg` ตรง** ไม่งั้นใช้ `CalendarCtrl` เดิมคำนวณจากปฏิทินแทน
   (เช่น แก้ปฏิทินเดือนอื่นที่ RPN ไม่ได้เปิดอยู่ แอปเซลเปลี่ยนตามทันที แล้วกลับมาใช้ rpnCal เมื่อเปิดเดือนนั้นใน RPN)
 - ก่อนเขียน §5 อ่านเอกสารสายจาก server เทียบ `sig` ก่อนเสมอ (กันเขียนวันที่ของเดือนเก่าที่ค้างในหน่วยความจำระหว่างสลับเดือน)
+- **`rpnCalIndex` ต้องตรงกับเอกสารสาย** (2026-10-16): ทุกครั้งที่บันทึกสายแล้ว rpnCal ถูกลบ/ไม่ได้แนบ (`noCal` — เช่น เขียนสายของเดือนที่ไม่ได้เปิด) จะลบ entry ของสายนั้นใน index ด้วย · ตอนเปิดเดือน reconcile อ่านเอกสารสายครั้งเดียว ถ้าไม่มี rpnCal / ไม่มี `cfg` ถือว่ายังไม่เขียน
+  (ก่อนหน้านี้ index ค้างได้ → reconcile ข้ามตลอด แอปเซลถอยไปใช้ `CalendarCtrl` เงียบ ๆ — เจอ TEST_DAYOFF ธ.ค.)
+- **V1 รวมตลาดตามปฏิทิน (`cal-fold.js`)**: ช่อง "D1·รอบ2" ยังเป็น Day เลขเกินรอบ (เช่น `Day 13` ในรอบ 12) มี `runOf[ช่อง] = { src, run, fold:true }` — `Runs.datesOf` ให้วันที่ของรอบ 2 ของตลาดหลัก rpnCal จึงถูกโดยไม่ต้องแก้อะไร
+  แต่ถ้า rpnCal ไม่ fresh แอปเซลถอยไป `CalendarCtrl` ซึ่ง**ไม่รู้จัก fold** → ช่องเกินรอบไม่ขึ้นในปฏิทิน (เปิดเดือนนั้นใน RPN ให้ rpnCal ถูกเขียนก่อน)
 - **ฟังก์ชันที่ต้องเหมือนกันทุกตัวอักษร:**
   - `hash()` / `sig()` — `rpn-online.js` §5, `RpnCompat.hash/sig` ใน `sales-app.js`, `App._rpnSig` ใน `admin-data.js`
   - `cfgSig()` + รายการ `CFG_KEYS` — `rpn-online.js` §5 และ `RpnCompat.cfgSig/_CFG_KEYS` ใน `sales-app.js`
@@ -150,7 +158,8 @@ plans/{ym}.rpnCalIndex        = { สาย: hash }
 - **สายเทียม `รอจัดสาย`** ใน `routeList` — ทุกที่ที่ไล่รายชื่อสายต้องข้าม: `users.js` (สร้าง user), `tasks.js`, `center-select.html` (นับสาย),
   `admin-cellsplit.js`, `admin-ui.js` (ภาพรวมทุกสาย), `admin-data.js` (`getRouteConfirmStatus`), `sales-app.js` (`RpnCompat.cleanRouteList`)
 - **ร้าน `inactive`** (ออกจากแผน) — แอปเซลซ่อนด้วย `RpnCompat.clean()` และทุกจุดที่เขียน `stores` กลับต้องห่อ `RpnCompat.restore()` ไม่งั้นร้านที่ซ่อนหาย
-- **field ร้านใหม่:** `inactive`, `wasPlan`, `runOf`, `fqs`, `fqRun`, `cys`, `vd` · center doc: `cyPoints`, `routeBase`, `masterKm`, `maxCycleCode`, `routeDist`
+- **field ร้านใหม่:** `inactive`, `wasPlan`, `runOf` (V1: + `fold`), `fqs`, `fqRun`, `cys`, `vd` · center doc: `cyPoints`, `routeBase`, `masterKm`, `maxCycleCode`, `routeDist`, `lastImportYM`, `masterInfo` (V1: + `mActiveBy`) · plan doc (V1): `importInfo` (ใบนำเข้า) — `firestore.rules` รับได้อยู่แล้ว (`hasAny`)
+- **V1 เก็บสำเนาไฟล์นำเข้า** ใน IndexedDB `rp_importfiles` ของเบราว์เซอร์ (ไม่ขึ้น Firestore) — แอดมินคนละเครื่องไม่เห็นไฟล์ของกัน เป็นเรื่องปกติ
 - **ร้านหนึ่งอยู่ได้หลาย Day** (F2/F4) — `approveMoveRequest` แทนเฉพาะ `fromDay` และย้ายค่ารายวัน (`cys`, `fqs`, `fqRun`, `vd`, `runOf`) ตามร้านข้างเคียงใน Day ปลายทาง
 
 ### ตามไฟล์
@@ -220,6 +229,7 @@ plans/{ym}.rpnCalIndex        = { สาย: hash }
 | 2026-10-15 | `e54ca91` | rpnCal ค้าง Day ที่ไม่มีร้านแล้ว (เขียนแบบ merge ลึก) → reconcile ใช้ `mergeFields`, `injectCal` ส่งคำสั่งลบ Day ที่หายไป, แอปเซล (`RpnCompat.calOf`) ใช้เฉพาะ Day ที่ร้านมีจริง · **แก้แผน 402C02 พ.ย.** เลื่อนตลาด D6–D11 → D5–D10 ให้ครบ 23 ตลาด (สำรองก่อนแก้ `402C02@bk-20261015-0920`) |
 | 2026-10-15 | — | สรุปปัญหา RPN ส่งต่อส่วนกลาง `RPN-ISSUES-FOR-HQ.md` (ปฏิทิน/วันหยุดไม่จำค่า — ไม่แก้ฝั่งเรา) |
 | 2026-10-14 | `06ab502` `688f048` `a6b4090` | เมนูข้าง: เอาปุ่มวิเคราะห์สายวิ่ง / ภาพรวมทุกสาย / แบ่งเซลล์ออก · จัดเครื่องมือแผน 4 อย่างเป็นเมนูย่อยใต้ "วางแผนคิวงาน" · แก้ป้ายแดงขึ้นเลข 0 ตลอด |
+| 2026-10-16 | — | **รับ RPN V1.0.0** (จาก V0.9.5 — รวม V0.9.6–V0.9.18) · หน้าหลักเปลี่ยนชื่อ → `tools/sync-rpn.mjs` หา `RoutePlannerV{N}.html` เอง เขียนเป็น `rpn/RoutePlanner.html` (iframe / `plan-lock.js` ชี้ชื่อนี้) · จุดเกาะหัวข้อ 4 ครบทุกตัว · `Reorder.apply` ส่วนกลางแก้แล้ว (หัวข้อ 5) · แก้ `rpnCalIndex` ค้างจน rpnCal ไม่ถูกเขียน (หัวข้อ 6) |
 
 **แก้ข้อมูลโดยตรง (ไม่ใช่โค้ด) ที่ควรรู้:** 402V09 พ.ย. ย้อนการสลับ D1↔D21 และทำให้เรียงตาม ต.ค. · 402V09 ธ.ค. เรียงตาม พ.ย. ·
 402V08 พ.ย. ย้าย 10 ร้านกลับวันเดิมแบบ ต.ค. (2026-10-09)

@@ -54,19 +54,22 @@
             try {
                 const ds = Runs.datesOf(route, dayLabel);
                 if (ds.length) out = { txt: Runs._dlist(ds), exact: true, dates: ds };
+                // V0.9.8: ปฏิทินตั้งแล้วแต่ช่องนี้ไม่มีวันวิ่งในเดือนนี้เลย (รอบยาวกว่าวันทำงาน / ตรงวันหยุดแบบตรึง)
+                else if (Runs.potential && !Runs.potential(route, dayLabel).length && !(Runs.isDetached && Runs.isDetached(route, dayLabel)))
+                    out = { txt: 'ไม่วิ่งเดือนนี้', exact: true, dates: [], none: true };
             } catch (e) {}
         }
         if (!out && cfg && typeof FileManager !== 'undefined' && FileManager._resolveCalendarDate) {
             try {
                 const d = FileManager._resolveCalendarDate(cfg, dayLabel, p.y, p.m0);
-                if (d) out = { txt: d.getDate() + ' ' + TH[d.getMonth()], exact: true };
+                if (d) out = { txt: d.getDate() + ' ' + TH[d.getMonth()], exact: true, dates: [d] };
             } catch (e) {}
         }
         if (!out) {
             // ยังไม่ตั้งปฏิทิน → เดาแบบเดียวกับตอน Export: Day N = วันที่ N ของเดือนนั้น
             const n = dayNum(dayLabel);
             const last = new Date(p.y, p.m0 + 1, 0).getDate();
-            if (n >= 1 && n <= last) out = { txt: n + ' ' + TH[p.m0], exact: false };
+            if (n >= 1 && n <= last) out = { txt: n + ' ' + TH[p.m0], exact: false, dates: [new Date(p.y, p.m0, n)] };
         }
         cache.set(key, out);
         return out;
@@ -79,22 +82,41 @@
         if (tag) return tag;                                   // V0.7.6: ช่องที่แยกมา = "D5·ครั้ง2" ไม่โชว์เลขเกินรอบ
         return short ? ('D' + dayNum(dayLabel)) : ('Day ' + dayNum(dayLabel));
     };
-    const label = (route, dayLabel, short) => {
-        const base = baseName(route, dayLabel, short);
-        const d = dateOf(route, dayLabel);
-        return d ? `${base} (${d.txt})` : base;
+    // V0.9.8: วันที่ในเดือนเป็นหลัก แล้วกำกับตลาด (D1–D24) ไว้หลังวันที่ — "พ. 1 ต.ค. · D1"
+    const WD = ['อา.', 'จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.', 'ส.'];
+    /** วันที่พร้อมชื่อวัน: "จ. 2 พ.ย." · หลายวัน "จ. 2 · จ. 16 พ.ย." */
+    const wtxt = (d) => {
+        if (!d) return '';
+        if (d.none) return d.txt;
+        const ds = (d.dates || []).filter(Boolean);
+        if (!ds.length) return d.txt;
+        const sameM = ds.every(x => x.getMonth() === ds[0].getMonth());
+        return ds.map((x, i) => WD[x.getDay()] + ' ' + x.getDate() + ((!sameM || i === ds.length - 1) ? ' ' + TH[x.getMonth()] : '')).join(' · ');
     };
+    /** วันแรกที่วิ่ง (ใช้เรียงตามวันที่) — ไม่มีวันวิ่ง = ท้ายสุด */
+    const firstDate = (route, dayLabel) => {
+        const d = dateOf(route, dayLabel);
+        const ds = (d && d.dates) || [];
+        return ds.length ? ds[0].getTime() : Infinity;
+    };
+    /** ข้อความล้วน (ใช้ใน <option>) */
+    const label = (route, dayLabel, short) => {
+        const base = baseName(route, dayLabel, true);
+        const d = dateOf(route, dayLabel);
+        return d ? `${wtxt(d)} · ${base}` : base;
+    };
+    const opt = (route, dayLabel) => label(route, dayLabel, true);
 
     const html = (route, dayLabel, short) => {
-        const base = baseName(route, dayLabel, short);
+        const base = baseName(route, dayLabel, true);
         const d = dateOf(route, dayLabel);
         if (!d) return base;
-        const cls = d.exact ? 'color:#475569' : 'color:#cbd5e1';
-        const tip = d.exact ? 'วันที่จริงตามปฏิทินที่ตั้งไว้' : 'ยังไม่ได้ตั้งปฏิทิน — ใช้ Day N = วันที่ N ของเดือนนี้ไปก่อน';
-        return `${base} <span style="${cls};font-size:.92em" title="${tip}">(${d.txt})</span>`;
+        const cls = d.none ? 'color:#b91c1c' : d.exact ? 'color:#111827' : 'color:#94a3b8';
+        const tip = d.none ? 'ช่องวันนี้ไม่มีวันวิ่งในเดือนนี้ตามปฏิทิน' : d.exact ? 'วันที่จริงตามปฏิทินที่ตั้งไว้' : 'ยังไม่ได้ตั้งปฏิทิน — ใช้ Day N = วันที่ N ของเดือนนี้ไปก่อน';
+        return `<b style="${cls}" title="${tip}">${wtxt(d)}</b> <span style="color:#6b7280;font-size:.92em">· ${base}</span>`;
     };
 
-    window.DayDate = { dateOf, label, html, _clear: () => { cache = new Map(); }, reloadOverrides: () => loadOverrides() };
+    window.DayDate = { dateOf, label, opt, html, wtxt, firstDate, _clear: () => { cache = new Map(); }, reloadOverrides: () => loadOverrides() };
 
     // ── โหลด override ของแต่ละสายมาไว้ในหน่วยความจำ ─────────────────────
     // (ตัวอ่านเดิมไปดึงจากที่เก็บข้อมูลตอน Export เท่านั้น หน้าจอเลยไม่รู้)
@@ -205,7 +227,7 @@
         if (!d) return;
         t.dataset.ddFor = State.openDayModal;
         t.insertAdjacentHTML('beforeend',
-            `<span style="font-size:.8em;font-weight:700;color:${d.exact ? '#475569' : '#cbd5e1'}"> (${d.txt})</span>`);
+            `<span style="font-size:.8em;font-weight:700;color:${d.exact ? '#475569' : '#cbd5e1'}"> (${wtxt(d)})</span>`);
     };
 
     const boot = () => {

@@ -223,6 +223,9 @@ const RoadDist = (() => {
             return null;
         },
 
+        /** V0.9.17: ตารางดิบที่เก็บไว้ในเครื่อง (ArrayBuffer) — ใช้ตอน Save เป็น .json */
+        async raw() { return await load(); },
+
         /** ลบตารางที่เก็บไว้ */
         async clear() {
             try {

@@ -49,7 +49,7 @@ const Runs = (() => {
     let memo = null;
     const memoClear = () => { memo = null; };
     const M_ = () => {
-        if (!memo) { memo = { idx: new Map(), cal: new Map(), dates: new Map(), pot: new Map(), fq: new Map() }; Promise.resolve().then(memoClear); }
+        if (!memo) { memo = { idx: new Map(), cal: new Map(), dates: new Map(), pot: new Map(), fq: new Map(), pc: new Map() }; Promise.resolve().then(memoClear); }
         return memo;
     };
     /** ดัชนีของสาย: Day → ร้าน · Day → ข้อมูลการแยก · ตลาดต้นทาง → {ครั้ง: ช่องใหม่} */
@@ -61,6 +61,9 @@ const Runs = (() => {
         for (const s of listOf(route)) {
             if (s.runOf) for (const k in s.runOf) {
                 const r = s.runOf[k];
+                // V0.9.14: ช่องที่ "รวมตลาดตามปฏิทิน" ไว้ (fold) มีผลเฉพาะตอนช่องนั้นเกินรอบของปฏิทิน
+                //   ตั้งปฏิทินสายนั้นกลับเป็นรอบ 24 → D13–D24 กลับเป็นตลาดปกติของตัวเองทันที (เดิมค้างเป็น "ไม่วิ่งเดือนนี้")
+                if (r && r.src && r.fold && dayNum(k) <= cycleOf(route)) continue;
                 if (r && r.src) {
                     if (!meta.has(k)) meta.set(k, r);
                     if ((s.days || []).includes(k)) { const o = det.get(r.src) || {}; o[r.run] = k; det.set(r.src, o); }
@@ -84,9 +87,12 @@ const Runs = (() => {
         const ov = (State.db && State.db.routeCal && route && State.db.routeCal[route]) || null;
         return ov || (State.db && State.db.calendarConfig) || {};
     };
+    // V0.9.9: ความยาวรอบ = ปฏิทินรายสาย › ปฏิทินระดับเดือน (ที่ตั้งในหน้าตั้งค่าปฏิทิน) › ค่าตอนนำเข้า
+    //   เดิมไม่ดูปฏิทินระดับเดือน — ตั้งรอบ 12 แล้วระบบยังคิดว่าเป็นรอบ 24 (ไม่รู้ว่าเป็นรอบสั้น)
     const cycleOf = (route) => {
         const ov = (State.db && State.db.routeCal && route && State.db.routeCal[route]) || null;
-        const n = parseInt((ov && ov.cycleDays) || (State.db && State.db.cycleDays) || 24, 10);
+        const cc = (State.db && State.db.calendarConfig) || null;
+        const n = parseInt((ov && ov.cycleDays) || (cc && cc.cycleDays) || (State.db && State.db.cycleDays) || 24, 10);
         return (n >= 2 && n <= 31) ? n : 24;
     };
     /** สายรอบสั้น = 1 เดือนหมุนมากกว่า 1 รอบ (รอบ ≤ 14 วันทำงาน) — ความถี่กำหนดที่ตลาด */
@@ -151,6 +157,16 @@ const Runs = (() => {
     /** ข้อมูลการแยกของช่องวันนี้ ถ้าช่องนี้เป็น "ครั้งที่แยกออกมา" — {src, run, date} */
     const metaOf = (route, day) => idxOf(route).meta.get(day) || null;
     const isDetached = (route, day) => !!metaOf(route, day);
+    /** วันที่ของช่องที่แยกมา — ตั้งเองไว้ (date) › ช่องที่ได้จากการรวมตลาดตามปฏิทิน (fold) = ครั้งที่ run ของตลาดหลักในเดือนนี้ */
+    const metaDate = (route, day) => {
+        const m = metaOf(route, day);
+        if (!m) return null;
+        if (m.date) return parse(m.date);
+        if (m.fold) { const p = potential(route, m.src).find(x => x.k === m.run); return p ? p.date : null; }
+        return null;
+    };
+    /** ตั้งปฏิทินแล้วหรือยัง (ระดับเดือนหรือรายสาย) */
+    const hasCal = (route) => Object.keys(cfgOf(route) || {}).length > 0;
 
     /** ช่องวันที่ถูกแยกออกมาจากตลาดนี้ { run(1-based): ช่องใหม่ } */
     const detachedOf = (route, src) => Object.assign({}, idxOf(route).det.get(src) || {});
@@ -194,7 +210,7 @@ const Runs = (() => {
     };
     const potential0 = (route, day) => {
         const m = metaOf(route, day);
-        if (m) { const d = parse(m.date); return d ? [{ k: m.run, date: d, to: null }] : []; }
+        if (m) { const d = metaDate(route, day); return d ? [{ k: m.run, date: d, to: null }] : []; }
         const cal = calDates(route, day);
         const end = endDate(route);
         let dates = end ? cal.filter(d => d <= end) : cal;          // DMS ไม่วิ่งเกิน End date
@@ -259,8 +275,7 @@ const Runs = (() => {
             pick.forEach(p => {
                 if (p.to) {
                     used.add(p.to);
-                    const m = metaOf(route, p.to);
-                    const dd = parse(m && m.date) || p.date;
+                    const dd = metaDate(route, p.to) || p.date;
                     // แยกไปแล้วแต่ "กลับมาเหมือนกันหมด" (ร้าน ลำดับ และวันตรงกับที่ควรเป็น) → นับรวมเป็นครั้งของตลาดเดิม
                     if (sigOf(route, p.to) === sig0 && iso(dd) === iso(p.date)) runs.push({ date: p.date, day, k: p.k, auto: p.to });
                     else if (storesOf(route, p.to).length) runs.push({ date: dd, day: p.to, k: p.k });
@@ -284,14 +299,116 @@ const Runs = (() => {
                            merged: tail.filter(r => r.auto).map(r => r.auto) });
             }
         });
+        // V0.9.8: รวม CY ข้ามช่องวัน — ตลาดคนละช่อง (เช่น 302 D1 กับ D13 ที่ไฟล์เก่าแยกเป็น R01 / R01 F2)
+        //   ถ้าร้าน + ลำดับเหมือนกันทุกครั้ง และห่างกัน 14 วันพอดี (วันเดียวกันในสัปดาห์) และไม่มีครั้งถัดไปก่อน End date
+        //   → 1 CY แบบ 5 (ใช้ช่องแรกเป็นหลัก) ไม่ยึดว่าไฟล์เก่าแยกช่องไว้อย่างไร
+        pairMerge(route, out, end);
         // ครั้งที่แยกออกมาแต่ตลาดต้นทางไม่มีครั้งนั้นแล้ว (เช่น เปลี่ยนปฏิทิน) → ส่งออกเป็นแบบ 9 ตามวันที่ของมันเอง
         all.filter(d => isDetached(route, d) && !used.has(d)).forEach(day => {
             if (!storesOf(route, day).length) return;
             const m = metaOf(route, day);
-            const d = parse(m && m.date);
+            const d = metaDate(route, day);
             if (d) out.push({ route, day, base: m.src, k: m.run, date: d, vf: '9', dates: [d], orphan: true });
         });
         return out;
+    };
+
+    /** แถวแบบ 9 ครั้งเดียวของช่องปกติ (ตัวเลือกที่จะรวมข้ามช่องได้) */
+    const singlesOf = (route, out) => out.filter(r => r.vf === '9' && !r.orphan && r.day === r.base && !isDetached(route, r.day) && r.date);
+    const pairMerge = (route, out, end) => {
+        const by = new Map();
+        singlesOf(route, out).forEach(r => {
+            const sg = sigOf(route, r.day);
+            if (!sg) return;
+            let a = by.get(sg); if (!a) by.set(sg, a = []); a.push(r);
+        });
+        by.forEach(list => {
+            if (list.length < 2) return;
+            list.sort((a, b) => a.date - b.date);
+            let i = 0;
+            while (i < list.length) {
+                let j = i;
+                while (j + 1 < list.length && diffDays(list[j].date, list[j + 1].date) === 14) j++;
+                const chain = list.slice(i, j + 1);
+                if (chain.length >= 2 && (!end || addDays(chain[chain.length - 1].date, 14) > end)) {
+                    const h = chain[0];
+                    chain.forEach(r => { const k = out.indexOf(r); if (k >= 0) out.splice(k, 1); });
+                    out.push({ route, day: h.day, base: h.base, k: h.k, date: h.date, vf: '5', dates: chain.map(r => r.date),
+                               merged: [], pairs: chain.slice(1).map(r => r.day) });
+                }
+                i = j + 1;
+            }
+        });
+    };
+    /**
+     * V0.9.8: คู่ตลาดข้ามช่อง — รวมได้ / เกือบรวมได้ (สำหรับเตือนในหน้าต่างส่งออก DMS และป้ายในแท็บ 1)
+     * คืน { merged: [{days, dates}], near: [{a, b, why}] }
+     *   near = ห่าง 14 วันและร้านซ้ำ ≥ 80% แต่ร้าน/ลำดับไม่ตรงกัน · หรือร้าน+ลำดับตรงกันแต่ไม่ได้ห่าง 14 วัน · หรือมีครั้งถัดไปก่อน End date
+     */
+    const pairCheck = (route) => {
+        const rows = planRoute(route);
+        const merged = rows.filter(r => (r.pairs && r.pairs.length) || (r.merged && r.merged.length))
+            .map(r => ({ days: [r.day].concat(r.pairs || [], r.merged || []), dates: r.dates }));
+        const singles = singlesOf(route, rows);
+        const near = [];
+        const end = endDate(route);
+        for (let x = 0; x < singles.length; x++) for (let y = 0; y < singles.length; y++) {
+            const a = singles[x], b = singles[y];
+            if (a === b || b.date <= a.date) continue;
+            const gap = diffDays(a.date, b.date);
+            const sa = sigOf(route, a.day), sb = sigOf(route, b.day);
+            const A = new Set(storesOf(route, a.day).map(s => String(s.id))), B = storesOf(route, b.day).map(s => String(s.id));
+            const common = B.filter(id => A.has(id)).length;
+            const ov = common / Math.max(A.size, B.length, 1);
+            if (sa === sb) {
+                if (gap === 14) { if (end && addDays(b.date, 14) <= end) near.push({ a: a.day, b: b.day, da: a.date, db: b.date, why: 'มีครั้งถัดไป ' + short(addDays(b.date, 14)) + ' ก่อน End date — CY แบบ 5 จะวิ่งเกินแผน' }); }
+                else if (gap === 13 || gap === 15) near.push({ a: a.day, b: b.day, da: a.date, db: b.date, why: 'ร้าน+ลำดับเหมือนกัน แต่ห่าง ' + gap + ' วัน (ต้อง 14)' });
+            } else if (gap === 14 && ov >= 0.8) {
+                const diff = (A.size - common) + (B.length - common);
+                near.push({ a: a.day, b: b.day, da: a.date, db: b.date, why: diff ? 'ร้านต่างกัน ' + diff + ' ร้าน' : 'ลำดับคิวไม่ตรงกัน' });
+            }
+        }
+        // V0.9.9: ช่องที่ได้จากการรวมตลาดตามปฏิทินแต่ร้าน/ลำดับไม่เหมือนตลาดหลัก (เช่น D1·รอบ2 มีร้านเพิ่ม) → เตือน
+        const inMerged = new Set(merged.flatMap(g => g.days));
+        daysOf(route).forEach(slot => {
+            const m = metaOf(route, slot);
+            if (!m || !m.fold || inMerged.has(slot) || !storesOf(route, slot).length) return;
+            const d = diffOf(route, m.src, slot);
+            if (!d.same) near.push({ a: m.src, b: slot, da: null, db: metaDate(route, slot), why: d.text, fold: true });
+        });
+        return { merged, near };
+    };
+    /** เทียบร้าน + ลำดับคิวของสองช่อง — { same, order, add:[ร้านที่มีแค่ b], miss:[ร้านที่มีแค่ a], text } */
+    const diffOf = (route, a, b) => {
+        const A = storesOf(route, a), B = storesOf(route, b);
+        const ia = new Set(A.map(s => String(s.id))), ib = new Set(B.map(s => String(s.id)));
+        const add = B.filter(s => !ia.has(String(s.id))), miss = A.filter(s => !ib.has(String(s.id)));
+        const same = !add.length && !miss.length && sigOf(route, a) === sigOf(route, b);
+        const order = !add.length && !miss.length && !same;
+        const nm = (l) => l.slice(0, 4).map(s => s.name || s.id).join(', ') + (l.length > 4 ? ` +${l.length - 4}` : '');
+        const parts = [];
+        if (add.length) parts.push(`มีร้านเพิ่ม ${add.length} ร้าน (${nm(add)})`);
+        if (miss.length) parts.push(`ขาด ${miss.length} ร้าน (${nm(miss)})`);
+        if (order) {
+            const qa = {}; A.forEach(s => { qa[s.id] = (s.seqs || {})[a]; });
+            const moved = B.filter(s => (s.seqs || {})[b] !== qa[s.id]);
+            parts.push(`ลำดับคิวต่าง ${moved.length} ร้าน (${nm(moved)})`);
+        }
+        return { same, order, add, miss, text: parts.join(' · ') };
+    };
+
+    /** ป้ายคู่ CY ของช่องวันนี้ (แคชในรอบวาดจอ) — { merged:[ช่องอื่นใน CY เดียวกัน], near:[{other, why}] } */
+    const pairOfDay = (route, day) => {
+        const mm = M_();
+        let pc = mm.pc.get(route);
+        if (!pc) { try { pc = pairCheck(route); } catch (e) { pc = { merged: [], near: [] }; } mm.pc.set(route, pc); }
+        const g = pc.merged.find(x => x.days.includes(day));
+        return {
+            merged: g ? g.days.filter(d => d !== day) : [],
+            dates: g ? g.dates : [],
+            // V0.9.13: คู่ "รอบ 2 ของตลาดหลัก" (fold) ติดป้ายเฉพาะแถวรอบ 2 — แถวรอบแรกไม่ติด
+            near: pc.near.filter(x => x.b === day || (x.a === day && !x.fold)).map(x => ({ other: x.a === day ? x.b : x.a, why: x.why, fold: !!x.fold })),
+        };
     };
 
     /** ครั้งที่ตกวันหยุด (ต้องแก้ก่อนส่งออก) — [{route, day, k, date}] */
@@ -359,7 +476,7 @@ const Runs = (() => {
     const detach = async (route, day, k, opt) => {
         const p = potential(route, day).find(x => x.k === k);
         if (!p) return UI.showErrorToast('⚠️ ไม่พบครั้งที่ ' + k + ' ของตลาดนี้ในเดือนนี้');
-        if (p.to) return UI.showErrorToast('ℹ️ ครั้งนี้แยกออกไปแล้ว (' + (tagOf(route, p.to) || p.to) + ')');
+        if (p.to) return UI.showErrorToast('ℹ️ ครั้งนี้แยกออกไปแล้ว (' + (tagLong(route, p.to) || p.to) + ')');
         const slot = freeSlot(route, day, k);
         if (!slot) return UI.showErrorToast('⚠️ ช่องวันของสายนี้เต็มแล้ว (ใช้ได้ถึงวันที่ ' + MAX_SLOT + ')');
         const date = (opt && opt.date) || iso(p.date);
@@ -379,7 +496,7 @@ const Runs = (() => {
             s.freq = s.days.length > 1 ? 2 : 1;
         });
         await finish(route, 'แยกครั้งที่ ' + k + ' ' + day.replace('Day ', 'D'));
-        UI.showSaveToast(`✂️ แยก ${day.replace('Day ', 'D')} ครั้งที่ ${k} (${short(parse(date))}) ออกเป็น ${tagOf(route, slot) || slot} แล้ว · ${arr.length} ร้าน — แก้ร้าน/ลำดับ/วันที่ของครั้งนี้ได้อิสระ`);
+        UI.showSaveToast(`✂️ แยก ${day.replace('Day ', 'D')} ครั้งที่ ${k} (${short(parse(date))}) ออกเป็น ${tagLong(route, slot) || slot} แล้ว · ${arr.length} ร้าน — แก้ร้าน/ลำดับ/วันที่ของครั้งนี้ได้อิสระ`);
         return slot;
     };
 
@@ -401,7 +518,7 @@ const Runs = (() => {
         });
         if (silent) return orphan;
         await finish(route, 'รวมกลับ ' + m.src.replace('Day ', 'D'));
-        UI.showSaveToast(`🔗 รวม ${m.src.replace('Day ', 'D')}·ครั้ง${m.run} กลับเข้า ${m.src.replace('Day ', 'D')} ครั้งที่ ${m.run} แล้ว`
+        UI.showSaveToast(`🔗 รวม ${m.src.replace('Day ', 'D')}·รอบ${m.run} กลับเข้า ${m.src.replace('Day ', 'D')} ครั้งที่ ${m.run} แล้ว`
             + (orphan ? ` · ${orphan} ร้านที่อยู่เฉพาะครั้งนั้นกลับไปเป็น "ยังไม่จัดวัน"` : ''));
         return orphan;
     };
@@ -421,7 +538,7 @@ const Runs = (() => {
         const inSlot = storesOf(route, slot);
         const want = new Set((ids || []).map(String));
         const sel = inSlot.filter(s => want.has(String(s.id)));
-        const tag = tagOf(route, slot);
+        const tag = tagLong(route, slot);
         if (!sel.length) return UI.showErrorToast(`⚠️ ติ๊กร้านที่จะเอาออกจาก ${tag} ก่อน`);
         if (sel.length >= inSlot.length) return UI.showErrorToast(`⚠️ เอาออกทุกร้านไม่ได้ — ถ้าครั้งนี้ไม่ต้องวิ่งทั้งตลาด ให้ตั้ง "วิ่งครั้งเดียว" ที่ตลาด ${m.src.replace('Day ', 'D')} แทน`);
         let orphan = 0;
@@ -478,6 +595,17 @@ const Runs = (() => {
         if (!rows.length) return;
         const byId = new Map(listOf(route).map(s => [String(s.id), s]));
         let added = 0;
+        // V0.9.12: ร้านที่ไม่เหมือนอีกครั้งของตลาดนี้ — พื้นเหลือง + ชี้ดูเหตุผล
+        const rdm = roundDiff(route);
+        rows.forEach(row => {
+            const m0 = /dragStart\('([^']+)'\)/.exec(row.getAttribute('ondragstart') || '');
+            const why = m0 && rdm.get(d + '|' + m0[1]);
+            if (why && !row.dataset.rdDone) {
+                row.dataset.rdDone = '1';
+                row.style.background = '#FEF3C7'; row.style.borderColor = '#F59E0B';
+                row.title = '⚠️ ' + why;
+            }
+        });
         rows.forEach(row => {
             const mm = /dragStart\('([^']+)'\)/.exec(row.getAttribute('ondragstart') || '');
             if (!mm || row.querySelector('[data-rm1]')) return;
@@ -494,7 +622,7 @@ const Runs = (() => {
             }
             row.insertAdjacentHTML('beforeend',
                 `<button data-rm1="1" onclick="event.stopPropagation();Runs.removeOne('${esc(route)}','${esc(d)}','${esc(mm[1])}')"
-                    title="เอาร้านนี้ออกจาก${esc(tagOf(route, d))} — ครั้งอื่นของตลาดนี้ไม่โดน"
+                    title="เอาร้านนี้ออกจาก${esc(tagLong(route, d))} — ครั้งอื่นของตลาดนี้ไม่โดน"
                     class="shrink-0 w-7 h-7 rounded-lg bg-red-50 hover:bg-red-100 border border-red-200 text-red-600 font-black text-sm leading-none">➖</button>`);
         });
         if (!m) {
@@ -507,7 +635,7 @@ const Runs = (() => {
         if (!box.querySelector('[data-rm1note]'))
             rows[0].insertAdjacentHTML('beforebegin',
                 `<p data-rm1note="1" class="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1 mb-2">
-                    ${esc(tagOf(route, d))} — กด <b>➖</b> ท้ายแถวเพื่อเอาร้านออกจากครั้งนี้ (ครั้งอื่นไม่โดน)</p>`);
+                    ${esc(tagLong(route, d))} — กด <b>➖</b> ท้ายแถวเพื่อเอาร้านออกจากครั้งนี้ (ครั้งอื่นไม่โดน)</p>`);
     };
     /** จำนวนร้านที่เลือกไว้ในครั้งที่แยกนี้ */
     const selIn = (route, slot) => storesOf(route, slot).filter(s => s.selected).length;
@@ -542,7 +670,15 @@ const Runs = (() => {
         const touched = [];
         Object.keys(State.db.routes || {}).forEach(rt => {
             const slots = new Set();
-            listOf(rt).forEach(s => { if (s.runOf) Object.keys(s.runOf).forEach(k => slots.add(k)); });
+            let keep = false;
+            // V0.9.9: ช่องที่ได้จากการรวมตลาดตามปฏิทิน (fold) เป็นแผนถาวรของสาย ไม่ใช่ของเดือนเก่า
+            //   เก็บไว้ ล้างแค่วันที่ที่ตั้งเอง → เดือนใหม่ใช้ครั้งที่ run ของตลาดหลักตามปฏิทินเดือนนั้น
+            listOf(rt).forEach(s => { if (s.runOf) Object.keys(s.runOf).forEach(k => {
+                const r = s.runOf[k];
+                if (r && r.fold) { if (r.date) { delete r.date; keep = true; } }
+                else slots.add(k);
+            }); });
+            if (keep && !slots.size) { touched.push(rt); n++; }
             listOf(rt).forEach(s => { if (s.fqRun) delete s.fqRun; });
             if (!slots.size) return;
             slots.forEach(k => { orphan += rejoin(rt, k, true) || 0; n++; });
@@ -559,14 +695,14 @@ const Runs = (() => {
     };
 
     const describe = (rows) => rows.map(r => r.vf === '5'
-        ? `<b class="text-indigo-700">1 CY แบบ 5</b> (${esc(dlist(r.dates))})`
-        : `<b class="text-gray-700">1 CY แบบ 9</b> (${esc(short(r.date))}${r.day !== r.base ? ' · ' + esc((tagOf(route, r.day) || r.day)) : ''})`).join(' + ');
+        ? `<b class="text-indigo-700">1 CY แบบ 5</b> (${esc(dlist(r.dates))}${r.pairs && r.pairs.length ? ' · รวม ' + esc([r.day].concat(r.pairs).map(d => d.replace('Day ', 'D')).join('+')) + ' ร้าน+ลำดับเหมือนกัน ห่าง 14 วัน' : ''})`
+        : `<b class="text-gray-700">1 CY แบบ 9</b> (${esc(short(r.date))}${r.day !== r.base ? ' · ' + esc((tagLong(route, r.day) || r.day)) : ''})`).join(' + ');
 
     const open = (route, day) => {
         const m = metaOf(route, day);
         const base = m ? m.src : day;
         const pot = potential(route, base);
-        const rows = planRoute(route).filter(r => r.base === base);
+        const rows = planRoute(route).filter(r => r.base === base || (r.pairs || []).includes(base));
         const once = fqOf(route, base) === 'F1';
         const n = storesOf(route, base).length;
         const mk = (typeof RoadMaster !== 'undefined' && RoadMaster.marketName) ? (RoadMaster.marketName(route, base, listOf(route)) || '') : '';
@@ -577,16 +713,15 @@ const Runs = (() => {
         const onceK = once ? (onceRun(route, base, pot) || {}).k : 0;
 
         const runRow = (x) => {
-            const hol = isHoliday(route, x.to ? parse((metaOf(route, x.to) || {}).date) : x.date);
+            const hol = isHoliday(route, x.to ? metaDate(route, x.to) : x.date);
             if (x.to) {
-                const mm = metaOf(route, x.to) || {};
-                const dd = parse(mm.date);
+                const dd = metaDate(route, x.to);
                 const same = sigOf(route, x.to) === sig0;
                 const nn = storesOf(route, x.to).length;
                 return `<div class="border border-amber-200 bg-amber-50 rounded-xl px-2.5 py-2">
                     <div class="flex items-center gap-2">
                         <span class="text-xs font-black text-amber-800">ครั้งที่ ${x.k}</span>
-                        <span class="text-[11px] text-amber-800">แยกเป็นช่อง ${esc(tagOf(route, x.to) || x.to)} · ${nn} ร้าน</span>
+                        <span class="text-[11px] text-amber-800">แยกเป็นช่อง ${esc(tagLong(route, x.to) || x.to)} · ${nn} ร้าน</span>
                         ${same ? '<span class="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1">ร้าน+ลำดับเหมือนเดิม</span>'
                                : '<span class="text-[10px] font-bold text-amber-700 bg-white border border-amber-300 rounded px-1">ร้าน/ลำดับต่างจากเดิม</span>'}
                     </div>
@@ -663,7 +798,7 @@ const Runs = (() => {
         if (!m) return;
         const only = listOf(route).filter(s => !s.inactive && (s.days || []).length === 1 && s.days[0] === slot).length;
         const same = sigOf(route, slot) === sigOf(route, m.src);
-        const msg = `รวม ${tagOf(route, slot) || slot} กลับเข้า ${m.src.replace('Day ', 'D')} ครั้งที่ ${m.run}?\n\n`
+        const msg = `รวม ${tagLong(route, slot) || slot} กลับเข้า ${m.src.replace('Day ', 'D')} ครั้งที่ ${m.run}?\n\n`
             + (same ? 'ร้านและลำดับเหมือนตลาดเดิมอยู่แล้ว' : 'ร้าน/ลำดับที่แก้ไว้ในครั้งนี้จะหายไป ครั้งนี้กลับไปใช้ร้านและลำดับของตลาดเดิม')
             + (only ? `\n${only} ร้านที่อยู่เฉพาะครั้งนี้จะกลับไปเป็น "ยังไม่จัดวัน"` : '');
         UI.showConfirm(msg, async () => { await rejoin(route, slot); open(route, m.src); }, () => {});
@@ -680,9 +815,71 @@ const Runs = (() => {
     };
 
     /** ป้ายสั้นของช่องวันที่แยกมา เช่น "D3·ครั้ง2" */
+    // V0.9.12: ช่องที่เป็นรอบ/ครั้งอื่นของตลาดหลัก เรียกชื่อตลาดหลักตรง ๆ ("D1") — ไม่มี D13–D24 ให้เห็น · แยกกันด้วยวันที่
     const tagOf = (route, day) => {
         const m = metaOf(route, day);
-        return m ? m.src.replace('Day ', 'D') + '·ครั้ง' + m.run : '';
+        return m ? m.src.replace('Day ', 'D') : '';
+    };
+    /** ชื่อเต็มสำหรับข้อความอธิบาย เช่น "D1 ครั้งที่ 2 (16 พ.ย.)" */
+    const tagLong = (route, day) => {
+        const m = metaOf(route, day);
+        if (!m) return '';
+        const d = metaDate(route, day);
+        return m.src.replace('Day ', 'D') + ' ครั้งที่ ' + m.run + (d ? ' (' + short(d) + ')' : '');
+    };
+    /**
+     * V0.9.13: รายการ "ครั้งเข้าเยี่ยม" ของสาย = 1 แถวต่อ 1 วันที่ (ไม่ใช่ต่อช่อง) เรียงตามปฏิทิน
+     *   { key:'Day 1|2', slot:'Day 1', k:2, date, base:'Day 1', label:'D1', fold:bool }
+     *   ช่องที่วิ่ง 2 รอบ (รอบ 12 วัน) ได้ 2 แถว · ช่องที่เป็นครั้งอื่นของตลาดหลัก (แยก/รวมตามปฏิทิน) ได้ 1 แถวในชื่อตลาดหลัก
+     */
+    const visitRows = (route) => {
+        const mm = M_();
+        if (!mm.vr) mm.vr = new Map();
+        if (mm.vr.has(route)) return mm.vr.get(route).slice();
+        const out = [];
+        daysOf(route).forEach(slot => {
+            if (!storesOf(route, slot).length) return;
+            const m = metaOf(route, slot);
+            if (m) {
+                out.push({ key: slot + '|' + m.run, slot, k: m.run, date: metaDate(route, slot), base: m.src, label: m.src.replace('Day ', 'D'), fold: true });
+                return;
+            }
+            const pot = potential(route, slot);
+            if (!pot.length) { out.push({ key: slot + '|1', slot, k: 1, date: null, base: slot, label: 'D' + dayNum(slot), fold: false }); return; }
+            const once = fqOf(route, slot) === 'F1';
+            const pick = once ? [onceRun(route, slot, pot)].filter(Boolean) : pot;
+            pick.forEach(p => { if (!p.to) out.push({ key: slot + '|' + p.k, slot, k: p.k, date: p.date, base: slot, label: 'D' + dayNum(slot), fold: false }); });
+        });
+        out.sort((a, b) => ((a.date ? a.date.getTime() : Infinity) - (b.date ? b.date.getTime() : Infinity)) || (dayNum(a.slot) - dayNum(b.slot)) || (a.k - b.k));
+        mm.vr.set(route, out);
+        return out.slice();
+    };
+    /** แถวครั้งเข้าเยี่ยมของช่องหนึ่ง */
+    const rowsOfSlot = (route, slot) => visitRows(route).filter(r => r.slot === slot);
+
+    /** V0.9.12: ร้านที่ไม่เหมือนอีกครั้งของตลาดเดียวกัน — Map("ช่อง|id" → ข้อความ) ใช้ทาพื้นหลังรายชื่อร้าน */
+    const roundDiff = (route) => {
+        const mm = M_();
+        if (!mm.rd) mm.rd = new Map();
+        if (mm.rd.has(route)) return mm.rd.get(route);
+        const out = new Map();
+        const dl = (d) => { const x = isDetached(route, d) ? metaDate(route, d) : (datesOf(route, d)[0] || null); return x ? shortW(x) : d.replace('Day ', 'D'); };
+        daysOf(route).forEach(slot => {
+            const m = metaOf(route, slot);
+            if (!m || !storesOf(route, slot).length || !storesOf(route, m.src).length) return;
+            const df = diffOf(route, m.src, slot);
+            if (df.same) return;
+            const qa = {}; storesOf(route, m.src).forEach(s => { qa[s.id] = (s.seqs || {})[m.src]; });
+            df.add.forEach(s => out.set(slot + '|' + s.id, `มีเฉพาะ ${dl(slot)} — ไม่มีใน ${dl(m.src)}`));
+            df.miss.forEach(s => out.set(m.src + '|' + s.id, `มีเฉพาะ ${dl(m.src)} — ไม่มีใน ${dl(slot)}`));
+            storesOf(route, slot).forEach(s => {
+                if (out.has(slot + '|' + s.id) || !(s.id in qa)) return;
+                const q = (s.seqs || {})[slot];
+                if (q !== qa[s.id]) out.set(slot + '|' + s.id, `ลำดับต่างจาก ${dl(m.src)} (ลำดับ ${qa[s.id] || '-'} → ${q || '-'})`);
+            });
+        });
+        mm.rd.set(route, out);
+        return out;
     };
 
     // ── ต่อเข้ากับส่วนอื่น ──────────────────────────────────────────────
@@ -719,7 +916,7 @@ const Runs = (() => {
         // คำนวณ
         removeSel, selIn, removeChecked, removeOne, removeDayOnly, _rmToggle(slot, o) { rmOpen = o ? slot : (rmOpen === slot ? '' : rmOpen); },
         cycleOf, isShort, isHoliday, workEnd, endDate, calDates, potential, datesOf, fqOf, sigOf,
-        metaOf, isDetached, detachedOf, daysOf, planRoute, holidayHits, clashes, tagOf, onceRun,
+        metaOf, metaDate, hasCal, diffOf, tagLong, roundDiff, visitRows, rowsOfSlot, isDetached, detachedOf, daysOf, planRoute, pairCheck, pairOfDay, holidayHits, clashes, tagOf, onceRun,
         version: () => ver, bump,
         // แก้ไข
         detach, rejoin, setDate, setOnce, setFq, resetAll,

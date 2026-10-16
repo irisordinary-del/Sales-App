@@ -9,7 +9,7 @@
  *       RPN V0 แล้วปลดในวันเดียวกัน
  *
  *  โหลดหลัง Firebase SDK และก่อนสคริปต์อื่นทุกตัว — ใช้ทั้ง index.html (หน้า admin) และ
- *  rpn/RoutePlannerV0.html (tools/sync-rpn.mjs ใส่ให้) · หน้าเซล (sales.html) ไม่โหลดไฟล์นี้
+ *  rpn/RoutePlanner.html (tools/sync-rpn.mjs ใส่ให้) · หน้าเซล (sales.html) ไม่โหลดไฟล์นี้
  *  ดักที่ Firestore SDK ตรง ๆ: set / update / delete ของเอกสารใต้ appData/{ศูนย์}/plans/{เดือนที่ล็อก}
  *  (รวม routes/ ข้างใน) ทั้งแบบเอกสารเดี่ยวและใน batch → ไม่เขียน และขึ้นข้อความบอก
  *  ⚠️ เป็นด่านฝั่งหน้าเว็บ (เหมือนระบบล็อกอินของแอปนี้) — firestore.rules ไม่ได้บังคับ

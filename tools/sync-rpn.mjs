@@ -1,17 +1,19 @@
 #!/usr/bin/env node
 /* =============================================================================
- *  tools/sync-rpn.mjs — ดึง RPN V0 (โปรแกรมวางแผนของบริษัท) เข้ามาไว้ที่ rpn/ แบบออนไลน์
+ *  tools/sync-rpn.mjs — ดึง RPN (โปรแกรมวางแผนของบริษัท, V0/V1…) เข้ามาไว้ที่ rpn/ แบบออนไลน์
  * =============================================================================
  *  RPN V0 เป็นโปรแกรมวางแผนที่บริษัทพัฒนาต่อจากหน้า admin เดิมของเรา รันในเครื่อง (IndexedDB)
  *  แต่ยังเรียก Firestore API และ path เดียวกับระบบเรา (appData/{ศูนย์}_main/plans/...)
- *  สคริปต์นี้คัดลอกไฟล์ของ RPN V0 มาไว้ใน rpn/ แล้วแก้เฉพาะ RoutePlannerV0.html ให้
+ *  สคริปต์นี้คัดลอกไฟล์ของ RPN มาไว้ใน rpn/ แล้วแก้เฉพาะหน้าหลัก (RoutePlannerV{N}.html ของต้นฉบับ
+ *  ซึ่งถูกเขียนเป็นชื่อคงที่ rpn/RoutePlanner.html เสมอ — ส่วนกลางเปลี่ยนชื่อตามเลข MAJOR เช่น V0 → V1
+ *  เมื่อ 2026-10-16 แต่ iframe ใน index.html ชี้ชื่อเดียวตลอด) ให้
  *    • ใช้ Firebase จริงแทน local-firebase.js
  *    • ใช้ระบบล็อกอินของเรา (../auth.js) แทน auth-local.js
  *    • ตัดไฟล์ที่ใช้ได้เฉพาะโหมด local (Save/Restore/ล้างข้อมูลในเครื่อง, สลับศูนย์ในเครื่อง)
  *    • โหลด rpn-online-pre.js / rpn-online.js ซึ่งเป็นตัวต่อเข้ากับระบบออนไลน์ (เราเขียนเอง)
  *  ไฟล์ .js อื่นของ RPN V0 ไม่แตะเลย — เวอร์ชันใหม่ของบริษัทจึงวางทับได้ด้วยการรันสคริปต์นี้ซ้ำ
  *
- *  วิธีใช้:  node tools/sync-rpn.mjs "<โฟลเดอร์ RPN V0>"
+ *  วิธีใช้:  node tools/sync-rpn.mjs "<โฟลเดอร์ RPN เช่น RPN V1 Launch>"
  *  ถ้าจุดที่ต้องแก้ใน HTML หาไม่เจอ (บริษัทเปลี่ยนโครงไฟล์) สคริปต์จะหยุดและบอกว่าจุดไหน
  * ========================================================================== */
 import fs from 'node:fs';
@@ -19,10 +21,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const SRC = process.argv[2];
-if (!SRC || !fs.existsSync(path.join(SRC, 'RoutePlannerV0.html'))) {
-    console.error('ใช้: node tools/sync-rpn.mjs "<โฟลเดอร์ RPN V0 ที่มี RoutePlannerV0.html>"');
+const MAIN = SRC && fs.existsSync(SRC) ? fs.readdirSync(SRC).filter(f => /^RoutePlannerV\d+\.html$/i.test(f)) : [];
+if (MAIN.length !== 1) {
+    console.error('ใช้: node tools/sync-rpn.mjs "<โฟลเดอร์ RPN ที่มี RoutePlannerV{N}.html ไฟล์เดียว>"' +
+                  (MAIN.length > 1 ? `\n   เจอหลายไฟล์: ${MAIN.join(', ')}` : ''));
     process.exit(1);
 }
+const MAIN_OUT = 'RoutePlanner.html';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DST = path.join(ROOT, 'rpn');
 
@@ -55,15 +60,15 @@ for (const f of fs.readdirSync(SRC)) {
     }
     if (SKIP.has(f) || OURS.has(f)) continue;
     if (!/\.(js|css|html|bin|md)$/i.test(f) && f !== 'VERSION') continue;
-    fs.copyFileSync(p, path.join(DST, f));
+    fs.copyFileSync(p, path.join(DST, f === MAIN[0] ? MAIN_OUT : f));
     copied.push(f);
 }
 
-// ── 2) แก้ RoutePlannerV0.html ──────────────────────────────────────────────
-const htmlPath = path.join(DST, 'RoutePlannerV0.html');
+// ── 2) แก้หน้าหลัก (rpn/RoutePlanner.html) ──────────────────────────────────
+const htmlPath = path.join(DST, MAIN_OUT);
 let html = fs.readFileSync(htmlPath, 'utf8');
 const must = (re, to, what) => {
-    if (!re.test(html)) { console.error(`❌ หาจุดแก้ไม่เจอ: ${what}\n   (RPN V0 เปลี่ยนโครง RoutePlannerV0.html — ต้องแก้ tools/sync-rpn.mjs)`); process.exit(2); }
+    if (!re.test(html)) { console.error(`❌ หาจุดแก้ไม่เจอ: ${what}\n   (RPN เปลี่ยนโครง ${MAIN[0]} — ต้องแก้ tools/sync-rpn.mjs)`); process.exit(2); }
     html = html.replace(re, to);
 };
 const FIREBASE = '<script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>\n' +
