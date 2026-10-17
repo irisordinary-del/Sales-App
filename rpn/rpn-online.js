@@ -249,6 +249,25 @@
         }
         return v;
     };
+    // ✅ NEW (2026-10-17, ผู้ใช้ขอ): ร้านที่จัดลงวันแล้วแต่ยังไม่มีชื่อตลาด (ร้านเปิดใหม่จากกองรอจัดสาย / ซิงก์ Master)
+    // → ใช้ชื่อตลาดของวันนั้น (ชื่อที่ร้านอื่นในวันเดียวกันของสายนี้ใช้มากที่สุด) ทำทุกครั้งที่บันทึกเอกสารสาย
+    // ไม่แตะร้านที่มีชื่อตลาดอยู่แล้ว · วันที่ยังไม่มีร้านไหนมีชื่อ = ปล่อยว่างไว้
+    const fillMarket = (stores) => {
+        const tally = {};
+        stores.forEach(s => {
+            if (!s || s.inactive || !s.marketName) return;
+            (s.days || []).forEach(d => { const t = tally[d] || (tally[d] = {}); t[s.marketName] = (t[s.marketName] || 0) + 1; });
+        });
+        const top = (d) => { const t = tally[d]; return t ? Object.entries(t).sort((a, b) => b[1] - a[1])[0][0] : ''; };
+        let n = 0;
+        stores.forEach(s => {
+            if (!s || s.inactive || s.marketName || !(s.days || []).length) return;
+            const name = s.days.map(top).find(Boolean);
+            if (name) { s.marketName = name; n++; }
+        });
+        return n;
+    };
+
     // ✅ FIX (2026-10-16): Geo Tree (geo-tree.js) เก็บ cust[รหัสร้าน] = [[Node, วันเริ่ม, วันจบ], ...] = array ซ้อน array
     // local-firebase.js ยอม แต่ Firestore จริงไม่รองรับ (และเดิม firestore.rules ไม่มีกฎของ meta/ เลย) → นำเข้า Geo Tree
     // ออนไลน์ไม่สำเร็จ ส่งออก DMS ถูกบล็อกเมื่อมีร้านอยู่สายที่ไม่ตรง Salesman Code
@@ -294,6 +313,10 @@
             DocProto[n] = function (data, opts) {
                 if (n !== 'delete') { const why = aliasGuard(this, data); if (why) return Promise.reject(new Error(why)); }
                 if (n === 'set' && GEO_RE.test(this.path || '')) data = geoEncode(data);
+                if (n === 'set' && data && Array.isArray(data.stores)) {
+                    const rm = ROUTE_RE.exec(this.path || '');
+                    if (rm && rm[3] !== UNASSIGNED) { try { fillMarket(data.stores); } catch (e) { console.warn('[fillMarket]', e); } }
+                }
                 mark();
                 // ตัด undefined ทุกคำสั่งเขียนใต้ appData/ (เดิมเฉพาะ stores ของเอกสารสาย) — เอกสารแผน/ศูนย์ก็โดนปฏิเสธทั้งคำสั่งได้เหมือนกัน
                 if (n !== 'delete' && data && typeof data === 'object' && /^appData\//.test(this.path || '')) stripUndef(data);
