@@ -213,11 +213,14 @@
             const tally = {};
             act.forEach(s => { const c = s.salesCode || s.route; if (c) tally[c] = (tally[c] || 0) + 1; });
             const owner = (Object.entries(tally).sort((a, b) => b[1] - a[1])[0] || [])[0];
-            if (!owner || owner === m[3]) return '';
+            if (owner === m[3]) return '';
+            // ✅ FIX (2026-11-15): เดิมเทียบเฉพาะสายเจ้าของ (owner) — หลุดกรณีชุดร้านมาจาก "รอจัดสาย" ที่ salesCode ปนกันหลายสาย
+            // (406V05 พ.ย. ถูกทับด้วยกองรอจัดสาย 11 ร้าน · owner คำนวณได้ 406V04 จึงไม่เคยเทียบกับกองรอจัดสาย)
+            // → เทียบกับทุกสายอื่นในหน่วยความจำ รวมรอจัดสาย
             for (const [rt, list] of Object.entries(State.db.routes)) {
-                if (rt !== owner || !Array.isArray(list)) continue;
+                if (rt === m[3] || !Array.isArray(list)) continue;
                 const other = list.filter(s => s && !s.inactive).map(s => String(s.id));
-                if (!other.length) continue;
+                if (other.length < 5) continue;
                 const both = other.filter(id => ids.has(id)).length;
                 if (both >= 0.9 * ids.size && both >= 0.9 * other.length) {
                     console.error(`[rpn-online] กันบันทึก: ร้านที่จะเขียนลง ${m[3]} เป็นชุดเดียวกับสาย ${rt} (${both} ร้าน)`);
