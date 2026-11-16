@@ -251,4 +251,4 @@ const AI = {
         }
     }
 };
-
+;(window.__RPV=window.__RPV||{})['admin-ai.js']='1.0.4';

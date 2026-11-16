@@ -71,12 +71,10 @@
             if (!f || f.s.inactive) return;
             const { rt, s } = f;
             const days = [...(s.days || [])];
-            s.wasPlan = {
-                days, seqs: { ...(s.seqs || {}) },
-                fqs: s.fqs ? { ...s.fqs } : undefined,
-                runOf: s.runOf ? JSON.parse(JSON.stringify(s.runOf)) : undefined,
-                freq: s.freq, at: now,
-            };
+            // V1.0.3 (HQ ชุด 2 ข้อ ด2): ไม่ใส่ช่องที่ไม่มีค่า (undefined) — Firestore ออนไลน์ปฏิเสธทั้งคำสั่ง
+            s.wasPlan = { days, seqs: { ...(s.seqs || {}) }, freq: s.freq == null ? 1 : s.freq, at: now };
+            if (s.fqs) s.wasPlan.fqs = { ...s.fqs };
+            if (s.runOf) s.wasPlan.runOf = JSON.parse(JSON.stringify(s.runOf));
             if (days.length) { if (!reflow.has(rt)) reflow.set(rt, new Set()); days.forEach(d => reflow.get(rt).add(d)); }
             s.days = []; s.seqs = {}; s.cys = {}; s.cy = '';
             delete s.fqs; delete s.runOf;
@@ -281,3 +279,4 @@
     };
     document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 1200));
 })();
+;(window.__RPV=window.__RPV||{})['removed.js']='1.0.4';

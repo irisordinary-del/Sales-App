@@ -21,9 +21,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const SRC = process.argv[2];
-const MAIN = SRC && fs.existsSync(SRC) ? fs.readdirSync(SRC).filter(f => /^RoutePlannerV\d+\.html$/i.test(f)) : [];
+const MAIN = SRC && fs.existsSync(SRC) ? fs.readdirSync(SRC).filter(f => /^RoutePlanner(V\d+| [^./\\]+)\.html$/i.test(f)) : [];
+// V1.0.4 (2026-11-16): แพ็กเกจรายศูนย์ใช้ชื่อ "RoutePlanner <ศูนย์>.html" เช่น "RoutePlanner 402.html"
 if (MAIN.length !== 1) {
-    console.error('ใช้: node tools/sync-rpn.mjs "<โฟลเดอร์ RPN ที่มี RoutePlannerV{N}.html ไฟล์เดียว>"' +
+    console.error('ใช้: node tools/sync-rpn.mjs "<โฟลเดอร์ RPN ที่มี RoutePlannerV{N}.html หรือ RoutePlanner <ศูนย์>.html ไฟล์เดียว>"' +
                   (MAIN.length > 1 ? `\n   เจอหลายไฟล์: ${MAIN.join(', ')}` : ''));
     process.exit(1);
 }
@@ -39,10 +40,15 @@ const SKIP = new Set([
     'center.js',             // สลับศูนย์ในเครื่อง → ศูนย์มาจาก ?center= ของระบบเรา
     'road-matrix.js',        // สำเนาของ road-matrix.bin ไว้ใช้ตอนเปิดแบบ file:// เท่านั้น
     'Basemap-Preview.html', 'Reset-RoutePlanner.html', 'Start-RoutePlanner.bat',
+    // V1.0.4: แพ็กเกจรายศูนย์ — window.RPN_PKG = '<ศูนย์>' (เปิดเป็นศูนย์นั้นเมื่อไม่มี ?center= + ชื่อแท็บ "Route Planner <ศูนย์>")
+    // ออนไลน์ศูนย์มาจาก ?center= เสมอ และหน้านี้ใช้ทุกศูนย์ → ไม่ใช้ (ตัดแท็กออกจากหน้าหลักด้วย)
+    'package.js',
 ]);
 // ไฟล์ของเราเองที่อยู่ใน rpn/ — ห้ามลบ/ทับ
 const OURS = new Set(['rpn-online-pre.js', 'rpn-online.js', 'SYNC.md']);
-const COPY_DIRS = ['vendor'];
+// road-matrix/ (V1.0.3+): ตารางระยะถนนรายศูนย์ road-matrix/<ศูนย์>.js — road-dist.js โหลดของศูนย์ที่เปิดอยู่เอง
+// (แพ็กเกจรายศูนย์มีแค่ไฟล์ของศูนย์นั้น · ชุด HQ มีครบทุกศูนย์ · ศูนย์ที่ไม่มีไฟล์ = ระยะเส้นตรง × ตัวคูณ)
+const COPY_DIRS = ['vendor', 'road-matrix'];
 
 // ── 1) ล้างของเดิม (ยกเว้นไฟล์ของเรา) แล้วคัดลอกใหม่ ─────────────────────────
 fs.mkdirSync(DST, { recursive: true });
@@ -79,6 +85,7 @@ must(/<script src="auth-local\.js[^"]*"><\/script>/,
      '<script src="../auth.js"></script>\n    <script src="rpn-online-pre.js"></script>', 'auth-local.js');
 must(/\s*<script src="local-extras\.js[^"]*"><\/script>/, '', 'local-extras.js');
 must(/\s*<script src="center\.js[^"]*"><\/script>/, '', 'center.js');
+html = html.replace(/\s*<script src="package\.js[^"]*"><\/script>/, '');   // มีเฉพาะแพ็กเกจรายศูนย์ (V1.0.4+) ไม่มีก็ไม่เป็นไร
 must(/<\/body>/, '    <script src="rpn-online.js"></script>\n</body>', '</body>');
 fs.writeFileSync(htmlPath, html);
 

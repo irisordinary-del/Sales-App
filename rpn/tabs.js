@@ -19,6 +19,8 @@
         all:      { panes: ['wait', 'assigned'], label: 'ทั้งหมด',  ph: '🔍 ค้นหาร้านทั้งหมด...' },
         assigned: { panes: ['assigned'],         label: 'จัดแล้ว',  ph: '🔍 ค้นหาร้านที่จัดวันแล้ว...' },
         wait:     { panes: ['wait'],             label: 'รอจัดวัน', ph: '🔍 ค้นหาร้านที่ยังไม่จัดวัน...' },
+        // V1.0.3: ร้านใหม่ = อยู่ในแผนเดือนนี้แต่ไม่อยู่แผนเดือนฐาน (นิยามเดียวกับหน้าภาพรวม) — นับรวมใน "จัดแล้ว" ด้วย
+        nw:       { panes: ['assigned'],         label: '🆕 ร้านใหม่', ph: '🔍 ค้นหาร้านใหม่...' },
     };
     let cur = 'all';
 
@@ -44,7 +46,8 @@
             if (typeof Freq !== 'undefined' && Freq.visitsOf) { visits += Freq.visitsOf(s); return; }
             visits += (s.days || []).length;
         });
-        return { all: act.length, wait, assigned: act.length - wait, visits, cover: act.length - wait };
+        const nw = (typeof NewStores !== 'undefined') ? NewStores.countIn(act) : 0;
+        return { all: act.length, wait, assigned: act.length - wait, visits, cover: act.length - wait, nw };
     };
 
     const paintChips = () => {
@@ -214,6 +217,57 @@
         if (s) { s.placeholder = PANES[k].ph; if (s.value) search(s.value); }
         paintChips();
         addMoveButtons();
+        markNew(k === 'nw');
+    };
+    /** V1.0.3: ป้าย 🆕 + ขอบเขียวที่การ์ดร้านใหม่ · ชิป "ร้านใหม่" = ซ่อนการ์ดอื่น (กลุ่มที่ไม่มีร้านใหม่ซ่อนด้วย) */
+    const markNew = (only) => {
+        const box = $('list-assigned');
+        if (!box || typeof NewStores === 'undefined') return;
+        const R = (State.db && State.db.routes) || {};
+        const byId = new Map();
+        Object.keys(R).forEach(rt => (R[rt] || []).forEach(x => { if (x && !x.inactive && (x.days || []).length) byId.set(String(x.id), x); }));
+        const cards = [...box.querySelectorAll('div[id^="card-"], label')].filter(c => /ID:/.test(c.textContent));
+        cards.forEach(c => {
+            const m = c.textContent.match(/ID:\s*([A-Za-z0-9_.\-]+)/);
+            const st = m && byId.get(m[1]);
+            const nw = !!(st && NewStores.isNew(st));
+            c.style.borderLeft = nw ? '4px solid #10b981' : '';
+            let tag = c.querySelector(':scope .nw-tag');
+            if (nw && !tag) {
+                const p = c.querySelector('p');
+                if (p) p.insertAdjacentHTML('beforeend', ' <span class="nw-tag" title="ไม่อยู่ในแผนเดือนฐาน (ร้านใหม่เข้าแผน)" style="background:#10b981;color:#fff;border-radius:6px;padding:0 5px;font-size:10px;font-weight:800">🆕 ใหม่</span>');
+            } else if (!nw && tag) tag.remove();
+            if (only) { if (!nw) { c.style.display = 'none'; c.dataset.nwHide = '1'; } }
+            else if (c.dataset.nwHide) { c.style.display = ''; delete c.dataset.nwHide; }
+        });
+        // V1.0.4: ป้าย 🔄 Re-Active (ร้านเก่าที่เปิดบัญชีเกิน 60 วัน กลับมา Active นอกแผน) — ทั้งร้านจัดแล้วและกองรอจัดสาย
+        const byAll = new Map();
+        Object.keys(R).forEach(rt => (R[rt] || []).forEach(x => { if (x && !x.inactive && !byAll.has(String(x.id))) byAll.set(String(x.id), x); }));
+        ['list-assigned', 'list-unassigned'].forEach(lid => {
+            const bx = $(lid);
+            if (!bx || !NewStores.isReAct) return;
+            [...bx.querySelectorAll('div[id^="card-"], label')].filter(c => /ID:/.test(c.textContent)).forEach(c => {
+                const m = c.textContent.match(/ID:\s*([A-Za-z0-9_.\-]+)/);
+                const st = m && byAll.get(m[1]);
+                const ra = !!(st && NewStores.isReAct(st));
+                const tag = c.querySelector(':scope .ra-tag');
+                if (ra && !tag) {
+                    const p = c.querySelector('p');
+                    if (p) p.insertAdjacentHTML('beforeend', ` <span class="ra-tag" title="Re-Active: ร้านเก่า (เปิดบัญชีเกิน ${NewStores.REACT_DAYS} วัน) ที่กลับมา Active นอก Route Plan" style="background:#ffedd5;color:#9a3412;border:1px solid #fdba74;border-radius:6px;padding:0 5px;font-size:10px;font-weight:800">🔄 Re-Active</span>`);
+                } else if (!ra && tag) tag.remove();
+            });
+        });
+        const groups = [...box.querySelectorAll('details')].reverse();
+        groups.forEach(g => {
+            if (only) {
+                const any = [...g.querySelectorAll('div[id^="card-"], label')].some(c => /ID:/.test(c.textContent) && c.style.display !== 'none');
+                if (!any) { g.style.display = 'none'; g.dataset.nwHide = '1'; }
+                else { if (g.dataset.nwOpen === undefined) g.dataset.nwOpen = g.open ? '1' : '0'; g.open = true; }
+            } else {
+                if (g.dataset.nwHide) { g.style.display = ''; delete g.dataset.nwHide; }
+                if (g.dataset.nwOpen !== undefined) { g.open = g.dataset.nwOpen === '1'; delete g.dataset.nwOpen; }
+            }
+        });
     };
 
     // ── ข้อความ "รายการถูกจำกัด" ─────────────────────────────────────
@@ -496,3 +550,4 @@
         setTimeout(() => clearInterval(t), 15000);
     });
 })();
+;(window.__RPV=window.__RPV||{})['tabs.js']='1.0.4';

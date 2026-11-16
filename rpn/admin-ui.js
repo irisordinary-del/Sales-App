@@ -325,7 +325,15 @@ const UI = {
         const cur = el.value;
         const rt = el.dataset.rt || State.localActiveRoute;
         const lb = (d) => (typeof DayDate !== 'undefined' && DayDate.opt) ? DayDate.opt(rt, d) : DAY_COLORS[d].name;   // V0.9.8
-        el.innerHTML = Object.keys(DAY_COLORS)
+        // V1.0.3: เฉพาะตลาดในรอบของปฏิทินสายนี้ที่มีวันวิ่งเดือนนี้ (เดิมขึ้น D1–D30 ทุกช่อง รวมวันที่ไม่มีวิ่ง)
+        let keys = Object.keys(DAY_COLORS);
+        try {
+            if (typeof Runs !== 'undefined' && Runs.cycleOf && Runs.potential) {
+                const k = Runs.cycleOf(rt);
+                keys = keys.filter(d => d === cur || ((parseInt(d.replace(/\D/g, ''), 10) || 0) <= k && Runs.potential(rt, d).length > 0));
+            }
+        } catch (e) {}
+        el.innerHTML = keys
             .map(d => `<option value="${d}" ${d === cur ? 'selected' : ''}>${lb(d)}</option>`).join('');
         el.value = cur;
         el.dataset.full = '1';
@@ -517,7 +525,7 @@ const UI = {
                 const c = DAY_COLORS[d].hex;
                 const act = State.activeRoadDay === d;
                 sumH.push(`
-                    <div onclick="UI.showDayModal('${d}')" class="p-4 bg-white border ${act ? 'border-indigo-500 ring-2 ring-indigo-200' : 'border-gray-200'} rounded-2xl flex flex-col items-center cursor-pointer relative shadow-sm hover:shadow-md transition">
+                    <div onclick="(typeof MultiRoute!=='undefined'&&MultiRoute.viewDay)?MultiRoute.openDay(State.localActiveRoute,'${d}'):UI.showDayModal('${d}')" class="p-4 bg-white border ${act ? 'border-indigo-500 ring-2 ring-indigo-200' : 'border-gray-200'} rounded-2xl flex flex-col items-center cursor-pointer relative shadow-sm hover:shadow-md transition">
                         <div class="absolute top-0 left-0 w-full h-1.5 rounded-t-2xl" style="background:${c}"></div>
                         <p class="text-xs font-bold mt-1 text-gray-500">${DAY_COLORS[d].name}</p>
                         <p class="text-3xl font-black mt-1" style="color:${c}">${sums[d]}</p>
@@ -723,4 +731,4 @@ const ExportCtrl = {
         if (typeof ExcelRT !== 'undefined') ExcelRT.export(v);
     },
 };
-
+;(window.__RPV=window.__RPV||{})['admin-ui.js']='1.0.4';

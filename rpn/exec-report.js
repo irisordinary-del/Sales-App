@@ -1,9 +1,11 @@
 /* =============================================================================
  *  exec-report.js — Export รายงาน Executive (V0.9.0 · ปรับ V0.9.10)
  * =============================================================================
- *  ปุ่ม 📊 ที่หน้าภาพรวมแผน → ไฟล์ Excel 11 ชีท ตามสายที่เลือกดูอยู่
- *    Executive Summary · Route Summary · Daily Calendar · ตลาด · Movement · รอจัดสาย
+ *  ปุ่ม 📊 ที่หน้าภาพรวมแผน → ไฟล์ Excel 12 ชีท ตามสายที่เลือกดูอยู่
+ *    Executive Summary · Route Summary · Daily Calendar · ตลาด · Movement · Re-Active · รอจัดสาย
  *    Issues · Raw Data · Prev Plan · Parameters · Definitions
+ *  V1.0.4 (12 พ.ย. 2569): แยก Re-Active (ร้านใหม่ที่เปิดบัญชีเกิน 60 วัน = ร้านเก่ากลับมา Active) ออกจากร้านใหม่
+ *    + ชีท Re-Active · สีแท็บ Executive Summary / Route Summary / Daily Calendar / Raw Data
  *  ตัวเลขทุกช่องในหน้าสรุปเป็นสูตรที่ดึงจากชีทข้อมูล (Raw Data / Prev Plan / ...) — Excel คำนวณตอนเปิดไฟล์
  *  เทียบกับ "แผนเดือนก่อนที่อยู่ในโปรแกรม" (ตัวเดียวกับตาราง Details by Route) — ไม่มีเดือนก่อน = ส่วนเทียบว่าง
  *  ใช้ ExcelJS (vendor/exceljs.min.js) โหลดเมื่อกดครั้งแรก — SheetJS รุ่นฟรีใส่สี/แถบสี/ตั้งหน้ากระดาษไม่ได้
@@ -68,6 +70,9 @@
         }));
 
         // Raw rows: ร้าน × ครั้งเข้าเยี่ยม (เหมือนปฏิทินหน้าภาพรวม)
+        // V1.0.4: ไม่อยู่แผนเดือนก่อน + เปิดบัญชีเกิน 60 วัน = Re-Active (เกณฑ์เดียวกับหน้าภาพรวม — NewStores.oldOpen)
+        const oldOpen = (s) => !!(typeof NewStores !== 'undefined' && NewStores.oldOpen && NewStores.oldOpen(s));
+        const RA_LBL = 'Re-Active (ไม่อยู่แผนเดือนก่อน · เปิดบัญชีเกิน 60 วัน)';
         const rows = [];
         rts.forEach(rt => {
             const list = (R[rt] || []).filter(s => !s.inactive && (s.days || []).length);
@@ -91,7 +96,7 @@
                     (datesOf[d] || []).forEach(dt => rows.push({
                         date: dt, rt, d: bd, slot: d, day: dayNum(bd), market: s.marketName || mk[d] || '',
                         seq: (s.seqs && s.seqs[d]) || '', cy: (s.cys && s.cys[d]) || s.cy || '', times: s.days.length,
-                        c, s, base: base ? (base.route[c] ? (base.route[c] === rt ? 'สายเดิม' : 'ย้ายจาก ' + base.route[c]) : 'ร้านใหม่ (ไม่อยู่แผนเดือนก่อน)') : 'ไม่มีแผนเดือนก่อนให้เทียบ',
+                        c, s, base: base ? (base.route[c] ? (base.route[c] === rt ? 'สายเดิม' : 'ย้ายจาก ' + base.route[c]) : (oldOpen(s) ? RA_LBL : 'ร้านใหม่ (ไม่อยู่แผนเดือนก่อน)')) : 'ไม่มีแผนเดือนก่อนให้เทียบ',
                     }));
                 });
             });
@@ -123,6 +128,14 @@
         // รอจัดสาย
         const waiting = (R[UNASSIGNED] || []).filter(s => !s.inactive)
             .slice().sort((a, b) => String(b.openDate || '').localeCompare(String(a.openDate || '')));
+
+        // V1.0.4: ชีท Re-Active — ร้านที่จัดเข้าสายแล้ว (สายที่เลือก) + ร้านในกองรอจัดสาย
+        const reAct = [];
+        {
+            const seen = new Set();
+            rows.forEach(r => { if (r.base === RA_LBL && !seen.has(r.c)) { seen.add(r.c); reAct.push({ s: r.s, rt: r.rt, st: 'จัดเข้าสายแล้ว' }); } });
+            waiting.filter(oldOpen).forEach(s => reAct.push({ s, rt: '', st: 'ยังอยู่กองรอจัดสาย' }));
+        }
 
         // ศูนย์ / Master / ร้านที่ไม่ได้นำเข้า
         let center = {}, planDoc = {}, baseDoc = {};
@@ -160,7 +173,7 @@
             rts.forEach(rt => { const r = (DD && DD.rows[rt]) || {}; dist[rt] = {}; Object.keys(r).forEach(d => { dist[rt][d] = OV._distOf(rt, r[d].days); }); });
         } catch (e) { console.warn('[ExecReport] dist', e); }
 
-        return { p, last, rts, rows, markets, prev, waiting, iss, base, baseYM, mActive: mActivePVC, mActiveAll: mActive, mBy, dist, center,
+        return { p, last, rts, rows, markets, prev, waiting, reAct, iss, base, baseYM, mActive: mActivePVC, mActiveAll: mActive, mBy, dist, center,
                  hol: OV._holidayInfo(), ymLabel: OV._ymLabel(App._currentPlanYM), baseLabel: baseYM ? OV._ymLabel(baseYM) : '',
                  centerId: String(window.CENTER_ID || ''), lo: OV.LOAD_MIN || 15, hi: OV.LOAD_MAX || 45 };
     };
@@ -180,15 +193,17 @@
         const LEFT = { horizontal: 'left', vertical: 'middle', wrapText: true };
         const fx = (f) => ({ formula: f.replace(/^=/, '') });
 
-        const add = (name, opt) => wb.addWorksheet(name, { views: [{ showGridLines: false, ...(opt || {}) }] });
-        const E = add('Executive Summary');
-        const RS = add('Route Summary', { state: 'frozen', xSplit: 1, ySplit: 4 });
-        const DC = add('Daily Calendar', { state: 'frozen', xSplit: 1, ySplit: 5 });
+        // V1.0.4: สีแท็บ — Executive Summary / Route Summary / Daily Calendar / Raw Data
+        const add = (name, opt, tab) => wb.addWorksheet(name, { views: [{ showGridLines: false, ...(opt || {}) }], ...(tab ? { properties: { tabColor: { argb: tab } } } : {}) });
+        const E = add('Executive Summary', null, 'FF2E8B8B');
+        const RS = add('Route Summary', { state: 'frozen', xSplit: 1, ySplit: 4 }, 'FF5B9BD5');
+        const DC = add('Daily Calendar', { state: 'frozen', xSplit: 1, ySplit: 5 }, 'FF7030A0');
         const MK = add('ตลาด', { state: 'frozen', ySplit: 2 });
         const MV = add('Movement', { state: 'frozen', ySplit: 3 });
+        const RA = add('Re-Active', { state: 'frozen', ySplit: 3 });
         const WT = add('รอจัดสาย', { state: 'frozen', ySplit: 2 });
         const IS = add('Issues', { state: 'frozen', ySplit: 3 });
-        const RW = add('Raw Data', { state: 'frozen', ySplit: 2 });
+        const RW = add('Raw Data', { state: 'frozen', ySplit: 2 }, 'FFFFD966');
         const PV = add('Prev Plan', { state: 'frozen', ySplit: 2 });
         const PR = add('Parameters');
         const DF = add('Definitions');
@@ -218,13 +233,14 @@
         // ── Parameters
         title(PR, 'Parameters — ค่าตั้งต้นที่ใช้คำนวณ (ช่องเหลือง = โปรแกรมใส่ให้ตอน Export · แก้ได้)');
         hdr(PR, 3, ['รายการ', 'ค่า', 'ที่มา']);
-        const p1 = new Date(D.p.y, D.p.m0, 1); const cut = new Date(p1.getTime() - 90 * 86400000);
+        const p1 = new Date(D.p.y, D.p.m0, 1); const cut = new Date(D.p.y, D.p.m0, 1 - ((typeof NewStores !== 'undefined' && NewStores.REACT_DAYS) || 60));
+        void p1;
         const params = [
             ['ร้าน Active ใน Master (สาย P/V/C)', D.mActive === '' ? null : D.mActive, '#,##0', D.mActive === '' ? 'ยังไม่มีข้อมูล — นำเข้า Customer Master อีกครั้งด้วยโปรแกรมเวอร์ชันนี้'
                 : (D.mBy ? `จาก Customer Master ล่าสุด · นับตาม Salesman Code สาย P/V/C (ทั้งหมด ${Number(D.mActiveAll || 0).toLocaleString()} · สาย E ${Number(D.mBy.E || 0).toLocaleString()})` : 'จาก Customer Master ที่นำเข้า/ซิงก์ล่าสุด (ยังไม่แยกประเภทสาย — นำเข้า Master ใหม่ด้วย V0.9.10 เพื่อแยก)')],
             ['เกณฑ์ร้านต่อวัน ต่ำสุด (สาย P/V)', D.lo, '0', 'กฎคำเตือนในโปรแกรม'],
             ['เกณฑ์ร้านต่อวัน สูงสุด (สาย P/V)', D.hi, '0', 'กฎคำเตือนในโปรแกรม'],
-            ['วันตัด "ร้านใหม่" (เปิดบัญชีตั้งแต่วันนี้)', xDate(cut), 'yyyy-mm-dd', '90 วันก่อนวันที่ 1 ของเดือนแผน'],
+            ['วันตัด "ร้านใหม่" (เปิดบัญชีตั้งแต่วันนี้) · ก่อนวันนี้ = Re-Active', xDate(cut), 'yyyy-mm-dd', '60 วันก่อนวันที่ 1 ของเดือนแผน · คอลัมน์ Movement ใน Raw Data / ชีท Re-Active คิดตอน Export ด้วยเกณฑ์นี้ (แก้ช่องนี้มีผลกับชีทรอจัดสาย)'],
         ];
         const P = {};
         params.forEach((x, i) => {
@@ -238,7 +254,7 @@
         const holDates = [];
         for (let d = 1; d <= D.last; d++) {
             const wd = new Date(D.p.y, D.p.m0, d).getDay();
-            if (D.hol.weekly.includes(wd) || (D.hol.adhoc || []).map(Number).includes(d)) holDates.push(new Date(D.p.y, D.p.m0, d));
+            if ((D.hol.weekly.includes(wd) && !(D.hol.work || []).includes(d)) || (D.hol.adhoc || []).map(Number).includes(d)) holDates.push(new Date(D.p.y, D.p.m0, d));
         }
         holDates.forEach((d, k) => { put(PR, hr + 1 + k, 1, WDN[d.getDay()]); put(PR, hr + 1 + k, 2, xDate(d), { fmt: 'yyyy-mm-dd', font: F(10, false, 'FF0000FF'), fill: 'FFFFFF00' }); });
         const HOLR = `Parameters!$B$${hr + 1}:$B$${hr + Math.max(1, holDates.length)}`;
@@ -294,17 +310,37 @@
         const PV_RT = `'Prev Plan'!$B$3:$B$${NP}`, PV_NOW = `'Prev Plan'!$C$3:$C$${NP}`, PV_CS = `'Prev Plan'!$D$3:$D$${NP}`,
               PV_CO = `'Prev Plan'!$E$3:$E$${NP}`, PV_CH = `'Prev Plan'!$F$3:$F$${NP}`;
 
+        // ── V1.0.4: Re-Active
+        title(RA, `Re-Active — ร้านเก่า (เปิดบัญชีเกิน 60 วัน) ที่กลับมา Active นอก Route Plan · ศูนย์ ${D.centerId} · ${curL}`,
+            `จัดเข้าสายแล้ว = อยู่แผน ${curL} แต่ไม่อยู่แผน ${baseL} (เฉพาะสายที่เลือก) · ยังอยู่กองรอจัดสาย = Active นอกแผนที่ยังไม่ได้จัด · วันเปิดบัญชี = Open Account Date ใน Customer Master`);
+        hdr(RA, 3, ['สถานะ', 'Customer Code', 'Customer Name', 'Outlet Category', 'Segmentation', 'Salesman Code (Master)', 'สาย ' + curL, 'วัน', 'ชื่อตลาด',
+            'เปิดบัญชี', 'วันตั้งแต่เปิดบัญชี', 'Status (Master)', 'Latitude', 'Longitude']);
+        const P1F = `DATE(${D.p.y},${D.p.m0 + 1},1)`;
+        D.reAct.forEach((x, k) => {
+            const i = 4 + k, s = x.s;
+            const dd = (s.days || []).slice().sort((a, b) => dayNum(a) - dayNum(b)).map(d => String(d).replace('Day ', 'D')).join('·');
+            [x.st, String(s.code || s.id), s.name || '', s.shopType || '', s.segment || '', s.salesCode || '', x.rt || null, x.rt ? dd : null,
+             x.rt ? (s.marketName || '') : null, asDate(s.openDate), `=IF(J${i}="","",${P1F}-J${i})`, s.status || '', +s.lat || null, +s.lng || null]
+                .forEach((v, j) => put(RA, i, j + 1, v === '' ? null : v, { font: F(9), fmt: j === 9 ? 'yyyy-mm-dd' : j === 10 ? '#,##0' : undefined,
+                    fill: j === 0 ? (x.rt ? 'FFE2EFDA' : 'FFFCE4D6') : undefined }));
+        });
+        if (!D.reAct.length) RA.getCell(4, 1).value = 'ไม่มีร้าน Re-Active';
+        const NRA = 3 + Math.max(1, D.reAct.length);
+        widths(RA, [18, 13, 34, 9, 12, 12, 10, 14, 24, 11, 10, 11, 10, 10]);
+        RA.autoFilter = `A3:N${NRA}`;
+        const RA_ST = `'Re-Active'!$A$4:$A$${NRA}`;
+
         // ── รอจัดสาย
-        title(WT, 'รอจัดสาย — ร้าน Active ใน Master ที่มีพิกัด แต่ยังไม่อยู่ในแผน (กองรอจัดสายในโปรแกรม)');
-        hdr(WT, 2, ['Customer Code', 'Customer Name', 'Outlet Category', 'Salesman', 'เปิดบัญชี', 'ร้านใหม่?', 'Latitude', 'Longitude']);
+        title(WT, 'รอจัดสาย — ร้าน Active ใน Master ที่มีพิกัด แต่ยังไม่อยู่ในแผน (กองรอจัดสายในโปรแกรม) · Re-Active = เปิดบัญชีเกิน 60 วัน (ร้านเก่ากลับมา Active)');
+        hdr(WT, 2, ['Customer Code', 'Customer Name', 'Outlet Category', 'Salesman', 'เปิดบัญชี', 'ร้านใหม่ / Re-Active', 'Latitude', 'Longitude']);
         D.waiting.forEach((s, k) => {
             const i = 3 + k;
             WT.getRow(i).values = [String(s.code || s.id), s.name || '', s.shopType || '', s.salesCode || '', asDate(s.openDate),
-                fx(`IF(E${i}="","ไม่ทราบ",IF(E${i}>=${P_CUT},"ร้านใหม่","ร้านเก่า"))`), +s.lat || null, +s.lng || null];
+                fx(`IF(E${i}="","ไม่ทราบ",IF(E${i}>=${P_CUT},"ร้านใหม่","Re-Active"))`), +s.lat || null, +s.lng || null];
         });
         WT.getColumn(5).numFmt = 'yyyy-mm-dd';
         const NW = 2 + Math.max(1, D.waiting.length);
-        widths(WT, [13, 36, 9, 10, 11, 10, 10, 10]);
+        widths(WT, [13, 36, 9, 10, 11, 13, 10, 10]);
         WT.autoFilter = `A2:H${NW}`;
 
         // ── Issues
@@ -374,7 +410,7 @@
         // ── Route Summary — V0.9.10: ตัดคอลัมน์สถานะ · มาตรฐาน Coverage F1/F2 · Segmentation · ขนาดตลาดช่วงละ 5 · สาย E ท้ายสุดแยกยอด
         title(RS, `Route Summary — ศูนย์ ${D.centerId} · ${curL}`, `ทุกตัวเลขคำนวณจาก Raw Data / Daily Calendar / Prev Plan · เทียบกับแผน ${baseL} · ยอด "รวม P/V/C" ไม่รวมสาย E (Spare/Gainer) · มาตรฐาน Coverage (สาย P/V): Re-Visit > 15% = F2 (420 ร้าน) · ไม่ถึง = F1 (600 ร้าน)`);
         const H = ['สาย', 'ประเภท', 'ประเมินเกณฑ์', 'Working Day', 'Coverage', 'Visit', 'Re-Visit', 'Re-Visit %', 'มาตรฐาน Coverage', 'Visit/Day',
-            'ร้าน/วัน ต่ำสุด', 'ร้าน/วัน สูงสุด', 'วันนอกเกณฑ์', 'Coverage ' + baseL, 'Diff', 'Match', 'ร้านใหม่', 'ย้ายเข้า', 'ย้ายออก', 'Remove',
+            'ร้าน/วัน ต่ำสุด', 'ร้าน/วัน สูงสุด', 'วันนอกเกณฑ์', 'Coverage ' + baseL, 'Diff', 'Match', 'ร้านใหม่', 'Re-Active', 'ย้ายเข้า', 'ย้ายออก', 'Remove',
             ...SEGS.map(x => 'Seg ' + x), 'Seg อื่น ๆ', 'จำนวนตลาด', ...BUCK.map(b => 'ตลาด ' + b), 'ระยะทาง (กม.)'];
         const C = {}; H.forEach((h, j) => { C[h] = CL(j + 1); });
         hdr(RS, 4, H, 1, 40);
@@ -394,7 +430,7 @@
                 ['Coverage ' + baseL]: `=COUNTIF(${PV_RT},A${rr})`,
                 'Diff': `=IF(${c('Coverage ' + baseL)}=0,"",${c('Coverage')}-${c('Coverage ' + baseL)})`,
                 'Match': `=IF(${c('Coverage ' + baseL)}=0,"",IF(${c('Diff')}>0,"▲ Increase",IF(${c('Diff')}<0,"▼ Decrease","Equal")))`,
-                'ร้านใหม่': `=COUNTIFS(${R_RT},A${rr},${R_FS},1,${R_MOVE},"ร้านใหม่*")`, 'ย้ายเข้า': `=COUNTIFS(${R_RT},A${rr},${R_FS},1,${R_MOVE},"ย้ายจาก*")`,
+                'ร้านใหม่': `=COUNTIFS(${R_RT},A${rr},${R_FS},1,${R_MOVE},"ร้านใหม่*")`, 'Re-Active': `=COUNTIFS(${R_RT},A${rr},${R_FS},1,${R_MOVE},"Re-Active*")`, 'ย้ายเข้า': `=COUNTIFS(${R_RT},A${rr},${R_FS},1,${R_MOVE},"ย้ายจาก*")`,
                 'ย้ายออก': `=COUNTIFS(${PV_RT},A${rr},${PV_NOW},"<>"&A${rr},${PV_NOW},"<>${NOTIN}")`, 'Remove': `=COUNTIFS(${PV_RT},A${rr},${PV_NOW},"${NOTIN}")`,
                 'Seg อื่น ๆ': `=${c('Coverage')}-SUM(${C['Seg ' + SEGS[0]]}${rr}:${C['Seg ' + SEGS[SEGS.length - 1]]}${rr})`,
                 'จำนวนตลาด': `=COUNTIF(${MK_RT},$A${rr})`,
@@ -412,14 +448,15 @@
                 const h = H[j - 1], L = CL(j), rng = `${L}${a}:${L}${b}`, c = (x) => C[x] + rr;
                 const cr = `${C['ประเมินเกณฑ์']}${a}:${C['ประเมินเกณฑ์']}${b}`;
                 const v = b < a ? 0 : ({
-                    'Working Day': `=COUNTIF('Daily Calendar'!B${dcTot}:${LL}${dcTot},">0")`,
+                    // V1.0.3: ยอดรวม = เฉลี่ยวันทำงานของแต่ละสาย (วันหยุดแต่ละสายไม่ตรงกัน — เช่น 24.25 แปลว่ามีสายที่ทำงานเกิน 24 วัน)
+                    'Working Day': `=IFERROR(ROUND(AVERAGEIF(${rng},">0"),2),0)`,
                     'Re-Visit %': `=IF(${c('Coverage')}=0,0,${c('Re-Visit')}/${c('Coverage')})`, 'มาตรฐาน Coverage': '',
                     'Visit/Day': `=IF(SUM(${C['Working Day']}${a}:${C['Working Day']}${b})=0,0,ROUNDUP(${c('Visit')}/SUM(${C['Working Day']}${a}:${C['Working Day']}${b}),0))`,
                     'ร้าน/วัน ต่ำสุด': `=IFERROR(_xlfn.MINIFS(${rng},${cr},"Y"),"")`, 'ร้าน/วัน สูงสุด': `=IFERROR(_xlfn.MAXIFS(${rng},${cr},"Y"),"")`,
                     'Diff': `=IF(${c('Coverage ' + baseL)}=0,"",${c('Coverage')}-${c('Coverage ' + baseL)})`,
                     'Match': `=IF(${c('Coverage ' + baseL)}=0,"",IF(${c('Diff')}>0,"▲ Increase",IF(${c('Diff')}<0,"▼ Decrease","Equal")))`,
                 })[h];
-                put(RS, rr, j, v === undefined ? `=SUM(${rng})` : v, { fmt: h === 'Diff' ? '+#,##0;-#,##0;0' : h === 'Re-Visit %' ? '0%' : '#,##0',
+                put(RS, rr, j, v === undefined ? `=SUM(${rng})` : v, { fmt: h === 'Diff' ? '+#,##0;-#,##0;0' : h === 'Re-Visit %' ? '0%' : h === 'Working Day' ? 'General' : '#,##0',
                     font: F(10, true), fill: LIGHT, al: ['Match', 'Re-Visit %'].includes(h) ? CEN : undefined });
             }
         };
@@ -433,7 +470,7 @@
             rsTotal(rTE, 'รวม E (Spare/Gainer)', rT + 1, rTE - 1, rDE);
         }
         const rsLast = rTE || rT;
-        RS.getCell(rsLast + 1, 1).value = 'รวม P/V/C = ยอดที่ใช้ในหน้า Executive Summary (ไม่รวมสาย E) · Working Day ของยอดรวม = วันในปฏิทินที่มีอย่างน้อย 1 สายในกลุ่มวิ่ง · ต่ำสุด/สูงสุดของยอดรวม = เฉพาะสาย P/V · มาตรฐาน Coverage: Route Credit ไม่ประเมิน';
+        RS.getCell(rsLast + 1, 1).value = 'รวม P/V/C = ยอดที่ใช้ในหน้า Executive Summary (ไม่รวมสาย E) · Working Day ของยอดรวม = เฉลี่ยวันทำงานของแต่ละสายในกลุ่ม · ต่ำสุด/สูงสุดของยอดรวม = เฉพาะสาย P/V · มาตรฐาน Coverage: Route Credit ไม่ประเมิน';
         RS.getCell(rsLast + 1, 1).font = F(8, false, GREY, true);
         widths(RS, H.map((h, j) => j === 0 ? 10 : h.startsWith('Seg ') ? 8 : h.startsWith('ตลาด ') ? 8 : h === 'มาตรฐาน Coverage' ? 10 : 9));
         // มาตรฐาน Coverage ของสาย P/V: F1 600 (แดง < 570 · ส้ม < 585 · เขียวอ่อน < 600 · เขียวเข้ม ≥ 600) · F2 420 (< 390 · < 400 · < 410 · ≥ 410)
@@ -459,7 +496,8 @@
             const seen = new Set();
             D.rows.forEach(r => {
                 if (seen.has(r.c)) return; seen.add(r.c);
-                if (r.base.startsWith('ร้านใหม่')) mvRows.push(['ร้านใหม่เข้าแผน', r.c, r.s.name, r.s.shopType, '', r.rt, r.s.status, r.s.openDate, '', r.s.shopType]);
+                if (r.base.startsWith('Re-Active')) mvRows.push(['Re-Active เข้าแผน', r.c, r.s.name, r.s.shopType, '', r.rt, r.s.status, r.s.openDate, '', r.s.shopType]);
+                else if (r.base.startsWith('ร้านใหม่')) mvRows.push(['ร้านใหม่เข้าแผน', r.c, r.s.name, r.s.shopType, '', r.rt, r.s.status, r.s.openDate, '', r.s.shopType]);
                 else if (r.base.startsWith('ย้ายจาก')) mvRows.push(['ย้าย Route', r.c, r.s.name, r.s.shopType, D.base.route[r.c], r.rt, r.s.status, r.s.openDate, (D.base.info[r.c] || {}).shopType, r.s.shopType]);
             });
             D.prev.forEach(x => {
@@ -514,23 +552,24 @@
 
         section(5, 'ภาพรวมแผน — สาย P/V/C (ไม่รวมสาย E Spare/Gainer)');
         const N_PREV = `COUNTA(${PV_RT})`;
-        const WT_NEW = `COUNTIF('รอจัดสาย'!$F$3:$F$${NW},"ร้านใหม่")`, WT_OLD = `COUNTIF('รอจัดสาย'!$F$3:$F$${NW},"ร้านเก่า")`;
+        const WT_NEW = `COUNTIF('รอจัดสาย'!$F$3:$F$${NW},"ร้านใหม่")`, WT_OLD = `COUNTIF('รอจัดสาย'!$F$3:$F$${NW},"Re-Active")`;
         tile(6, ...TL[0], 'ร้าน Active ใน Master (P/V/C)', `=IF(${P_ACT}="","—",${P_ACT})`, D.mBy ? 'ตาม Salesman Code สาย P/V/C' : 'Customer Master ล่าสุด');
         tile(6, ...TL[1], 'Coverage (ร้านในแผน)', `=${T('Coverage')}`, `=IF(${P_ACT}="","",TEXT(${T('Coverage')}/${P_ACT},"0.0%")&" ของ Active")` + (rtsE.length ? `&" · ไม่รวม E "&TEXT(${TE('Coverage')},"#,##0")` : ''));
         tile(6, ...TL[2], 'Visit ทั้งเดือน', `=${T('Visit')}`, 'ร้านที่เข้า 2 ครั้ง นับ 2');
         tile(6, ...TL[3], 'Re-Visit (ร้านเข้า ≥2 ครั้ง)', `=${T('Re-Visit')}`, `=IF(${T('Coverage')}=0,"",TEXT(${T('Re-Visit')}/${T('Coverage')},"0%")&" ของ Coverage")`, { color: 'FFC00000' });
-        tile(6, ...TL[4], 'Working Day', `=${T('Working Day')}`, `="วันหยุด "&COUNT(${HOLR})&" วัน"`);
+        tile(6, ...TL[4], 'Working Day (เฉลี่ยต่อสาย)', `=${T('Working Day')}`, `="วันหยุด "&COUNT(${HOLR})&" วัน"`, { fmt: 'General' });
         tile(10, ...TL[0], 'Visit/Day เฉลี่ยต่อสาย', `=${T('Visit/Day')}`, 'ROUNDUP(Visit ÷ Working Day รวมทุกสาย)');
-        tile(10, ...TL[1], 'รอจัดสาย', `=COUNTA('รอจัดสาย'!$A$3:$A$${NW})`, `="ร้านใหม่ "&${WT_NEW}&" · ร้านเก่า "&${WT_OLD}`, { color: 'FFC55A11' });
+        tile(10, ...TL[1], 'รอจัดสาย', `=COUNTA('รอจัดสาย'!$A$3:$A$${NW})`, `="ร้านใหม่ "&${WT_NEW}&" · Re-Active "&${WT_OLD}`, { color: 'FFC55A11' });
         tile(10, ...TL[2], `หลุดจากแผน (เทียบ ${baseL})`, `=COUNTIF(${PV_NOW},"${NOTIN}")`, `อยู่แผน ${baseL} แต่ไม่อยู่ ${curL}`, { color: 'FFC00000' });
-        tile(10, ...TL[3], 'ร้านใหม่เข้าแผน', `=COUNTIFS(${R_FS},1,${R_MOVE},"ร้านใหม่*")`, `ไม่อยู่แผน ${baseL}`, { color: 'FF548235' });
+        const NW_N = `COUNTIFS(${R_FS},1,${R_MOVE},"ร้านใหม่*")`, RA_N = `COUNTIFS(${R_FS},1,${R_MOVE},"Re-Active*")`;
+        tile(10, ...TL[3], 'ร้านใหม่เข้าแผน', `=${NW_N}+${RA_N}`, `="ไม่อยู่แผน ${baseL} · ใหม่ "&${NW_N}&" · Re-Active "&${RA_N}`, { color: 'FF548235' });
         tile(10, ...TL[4], 'ย้าย Route', `=COUNTIFS(${R_FS},1,${R_MOVE},"ย้ายจาก*")`, `Route ${baseL} ≠ Route ${curL}`);
         const REMOVED = 'F11', NEWIN = 'I11';
 
         // เทียบเดือนก่อน — แยกกลุ่ม P/V · C · E · รวม P/V/C
         section(14, `เทียบเดือนก่อน: Coverage ${baseL} → ${curL} แยกกลุ่มสาย`);
         const CMP = { lab: [2, 3], base: [4, 4], nw: [5, 5], rm: [6, 6], mv: [7, 8], cur: [9, 9], diff: [10, 10], pct: [11, 12] };
-        [['lab', 'กลุ่มสาย'], ['base', 'Coverage ' + baseL], ['nw', '+ ร้านใหม่'], ['rm', '− หลุดจากแผน'], ['mv', '± ย้ายข้ามกลุ่ม'], ['cur', 'Coverage ' + curL], ['diff', 'Diff'], ['pct', '% เปลี่ยน']]
+        [['lab', 'กลุ่มสาย'], ['base', 'Coverage ' + baseL], ['nw', '+ ร้านใหม่ / Re-Active'], ['rm', '− หลุดจากแผน'], ['mv', '± ย้ายข้ามกลุ่ม'], ['cur', 'Coverage ' + curL], ['diff', 'Diff'], ['pct', '% เปลี่ยน']]
             .forEach(([k, t]) => hd(15, CMP[k][0], CMP[k][1], t));
         E.getRow(15).height = 28;
         const cmpRow = {}, CL1 = (k) => CL(CMP[k][0]);
@@ -540,7 +579,7 @@
             const v = (key) => tot ? `=${CL1(key)}${cmpRow.PV}+${CL1(key)}${cmpRow.C}` : null;
             mput(rr, ...CMP.lab, tot ? 'รวม P/V/C' : ({ PV: 'สาย P/V', C: 'สาย C (Credit)', E: 'สาย E (Spare/Gainer)' })[g], { font: F(9.5, true, fc), fill: fl });
             mput(rr, ...CMP.base, v('base') || `=${sumP(g, x => `COUNTIF(${PV_RT},"${x}")`)}`, { fmt: '#,##0', font: F(10, false, fc), al: CEN, fill: fl });
-            mput(rr, ...CMP.nw, v('nw') || `=${sumP(g, x => `COUNTIFS(${R_FS},1,${R_MOVE},"ร้านใหม่*",${R_RT},"${x}")`)}`, { fmt: '+#,##0;-#,##0;0', font: F(10, false, fc || 'FF548235'), al: CEN, fill: fl });
+            mput(rr, ...CMP.nw, v('nw') || `=${sumP(g, x => `COUNTIFS(${R_FS},1,${R_MOVE},"ร้านใหม่*",${R_RT},"${x}")+COUNTIFS(${R_FS},1,${R_MOVE},"Re-Active*",${R_RT},"${x}")`)}`, { fmt: '+#,##0;-#,##0;0', font: F(10, false, fc || 'FF548235'), al: CEN, fill: fl });
             mput(rr, ...CMP.rm, v('rm') || `=${sumP(g, x => `COUNTIFS(${PV_RT},"${x}",${PV_NOW},"${NOTIN}")`)}`, { fmt: '#,##0', font: F(10, false, fc || 'FFC00000'), al: CEN, fill: fl });
             mput(rr, ...CMP.cur, v('cur') || `=${sumP(g, x => `COUNTIFS(${R_FS},1,${R_RT},"${x}")`)}`, { fmt: '#,##0', font: F(10, true, fc || NAVY), al: CEN, fill: fl });
             const b = `${CL1('base')}${rr}`, n2 = `${CL1('nw')}${rr}`, m = `${CL1('rm')}${rr}`, c = `${CL1('cur')}${rr}`;
@@ -548,7 +587,7 @@
             mput(rr, ...CMP.diff, `=${c}-${b}`, { fmt: '+#,##0;-#,##0;0', font: F(10, true, fc), al: CEN, fill: fl });
             mput(rr, ...CMP.pct, `=IF(${b}=0,"",(${c}-${b})/${b})`, { fmt: '+0.0%;-0.0%;0.0%', font: F(10, false, fc), al: CEN, fill: fl });
         });
-        note(20, LC, RE, `Coverage ${curL} = Coverage ${baseL} + ร้านใหม่ − หลุดจากแผน ± ย้ายข้ามกลุ่ม (เช่น P → C) · สาย E (Spare/Gainer) แสดงแยก ไม่รวมในยอด P/V/C`, 14);
+        note(20, LC, RE, `Coverage ${curL} = Coverage ${baseL} + ร้านใหม่ / Re-Active − หลุดจากแผน ± ย้ายข้ามกลุ่ม (เช่น P → C) · สาย E (Spare/Gainer) แสดงแยก ไม่รวมในยอด P/V/C`, 14);
         const COVCUR = (g) => `$${CL1('cur')}$${cmpRow[g]}`;
 
         // ซ้าย: สรุปรายสาย — สาย | Coverage | Visit | Re-Visit | Visit/Day | หมายเหตุ · สาย E ท้ายสุด
@@ -667,7 +706,7 @@
             [`="ตลาดที่มีร้านต่ำกว่า 15 (สาย P/V): "&${CL(RC + 2)}${bk0}&" ตลาด"&IF(${CL(RC + 2)}${bk0}=0," ✓","")`, 'ที่มา: Raw Data → ชีท ตลาด'],
             [`="วันที่ร้าน/วัน นอกเกณฑ์ (สาย P/V): "&${T('วันนอกเกณฑ์')}&" วัน"&IF(${T('วันนอกเกณฑ์')}=0," ✓","")`, 'ที่มา: แผนเดือนนี้ × เกณฑ์ใน Parameters → Daily Calendar'],
             [`="ร้านใหม่ยังไม่จัดเข้าสาย: "&${WT_NEW}&" ร้าน"`, 'ที่มา: กองรอจัดสาย × วันเปิดบัญชี → ชีท รอจัดสาย'],
-            [`="ร้านเก่า Active แต่ไม่อยู่ในแผน: "&${WT_OLD}&" ร้าน → พิจารณา Inactive"`, 'ที่มา: กองรอจัดสาย × วันเปิดบัญชี → ชีท รอจัดสาย'],
+            [`="Re-Active ยังไม่จัดเข้าสาย: "&${WT_OLD}&" ร้าน · จัดเข้าแผนแล้ว "&COUNTIF(${RA_ST},"จัดเข้าสายแล้ว")&" ร้าน"`, 'ที่มา: กองรอจัดสาย / แผนเดือนนี้ × วันเปิดบัญชี (เกิน 60 วัน) → ชีท Re-Active'],
             [`="ร้านในแผนแต่ InActive ใน Master: "&COUNTIF(${IS_TOP},"*InActive ใน Master*")&" ร้าน"`, 'ที่มา: ไฟล์ RoutePlan × Customer Master → ชีท Issues'],
             [`="หลุดจากแผนเทียบ ${baseL}: "&${REMOVED}&" ร้าน → ยืนยันว่าตั้งใจตัด"`, `ที่มา: แผน ${baseL} × แผน ${curL} → ชีท Movement`],
             [`="ร้านเปลี่ยน Shop type: "&SUM(${PV_CH})&" ร้าน → ตรวจว่าถูกต้อง"`, `ที่มา: แผน ${baseL} × แผน ${curL} → ชีท Movement`],
@@ -708,15 +747,16 @@
             ['ระยะทาง (กม.)', 'ระยะตามลำดับคิวของวันนั้น — ตัวเดียวกับหน้าต่างรายวัน · ช่องฟ้า = ยังไม่ใส่จุดเริ่ม/จุดจบ (เป็นระยะระหว่างร้านอย่างเดียว)'],
             ['Visit', 'จำนวนครั้งเข้าเยี่ยมทั้งเดือน = จำนวนแถวใน Raw Data (ร้านที่เข้า 2 ครั้งนับ 2)'],
             ['Re-Visit', 'ร้านที่ถูกเข้าเยี่ยม ≥ 2 ครั้งในเดือน'],
-            ['Working Day', 'จำนวนวันที่สายนั้นมีการเข้าเยี่ยม · Grand Total = วันในปฏิทินที่มีอย่างน้อย 1 สายวิ่ง'],
+            ['Working Day', 'จำนวนวันที่สายนั้นมีการเข้าเยี่ยม (นับแยกรายสาย ตามปฏิทินและวันหยุดของสายนั้น) · Grand Total = เฉลี่ยของทุกสาย เช่น 24.25 = มีบางสายทำงานเกิน 24 วัน'],
             ['Visit/Day', 'ROUNDUP(Visit ÷ Working Day) · Grand Total = Visit รวม ÷ Working Day รวมทุกสาย'],
             ['เกณฑ์ร้านต่อวัน', 'สาย Presales (P) / Vansales (V) ตามค่าใน Parameters · สาย C และ E ไม่ประเมิน'],
             ['ตลาด', 'สาย × Day ตามการ์ด Day ในหน้าวางแผนคิวงาน (รอบที่ 2 ของเดือนเป็น Day แยก) · ร้านในตลาด = ร้านที่อยู่ใน Day นั้น · ช่วงร้าน (ช่วงละ 5): ต่ำกว่า 15 / 15–19 / 20–24 / 25–29 / 30–34 / 35–39 / 40 ขึ้นไป · นับเฉพาะสาย P/V'],
             ['เดือนก่อน', `แผน ${baseL} ที่อยู่ในโปรแกรม (เดือนที่นำเข้าจากระบบล่าสุด) — ไม่ได้ดึงข้อมูลในอดีตจากที่อื่น`],
-            ['ร้านใหม่ / หลุดจากแผน', 'อยู่แผนเดือนนี้แต่ไม่อยู่แผนเดือนก่อน / อยู่แผนเดือนก่อนแต่ไม่อยู่แผนเดือนนี้ (รวมร้านที่ไปอยู่กองรอจัดสายหรือออกจากแผน)'],
+            ['ร้านใหม่ / หลุดจากแผน', 'อยู่แผนเดือนนี้แต่ไม่อยู่แผนเดือนก่อน (เปิดบัญชีไม่เกิน 60 วัน หรือไม่มีวันเปิดบัญชี) / อยู่แผนเดือนก่อนแต่ไม่อยู่แผนเดือนนี้ (รวมร้านที่ไปอยู่กองรอจัดสายหรือออกจากแผน)'],
+            ['Re-Active', 'ร้านเก่าที่กลับมา Active นอก Route Plan: ไม่อยู่แผนเดือนก่อน + Open Account Date เก่ากว่า 60 วันนับจากวันที่ 1 ของเดือนแผน · ชีท Re-Active รวมทั้งร้านที่จัดเข้าสายแล้วและที่ยังอยู่กองรอจัดสาย'],
             ['ย้ายเข้า / ย้ายออก / ย้าย Route', 'เดือนก่อนอยู่ Route อื่น / เดือนนี้ไปอยู่ Route อื่น (ภายในศูนย์)'],
             ['เปลี่ยน Shop type', 'ร้านที่อยู่ทั้งแผนเดือนก่อนและเดือนนี้ แต่ Outlet Category ไม่เหมือนกัน · +เข้า = เปลี่ยนมาเป็นประเภทนี้ · −ออก = เปลี่ยนออกจากประเภทนี้'],
-            ['รอจัดสาย', 'ร้านในกองรอจัดสายของโปรแกรม · ร้านใหม่ = เปิดบัญชีตั้งแต่วันตัดใน Parameters · ไม่ทราบ = ไม่มีวันเปิดบัญชี (นำเข้าก่อน V0.9.0)'],
+            ['รอจัดสาย', 'ร้านในกองรอจัดสายของโปรแกรม · ร้านใหม่ = เปิดบัญชีตั้งแต่วันตัดใน Parameters · Re-Active = เปิดบัญชีก่อนวันตัด · ไม่ทราบ = ไม่มีวันเปิดบัญชี (นำเข้าก่อน V0.9.0)'],
             ['วันหยุด', 'วันหยุดที่ตั้งในปฏิทินของโปรแกรม (วันที่หยุดทุกสายที่เลือก)'],
             ['Issues', 'รายการที่ระบบตรวจเจอตอน Export + คำเตือนจากหน้าภาพรวมแผน — แต่ละแถวระบุที่มา'],
         ].forEach(([a, b], i) => { put(DF, 4 + i, 1, a, { font: F(10, true), al: LEFT }); put(DF, 4 + i, 2, b, { al: LEFT }); });
@@ -726,6 +766,8 @@
     };
 
     const run = async () => {
+        const pend = (State.db.routeList || []).filter(r => r && r !== 'รอจัดสาย' && !Array.isArray((State.db.routes || {})[r]));
+        if (pend.length) return UI.showErrorToast(`⏳ ยังโหลดสายไม่ครบ (${pend.length} สาย) — รอสักครู่แล้วกดอีกครั้ง`);      // V1.0.3
         try {
             UI.showLoader('📊 กำลังสร้างรายงาน Executive…', 'ประกอบข้อมูลจากแผน');
             const D = await collect();
@@ -750,3 +792,4 @@
 
     window.ExecReport = { run, _collect: collect, _build: build };
 })();
+;(window.__RPV=window.__RPV||{})['exec-report.js']='1.0.4';

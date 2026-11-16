@@ -248,3 +248,4 @@
 
     document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 600));
 })();
+;(window.__RPV=window.__RPV||{})['history.js']='1.0.4';

@@ -25,7 +25,7 @@
         ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const num = (d) => parseInt(String(d || '').replace(/\D/g, ''), 10) || 0;
 
-    const S = { route: '', order: [], base: [], half: false, mK: 12, drag: -1, dragR: 0, view: 'both', rrows: null, rorder: null };
+    const S = { route: '', order: [], base: [], order2: [], base2: [], half: false, mK: 12, drag: -1, dragR: 0, view: 'both', rrows: null, rorder: null };
 
     const routesOpen = () => {
         const o = (typeof MultiRoute !== 'undefined' && MultiRoute.open) || [];
@@ -83,6 +83,10 @@
         S.half = f.half; S.mK = f.mK; S.k = f.k;
         S.base = f.slots.map(x => x.day);
         S.order = f.slots.map(x => x.day);
+        // V1.0.3: ครึ่งหลังของสายคู่ครึ่งรอบ (D13–D24) — ใช้ในโหมด "เฉพาะครึ่งหลัง"
+        S.base2 = f.half ? f.slots.map(x => 'Day ' + (num(x.day) + f.mK)).filter(d => num(d) <= f.k && !detached(S.route, d)) : [];
+        S.order2 = S.base2.slice();
+        if (S.view === 'half2' && !f.half) S.view = 'both';
         S.rrows = null; S.rorder = null; S.drag = -1;
         render();
         const el = $('reorder-modal');
@@ -96,6 +100,10 @@
     /** map วันเดิม -> วันใหม่ (รวมครึ่งหลังถ้าสายมีร้าน F2) */
     const perm = () => {
         const m = new Map();
+        if (S.view === 'half2') {                 // V1.0.3: สลับเฉพาะครึ่งหลัง — ครึ่งแรกไม่แตะ
+            S.order2.forEach((oldDay, i) => { if (oldDay !== S.base2[i]) m.set(oldDay, S.base2[i]); });
+            return m;
+        }
         S.order.forEach((oldDay, i) => {
             const newDay = S.base[i];
             if (oldDay !== newDay) m.set(oldDay, newDay);
@@ -188,10 +196,39 @@
         const nR = roundsOf();
         const canRound = nR >= 2 && !S.half;                 // รอบสั้นเท่านั้น (รอบยาวคู่ครึ่งรอบ = คนละช่องอยู่แล้ว สลับได้ตรง ๆ)
         if (S.view === 'round' && !canRound) S.view = 'both';
+        if (S.view === 'half2' && !S.half) S.view = 'both';
         const arrAll = f.arr;
 
         let rows = '', table = '', notes = '', btn = '', hint = '';
-        if (S.view === 'round') {
+        if (S.view === 'half2') {
+            // V1.0.3: สายคู่ครึ่งรอบ — ลากเฉพาะครึ่งหลัง (รอบ 2) · ตลาดครึ่งแรกอยู่ที่เดิม
+            const r1 = S.base.map(t => ({ date: (potOf(S.route, t)[0] || {}).date || null }));
+            const r2 = S.base2.map(t => ({ date: (potOf(S.route, t)[0] || {}).date || null }));
+            rows = roundHead(1, r1) + `<div class="text-[10.5px] text-gray-400 px-2 pb-1">ครึ่งแรก D1–D${S.mK} อยู่ที่เดิม (ไม่แตะ)</div>`
+                + roundHead(2, r2) + S.order2.map((src, i) => {
+                    const tgt = S.base2[i];
+                    const si = slotInfo(S.route, src, arrAll);
+                    const moved = tgt !== src;
+                    return rowHTML({ i, r: 2, date: (potOf(S.route, tgt)[0] || {}).date || null, label: 'D' + num(src), color: colorOf(src), market: si.market, n: si.n,
+                        moved, from: dlab((potOf(S.route, src)[0] || {}).date), warn: moved ? 'ตลาดนี้จะไม่คู่กับครึ่งแรกแล้ว — ส่งออกแยก CY' : '' });
+                }).join('');
+            const chg = [...perm().entries()];
+            table = chg.length ? `
+                <table class="w-full text-[11px] bg-white border border-gray-200 rounded-lg overflow-hidden mt-2">
+                    <tr class="bg-gray-50 text-gray-500"><th class="text-left px-2 py-1 font-bold">ตลาด</th>
+                        <th class="px-1 py-1 font-bold">เดิม</th><th class="px-1"></th><th class="px-1 py-1 font-bold">ใหม่</th></tr>
+                    ${chg.map(([o, n]) => `<tr class="border-t border-gray-100 bg-amber-50/40">
+                        <td class="px-2 py-1">D${num(o)} ${esc(slotInfo(S.route, o, arrAll).market || '')}</td>
+                        <td class="px-1 py-1 text-center text-gray-500">${esc(dlab((potOf(S.route, o)[0] || {}).date))}</td><td class="text-gray-300">→</td>
+                        <td class="px-1 py-1 text-center font-black text-emerald-700">${esc(dlab((potOf(S.route, n)[0] || {}).date))} · D${num(n)}</td></tr>`).join('')}
+                </table>` : `<p class="text-[11px] text-gray-400 text-center py-3">ยังไม่ได้สลับอะไร — ลากแถวในรอบ 2 หรือกดลูกศรขึ้น/ลง</p>`;
+            notes = chg.length ? `<p class="text-[10.5px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5 mt-2 leading-snug">
+                ⚠️ ร้านของตลาดที่ย้ายจะไปวิ่งรอบ 2 ในวันใหม่ — คู่ D1/D${S.mK + 1} … ที่ไม่ตรงกันแล้วจะส่งออกเป็น CY แยก (แบบ 9) · เป็นการย้ายถาวร (เดือนหน้าติดไปด้วย) · ย้อนได้ด้วย Ctrl+Z</p>` : '';
+            hint = 'ลากเฉพาะครึ่งหลัง (D' + (S.mK + 1) + '–D' + (S.mK * 2) + ') — ร้านของรอบ 2 ย้ายทั้งก้อนไปวันใหม่ · ครึ่งแรกไม่แตะ';
+            btn = `<button onclick="Reorder.apply()" ${chg.length ? '' : 'disabled'}
+                    class="flex-[2] ${chg.length ? 'bg-gray-900 hover:bg-black text-white' : 'bg-gray-200 text-gray-400 cursor-not-allowed'} py-2 rounded-xl text-sm font-bold">
+                    ยืนยันสลับ ${chg.length ? chg.length + ' ตลาด (เฉพาะรอบ 2)' : ''}</button>`;
+        } else if (S.view === 'round') {
             if (!S.rrows) buildRoundRows();
             const chg = roundChanges();
             const lastK = Math.max(...Object.keys(S.rrows).map(Number), 1);
@@ -284,10 +321,11 @@
             </div>
             <p class="text-[10.5px] text-gray-500 leading-snug mb-2">
                 สลับทั้งกลุ่ม (ร้าน + ลำดับคิว + ชื่อตลาด) ย้ายไปด้วยกัน · รอบสาย ${f.k} วัน · ${f.slots.length} ตลาด${nDates ? ' · ' + nDates + ' วันที่' : ''}
-                ${S.half ? '<br><b class="text-amber-700">สายนี้เป็นแบบ F2 คู่ครึ่งรอบ</b> (D1 คู่ D' + (S.mK + 1) + ' …) — ครึ่งหลังสลับตามครึ่งแรกอัตโนมัติ' : ''}
+                ${S.half ? '<br><b class="text-amber-700">สายนี้เป็นแบบ F2 คู่ครึ่งรอบ</b> (D1 คู่ D' + (S.mK + 1) + ' …) — ' + (S.view === 'half2' ? 'โหมดนี้ย้ายเฉพาะรอบ 2' : 'ครึ่งหลังสลับตามครึ่งแรกอัตโนมัติ · ถ้าจะสลับเฉพาะรอบ 2 เลือก "เฉพาะรอบ 2" ด้านล่าง') : ''}
                 ${f.unpaired.length ? '<br><span class="text-red-600">⚠️ ช่องครึ่งหลังที่ไม่ใช่คู่ของครึ่งแรก: ' + f.unpaired.map(d => 'D' + num(d)).join(' ') + ' — ถ้าสลับคู่ของมัน ตลาดนี้จะถูกสลับตามด้วย</span>' : ''}
             </p>
             ${canRound ? `<div class="flex bg-gray-100 rounded-xl p-0.5 mb-1">${sw(S.view !== 'round', 'ทั้ง ' + nR + ' รอบ (เปลี่ยนลำดับถาวร)', 'both')}${sw(S.view === 'round', 'เฉพาะรอบที่ลาก (เดือนนี้)', 'round')}</div>` : ''}
+            ${S.half && S.base2.length ? `<div class="flex bg-gray-100 rounded-xl p-0.5 mb-1">${sw(S.view !== 'half2', 'ทั้ง 2 รอบ (คู่กัน)', 'both')}${sw(S.view === 'half2', 'เฉพาะรอบ 2 (D' + (S.mK + 1) + '–D' + (S.mK * 2) + ')', 'half2')}</div>` : ''}
             <p class="text-[10px] text-gray-500 leading-snug mb-2">${hint}</p>
             <div class="max-h-[46vh] overflow-y-auto pr-1">${rows}</div>
             ${table}${notes}
@@ -341,7 +379,7 @@
         const route = S.route;
         const R = State.db.routes || {};
         const arr = R[route] || [];
-        if (typeof EditHistory !== 'undefined') EditHistory.mark('สลับลำดับตลาด ' + route);
+        if (typeof EditHistory !== 'undefined') EditHistory.mark((S.view === 'half2' ? 'สลับตลาดเฉพาะรอบ 2 ' : 'สลับลำดับตลาด ') + route);
         UI.showLoader('⇅ กำลังสลับลำดับตลาด...', route);
         try {
             // CY ของแต่ละช่องวัน (อ่านก่อนสลับ) — CY อยู่กับช่อง ไม่ได้ไปกับกลุ่ม
@@ -398,7 +436,8 @@
             close();
             if (typeof MultiRoute !== 'undefined' && MultiRoute.rebuild) MultiRoute.rebuild();
             UI.render();
-            UI.showSaveToast(`⇅ สลับแล้ว ${m.size} ตลาด ในสาย ${route} — CY ยังเรียงตามวันเหมือนเดิม`);
+            UI.showSaveToast(S.view === 'half2' ? `⇅ สลับเฉพาะรอบ 2 แล้ว ${m.size} ตลาด ในสาย ${route} — คู่ที่ไม่ตรงกันส่งออกแยก CY`
+                                                : `⇅ สลับแล้ว ${m.size} ตลาด ในสาย ${route} — CY ยังเรียงตามวันเหมือนเดิม`);
         } catch (e) {
             UI.hideLoader();
             console.error('[Reorder]', e);
@@ -411,12 +450,15 @@
         close,
         apply,
         applyRound,
-        setView(v) { S.view = v === 'round' ? 'round' : 'both'; if (S.view === 'round') buildRoundRows(); S.drag = -1; render(); },
+        setView(v) { S.view = (v === 'round' || v === 'half2') ? v : 'both'; if (S.view === 'round') buildRoundRows(); S.order = S.base.slice(); S.order2 = S.base2.slice(); S.drag = -1; render(); },
         dragStart(i, r) { S.drag = i; S.dragR = r || 0; },
         drop(i, r) {
             const from = S.drag;
             if (from < 0) return;
-            if (S.view === 'round') {
+            if (S.view === 'half2') {
+                if (from === i) { S.drag = -1; return; }
+                const it = S.order2.splice(from, 1)[0]; S.order2.splice(i, 0, it);
+            } else if (S.view === 'round') {
                 // ลากได้เฉพาะในรอบเดียวกัน
                 if ((r || 0) !== S.dragR || from === i) { S.drag = -1; return; }
                 const ord = S.rorder[r];
@@ -431,7 +473,7 @@
         },
         move(i, dir, r) {
             const j = i + dir;
-            const list = S.view === 'round' ? S.rorder[r] : S.order;
+            const list = S.view === 'round' ? S.rorder[r] : (S.view === 'half2' ? S.order2 : S.order);
             if (!list || j < 0 || j >= list.length) return;
             const t = list[i]; list[i] = list[j]; list[j] = t;
             render();
@@ -464,3 +506,4 @@
         [900, 2500, 5000, 9000].forEach(t => setTimeout(() => { try { mount(); } catch (e) {} }, t));
     });
 })();
+;(window.__RPV=window.__RPV||{})['reorder.js']='1.0.4';

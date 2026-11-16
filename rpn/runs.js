@@ -5,8 +5,9 @@
  *    • 1 CY = ร้าน + ลำดับคิว + วันเข้าเยี่ยม — ทุกครั้งใน CY ต้องเหมือนกันหมด
  *    • ความถี่เป็นของ "ตลาด" (สาย × ช่องวัน) ไม่ใช่ของร้าน
  *        F2 = วิ่งทุกครั้งที่ปฏิทินให้   ·   F1 = วิ่งครั้งเดียว
- *    • สายรอบสั้น (รอบ ≤ 14 วัน เช่น 12 วัน) ครั้งถัดไป = ครั้งก่อน + 14 วัน จนถึง End date
- *      (DMS ยิงซ้ำทุก 14 วันจาก Start date เอง ไม่ได้นับวันทำงาน) → เดือน 5 สัปดาห์ได้ 3 ครั้ง
+ *    • สายรอบสั้น (รอบ ≤ 14 วัน เช่น 12 วัน) V1.0.4: วันที่ทุกครั้งตามปฏิทินที่ตั้ง (ปฏิทินใหญ่สุด)
+ *      ปฏิทินแบบนับรอบให้ครบทุกครั้งอยู่แล้ว (วนรอบ ข้ามวันหยุด นับวันทำงานพิเศษ) — เดิมใช้ครั้งแรก + 14 วัน
+ *      (DMS แบบ 5 ยิงซ้ำทุก 14 วันจาก Start date เอง → รวมเป็นแบบ 5 ได้เฉพาะคู่ที่ห่าง 14 วันพอดี)
  *    • สายรอบยาว (24 วัน) ใช้วันที่ตามปฏิทินตรง ๆ
  *    • ตอนส่งออก: ครั้งที่ติดกันห่าง 14 วันพอดี เหมือนกันหมด และวิ่งไปจนถึง End date
  *      → 1 CY แบบ 5 (Fortnightly)  ·  ที่เหลือ → CY แบบ 9 (Monthly) ครั้งละ 1 CY
@@ -101,10 +102,14 @@ const Runs = (() => {
     const isHoliday = (route, d) => {
         if (!d) return false;
         const c = cfgOf(route);
-        if ((c.weeklyHolidays || []).includes(d.getDay())) return true;
         const p = ym();
-        return !!(p && d.getFullYear() === p.y && d.getMonth() === p.m0 && (c.holidays || []).includes(d.getDate()));
+        const inM = !!(p && d.getFullYear() === p.y && d.getMonth() === p.m0);
+        if (wkOff(c, d, inM)) return true;
+        return !!(inM && (c.holidays || []).includes(d.getDate()));
     };
+    /** V1.0.4: วันหยุดประจำสัปดาห์ — ยกเว้นวันทำงานพิเศษของเดือนนี้ (workDays) */
+    const wkOff = (c, d, inM) => (c.weeklyHolidays || []).includes(d.getDay())
+        && !(inM && c.anchorType !== 'weekday-rolling' && (c.workDays || []).map(Number).includes(d.getDate()));
 
     /** วันทำงานสุดท้ายของเดือนตามปฏิทินของสายนี้ (override รายสายมาก่อน) = วันสุดท้ายที่สายนี้มีแผน
      *  ไม่ระบุสาย = ตามปฏิทินระดับเดือน · วันหยุดเฉพาะกิจท้ายเดือนจึงดึง End date ของสายนั้นเข้ามาเอง (V0.6) */
@@ -117,7 +122,7 @@ const Runs = (() => {
         const cap = Math.min(new Date(p.y, p.m0 + 1, 0).getDate(), (c.source === 'import' && c.lastDay) || 99);
         for (let d = cap; d >= 1; d--) {
             const dt = new Date(p.y, p.m0, d);
-            if (!wk.includes(dt.getDay()) && !ad.includes(d)) return dt;
+            if (!wkOff(c, dt, true) && !ad.includes(d)) return dt;
         }
         return new Date(p.y, p.m0 + 1, 0);
     };
@@ -161,8 +166,18 @@ const Runs = (() => {
     const metaDate = (route, day) => {
         const m = metaOf(route, day);
         if (!m) return null;
-        if (m.date) return parse(m.date);
-        if (m.fold) { const p = potential(route, m.src).find(x => x.k === m.run); return p ? p.date : null; }
+        // V1.0.3: วันหยุดในปฏิทินชนะเสมอ — วันที่ที่ล็อกไว้เอง / รอบที่รวมตามปฏิทิน ถ้าตรงวันหยุด
+        //   แบบ "ตรึง" = ครั้งนั้นไม่วิ่ง · แบบ "เลื่อน" = ไปวันทำงานถัดไป (ตั้งวันหยุดทีหลังก็มีผลทันที ไม่ต้องไปแก้เอง)
+        if (m.date) return holFix(route, parse(m.date));
+        if (m.fold) { const p = potential(route, m.src).find(x => x.k === m.run); return p ? holFix(route, p.date) : null; }
+        return null;
+    };
+    /** V1.0.3: วันที่ที่ตรงวันหยุดของสาย → ตรึง = null (ไม่วิ่ง) · เลื่อน = วันทำงานถัดไป (ไม่เกิน End date) */
+    const holFix = (route, d) => {
+        if (!d || !isHoliday(route, d)) return d || null;
+        if (skipHol(route)) return null;
+        const end = endDate(route) || new Date(d.getFullYear(), d.getMonth() + 1, 0);
+        for (let x = addDays(d, 1); x <= end; x = addDays(x, 1)) if (!isHoliday(route, x)) return x;
         return null;
     };
     /** ตั้งปฏิทินแล้วหรือยัง (ระดับเดือนหรือรายสาย) */
@@ -214,12 +229,37 @@ const Runs = (() => {
         const cal = calDates(route, day);
         const end = endDate(route);
         let dates = end ? cal.filter(d => d <= end) : cal;          // DMS ไม่วิ่งเกิน End date
-        if (isShort(route) && cal.length) {
+        // V1.0.4: ปฏิทินใหญ่สุด — ปฏิทินแบบนับรอบ (cycle) วันที่ของทุกครั้ง = วันที่ตามปฏิทินที่ตั้งไว้ (ตรงกับตัวอย่างปฏิทิน)
+        //   เดิมรอบสั้นใช้ปฏิทินแค่ครั้งแรก แล้วครั้งถัดไป +14 วันเอง → เดือนที่มีวันหยุด/วันทำงานพิเศษกลางเดือน แผนไม่ตรงปฏิทิน
+        //   เงื่อนไข CY เหมือนเดิม: ห่าง 14 วันพอดี + เหมือนกัน → แบบ 5 · ที่เหลือ → แบบ 9
+        //   ปฏิทินแบบอื่น (ตามวันในสัปดาห์ / กำหนดเอง / ยังไม่ตั้ง) ให้วันที่ครั้งแรกอย่างเดียว → ยัง +14 วันเหมือนเดิม
+        if (isShort(route) && cal.length && cfgOf(route).mode !== 'cycle') {
             dates = [];
             for (let d = cal[0]; !end || d <= end; d = addDays(d, 14)) { dates.push(d); if (dates.length >= 5) break; }
         }
+        if (dates.length > 5) dates = dates.slice(0, 5);
         const det = detachedOf(route, day);
-        return dates.map((d, i) => ({ k: i + 1, date: d, to: det[i + 1] || null }));
+        const out = dates.map((d, i) => ({ k: i + 1, date: d, to: det[i + 1] || null }));
+        // V1.0.4: ครั้งที่เพิ่มเอง (➕ ครั้งที่ 2) ที่เกินจำนวนครั้งตามปฏิทิน — เช่น ครั้งที่ 2 ตกหลังวันทำงานสุดท้าย / ตกวันหยุด
+        Object.keys(det).map(Number).filter(k => k > out.length).sort((a, b) => a - b).forEach(k => {
+            const mt = metaOf(route, det[k]);
+            if (!mt || !mt.add || !mt.date) return;
+            out.push({ k, date: holFix(route, parse(mt.date)), to: det[k] });
+        });
+        // V1.0.2: รอบสั้น + วันหยุดแบบ "ตรึงตลาดไว้กับวันที่" — ครั้งที่ +14 แล้วตกวันหยุด ไม่วิ่ง (ตรงกับตัวอย่างปฏิทิน)
+        //   เดิมยังวางแผนให้วิ่งแล้วขึ้นคำเตือน "ตรงวันหยุด" · ครั้งที่แยกออกไปแล้วและตั้งวันที่เองไว้ (✂️) ไม่แตะ
+        //   เลข k ไม่เปลี่ยน (ครั้งที่ 2 ยังเป็นครั้งที่ 2) ช่องที่แยก/เลือกครั้งไว้จึงไม่เพี้ยน
+        // V1.0.3: แบบ "เลื่อน" = ครั้งที่ตกวันหยุดไปวันทำงานถัดไป · ครั้งที่แยกออกไปแล้ว วันที่จริงคิดที่ช่องนั้น (metaDate)
+        if (isShort(route)) {
+            return out.map(p => p.to ? p : Object.assign({}, p, { date: holFix(route, p.date) }))
+                      .filter(p => p.to || p.date);
+        }
+        return out;
+    };
+    /** วันหยุดแบบ "ตรึงตลาดไว้กับวันที่" (ค่าเริ่มต้นของรอบ ≤ 14 วัน เหมือนตัวคำนวณปฏิทิน) */
+    const skipHol = (route) => {
+        const c = cfgOf(route) || {};
+        return (c.holidayMode || ((parseInt(c.cycleDays, 10) || 24) <= 14 ? 'skip' : 'shift')) === 'skip';
     };
 
     /**
@@ -249,6 +289,11 @@ const Runs = (() => {
         return pot.filter(p => !p.to).map(p => p.date);
     };
 
+    /** V1.0.3: จุดเริ่ม/จุดจบของครั้งนั้น — CY เดียวกัน (แบบ 5) ต้องใช้จุดเดียวกันทุกครั้ง ไม่งั้น DMS แยกเป็นคนละ CY */
+    const ptSig = (route, day, date) => {
+        try { return (typeof RoadMaster !== 'undefined' && RoadMaster.ptSig) ? RoadMaster.ptSig(route, day, date ? iso(date) : '') : ''; }
+        catch (e) { return ''; }
+    };
     /** ลายนิ้วมือของตลาด = ร้าน + ลำดับคิว (เทียบว่าสองครั้ง "เหมือนกันหมด" ไหม) */
     const sigOf = (route, day) => storesOf(route, day)
         .map(s => ({ id: String(s.id), q: (s.seqs && s.seqs[day]) || 9999 }))
@@ -275,7 +320,8 @@ const Runs = (() => {
             pick.forEach(p => {
                 if (p.to) {
                     used.add(p.to);
-                    const dd = metaDate(route, p.to) || p.date;
+                    const dd = metaDate(route, p.to);
+                    if (!dd) return;                                    // V1.0.3: ครั้งนั้นตรงวันหยุด (ตรึง) — ไม่วิ่ง
                     // แยกไปแล้วแต่ "กลับมาเหมือนกันหมด" (ร้าน ลำดับ และวันตรงกับที่ควรเป็น) → นับรวมเป็นครั้งของตลาดเดิม
                     if (sigOf(route, p.to) === sig0 && iso(dd) === iso(p.date)) runs.push({ date: p.date, day, k: p.k, auto: p.to });
                     else if (storesOf(route, p.to).length) runs.push({ date: dd, day: p.to, k: p.k });
@@ -290,7 +336,9 @@ const Runs = (() => {
                 const okSame = tail.every(r => r.day === day);
                 const okGap = tail.every((r, j) => j === 0 || diffDays(tail[j - 1].date, r.date) === 14);
                 const okEnd = !end || addDays(tail[tail.length - 1].date, 14) > end;
-                if (okSame && okGap && okEnd) { cut = i; break; }
+                const p0 = ptSig(route, tail[0].day, tail[0].date);
+                const okPt = tail.every(r => ptSig(route, r.day, r.date) === p0);
+                if (okSame && okGap && okEnd && okPt) { cut = i; break; }
             }
             runs.slice(0, cut).forEach(r => out.push({ route, day: r.day, base: day, k: r.k, date: r.date, vf: '9', dates: [r.date] }));
             if (cut < runs.length) {
@@ -308,7 +356,7 @@ const Runs = (() => {
             if (!storesOf(route, day).length) return;
             const m = metaOf(route, day);
             const d = metaDate(route, day);
-            if (d) out.push({ route, day, base: m.src, k: m.run, date: d, vf: '9', dates: [d], orphan: true });
+            if (d) out.push({ route, day, base: m.src, k: m.run, date: d, vf: '9', dates: [d], orphan: m.src !== day });   // V1.0.4: ตลาดของวันว่าง (ชี้ตัวเอง) ไม่ใช่ครั้งที่หลุด
         });
         return out;
     };
@@ -318,8 +366,9 @@ const Runs = (() => {
     const pairMerge = (route, out, end) => {
         const by = new Map();
         singlesOf(route, out).forEach(r => {
-            const sg = sigOf(route, r.day);
+            let sg = sigOf(route, r.day);
             if (!sg) return;
+            sg += '#' + ptSig(route, r.day, r.date);          // V1.0.3: จุดเริ่ม/จบต้องเหมือนกันด้วย
             let a = by.get(sg); if (!a) by.set(sg, a = []); a.push(r);
         });
         by.forEach(list => {
@@ -361,11 +410,12 @@ const Runs = (() => {
             const common = B.filter(id => A.has(id)).length;
             const ov = common / Math.max(A.size, B.length, 1);
             if (sa === sb) {
-                if (gap === 14) { if (end && addDays(b.date, 14) <= end) near.push({ a: a.day, b: b.day, da: a.date, db: b.date, why: 'มีครั้งถัดไป ' + short(addDays(b.date, 14)) + ' ก่อน End date — CY แบบ 5 จะวิ่งเกินแผน' }); }
-                else if (gap === 13 || gap === 15) near.push({ a: a.day, b: b.day, da: a.date, db: b.date, why: 'ร้าน+ลำดับเหมือนกัน แต่ห่าง ' + gap + ' วัน (ต้อง 14)' });
+                if (gap === 14 && ptSig(route, a.day, a.date) !== ptSig(route, b.day, b.date)) near.push({ a: a.day, b: b.day, da: a.date, db: b.date, kind: 'point', why: 'จุดเริ่ม/จุดจบ: ' + short(a.date) + ' กับ ' + short(b.date) + ' ตั้งจุดไม่เหมือนกัน — ส่งออก DMS เป็นคนละ CY (ถ้าตั้งใจให้ต่างกันก็ไม่เป็นไร)' });
+                else if (gap === 14) { if (end && addDays(b.date, 14) <= end) near.push({ a: a.day, b: b.day, da: a.date, db: b.date, kind: 'date', why: 'วันเข้าเยี่ยม: มีครั้งถัดไป ' + short(addDays(b.date, 14)) + ' ก่อน End date — CY แบบ 5 จะวิ่งเกินแผน' }); }
+                else if (gap === 13 || gap === 15) near.push({ a: a.day, b: b.day, da: a.date, db: b.date, kind: 'date', why: 'วันเข้าเยี่ยม: ร้าน+ลำดับเหมือนกัน แต่ ' + short(a.date) + ' → ' + short(b.date) + ' ห่าง ' + gap + ' วัน (ต้องห่าง 14 วันพอดี)' });
             } else if (gap === 14 && ov >= 0.8) {
-                const diff = (A.size - common) + (B.length - common);
-                near.push({ a: a.day, b: b.day, da: a.date, db: b.date, why: diff ? 'ร้านต่างกัน ' + diff + ' ร้าน' : 'ลำดับคิวไม่ตรงกัน' });
+                const d = diffOf(route, a.day, b.day);
+                near.push({ a: a.day, b: b.day, da: a.date, db: b.date, kind: d.kind, why: d.text });
             }
         }
         // V0.9.9: ช่องที่ได้จากการรวมตลาดตามปฏิทินแต่ร้าน/ลำดับไม่เหมือนตลาดหลัก (เช่น D1·รอบ2 มีร้านเพิ่ม) → เตือน
@@ -374,11 +424,34 @@ const Runs = (() => {
             const m = metaOf(route, slot);
             if (!m || !m.fold || inMerged.has(slot) || !storesOf(route, slot).length) return;
             const d = diffOf(route, m.src, slot);
-            if (!d.same) near.push({ a: m.src, b: slot, da: null, db: metaDate(route, slot), why: d.text, fold: true });
+            if (!d.same) near.push({ a: m.src, b: slot, da: (datesOf(route, m.src)[0] || null), db: metaDate(route, slot), kind: d.kind, why: d.text, fold: true });
         });
         return { merged, near };
     };
     /** เทียบร้าน + ลำดับคิวของสองช่อง — { same, order, add:[ร้านที่มีแค่ b], miss:[ร้านที่มีแค่ a], text } */
+    /** V1.0.3: ลำดับที่ (1, 2, 3 …) ของร้านในช่อง — เรียงตามเลขคิว */
+    const rankOf = (route, day) => {
+        const m = new Map();
+        storesOf(route, day).map(s => ({ id: String(s.id), q: (s.seqs && s.seqs[day]) || 9999 }))
+            .sort((x, y) => x.q - y.q || x.id.localeCompare(y.id)).forEach((x, i) => m.set(x.id, i + 1));
+        return m;
+    };
+    /** V1.0.3: ร้านที่ "ขยับ" จริงระหว่างสองครั้ง (ไม่นับร้านที่เลื่อนตามเพราะมีร้านอื่นแทรก) — คนนอกลำดับย่อยร่วมที่ยาวที่สุด */
+    const movedOf = (route, a, b) => {
+        const ra = rankOf(route, a), rb = rankOf(route, b);
+        const seq = [...rb.entries()].filter(([id]) => ra.has(id)).sort((x, y) => x[1] - y[1]).map(([id]) => id);
+        const v = seq.map(id => ra.get(id));
+        const tails = [], prev = new Array(v.length).fill(-1);
+        for (let i = 0; i < v.length; i++) {
+            let lo = 0, hi = tails.length;
+            while (lo < hi) { const mid = (lo + hi) >> 1; if (v[tails[mid]] < v[i]) lo = mid + 1; else hi = mid; }
+            if (lo > 0) prev[i] = tails[lo - 1];
+            tails[lo] = i;
+        }
+        const keep = new Set();
+        for (let k = tails.length ? tails[tails.length - 1] : -1; k >= 0; k = prev[k]) keep.add(seq[k]);
+        return seq.filter(id => !keep.has(id)).map(id => ({ id, ra: ra.get(id), rb: rb.get(id) }));
+    };
     const diffOf = (route, a, b) => {
         const A = storesOf(route, a), B = storesOf(route, b);
         const ia = new Set(A.map(s => String(s.id))), ib = new Set(B.map(s => String(s.id)));
@@ -389,25 +462,30 @@ const Runs = (() => {
         const parts = [];
         if (add.length) parts.push(`มีร้านเพิ่ม ${add.length} ร้าน (${nm(add)})`);
         if (miss.length) parts.push(`ขาด ${miss.length} ร้าน (${nm(miss)})`);
+        let moved = [];
         if (order) {
-            const qa = {}; A.forEach(s => { qa[s.id] = (s.seqs || {})[a]; });
-            const moved = B.filter(s => (s.seqs || {})[b] !== qa[s.id]);
-            parts.push(`ลำดับคิวต่าง ${moved.length} ร้าน (${nm(moved)})`);
+            const byId = new Map(B.map(s => [String(s.id), s]));
+            moved = movedOf(route, a, b).map(x => Object.assign({ s: byId.get(x.id) }, x));
+            parts.push(`ลำดับคิวต่าง ${moved.length} ร้าน (${nm(moved.map(x => x.s))})`);
         }
-        return { same, order, add, miss, text: parts.join(' · ') };
+        return { same, order, add, miss, moved, kind: same ? 'same' : (order ? 'order' : 'store'), text: parts.join(' · ') };
     };
 
     /** ป้ายคู่ CY ของช่องวันนี้ (แคชในรอบวาดจอ) — { merged:[ช่องอื่นใน CY เดียวกัน], near:[{other, why}] } */
-    const pairOfDay = (route, day) => {
+    const pcOf = (route) => {
         const mm = M_();
         let pc = mm.pc.get(route);
         if (!pc) { try { pc = pairCheck(route); } catch (e) { pc = { merged: [], near: [] }; } mm.pc.set(route, pc); }
+        return pc;
+    };
+    const pairOfDay = (route, day) => {
+        const pc = pcOf(route);
         const g = pc.merged.find(x => x.days.includes(day));
         return {
             merged: g ? g.days.filter(d => d !== day) : [],
             dates: g ? g.dates : [],
             // V0.9.13: คู่ "รอบ 2 ของตลาดหลัก" (fold) ติดป้ายเฉพาะแถวรอบ 2 — แถวรอบแรกไม่ติด
-            near: pc.near.filter(x => x.b === day || (x.a === day && !x.fold)).map(x => ({ other: x.a === day ? x.b : x.a, why: x.why, fold: !!x.fold })),
+            near: pc.near.filter(x => x.b === day || (x.a === day && !x.fold)).map(x => ({ other: x.a === day ? x.b : x.a, why: x.why, fold: !!x.fold, kind: x.kind || '' })),
         };
     };
 
@@ -470,6 +548,32 @@ const Runs = (() => {
         if (typeof EditHistory !== 'undefined' && EditHistory.mark) EditHistory.mark(label);
         try { if (typeof MultiRoute !== 'undefined' && MultiRoute.rebuild) MultiRoute.rebuild(); } catch (e) {}
         UI.render();
+    };
+
+    /** V1.0.1: แยกครั้งที่ k ออกเป็นช่องใหม่ในหน่วยความจำ (ไม่บันทึก ไม่เตือน) — คืน {slot, n} หรือ {err} */
+    const splitRun = (route, day, k, opt) => {
+        const p = potential(route, day).find(x => x.k === k);
+        if (!p) return { err: '⚠️ ไม่พบครั้งที่ ' + k + ' ของตลาดนี้ในเดือนนี้' };
+        if (p.to) return { err: 'ℹ️ ครั้งนี้แยกออกไปแล้ว (' + (tagLong(route, p.to) || p.to) + ')', slot: p.to };
+        const slot = freeSlot(route, day, k);
+        if (!slot) return { err: '⚠️ ช่องวันของสายนี้เต็มแล้ว (ใช้ได้ถึงวันที่ ' + MAX_SLOT + ')' };
+        const date = (opt && opt.date) || iso(p.date);
+        const arr = storesOf(route, day);
+        if (fqOf(route, day) === 'F1') arr.forEach(s => { if (!s.fqRun) s.fqRun = {}; s.fqRun[day] = k; });
+        arr.forEach(s => {
+            if (!s.days.includes(slot)) s.days.push(slot);
+            s.days.sort((a, b) => dayNum(a) - dayNum(b));
+            if (!s.seqs) s.seqs = {};
+            s.seqs[slot] = (s.seqs && s.seqs[day]) || 0;
+            if (!s.runOf) s.runOf = {};
+            s.runOf[slot] = { src: day, run: k, date };
+            if (!s.fqs) s.fqs = {};
+            s.fqs[slot] = 'F1';
+            if (s.cys) delete s.cys[slot];
+            s.freq = s.days.length > 1 ? 2 : 1;
+        });
+        bump();
+        return { slot, n: arr.length, date };
     };
 
     /** แยกครั้งที่ k ของตลาดนี้ออกเป็นช่องวันใหม่ (ร้าน + ลำดับ คัดลอกมา) */
@@ -644,6 +748,8 @@ const Runs = (() => {
         const d = parse(value);
         const p = ym();
         if (!d || !p || d.getFullYear() !== p.y || d.getMonth() !== p.m0) return UI.showErrorToast('⚠️ วันที่ต้องอยู่ในเดือนของแผนนี้');
+        // V1.0.3: เลือกวันหยุดไม่ได้ — วันหยุดในปฏิทินชนะเสมอ
+        if (isHoliday(route, d)) { UI.showErrorToast('⛔ ' + shortW(d) + ' เป็นวันหยุดตามปฏิทินของสายนี้ — เลือกวันทำงานอื่น'); return open(route, slot); }
         listOf(route).forEach(s => { if (s.runOf && s.runOf[slot]) s.runOf[slot].date = iso(d); });
         await finish(route, 'เปลี่ยนวัน ' + slot.replace('Day ', 'D'));
         if (isHoliday(route, d)) UI.showErrorToast('⚠️ ' + shortW(d) + ' เป็นวันหยุดตามปฏิทินของสายนี้');
@@ -696,7 +802,7 @@ const Runs = (() => {
 
     const describe = (rows) => rows.map(r => r.vf === '5'
         ? `<b class="text-indigo-700">1 CY แบบ 5</b> (${esc(dlist(r.dates))}${r.pairs && r.pairs.length ? ' · รวม ' + esc([r.day].concat(r.pairs).map(d => d.replace('Day ', 'D')).join('+')) + ' ร้าน+ลำดับเหมือนกัน ห่าง 14 วัน' : ''})`
-        : `<b class="text-gray-700">1 CY แบบ 9</b> (${esc(short(r.date))}${r.day !== r.base ? ' · ' + esc((tagLong(route, r.day) || r.day)) : ''})`).join(' + ');
+        : `<b class="text-gray-700">1 CY แบบ 9</b> (${esc(short(r.date))}${r.day !== r.base ? ' · ' + esc((tagLong(r.route, r.day) || r.day)) : ''})`).join(' + ');      // V1.0.2: เดิมใช้ตัวแปร route ที่ไม่มีในจุดนี้ → หน้าต่างเปิดไม่ขึ้น
 
     const open = (route, day) => {
         const m = metaOf(route, day);
@@ -721,7 +827,7 @@ const Runs = (() => {
                 return `<div class="border border-amber-200 bg-amber-50 rounded-xl px-2.5 py-2">
                     <div class="flex items-center gap-2">
                         <span class="text-xs font-black text-amber-800">ครั้งที่ ${x.k}</span>
-                        <span class="text-[11px] text-amber-800">แยกเป็นช่อง ${esc(tagLong(route, x.to) || x.to)} · ${nn} ร้าน</span>
+                        <span class="text-[11px] text-amber-800">${(metaOf(route, x.to) || {}).add ? 'เพิ่มเอง (➕)' : 'แยกเป็นช่อง ' + esc(tagLong(route, x.to) || x.to)} · ${nn} ร้าน</span>
                         ${same ? '<span class="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1">ร้าน+ลำดับเหมือนเดิม</span>'
                                : '<span class="text-[10px] font-bold text-amber-700 bg-white border border-amber-300 rounded px-1">ร้าน/ลำดับต่างจากเดิม</span>'}
                     </div>
@@ -731,7 +837,7 @@ const Runs = (() => {
                         <span class="text-[11px] text-amber-800">${esc(shortW(dd))}${hol ? ' · <b class="text-red-600">วันหยุด</b>' : ''}</span>
                         <div class="flex-1"></div>
                         <button onclick="Runs.go('${esc(route)}','${esc(x.to)}')" title="เปิดร้านของครั้งนี้ — ตั้งชื่อตลาด / จัดลำดับคิว" class="text-[11px] font-bold px-2 py-0.5 rounded-md bg-white border border-amber-300 text-amber-800 hover:bg-amber-100">ลำดับคิว</button>
-                        <button onclick="Runs.askRejoin('${esc(route)}','${esc(x.to)}')" class="text-[11px] font-bold px-2 py-0.5 rounded-md bg-white border border-gray-300 text-gray-700 hover:bg-gray-100">🔗 รวมกลับ</button>
+                        <button onclick="Runs.askRejoin('${esc(route)}','${esc(x.to)}')" class="text-[11px] font-bold px-2 py-0.5 rounded-md bg-white border border-gray-300 text-gray-700 hover:bg-gray-100">${(metaOf(route, x.to) || {}).add && x.k > (calDates(route, base).length) ? '✕ ยกเลิกครั้งนี้' : '🔗 รวมกลับ'}</button>
                     </div>
                     ${(() => {
                         const lst = storesOf(route, x.to).slice()
@@ -783,7 +889,8 @@ const Runs = (() => {
                 <button onclick="Runs.setFq('${esc(route)}','${esc(base)}','F2')" class="flex-1 py-1 rounded-lg text-[11px] font-bold border ${!once ? 'bg-red-500 text-white border-red-500' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}">วิ่งทุกครั้ง (F2)</button>
                 <button onclick="Runs.setFq('${esc(route)}','${esc(base)}','F1')" class="flex-1 py-1 rounded-lg text-[11px] font-bold border ${once ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}">วิ่งครั้งเดียว (F1)</button>
             </div>` : ''}
-            <div class="flex flex-col gap-1.5 mb-3">${pot.map(runRow).join('') || '<p class="text-xs text-gray-400">ปฏิทินไม่มีวันที่ของตลาดนี้ในเดือนนี้</p>'}</div>
+            <div class="flex flex-col gap-1.5 mb-3">${pot.map(runRow).join('') || '<p class="text-xs text-gray-400">ปฏิทินไม่มีวันที่ของตลาดนี้ในเดือนนี้</p>'}
+</div>
             <div class="bg-indigo-50 border border-indigo-200 rounded-xl px-2.5 py-2 text-[11px] text-indigo-900 leading-snug mb-3">
                 <b>ตอนส่งออก:</b> ${rows.length ? describe(rows) : '—'}
                 <div class="text-[10px] text-indigo-700/80 mt-1">CY เดียวแบบ 5 ได้เมื่อทุกครั้งเหมือนกันหมด (ร้าน ลำดับ) ห่าง 14 วันพอดี และวิ่งไปจนถึง End date · ไม่อย่างนั้นแตกเป็นแบบ 9 ครั้งละ 1 CY</div>
@@ -798,6 +905,12 @@ const Runs = (() => {
         if (!m) return;
         const only = listOf(route).filter(s => !s.inactive && (s.days || []).length === 1 && s.days[0] === slot).length;
         const same = sigOf(route, slot) === sigOf(route, m.src);
+        if (m.add) {
+            const solo = m.src === slot;
+            const msg2 = solo ? `ลบตลาด ${tagLong(route, slot) || slot}?\n\nร้านที่อยู่เฉพาะตลาดนี้จะกลับไปเป็น "ยังไม่จัดวัน"`
+                              : `ยกเลิก ${tagLong(route, slot) || slot}?\n\nตลาด ${m.src.replace('Day ', 'D')} กลับไปวิ่งตามปฏิทินเหมือนเดิม` + (only ? `\n${only} ร้านที่อยู่เฉพาะครั้งนี้จะกลับไปเป็น "ยังไม่จัดวัน"` : '');
+            return UI.showConfirm(msg2, async () => { await rejoin(route, slot); if (!solo) open(route, m.src); else close(); }, () => {});
+        }
         const msg = `รวม ${tagLong(route, slot) || slot} กลับเข้า ${m.src.replace('Day ', 'D')} ครั้งที่ ${m.run}?\n\n`
             + (same ? 'ร้านและลำดับเหมือนตลาดเดิมอยู่แล้ว' : 'ร้าน/ลำดับที่แก้ไว้ในครั้งนี้จะหายไป ครั้งนี้กลับไปใช้ร้านและลำดับของตลาดเดิม')
             + (only ? `\n${only} ร้านที่อยู่เฉพาะครั้งนี้จะกลับไปเป็น "ยังไม่จัดวัน"` : '');
@@ -872,12 +985,21 @@ const Runs = (() => {
             const qa = {}; storesOf(route, m.src).forEach(s => { qa[s.id] = (s.seqs || {})[m.src]; });
             df.add.forEach(s => out.set(slot + '|' + s.id, `มีเฉพาะ ${dl(slot)} — ไม่มีใน ${dl(m.src)}`));
             df.miss.forEach(s => out.set(m.src + '|' + s.id, `มีเฉพาะ ${dl(m.src)} — ไม่มีใน ${dl(slot)}`));
-            storesOf(route, slot).forEach(s => {
-                if (out.has(slot + '|' + s.id) || !(s.id in qa)) return;
-                const q = (s.seqs || {})[slot];
-                if (q !== qa[s.id]) out.set(slot + '|' + s.id, `ลำดับต่างจาก ${dl(m.src)} (ลำดับ ${qa[s.id] || '-'} → ${q || '-'})`);
+            movedOf(route, m.src, slot).forEach(x => {
+                if (!out.has(slot + '|' + x.id)) out.set(slot + '|' + x.id, `ลำดับต่างจาก ${dl(m.src)} (ลำดับที่ ${x.ra} → ${x.rb})`);
             });
         });
+        // V1.0.3: คู่ตลาดข้ามช่อง (เช่น รอบ 24: D1 คู่ D13) ที่ร้าน/ลำดับไม่ตรง — ทาเหลืองด้วย
+        try {
+            pcOf(route).near.forEach(x => {
+                if (x.fold || (x.kind !== 'store' && x.kind !== 'order')) return;
+                const la = x.da ? shortW(x.da) : dl(x.a), lb = x.db ? shortW(x.db) : dl(x.b);
+                const df = diffOf(route, x.a, x.b);
+                df.add.forEach(s => { if (!out.has(x.b + '|' + s.id)) out.set(x.b + '|' + s.id, `มีเฉพาะ ${lb} — ไม่มีใน ${la}`); });
+                df.miss.forEach(s => { if (!out.has(x.a + '|' + s.id)) out.set(x.a + '|' + s.id, `มีเฉพาะ ${la} — ไม่มีใน ${lb}`); });
+                df.moved.forEach(m => { if (!out.has(x.b + '|' + m.id)) out.set(x.b + '|' + m.id, `ลำดับต่างจาก ${la} (ลำดับที่ ${m.ra} → ${m.rb})`); });
+            });
+        } catch (e) { console.warn('[Runs] roundDiff pairs', e); }
         mm.rd.set(route, out);
         return out;
     };
@@ -911,15 +1033,313 @@ const Runs = (() => {
     };
     document.addEventListener('DOMContentLoaded', () => setTimeout(wrapDay, 2500));
 
+    // ══ V1.0.3: หน้าต่างรายละเอียดป้าย ⚠️ คู่ CY ไม่เข้าเงื่อนไข + ปุ่มแก้ลำดับให้เหมือนครั้งแรก ══
+    const KIND = {
+        store: { t: 'ร้านไม่เท่ากัน', c: '#b45309', note: 'แค่แจ้งให้รู้ — ถ้าตั้งใจให้ครั้งนี้ต่าง ไม่ต้องทำอะไร (ส่งออกแยก CY) · ร้านที่ต่างเป็นพื้นเหลืองในรายชื่อร้าน' },
+        order: { t: 'ร้านครบ แต่ลำดับคิวไม่ตรง', c: '#b45309', note: 'มักเกิดจากไม่ได้ตั้งใจ — กดปุ่มด้านล่างให้ลำดับครั้งหลังเรียงตามครั้งแรก แล้วส่งออกเป็น CY เดียว (แบบ 5) · ร้านที่ขยับเป็นพื้นเหลือง' },
+        date: { t: 'วันเข้าเยี่ยมไม่เข้าเงื่อนไข', c: '#1d4ed8', note: 'ร้านและลำดับเหมือนกัน แต่วันที่ไม่ได้ห่างกันตามเงื่อนไข CY เดียว — แจ้งให้รู้ ส่งออกแยก CY' },
+        point: { t: 'จุดเริ่ม/จุดจบไม่เหมือนกัน', c: '#1d4ed8', note: 'ร้านและลำดับเหมือนกัน แต่ตั้งจุดเริ่ม/จุดจบของสองครั้งไม่เหมือนกัน — DMS เก็บจุดได้ CY ละชุด จึงส่งออกแยก CY · ถ้าจะให้เป็น CY เดียว ตั้งจุดให้เหมือนกันในหน้าต่างรายวัน (🚩/🏁)' },
+    };
+    const closePair = () => { const el = document.getElementById('pairinfo-modal'); if (el) el.remove(); };
+    const pairInfo = (route, day) => {
+        closePair();
+        const pc = pcOf(route);
+        const list = pc.near.filter(x => x.a === day || x.b === day);
+        const lab = (d, dt) => `${tagLong(route, d) || d.replace('Day ', 'D')}${dt ? ' · ' + shortW(dt) : ''}`;
+        const cl = clashes([route]).filter(c => c.days.includes(day));
+        const nm = (s) => esc((s && (s.name || s.id)) || '');
+        const body = list.map((x, i) => {
+            const k = KIND[x.kind] || KIND.date;
+            const df = (x.kind === 'store' || x.kind === 'order') ? diffOf(route, x.a, x.b) : null;
+            let det = '';
+            if (df && x.kind === 'store') {
+                const li = (arr, t) => arr.length ? `<div class="mt-1"><b>${t} ${arr.length} ร้าน:</b> ${arr.slice(0, 30).map(nm).join(', ')}${arr.length > 30 ? ' …' : ''}</div>` : '';
+                det = li(df.add, 'มีเฉพาะ ' + esc(lab(x.b, x.db)) + ' —') + li(df.miss, 'มีเฉพาะ ' + esc(lab(x.a, x.da)) + ' —');
+            } else if (df && x.kind === 'order') {
+                det = `<table class="w-full text-[11px] mt-1"><tr class="text-gray-500 text-left"><th class="pr-2">ร้านที่ขยับ</th><th class="pr-2 text-right">ลำดับครั้งแรก</th><th class="text-right">ลำดับครั้งนี้</th></tr>`
+                    + df.moved.slice(0, 40).map(m => `<tr class="border-t border-gray-100"><td class="pr-2 py-0.5">${nm(m.s)}</td><td class="pr-2 text-right">${m.ra}</td><td class="text-right font-bold text-amber-700">${m.rb}</td></tr>`).join('')
+                    + `</table><button onclick="Runs.fixOrder('${esc(route)}','${esc(x.a)}','${esc(x.b)}')" class="mt-2 w-full py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black">🔧 แก้ลำดับให้เหมือนกัน (ใช้ลำดับของ ${esc(lab(x.a, x.da))})</button>`;
+            } else {
+                det = `<div class="mt-1">${esc(x.why)}</div>`;
+            }
+            return `<div class="border border-amber-200 rounded-xl p-2.5 ${i ? 'mt-2' : ''}">
+                <div class="text-xs font-black" style="color:${k.c}">⚠️ ${k.t}</div>
+                <div class="text-[11px] text-gray-600 mt-0.5">${esc(lab(x.a, x.da))} ↔ ${esc(lab(x.b, x.db))}</div>
+                <div class="text-[11px] text-gray-800">${det}</div>
+                <div class="text-[10.5px] text-gray-500 mt-1.5 leading-snug">${k.note}</div></div>`;
+        }).join('') + cl.map(c => `<div class="border border-blue-200 rounded-xl p-2.5 mt-2">
+                <div class="text-xs font-black text-blue-700">📅 วันเดียวกันมี ${c.days.length} ตลาด</div>
+                <div class="text-[11px] text-gray-800 mt-0.5">${esc(shortW(c.date))}: ${c.days.map(d => esc(tagLong(route, d) || d.replace('Day ', 'D'))).join(' · ')}</div>
+                <div class="text-[10.5px] text-gray-500 mt-1">ตลาดไปซ้ำวันกัน — ตรวจปฏิทิน/วันหยุดแบบเลื่อน หรือแก้วันที่ของครั้งที่ชน</div></div>`).join('');
+        const el = document.createElement('div');
+        el.id = 'pairinfo-modal';
+        el.className = 'fixed inset-0 bg-black/40 flex items-center justify-center p-4';
+        el.style.zIndex = '9996';
+        el.onclick = (e) => { if (e.target === el) closePair(); };
+        el.innerHTML = `<div class="bg-white rounded-2xl shadow-2xl w-full flex flex-col overflow-hidden" style="max-width:520px;max-height:85vh">
+            <div class="px-4 py-3 border-b bg-amber-50 flex items-center gap-2"><b class="text-sm">⚠️ ไม่เข้าเงื่อนไข CY เดียว · ${esc(route)} ${esc(tagLong(route, day) || day.replace('Day ', 'D'))}</b>
+              <button onclick="Runs.closePair()" class="ml-auto w-8 h-8 rounded-full border border-gray-200 text-gray-500 hover:bg-gray-100 font-bold">✕</button></div>
+            <div class="overflow-auto p-3">${body || '<div class="text-xs text-gray-500">ไม่มีรายการแล้ว — ตลาดนี้เข้าเงื่อนไขแล้ว</div>'}</div></div>`;
+        document.body.appendChild(el);
+    };
+    /** ให้ลำดับคิวของครั้ง b เรียงตามครั้ง a (ใช้เลขคิวของ a) — เฉพาะกรณีร้านครบเท่ากัน */
+    const fixOrder = async (route, a, b) => {
+        const df = diffOf(route, a, b);
+        if (df.add.length || df.miss.length) { UI.showErrorToast('⚠️ ร้านของสองครั้งไม่เท่ากัน — แก้เฉพาะลำดับไม่ได้'); return; }
+        if (df.same) { closePair(); UI.showSaveToast('ลำดับเหมือนกันอยู่แล้ว'); return; }
+        const label = `แก้ลำดับ ${tagLong(route, b) || b} ให้เหมือน ${tagLong(route, a) || a}`;
+        if (typeof EditHistory !== 'undefined' && EditHistory.mark) EditHistory.mark(label);
+        storesOf(route, b).forEach(s => {
+            const q = (s.seqs || {})[a];
+            if (q == null) return;
+            if (!s.seqs) s.seqs = {};
+            s.seqs[b] = q;
+        });
+        await finish(route, label);
+        closePair();
+        const ok = sigOf(route, a) === sigOf(route, b);
+        UI.showSaveToast(ok ? `🔧 ${label} แล้ว — สองครั้งร้าน+ลำดับเหมือนกัน` : `🔧 ${label} แล้ว`);
+    };
+
+    // ── V1.0.4: วันทำงานตามปฏิทิน · วันว่าง · ➕ ครั้งที่ 2 · ตลาดใหม่ของวันว่าง ─────────────
+    /** ช่องที่เป็น "ตลาดของวันว่าง" (สร้างจากแท็บ 2) — runOf ชี้กลับมาที่ตัวเอง */
+    const isStandalone = (route, slot) => { const m = metaOf(route, slot); return !!(m && m.src === slot); };
+    /** V1.0.4: ครั้งที่ตั้งวันที่เองไว้ (แยกครั้ง ✂ / ➕ ที่เพิ่มไว้) — ชนะปฏิทิน ไม่ขยับตามเมื่อแก้ปฏิทิน
+     *  ไม่นับครั้งที่ระบบรวมจากรอบ 24 (fold) และตลาดของวันว่าง */
+    const pinnedOf = (route) => {
+        const out = [];
+        daysOf(route).forEach(slot => {
+            const m = metaOf(route, slot);
+            if (!m || m.fold || !m.date || m.src === slot) return;
+            out.push({ slot, src: m.src, run: m.run, date: m.date, add: !!m.add });
+        });
+        return out.sort((a, b) => dayNum(a.src) - dayNum(b.src) || a.run - b.run);
+    };
+    /** วันทำงานทุกวันของสายนี้ในเดือน ตามปฏิทิน (ตั้งแต่วันแรกของรอบ ถึง End date · ไม่รวมวันหยุด) */
+    const workDates = (route) => {
+        const mm = M_();
+        if (!mm.wd) mm.wd = new Map();
+        if (mm.wd.has(route)) return mm.wd.get(route).slice();
+        const out = [];
+        const p = ym();
+        if (p && route && route !== UNASSIGNED && hasCal(route)) {
+            const last = new Date(p.y, p.m0 + 1, 0);
+            const end = endDate(route) || last;
+            let first = null;
+            const c = cycleOf(route);
+            for (let i = 1; i <= c; i++) { const d = calDates(route, 'Day ' + i)[0]; if (d && (!first || d < first)) first = d; }
+            let d = (first && first.getFullYear() === p.y && first.getMonth() === p.m0) ? first : new Date(p.y, p.m0, 1);
+            for (; d <= end && d <= last; d = addDays(d, 1)) if (!isHoliday(route, d)) out.push(d);
+        }
+        mm.wd.set(route, out);
+        return out.slice();
+    };
+    /** วันทำงานที่ยังไม่มีตลาดของสายนี้วิ่ง (สายที่ยังไม่มีร้านในตลาดเลย = ไม่นับ) */
+    const emptyDates = (route) => {
+        const rows = visitRows(route).filter(r => r.date);
+        if (!rows.length) return [];
+        const used = new Set(rows.map(r => iso(r.date)));
+        return workDates(route).filter(d => !used.has(iso(d)));
+    };
+    /** ช่องว่างสำหรับครั้งที่เพิ่มเอง / ตลาดของวันว่าง — ใช้ D25 ขึ้นไปก่อน (ไม่ชนตลาด D13–D24 ตอนสลับรอบ 12 ↔ 24) */
+    const spareSlot = (route, taken) => {
+        const used = new Set(taken || []);
+        listOf(route).forEach(s => (s.days || []).forEach(d => used.add(d)));
+        const c = cycleOf(route);
+        for (let i = Math.max(c, 24) + 1; i <= MAX_SLOT; i++) if (!used.has('Day ' + i)) return 'Day ' + i;
+        for (let i = Math.max(c, 24); i > c; i--) if (!used.has('Day ' + i)) return 'Day ' + i;
+        return null;
+    };
+    /** ตลาดรอบสั้นที่วิ่งครบทุกครั้ง (F2) แต่เดือนนี้ได้วิ่งครั้งเดียว — ขึ้นปุ่ม ➕ ครั้งที่ 2 */
+    const canAddRun = (route, day) => {
+        try {
+            if (!route || route === UNASSIGNED || !isShort(route) || isDetached(route, day)) return false;
+            if (!storesOf(route, day).length || fqOf(route, day) === 'F1') return false;
+            return visitRows(route).filter(r => r.base === day && r.date).length === 1;
+        } catch (e) { return false; }
+    };
+    const singleRuns = (route) => {
+        if (!isShort(route)) return [];
+        return [...new Set(visitRows(route).filter(r => r.date && !r.fold).map(r => r.slot))].filter(d => canAddRun(route, d));
+    };
+    const nextK = (route, day) => {
+        const have = new Set(potential(route, day).map(p => p.k));
+        Object.keys(detachedOf(route, day)).forEach(k => have.add(+k));
+        let k = 2; while (have.has(k)) k++;
+        return k;
+    };
+    const descOf = (route, day) => {
+        const mk = (typeof RoadMaster !== 'undefined' && RoadMaster.marketName) ? RoadMaster.marketName(route, day, listOf(route)) : '';
+        const raw = route + 'D' + pad2(dayNum(day)) + (mk || '');
+        return raw.length > 50 ? raw.slice(0, 50) : raw;
+    };
+    let arCtx = null;
+    /** หน้าต่างเลือกวันที่ของครั้งที่ 2 — วันว่างขึ้นก่อน (แนะนำวันที่ใกล้ +14 ที่สุด) แล้วค่อยวันที่มีตลาดอยู่แล้ว */
+    const addRunMenu = (route, day) => {
+        if (!canAddRun(route, day)) return UI.showErrorToast('⚠️ ตลาดนี้วิ่งครบแล้ว หรือไม่ใช่สายรอบสั้น');
+        const r1 = visitRows(route).find(r => r.base === day && r.date);
+        const d1 = r1.date;
+        const n = storesOf(route, day).length;
+        const mk = (typeof RoadMaster !== 'undefined' && RoadMaster.marketName) ? RoadMaster.marketName(route, day, listOf(route)) : '';
+        const empt = emptyDates(route);
+        const t = addDays(d1, 14).getTime();
+        const rec = empt.slice().sort((a, b) => Math.abs(a - t) - Math.abs(b - t) || a - b)[0] || null;
+        const byDate = {};
+        visitRows(route).filter(r => r.date).forEach(r => { (byDate[iso(r.date)] || (byDate[iso(r.date)] = [])).push(r); });
+        const busy = workDates(route).filter(d => byDate[iso(d)] && !byDate[iso(d)].some(r => r.base === day));
+        const k = nextK(route, day);
+        arCtx = { route, day, k, d1 };
+        const opt = (d, empty) => {
+            const v = iso(d);
+            const on = rec ? v === iso(rec) : false;
+            const who = empty ? '' : byDate[v].map(r => r.label + ' ' + ((typeof RoadMaster !== 'undefined' && RoadMaster.marketName) ? (RoadMaster.marketName(route, r.slot, listOf(route)) || '') : '')).join(', ');
+            return `<label class="flex items-center gap-2 px-2.5 py-1.5 mb-1 rounded-lg border ${on ? 'border-indigo-500 bg-indigo-50' : 'border-gray-200 bg-white'} cursor-pointer hover:bg-gray-50">
+                <input type="radio" name="ar-date" value="${v}" ${on ? 'checked' : ''} onchange="Runs._arNote()">
+                <span class="text-[12px] ${empty ? 'font-black text-gray-800' : 'text-gray-600'}">${esc(shortW(d))}</span>
+                ${empty ? '<span class="text-[11px] font-bold text-emerald-700">ว่าง</span>' : `<span class="ml-auto text-[10.5px] text-amber-700 truncate">มี ${esc(who)} อยู่แล้ว</span>`}
+                ${on ? '<span class="ml-auto text-[10px] font-bold text-white bg-emerald-600 rounded px-1.5">แนะนำ</span>' : ''}
+            </label>`;
+        };
+        let el = document.getElementById('addrun-modal');
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'addrun-modal';
+            el.className = 'fixed inset-0 bg-black/50 hidden items-center justify-center p-4';
+            el.style.zIndex = '9998';
+            el.addEventListener('click', (e) => { if (e.target === el) arClose(); });
+            document.body.appendChild(el);
+        }
+        el.innerHTML = `
+          <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-4 max-h-[90vh] overflow-y-auto">
+            <h3 class="font-black text-gray-800 mb-0.5">➕ เพิ่มครั้งที่ ${k} — ${esc(day.replace('Day ', 'D'))} ${esc(mk)} <span class="font-bold text-gray-500">(${n.toLocaleString()} ร้าน)</span></h3>
+            <p class="text-[11px] text-gray-500 mb-2">ครั้งที่ 1: ${esc(shortW(d1))} · ร้านและลำดับคิวเหมือนครั้งที่ 1 · เลือกวันที่ครั้งที่ ${k}</p>
+            ${empt.length ? empt.map(d => opt(d, true)).join('') : '<p class="text-[11px] text-gray-400 mb-1">ไม่มีวันทำงานที่ว่างในเดือนนี้</p>'}
+            ${busy.length ? `<details class="mt-2" ${empt.length ? '' : 'open'}><summary class="cursor-pointer select-none text-[10.5px] text-gray-500 mb-1">วันที่มีตลาดแล้ว ${busy.length} วัน (ถ้าเลือก = วันเดียว 2 ตลาด)</summary>${busy.map(d => opt(d, false)).join('')}</details>` : ''}
+            <div id="ar-note" class="text-[10.5px] text-gray-600 bg-gray-50 border border-gray-200 rounded-lg px-2 py-1.5 mt-2"></div>
+            <div class="flex gap-2 mt-3">
+              <button onclick="Runs._arClose()" class="flex-1 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-sm font-bold text-gray-700">ยกเลิก</button>
+              <button onclick="Runs._arGo()" class="flex-1 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-sm font-bold text-white">เพิ่มครั้งที่ ${k}</button>
+            </div>
+          </div>`;
+        el.classList.remove('hidden'); el.classList.add('flex');
+        arNote();
+    };
+    const arPick = () => { const r = document.querySelector('#addrun-modal input[name="ar-date"]:checked'); return r ? r.value : ''; };
+    const arNote = () => {
+        const el = document.getElementById('ar-note');
+        if (!el || !arCtx) return;
+        const v = arPick();
+        const nm = descOf(arCtx.route, arCtx.day);
+        if (!v) { el.innerHTML = 'เลือกวันที่ของครั้งที่ ' + arCtx.k; return; }
+        const d2 = parse(v);
+        const end = endDate(arCtx.route);
+        const five = diffDays(arCtx.d1, d2) === 14 && (!end || addDays(d2, 14) > end);
+        el.innerHTML = `ส่งออก DMS: ${esc(arCtx.day.replace('Day ', 'D'))} = ${five ? '1 CY แบบ 5 (ห่าง 14 วันพอดี)' : '2 CY แบบ 9'} (${esc(short(arCtx.d1))} · ${esc(short(d2))}) ชื่อ <span class="font-mono">${esc(nm)}</span>${five ? '' : ' ทั้งคู่'}`;
+    };
+    const arClose = () => { const el = document.getElementById('addrun-modal'); if (el) { el.classList.add('hidden'); el.classList.remove('flex'); } };
+    const arGo = async () => {
+        const v = arPick();
+        if (!v || !arCtx) return UI.showErrorToast('⚠️ เลือกวันที่ก่อน');
+        const { route, day } = arCtx;
+        arClose();
+        return addRun(route, day, v);
+    };
+    /** เพิ่มครั้งเข้าเยี่ยมให้ตลาดที่วิ่งครั้งเดียว — คัดลอกร้าน + ลำดับไปช่องใหม่ (เหมือนแยกครั้ง) ตั้งวันที่ตามที่เลือก */
+    const addRun = async (route, day, date) => {
+        if (!canAddRun(route, day)) return UI.showErrorToast('⚠️ ตลาดนี้วิ่งครบแล้ว หรือไม่ใช่สายรอบสั้น');
+        const k = nextK(route, day);
+        const slot = spareSlot(route);
+        if (!slot) return UI.showErrorToast('⚠️ ช่องวันของสายนี้เต็มแล้ว (ใช้ได้ถึงวันที่ ' + MAX_SLOT + ')');
+        const arr = storesOf(route, day);
+        arr.forEach(s => {
+            if (!s.days.includes(slot)) s.days.push(slot);
+            s.days.sort((a, b) => dayNum(a) - dayNum(b));
+            if (!s.seqs) s.seqs = {};
+            s.seqs[slot] = (s.seqs && s.seqs[day]) || 0;
+            if (!s.runOf) s.runOf = {};
+            s.runOf[slot] = { src: day, run: k, date, add: true };
+            if (!s.fqs) s.fqs = {};
+            s.fqs[slot] = 'F1';
+            if (s.cys) delete s.cys[slot];
+            s.freq = s.days.length > 1 ? 2 : 1;
+        });
+        await finish(route, 'เพิ่มครั้งที่ ' + k + ' ' + day.replace('Day ', 'D'));
+        UI.showSaveToast(`➕ ${day.replace('Day ', 'D')} ครั้งที่ ${k} วันที่ ${shortW(parse(date))} · ${arr.length} ร้าน (ร้าน + ลำดับเหมือนครั้งที่ 1) · ย้อนกลับได้ (Ctrl+Z)`);
+        return slot;
+    };
+    /** ตลาดใหม่ของวันว่าง (จากแท็บ 2) — จองช่อง แล้วให้ร้านที่เลือกเข้าช่องนี้ (runOf ชี้ตัวเอง + วันที่) */
+    const newMarketSlot = (route, taken) => spareSlot(route, taken);
+    const joinStandalone = (s, slot, date) => {
+        if (!s.days) s.days = [];
+        if (!s.days.includes(slot)) s.days.push(slot);
+        s.days.sort((a, b) => dayNum(a) - dayNum(b));
+        if (!s.runOf) s.runOf = {};
+        s.runOf[slot] = { src: slot, run: 1, date, add: true };
+        if (!s.fqs) s.fqs = {};
+        s.fqs[slot] = 'F1';
+        if (s.cys) delete s.cys[slot];
+        s.freq = s.days.length > 1 ? 2 : 1;
+    };
+    /** ถามชื่อตลาดใหม่ (จำกัดความยาวให้ Cycle name รวมไม่เกิน 50 ตัวอักษร) */
+    let nmCtx = null;
+    const askName = (route, slot, date) => {
+        nmCtx = { route, slot };
+        const max = (typeof RoadMaster !== 'undefined' && RoadMaster.nameMax) ? RoadMaster.nameMax(route) : 40;
+        let el = document.getElementById('mkname-modal');
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'mkname-modal';
+            el.className = 'fixed inset-0 bg-black/50 hidden items-center justify-center p-4';
+            el.style.zIndex = '9998';
+            document.body.appendChild(el);
+        }
+        el.innerHTML = `
+          <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-4">
+            <h3 class="font-black text-gray-800 mb-0.5">🏷️ ตั้งชื่อตลาดใหม่ — ${esc(date ? shortW(date) : '')}</h3>
+            <p class="text-[11px] text-gray-500 mb-2">${esc(route)} · ส่งออก DMS เป็น CY แบบ 9 ของวันนั้น · ชื่อ Cycle รวมไม่เกิน 50 ตัวอักษร</p>
+            <div class="flex items-center gap-2">
+              <span class="font-mono text-[11px] text-gray-400 shrink-0">${esc(route)}D${pad2(dayNum(slot))}</span>
+              <input id="mkname-in" maxlength="${max}" placeholder="เช่น อ.เมืองอ่างทอง" class="flex-1 min-w-0 border border-gray-300 rounded-lg px-2 py-1.5 text-sm"
+                oninput="document.getElementById('mkname-n').textContent=this.value.length+'/${max}'"
+                onkeydown="if(event.key==='Enter')Runs._nmSave()">
+              <span id="mkname-n" class="text-[10px] text-gray-400 tabular-nums shrink-0">0/${max}</span>
+            </div>
+            <div class="flex gap-2 mt-3">
+              <button onclick="Runs._nmClose()" class="flex-1 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-sm font-bold text-gray-700">ไว้ทีหลัง</button>
+              <button onclick="Runs._nmSave()" class="flex-1 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-sm font-bold text-white">บันทึกชื่อ</button>
+            </div>
+          </div>`;
+        el.classList.remove('hidden'); el.classList.add('flex');
+        setTimeout(() => { const i = document.getElementById('mkname-in'); if (i) i.focus(); }, 50);
+    };
+    const nmClose = () => { const el = document.getElementById('mkname-modal'); if (el) { el.classList.add('hidden'); el.classList.remove('flex'); } };
+    const nmSave = async () => {
+        const i = document.getElementById('mkname-in');
+        const v = ((i && i.value) || '').trim();
+        if (!nmCtx) return nmClose();
+        if (!v) return UI.showErrorToast('⚠️ ใส่ชื่อตลาดก่อน หรือกด "ไว้ทีหลัง"');
+        const { route, slot } = nmCtx;
+        nmClose();
+        try { await RoadMaster.setMarketName(route, slot, v); } catch (e) {}
+        try { await saveRoute(route); } catch (e) {}
+        bump();
+        UI.render();
+        UI.showSaveToast('🏷️ ตั้งชื่อตลาด ' + v + ' แล้ว');
+    };
+
     return {
         _memoClear: memoClear,
+        // V1.0.4: ปฏิทินใหญ่สุดแล้ว — ปุ่ม ➕ ครั้งที่ 2 / ป้าย "ตลาดวิ่งครั้งเดียว" เลิกใช้ (ตลาดที่โดนวันหยุดเลือกตรึง/เลื่อนที่ปฏิทิน)
+        //   ครั้งที่เพิ่มไว้ก่อนหน้ายังทำงาน + ยกเลิกได้ในหน้าต่างครั้งเข้าเยี่ยม
+        workDates, emptyDates, canAddRun: () => false, singleRuns: () => [], addRun, addRunMenu, isStandalone, newMarketSlot, joinStandalone, askName, descOf, pinnedOf,
+        _arNote: () => arNote(), _arClose: () => arClose(), _arGo: () => arGo(), _nmSave: () => nmSave(), _nmClose: () => nmClose(),
         // คำนวณ
         removeSel, selIn, removeChecked, removeOne, removeDayOnly, _rmToggle(slot, o) { rmOpen = o ? slot : (rmOpen === slot ? '' : rmOpen); },
         cycleOf, isShort, isHoliday, workEnd, endDate, calDates, potential, datesOf, fqOf, sigOf,
         metaOf, metaDate, hasCal, diffOf, tagLong, roundDiff, visitRows, rowsOfSlot, isDetached, detachedOf, daysOf, planRoute, pairCheck, pairOfDay, holidayHits, clashes, tagOf, onceRun,
-        version: () => ver, bump,
+        version: () => ver, bump, ptSig, movedOf, pairInfo, closePair, fixOrder,
         // แก้ไข
-        detach, rejoin, setDate, setOnce, setFq, resetAll,
+        detach, splitRun, rejoin, setDate, setOnce, setFq, resetAll,
         // หน้าจอ
         open, close, askRejoin, go,
         _iso: iso, _parse: parse, _short: short, _dlist: dlist,
@@ -945,3 +1365,4 @@ window.Runs = Runs;
     };
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(go, 0)); else setTimeout(go, 0);
 })();
+;(window.__RPV=window.__RPV||{})['runs.js']='1.0.4';

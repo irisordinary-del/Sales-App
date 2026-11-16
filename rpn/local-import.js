@@ -984,3 +984,4 @@ const SysImport = (() => {
     S.asDay = asDay;   // ให้โมดูลอื่นอ่านวันที่จาก Excel ด้วยกติกาเดียวกัน   // ให้ส่วนอื่นใช้ตัวแกะตัวเดียวกัน (multi-route ใช้หา "เดิม Dx")
     return S;
 })();
+;(window.__RPV=window.__RPV||{})['local-import.js']='1.0.4';

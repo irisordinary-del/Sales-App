@@ -102,10 +102,20 @@ const State = {
     // ครั้งแรกที่นำเข้าไฟล์ RoutePlan ระบบจะตั้งเลขศูนย์ให้เองจาก Distributor Code
     const params = new URLSearchParams(window.location.search);
     let _cid = (params.get('center') || '').trim();
+    // V1.0.4 (11 พ.ย. 2569 13:30): แพ็กเกจรายศูนย์ (package.js) เปิดมาเป็นศูนย์ของแพ็กเกจเสมอ
+    const _pkg = String(window.RPN_PKG || '').trim();
+    if (!_cid && _pkg && _pkg !== 'HQ') _cid = _pkg;
     if (!_cid) { try { _cid = localStorage.getItem('rpl:center') || ''; } catch (e) {} }
     window.CENTER_ID  = _cid || 'LOCAL';
     window.CENTER_DOC = window.CENTER_ID + '_main';
     try { localStorage.setItem('rpl:center', window.CENTER_ID); } catch (e) {}
+    // ป้ายชุดแพ็กเกจใต้โลโก้ + ชื่อแท็บ (เลขเวอร์ชันอยู่ในโปรแกรม ไม่อยู่ในชื่อไฟล์)
+    if (_pkg) document.addEventListener('DOMContentLoaded', () => {
+        const label = _pkg === 'HQ' ? 'HQ · ทุกศูนย์' : 'ชุดศูนย์ ' + _pkg;
+        const v = document.getElementById('app-version');
+        if (v) v.insertAdjacentHTML('beforeend', `<br><span style="display:inline-block;margin-top:2px;background:#4f46e5;color:#fff;border-radius:6px;padding:0 6px;font-weight:800">${label}</span>`);
+        document.title = document.title.replace(/^Route Planner/, 'Route Planner ' + _pkg);
+    });
 })();
 
 // ─── DateUtil — shared across all pages ──────────────────────────────────

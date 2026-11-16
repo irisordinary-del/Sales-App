@@ -111,8 +111,11 @@ const TasksApp = {
             const offOf = (cfg) => {
                 const s = new Set();
                 if (!cfg) return s;
-                const wk = cfg.weeklyHolidays || [], ad = cfg.anchorType === 'weekday-rolling' ? [] : (cfg.holidays || []);
-                for (let d = 1; d <= dim; d++) if (wk.includes(new Date(y, m - 1, d).getDay()) || ad.includes(d)) s.add(d);
+                const rolling = cfg.anchorType === 'weekday-rolling';
+                const wk = cfg.weeklyHolidays || [], ad = rolling ? [] : (cfg.holidays || []);
+                // RPN V1.0.4: วันทำงานพิเศษ (workDays) = วันหยุดประจำสัปดาห์ที่เดือนนี้ทำงาน (ไม่ใช้กับ weekday-rolling — ตรงกับ wkOff ใน rpn/runs.js)
+                const work = rolling ? [] : (cfg.workDays || []).map(Number);
+                for (let d = 1; d <= dim; d++) if ((wk.includes(new Date(y, m - 1, d).getDay()) && !work.includes(d)) || ad.includes(d)) s.add(d);
                 return s;
             };
             let all = null, n = 0;

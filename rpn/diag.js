@@ -116,3 +116,4 @@
 
     window.Diag = { step, log: () => ring.slice(), prev: () => prevLog.slice(), abnormal, flush };
 })();
+;(window.__RPV=window.__RPV||{})['diag.js']='1.0.4';

@@ -232,3 +232,4 @@
     const boot = () => { if (!B.wire()) setTimeout(boot, 500); };
     boot();
 })();
+;(window.__RPV=window.__RPV||{})['basemap.js']='1.0.4';

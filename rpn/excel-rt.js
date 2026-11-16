@@ -439,3 +439,4 @@
     window.ExcelRT = { export: exportFile, pick, readFile, apply, close, _analyze: analyze, _plan: () => PLAN };
 
 })();
+;(window.__RPV=window.__RPV||{})['excel-rt.js']='1.0.4';

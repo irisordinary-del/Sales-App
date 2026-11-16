@@ -305,3 +305,4 @@
         },
     };
 })();
+;(window.__RPV=window.__RPV||{})['basemap-draw.js']='1.0.4';

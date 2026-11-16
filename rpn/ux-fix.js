@@ -76,7 +76,7 @@
                 .map(([r, l]) => `   ${r} : ${l.length} ร้าน`).join('\n');
             const ok = await new Promise(r => UI.showConfirm(
                 `ย้ายร้านรอจัดสาย ${n} ร้าน เข้าสายตาม Salesman Code ในไฟล์ Master\n\n${lines}\n\n` +
-                `ร้านที่ย้ายยังไม่ได้จัดวัน ต้องจัดวันต่อเอง`,
+                `ร้านที่ย้ายยังไม่ได้จัดวัน — ถัดไประบบจะแนะนำวันให้ (กล่อง 💡 ในรายการรอจัดวัน)`,
                 () => r(true), () => r(false)));
             if (!ok) return;
 
@@ -116,7 +116,8 @@
                 if (typeof MultiRoute !== 'undefined') {
                     MultiRoute.setOpen([...new Set([...(MultiRoute.open || []), ...targets])]);
                 } else { UI.render(); }
-                UI.showSaveToast(`🔀 ย้ายแล้ว ${n} ร้าน เข้า ${targets.length} สาย — ยังไม่ได้จัดวัน`);
+                UI.showSaveToast(`🔀 ย้ายแล้ว ${n} ร้าน เข้า ${targets.length} สาย — 💡 ดูคำแนะนำวันในรายการรอจัดวัน`);
+                setTimeout(() => { try { if (window.Tabs) Tabs.show('wait'); if (window.SuggestDay) SuggestDay.paint(); } catch (e) {} }, 600);
             } catch (e) {
                 UI.hideLoader();
                 UI.showErrorToast('❌ ย้ายไม่สำเร็จ: ' + (e && e.message));
@@ -282,3 +283,4 @@
 
     document.addEventListener('DOMContentLoaded', () => { setTimeout(wire, 500); setTimeout(wireLasso, 800); });
 })();
+;(window.__RPV=window.__RPV||{})['ux-fix.js']='1.0.4';

@@ -79,7 +79,7 @@
         const seen = new Set(), out = [];
         let last = null, wrap = false;
         for (let d = 1; d <= dim; d++) {
-            const hol = (CA._holidays || []).includes(d) || (CA._weeklyHolidays || []).includes(new Date(y, m - 1, d).getDay());
+            const hol = (CA._holidays || []).includes(d) || (CA._isWkOff ? CA._isWkOff(d) : (CA._weeklyHolidays || []).includes(new Date(y, m - 1, d).getDay()));
             if (hol) continue;
             let lb = null; try { lb = CA._computeDayLabel(d); } catch (e) {}
             if (!lb) continue;
@@ -278,14 +278,20 @@
         tick(name, on) {
             if (on) S.ticked.add(name); else S.ticked.delete(name);
             // ตัวโหลด/ตัวบันทึกเดิมใช้สายเดียว — ให้ตัวแรกที่ติ๊กเป็นตัวแทน
+            const prev = CalendarAdmin._targetRoute || '';
             CalendarAdmin._targetRoute = [...S.ticked][0] || '';
+            // V1.0.1 (HQ ข1): สายตัวแทนเปลี่ยน → โหลดปฏิทินของสายนั้นมาแสดงในฟอร์ม
+            //   เดิมฟอร์มยังเป็นค่าของศูนย์ กดบันทึกแล้วค่าศูนย์ไปทับปฏิทินของสาย
+            if (CalendarAdmin._targetRoute !== prev) CalendarAdmin._loadConfig();
             paintTarget();
         },
         tickAll(on) {
             const names = (State.db.routeList || Object.keys(State.db.routes || {}))
                 .filter(r => r && r !== 'รอจัดสาย');
             S.ticked = on ? new Set(names) : new Set();
+            const prev = CalendarAdmin._targetRoute || '';
             CalendarAdmin._targetRoute = [...S.ticked][0] || '';
+            if (CalendarAdmin._targetRoute !== prev) CalendarAdmin._loadConfig();      // V1.0.1 (HQ ข1)
             paintTarget();
         },
         async edit(name) {
@@ -339,7 +345,8 @@
         };
         wrap('open', () => { S.perRoute = false; S.ticked.clear(); trimOptions(); paintTarget(); loadOverrides(); paintHolidayMode(); paintTotals(); paintNewMonth(); });
         wrap('close', () => { S.newMonth = ''; paintNewMonth(); });
-        wrap('shiftMonth', paintNewMonth);
+        // V1.0.1 (HQ ข2): เลื่อนเดือนด้วยลูกศร → โหลดป้าย "ตั้งค่าแล้ว" ของเดือนใหม่ด้วย
+        wrap('shiftMonth', () => { paintNewMonth(); loadOverrides(); });
         wrap('_loadConfig', () => { trimOptions(); paintTarget(); paintHolidayMode(); paintTotals(); });
         wrap('_renderPreview', () => { paintHolidayMode(); paintTotals(); });
         wrap('setMode', trimOptions);
@@ -366,3 +373,4 @@
     };
     document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 900));
 })();
+;(window.__RPV=window.__RPV||{})['cal-ui.js']='1.0.4';

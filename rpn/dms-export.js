@@ -83,6 +83,7 @@ const DmsExport = (() => {
     const ymdS = (d) => d ? d.getFullYear() + '/' + String(d.getMonth() + 1).padStart(2, '0') + '/' + String(d.getDate()).padStart(2, '0') : '';
 
     const D = {
+        DESC_MAX: 50,                       // V1.0.4: Cycle route description (nv50)
         _endDate: '',       // '' = แยกรายสาย (วันสุดท้ายที่สายนั้นมีแผน) · มีค่า = ผู้ใช้ตั้งวันเดียวทั้งศูนย์ (ของเดือน _endYM เท่านั้น)
         _endYM: '',
         _cyStart: null,     // เลข CY ตัวแรกที่ผู้ใช้แก้เอง (ของเดือน _cyYM เท่านั้น)
@@ -194,16 +195,19 @@ const DmsExport = (() => {
                     const baseN = dayNum(p.base);
                     const market = RoadMaster.marketName(rt, p.day, list) || RoadMaster.marketName(rt, p.base, list);
                     const split = nOf[p.base] > 1;
+                    // V1.0.4: ชื่อ CY ไม่ต่อท้าย (ครั้งN) แล้ว — DMS รับชื่อซ้ำได้ · ยาวรวมไม่เกิน 50 ตัวอักษร (nv50) เกินตัดท้าย
+                    const full = `${rt}D${pad2(baseN)}${market || ''}`;
                     out.push({
                         dist: D.distCode(rt), route: rt, day: p.day, base: p.base, n: baseN, k: p.k,
                         market,
-                        // ติดกันไม่เว้นวรรค ตามไฟล์ DMS ต้นแบบ · ตลาดที่แตกหลาย CY ต่อท้ายด้วยครั้งที่
-                        desc: `${rt}D${pad2(baseN)}${market || ''}` + (split ? `(ครั้ง${p.k})` : ''),
+                        // ติดกันไม่เว้นวรรค ตามไฟล์ DMS ต้นแบบ
+                        desc: full.length > D.DESC_MAX ? full.slice(0, D.DESC_MAX) : full, cut: full.length > D.DESC_MAX ? full : '',
                         date: p.date, dates: p.dates, vf: p.vf,
                         visits: p.dates.length, split, orphan: !!p.orphan, merged: p.merged || [], pairs: p.pairs || [],
                         stores: arr, cy: '',
-                        start: RoadMaster.startOf(rt, p.day, list),
-                        end: RoadMaster.endOf(rt, p.day),
+                        // V1.0.3: จุดเฉพาะครั้ง (รอบสั้น) คิดตามวันที่ของ CY นี้ — CY แบบ 5 ทุกครั้งใช้จุดเดียวกันอยู่แล้ว (Runs ไม่รวมถ้าจุดต่างกัน)
+                        start: RoadMaster.startOf(rt, p.day, list, p.date ? RoadMaster._iso(p.date) : ''),
+                        end: RoadMaster.endOf(rt, p.day, p.date ? RoadMaster._iso(p.date) : ''),
                     });
                 });
             });
@@ -222,6 +226,11 @@ const DmsExport = (() => {
         async cyBase() {
             const cur = App._currentPlanYM || '';
             let mx = 0, from = '';
+            // V1.0.3: เดือนนี้เคยส่งออกแล้ว → ใช้เลขชุดเดิม (กดส่งออกซ้ำได้เลขเดิม)
+            try {
+                const pd = (await App.planRef(cur).get()).data() || {};
+                if (pd.cyRun && D._num(pd.cyRun.first) > 0) return { mx: D._num(pd.cyRun.first) - 1, from: 'ส่งออกเดือนนี้ครั้งก่อน' };
+            } catch (e) {}
             try {
                 const snap = await App.plansCol().get();
                 const ids = (snap.docs || []).map(d => d.id).filter(id => id && id < cur).sort().reverse();
@@ -236,13 +245,15 @@ const DmsExport = (() => {
                 }
             } catch (e) { console.warn('[DmsExport] cyBase', e); }
             if (!mx) {
-                // ไม่มีเดือนก่อนในเครื่อง — ใช้เลขต่ำสุดของเดือนนี้ (ส่งออกซ้ำได้เลขเดิม) หรือเลขสูงสุดที่ระบบเคยเห็น
-                let mn = Infinity;
+                // ไม่มีเดือนก่อนในเครื่อง (เช่น นำเข้าไฟล์ RoutePlan ของเดือนนี้มาทำแผนตรง ๆ)
+                // V1.0.3: เลข CY ในเดือนนี้ = เลขที่ DMS ใช้อยู่แล้ว (มาจากไฟล์ที่นำเข้า) → ออกเลขต่อจากเลขสูงสุด
+                //   เดิมเริ่มที่ "เลขต่ำสุดของเดือนนี้" → ได้เลขซ้ำกับ CY ที่มีอยู่ใน DMS และเลื่อนไม่ตรงตลาดเดิม (เคส 301 พ.ย.)
+                let m = D._num(State.db.maxCycleCode);
                 Object.values(State.db.routes || {}).forEach(list => (list || []).forEach(s => {
-                    Object.values(s.cys || {}).forEach(v => { const k = D._num(v); if (k > 0 && k < mn) mn = k; });
+                    m = Math.max(m, D._num(s.cy));
+                    Object.values(s.cys || {}).forEach(v => { m = Math.max(m, D._num(v)); });
                 }));
-                if (isFinite(mn)) { mx = mn - 1; from = 'เดือนนี้'; }
-                else { mx = D._num(State.db.maxCycleCode); from = mx ? 'เลขสูงสุดที่ระบบเคยเห็น' : ''; }
+                if (m > 0) { mx = m; from = 'เลขสูงสุดที่ระบบเคยเห็น'; }
             }
             return { mx, from };
         },
@@ -263,6 +274,10 @@ const DmsExport = (() => {
             const noDt = rows.filter(r => !r.date).length;
             const noSeq = rows.reduce((t, r) => t + r.stores.filter(s => !(s.seqs && s.seqs[r.day])).length, 0);
             if (noMk) out.push(`${noMk} CY ยังไม่มีชื่อตลาด — คอลัมน์ Cycle route description จะไม่ครบ`);
+            const cut = [...new Map(rows.filter(r => r.cut).map(r => [r.route + '|' + r.n, r])).values()];
+            if (cut.length) out.push(`${cut.length} ตลาดชื่อยาวเกิน ${D.DESC_MAX} ตัวอักษร — ตัดท้ายให้ในไฟล์: `
+                + cut.slice(0, 8).map(r => `${r.route} D${pad2(r.n)} "${r.market}" → ${r.desc}`).join(' · ') + (cut.length > 8 ? ' …' : '')
+                + ' · แก้ชื่อให้สั้นลงได้ที่หัวตลาด (ช่องชื่อตลาด)');
             if (noDt) out.push(`${noDt} CY คำนวณวันที่ไม่ได้ — ตรวจปฏิทินของแผนนี้`);
             else if (!D.calSet()) out.push('ยังไม่ได้ตั้งปฏิทินของแผนนี้ — ระบบใช้กติกา Day N = วันที่ N ของเดือนไปก่อน (ไม่ข้ามวันหยุด) ตั้งได้ที่ปุ่มปฏิทินในหน้าจัดสาย');
             if (noSeq) out.push(`${noSeq} ร้านยังไม่มีลำดับคิว — เปิดการ์ดวันในแท็บสรุปแล้วกด "🔢 จัดลำดับจากพิกัด"`);
@@ -284,6 +299,16 @@ const DmsExport = (() => {
                 const nr = [];
                 [...new Set(rows.map(r => r.route))].forEach(rt => (Runs.pairCheck(rt).near || []).forEach(x => nr.push(rt + ' ' + x.a.replace('Day ', 'D') + '+' + x.b.replace('Day ', 'D') + ' (' + x.why + ')')));
                 if (nr.length) out.push(`${nr.length} คู่ตลาดเกือบรวมเป็น CY เดียวได้ (เงื่อนไข: ร้าน+ลำดับเหมือนกัน · ห่าง 14 วันพอดี · ไม่มีครั้งถัดไปก่อน End date) — ตอนนี้ส่งออกแยกเป็นแบบ 9: ${nr.slice(0, 4).join(' · ')}${nr.length > 4 ? ' …' : ''}`);
+            } catch (e) {}
+            // V1.0.4 (11 พ.ย. 2569 11:10): จุดเริ่ม/จุดจบห่างร้านเกิน 80 กม. — แค่เตือน ไม่ห้าม Export
+            try {
+                if (typeof RoadMaster !== 'undefined' && RoadMaster.farList) {
+                    const far = RoadMaster.farList([...new Set(rows.map(r => r.route))]);
+                    if (far.length) out.push(`จุดเริ่ม/จุดจบห่างร้านเกิน ${RoadMaster.FAR_KM} กม. ${far.length} ตลาด: `
+                        + far.slice(0, 10).map(f => `${f.route} ${f.day.replace('Day ', 'D')} (`
+                            + [f.outKm != null ? `ขาออก ${f.outKm}` : '', f.backKm != null ? `ขากลับ ${f.backKm}` : ''].filter(Boolean).join(' · ') + ' กม.)').join(' · ')
+                        + (far.length > 10 ? ' …' : '') + ' — เช็คว่าปักจุดถูกที่ไหม (แท็บ 4)');
+                }
             } catch (e) {}
             const orphan = rows.filter(r => r.orphan).length;
             if (orphan) out.push(`${orphan} ครั้งที่แยกไว้ ไม่ตรงกับครั้งของตลาดเดิมแล้ว (ปฏิทินเปลี่ยน) — ส่งออกเป็น CY แบบ 9 ตามวันที่ของมันเอง`);
@@ -368,7 +393,8 @@ const DmsExport = (() => {
                     <span class="text-xs font-mono text-gray-700">${esc(rows[0].cy)} – ${esc(rows[rows.length - 1].cy)}</span>
                 </div>
                 <p class="text-[10px] text-gray-400 mb-3 leading-snug">
-                    ${base.mx ? `ต่อจาก ${esc(D._fmtCY(base.mx))} (CY ล่าสุดของ${base.from === 'เดือนนี้' || base.from === 'เลขสูงสุดที่ระบบเคยเห็น' ? esc(base.from) : 'แผนเดือน ' + esc(base.from)})`
+                    ${base.from === 'ส่งออกเดือนนี้ครั้งก่อน' ? `เดือนนี้เคยส่งออกแล้ว — ใช้เลขชุดเดิม (เริ่ม ${esc(D._fmtCY(base.mx + 1))})`
+                      : base.mx ? `ต่อจาก ${esc(D._fmtCY(base.mx))} (${base.from === 'เลขสูงสุดที่ระบบเคยเห็น' ? 'CY สูงสุดที่ระบบเคยเห็น รวมเลขในไฟล์ RoutePlan ที่นำเข้า' : 'CY ล่าสุดของแผนเดือน ' + esc(base.from)})`
                               : 'ไม่พบเลข CY ของเดือนก่อนในเครื่อง — ใส่เลขตัวแรกเองให้ตรงกับ DMS'}
                     · ออกเลขใหม่ทั้งเดือน เรียงสาย → วันเข้าเยี่ยม · กดส่งออกซ้ำได้เลขเดิม</p>
 
@@ -472,7 +498,10 @@ const DmsExport = (() => {
                 if (c0 && s.cy !== c0) { s.cy = c0; touched.add(rt); }
             }));
             const last = rows.length ? D._num(rows[rows.length - 1].cy) : 0;
+            const firstN = rows.length ? D._num(rows[0].cy) : 0;
             try {
+                // V1.0.3: จำชุดเลขที่ส่งออกของเดือนนี้ — ส่งออกซ้ำได้เลขเดิม
+                if (firstN) await App.planRef(App._currentPlanYM).set({ cyRun: { first: firstN, last, at: new Date().toISOString() } }, { merge: true });
                 await Promise.all([...touched].filter(rt => Array.isArray(R[rt])).map(rt =>
                     App.planRoutesCol(App._currentPlanYM).doc(rt).set({ stores: R[rt] }, { merge: true })));
                 if (last > D._num(State.db.maxCycleCode)) {
@@ -484,6 +513,9 @@ const DmsExport = (() => {
 
         // ── สร้างไฟล์ ────────────────────────────────────────────────────
         run() {
+            // V1.0.3: สายยังโหลดไม่ครบ = ไฟล์ขาดสาย — รอก่อน
+            const pend = (State.db.routeList || []).filter(r => r && r !== 'รอจัดสาย' && !Array.isArray((State.db.routes || {})[r]));
+            if (pend.length) return UI.showErrorToast(`⏳ ยังโหลดสายไม่ครบ (${pend.length} สาย) — รอสักครู่แล้วกดส่งออกอีกครั้ง`);
             if (window.GeoTree && GeoTree.blocked()) {
                 return UI.showErrorToast(`⚠️ มี ${GeoTree.pre().length} ร้านย้ายเซลล์ — นำเข้า CUSTOMER_GEO_TREE ก่อนส่งออก`);
             }
@@ -513,7 +545,8 @@ const DmsExport = (() => {
 
                     // 1) ROUTE_PLAN_CYCLEROUTE — 1 แถว = 1 CY (จัดกลุ่มตามหลักใน runs.js)
                     //   แบบ 5 (Fortnightly) → Visit Week = สัปดาห์คี่/คู่นับจากต้นปี (1/2), ติด Y ที่วันในสัปดาห์ของ Start date
-                    //   แบบ 9 (Monthly)     → Visit Week 0, ไม่ติดธงวัน · ทุกแถว Visit Day of Month = วันที่ของ Start date
+                    //   แบบ 9 (Monthly)     → Visit Week 0, ไม่ติดธงวัน · Visit Day of Month = วันที่ของ Start date
+                    //   V1.0.3: แบบ 5 → Visit Day of Month ว่าง (ใช้ Visit Week + ธงวันแทน)
                     const a1 = [H_CYCLE];
                     rows.forEach(r => {
                         const fort = String(r.vf) === '5';
@@ -524,7 +557,7 @@ const DmsExport = (() => {
                             1, numOr(r.vf), fort ? D.weekParity(r.date) : 0,
                             ymdS(r.date), ymdS(endOf(r.route)),
                             ...wd,
-                            '', r.date ? r.date.getDate() : '',
+                            '', (!fort && r.date) ? r.date.getDate() : '',
                         ]);
                     });
                     // 2) ROUTE_PLAN_CUSTLIST
@@ -532,7 +565,7 @@ const DmsExport = (() => {
                     rows.forEach(r => r.stores.forEach(s => {
                         a2.push([numOr(r.dist), r.cy, numOr(s.code || s.id), (s.seqs && s.seqs[r.day]) || '']);
                     }));
-                    // 3–4) GEO_TREE_END / START — เฉพาะร้านที่ย้ายเซลล์ (ถ้านำเข้า Geo Tree ไว้)
+                    // 3–4) CUSTOMER_GEO_TREE_END / START — เฉพาะร้านที่ย้ายเซลล์ (V1.0.4: ร้านใหม่ไม่ใส่ START) (ถ้านำเข้า Geo Tree ไว้)
                     const geo = window.GeoTree ? GeoTree.files() : [];
                     const files = [
                         { name: 'ROUTE_PLAN_CYCLEROUTE.csv', data: tsvBytes(a1) },
@@ -563,3 +596,4 @@ const DmsExport = (() => {
 
     return D;
 })();
+;(window.__RPV=window.__RPV||{})['dms-export.js']='1.0.4';

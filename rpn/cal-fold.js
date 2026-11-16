@@ -295,3 +295,4 @@ const CalFold = (() => {
     return { check, apply, open, close, confirm, toggleLong };
 })();
 window.CalFold = CalFold;
+;(window.__RPV=window.__RPV||{})['cal-fold.js']='1.0.4';

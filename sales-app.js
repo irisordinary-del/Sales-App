@@ -903,10 +903,12 @@ const RpnCompat = {
     // rpnCal ใช้ได้ก็ต่อเมื่อคำนวณจากปฏิทินเดียวกับที่สายนี้ตั้งอยู่ตอนนี้ (ตั้งปฏิทินใหม่แล้ว RPN ยังไม่ได้คำนวณ
     // วันที่ใหม่ = ใช้ตัวคำนวณปฏิทินของแอปนี้แทน) · rpnCal รุ่นเก่าที่ไม่มี cfg ใช้ไม่ได้ (บอกไม่ได้ว่าตรงไหม)
     _CFG_KEYS: ['mode', 'cycleDays', 'anchorType', 'startDay', 'startDayNum', 'anchorWeekday', 'anchorDate',
-        'anchorDayNum', 'holidays', 'weeklyHolidays', 'holidayMode', 'mapping', 'weekdayMap'],
+        'anchorDayNum', 'holidays', 'weeklyHolidays', 'holidayMode', 'mapping', 'weekdayMap', 'workDays'],   // workDays: RPN V1.0.4 — ต้องตรงกับ rpn-online.js
     cfgSig: (c) => {
         c = c || {};
-        return RpnCompat.hash(JSON.stringify(RpnCompat._CFG_KEYS.map(k => {
+        // workDays (ตัวท้ายสุด) นับเฉพาะเมื่อมีค่า — ปฏิทินที่ไม่มีวันทำงานพิเศษได้ลายนิ้วมือเท่าเดิม (rpnCal เดิมยังใช้ได้)
+        const keys = (c.workDays || []).length ? RpnCompat._CFG_KEYS : RpnCompat._CFG_KEYS.filter(k => k !== 'workDays');
+        return RpnCompat.hash(JSON.stringify(keys.map(k => {
             let v = c[k];
             if (k === 'holidayMode' && !v) v = 'shift';
             if (Array.isArray(v)) v = v.map(Number).sort((a, b) => a - b);
@@ -2410,7 +2412,10 @@ const CalendarCtrl = {
     // default) เท่านั้น ถ้าเป็น 'skip' (ตรึงตลาด) วันหยุดเฉพาะกิจจะยังนับเข้ารอบตามปกติ (ดู
     // _isCyclePinnedHoliday ด้านล่าง — ใช้คู่กันเพื่อให้ตลาดวันอื่นไม่ขยับ มีแค่วันนั้นวันเดียวที่ไม่วิ่ง)
     _isCycleHoliday: (cfg, year, month, d) => {
-        if ((cfg.weeklyHolidays || []).includes(new Date(year, month, d).getDay())) return true;
+        // ✅ RPN V1.0.4 (2026-11-16): "วันทำงานพิเศษ" (workDays = เลขวันที่ของเดือนนี้) ยกเว้นวันหยุดประจำสัปดาห์
+        // เช่น หยุดอาทิตย์ แต่อาทิตย์ 27 ทำงาน — ตรงกับ wkOff ใน rpn/runs.js
+        if ((cfg.weeklyHolidays || []).includes(new Date(year, month, d).getDay())
+            && !(cfg.anchorType !== 'weekday-rolling' && (cfg.workDays || []).map(Number).includes(d))) return true;
         if ((cfg.holidays || []).includes(d)) return (cfg.holidayMode || 'shift') !== 'skip';
         return false;
     },

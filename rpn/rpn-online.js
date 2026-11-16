@@ -18,6 +18,18 @@
         console.log(msg);
     };
 
+    // ── 0) เลขเวอร์ชันของไฟล์ฝั่งเรา (2026-11-16, RPN V1.0.4) ────────────────────
+    // app-checks.js ของ RPN (V1.0.3+) ตรวจทุก <script src> ว่ามี __RPV ตรงกับเวอร์ชันโปรแกรม ไม่ตรง = ขึ้นแดง
+    // "ไฟล์โปรแกรมไม่ครบ อย่าเพิ่งแก้แผน" · ไฟล์ของเรา (auth/plan-lock/rpn-online*) ไม่ใช่ไฟล์ของ RPN จึงประทับเลขเดียวกันให้
+    // (checkFiles ทำงานหลังโหลด 2.5 วิ — ไฟล์นี้โหลดท้ายสุดแบบ synchronous จึงทันเสมอ)
+    try {
+        const V = (window.AppChecks && AppChecks.VER) || '';
+        if (V) {
+            const st = window.__RPV = window.__RPV || {};
+            ['auth.js', 'plan-lock.js', 'rpn-online-pre.js', 'rpn-online.js'].forEach(f => { if (!st[f]) st[f] = V; });
+        }
+    } catch (e) {}
+
     // ── 1) LocalExtras (เท่าที่โมดูลอื่นเรียกใช้) ─────────────────────────────
     const distCode = (route) => {
         const rd = (typeof State !== 'undefined' && State.db && State.db.routeDist) || {};
@@ -95,10 +107,13 @@
     // ปัจจุบันของสายก่อนใช้ rpnCal · เคยค้าง: ตั้งปฏิทิน 402C02 พ.ย. ตอน RPN เปิดเดือนอื่นอยู่ (reconcile คำนวณ
     // ใหม่แค่เดือนที่เปิด) แอปเซลจึงยังใช้วันที่ชุดเก่าเพราะร้านไม่เปลี่ยน sig เลยตรง — ต้องตรงกับ RpnCompat.cfgSig
     const CFG_KEYS = ['mode', 'cycleDays', 'anchorType', 'startDay', 'startDayNum', 'anchorWeekday', 'anchorDate',
-        'anchorDayNum', 'holidays', 'weeklyHolidays', 'holidayMode', 'mapping', 'weekdayMap'];
+        'anchorDayNum', 'holidays', 'weeklyHolidays', 'holidayMode', 'mapping', 'weekdayMap',
+        'workDays'];   // ✅ (2026-11-16) RPN V1.0.4 "วันทำงานพิเศษ" — แก้แค่ช่องนี้วันที่ก็เปลี่ยน · ต้องตรงกับ RpnCompat._CFG_KEYS (sales-app.js)
     const cfgSig = (c) => {
         c = c || {};
-        return hash(JSON.stringify(CFG_KEYS.map(k => {
+        // workDays (ตัวท้ายสุด) นับเฉพาะเมื่อมีค่า — ปฏิทินที่ไม่มีวันทำงานพิเศษได้ลายนิ้วมือเท่าเดิม (rpnCal เดิมยังใช้ได้)
+        const keys = (c.workDays || []).length ? CFG_KEYS : CFG_KEYS.filter(k => k !== 'workDays');
+        return hash(JSON.stringify(keys.map(k => {
             let v = c[k];
             if (k === 'holidayMode' && !v) v = 'shift';
             if (Array.isArray(v)) v = v.map(Number).sort((a, b) => a - b);
@@ -792,8 +807,15 @@
             return order.sort((a, b) => c[b] - c[a]);
         };
         const digits = String(day).replace(/[^0-9]/g, '');
-        return [route, digits ? 'D' + digits.padStart(2, '0') : '', ...rank('subDistrict').slice(0, 2),
-            rank('district')[0] || '', rank('province')[0] || ''].filter(Boolean).join(' ');
+        const parts = [route, digits ? 'D' + digits.padStart(2, '0') : '', ...rank('subDistrict').slice(0, 2),
+            rank('district')[0] || '', rank('province')[0] || ''].filter(Boolean);
+        // ✅ (2026-11-16) RPN V1.0.4: ชื่อ Cycle ใน DMS (สาย + D + เลข 2 หลัก + ชื่อตลาด) ไม่เกิน 50 ตัวอักษร
+        // ช่องชื่อตลาดของ RPN ล็อกไว้ที่ RoadMaster.nameMax(สาย) → ตัดคำท้ายออกทีละคำจนพอดี (ไม่ตัดกลางคำ)
+        let max = 0;
+        try { max = (RoadMaster && RoadMaster.nameMax) ? RoadMaster.nameMax(route) : 0; } catch (e) {}
+        while (max && parts.length > 1 && parts.join(' ').length > max) parts.pop();
+        const out = parts.join(' ');
+        return max && out.length > max ? out.slice(0, max) : out;
     };
     const escH = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const LEGACY = '__legacy__';
@@ -871,8 +893,12 @@
     // (2026-10-10, 402C02 พ.ย.) ① ติ๊กสายในโหมด "เลือกเฉพาะสาย" ไม่โหลดปฏิทินของสายนั้น (มีแต่ปุ่ม "แก้ไข" ที่โหลด)
     // ฟอร์มยังเป็นค่าของศูนย์ → เห็นเหมือนค่าที่ตั้งไว้หาย และถ้ากดบันทึกก็เขียนค่าศูนย์ทับของสาย
     // ② เลื่อนเดือนด้วยลูกศร ป้าย "✓ ตั้งค่าแล้ว" ยังเป็นของเดือนที่เปิด modal (loadOverrides ของ cal-ui โหลดตอน open เท่านั้น)
+    // ✅ (2026-11-16) ส่วนกลางแก้ทั้ง 2 ข้อแล้วใน V1.0.1 (HQ ข1 · ข2 — cal-ui.js tick เรียก _loadConfig เอง, shiftMonth โหลด override เอง)
+    // → RPN ≥ 1.0.1 ไม่ครอบซ้ำ (ครอบซ้ำ = โหลดฟอร์มสองรอบพร้อมกัน) · เก็บโค้ดไว้เผื่อย้อนกลับไปใช้เวอร์ชันเก่า
+    const hqFixedCal = () => { const v = (window.AppChecks && AppChecks.VER) || ''; return !!v && v.localeCompare('1.0.1', undefined, { numeric: true }) >= 0; };
     const wireCal = () => {
         if (typeof CalendarAdmin === 'undefined' || !window.CalUI || !CalendarAdmin._calUiWired) return false;
+        if (hqFixedCal()) return true;
         if (CalendarAdmin._rpnOnlineWired) return true;
         CalendarAdmin._rpnOnlineWired = true;
         const S = CalUI._state;

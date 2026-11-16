@@ -244,3 +244,4 @@
 
     window.MarketSuggest = { basic, community, mismatch, use, bulk, bulkAll, bulkApply, closeBulk, _places: places };
 })();
+;(window.__RPV=window.__RPV||{})['market-suggest.js']='1.0.4';

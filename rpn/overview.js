@@ -128,17 +128,20 @@
      * วันหยุดที่จะโชว์บนปฏิทิน — ต้องเป็นวันหยุด "ของทุกสายในขอบเขตที่ดูอยู่" เท่านั้น
      * (ถ้าดูทุกสายรวม แล้วมีแค่สายเดียวที่หยุดวันนั้น สายอื่นยังวิ่ง ไม่ใช่วันหยุดของศูนย์)
      */
+    /** V1.0.4: วันทำงานพิเศษ (วันหยุดประจำสัปดาห์ที่เดือนนี้ทำงาน) */
+    const wxOf = (c) => (c && c.anchorType !== 'weekday-rolling' ? (c.workDays || []).map(Number) : []);
     const holidayInfo = () => {
         const rs = scopeRoutes();
         const cfgs = rs.map(rt => (State.db.routeCal || {})[rt]).filter(Boolean);
         if (!cfgs.length) {
             const c = State.db.calendarConfig || {};
-            return { weekly: c.weeklyHolidays || [], adhoc: c.holidays || [] };
+            return { weekly: c.weeklyHolidays || [], adhoc: c.holidays || [], work: wxOf(c) };
         }
         const inter = (arrs) => arrs.reduce((a, b) => a.filter(x => b.includes(x)));
         return {
             weekly: inter(cfgs.map(c => c.weeklyHolidays || [])),
             adhoc: inter(cfgs.map(c => c.holidays || [])),
+            work: [...new Set([].concat(...cfgs.map(wxOf)))],      // V1.0.4: สายไหนทำงานพิเศษวันนั้น = ไม่ใช่วันหยุดของทุกสาย
         };
     };
 
@@ -158,7 +161,10 @@
             Object.values(cells).forEach(list => new Set(list.map(x => x.route)).forEach(rt => { wdOf[rt] = (wdOf[rt] || 0) + 1; }));
         } catch (e) {}
         const park = (State.db.routes[UNASSIGNED] || []).filter(s => !s.inactive).length;
-        return { rows, ...t, calDays, wdOf, park, base: t.cover + t.noDay + (scope === '__all' ? park : 0) };
+        // V1.0.3: วันทำงานรวม = เฉลี่ยวันทำงานของแต่ละสาย (วันหยุดแต่ละสายไม่ตรงกัน)
+        const wdl = rs.map(rt => wdOf[rt] || 0).filter(v => v > 0);
+        const wdAvg = wdl.length ? wdl.reduce((a, v) => a + v, 0) / wdl.length : 0;
+        return { rows, ...t, calDays, wdOf, wdAvg, park, base: t.cover + t.noDay + (scope === '__all' ? park : 0) };
     };
 
     /** รายการที่ต้องแก้ (block = ต้องแก้ก่อนส่งออก) และข้อสังเกต (info) */
@@ -348,6 +354,38 @@
         } catch (e) { console.warn('[Overview.load]', e); }
 
         // ── ข้อสังเกต (ไม่บล็อกการส่งออก) ──
+        // V1.0.4: วันทำงานตามปฏิทินที่ยังไม่มีตลาดวิ่ง (ปฏิทินใหญ่สุด — ทุกวันทำงานควรมีตลาด)
+        try {
+            if (typeof Runs !== 'undefined' && Runs.emptyDates) {
+                const TM = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+                const hit = [];
+                rs.forEach(rt => { if (rt === UNASSIGNED) return; const e = Runs.emptyDates(rt); if (e.length) hit.push({ rt, e, one: Runs.singleRuns(rt).length }); });
+                if (hit.length) {
+                    const nd = hit.reduce((t, x) => t + x.e.length, 0);
+                    out.push({
+                        info: true,
+                        t: `${hit.length} สาย มีวันทำงานที่ยังไม่มีตลาด (รวม ${nd} วัน)`,
+                        s: hit.slice(0, 5).map(x => `${x.rt}: ${x.e.slice(0, 4).map(d => d.getDate()).join(', ')}${x.e.length > 4 ? '…' : ''} ${TM[x.e[0].getMonth()]}`).join(' · ') + (hit.length > 5 ? ' …' : '')
+                            + ' — รอบสั้น: เลือกวันว่างในช่อง Visit (แท็บ 2) เป็นตลาดใหม่ · รอบยาว: ตั้งตลาดที่ตก 2 วันที่ให้ "วิ่งทุกครั้ง" · หรือแก้ปฏิทิน · กดแล้วเปิดสายเหล่านี้',
+                        go: () => focus(hit.map(x => x.rt), []),
+                    });
+                }
+            }
+        } catch (e) { console.warn('[overview] empty days', e); }
+        // V1.0.4: ครั้งที่ตั้งวันที่เองไว้ — ชนะปฏิทิน ไม่ขยับตามเมื่อแก้ปฏิทิน
+        try {
+            if (typeof Runs !== 'undefined' && Runs.pinnedOf) {
+                const hit = [];
+                rs.forEach(rt => { if (rt === UNASSIGNED) return; const p = Runs.pinnedOf(rt); if (p.length) hit.push({ rt, n: p.length }); });
+                if (hit.length) out.push({
+                    info: true,
+                    t: `${hit.length} สาย มีครั้งที่ตั้งวันที่เองไว้ (${hit.reduce((t, x) => t + x.n, 0)} ครั้ง) — ไม่ขยับตามปฏิทิน`,
+                    s: hit.slice(0, 6).map(x => `${x.rt} ${x.n} ครั้ง`).join(' · ') + (hit.length > 6 ? ' …' : '')
+                        + ' — ถ้าจะให้วิ่งตามปฏิทิน กดปุ่มวันที่ที่หัวตลาด → 🔗 รวมกลับ (หรือบันทึกปฏิทินแล้วกด "รวมกลับทั้งหมด" ในหน้าสถานะ) · กดแล้วเปิดสายเหล่านี้',
+                    go: () => focus(hit.map(x => x.rt), []),
+                });
+            }
+        } catch (e) { console.warn('[overview] pinned', e); }
         // วันทำงานเดือนนี้มากกว่าความยาวรอบ → ช่องวันต้นรอบตก 2 วันที่ → เลือกได้ว่าวิ่ง 1 หรือ 2 ครั้ง
         try {
             if (typeof DmsExport !== 'undefined' && DmsExport.datesOf) {
@@ -399,7 +437,9 @@
             const wk = (c.weeklyHolidays || []).map(i => WDN[i]).join(' ') || 'ไม่มี';
             const ad = (c.holidays || []).length ? c.holidays.join(', ') : '—';
             const st = c.startDay ? `วันที่ ${c.startDay} = D${c.startDayNum || 1}` : (c.anchorType || '');
-            return `${st} · รอบ ${c.cycleDays || State.db.cycleDays || 24} วัน · หยุดประจำ: <b>${esc(wk)}</b> · หยุดเฉพาะกิจ: ${esc(ad)}`;
+            const wx = wxOf(c);
+            return `${st} · รอบ ${c.cycleDays || State.db.cycleDays || 24} วัน · หยุดประจำ: <b>${esc(wk)}</b> · หยุดเฉพาะกิจ: ${esc(ad)}`
+                + (wx.length ? ` · ทำงานพิเศษ: <b>${esc(wx.join(', '))}</b>` : '');
         };
         const rc = State.db.routeCal || {};
         const month = State.db.calendarConfig;
@@ -432,7 +472,7 @@
         for (let i = 0; i < lead; i++) html += '<div></div>';
         for (let d = 1; d <= last; d++) {
             const dt = new Date(p.y, p.m0, d);
-            const isWk = hol.weekly.includes(dt.getDay());
+            const isWk = hol.weekly.includes(dt.getDay()) && !(hol.work || []).includes(d);
             const isAd = hol.adhoc.includes(d);
             const list = cells[d] || [];
             const n = list.reduce((t, x) => t + x.n, 0);
@@ -465,7 +505,7 @@
     const isPVRoute = (rt) => /^\d{3}[PV]\d/i.test(String(rt || ''));
     const holOf = (rt) => {
         const c = (State.db.routeCal || {})[rt] || State.db.calendarConfig || {};
-        return { weekly: c.weeklyHolidays || [], adhoc: (c.holidays || []).map(Number) };
+        return { weekly: c.weeklyHolidays || [], adhoc: (c.holidays || []).map(Number), work: wxOf(c) };
     };
     // V0.9.10: ระยะทางของตลาด (สาย × ช่องวัน) ตามลำดับคิว — ตัวเดียวกับตัวเลข กม. ในหน้าต่างรายวัน
     //   missing = ยังไม่มีจุดเริ่มหรือจุดจบ (ระยะเป็นระหว่างร้านอย่างเดียว) → ช่องพื้นฟ้า
@@ -527,7 +567,7 @@
             let tot = 0, totK = 0, cellsH = '';
             for (let d = 1; d <= last; d++) {
                 const o = r[d], n = o ? o.n : 0;
-                const isHol = hol.weekly.includes(new Date(p.y, p.m0, d).getDay()) || hol.adhoc.includes(d);
+                const isHol = (hol.weekly.includes(new Date(p.y, p.m0, d).getDay()) && !hol.work.includes(d)) || hol.adhoc.includes(d);
                 let st = '', txt = '';
                 if (n) {
                     tot += n; colT[d] = (colT[d] || 0) + n;
@@ -622,7 +662,7 @@
                     (s.noDay + s.park) ? 'text-amber-600' : 'text-gray-300')}
               ${kpi('ครั้งเข้าเยี่ยม', s.visits.toLocaleString(), 'ทั้งเดือน (F2 นับ 2)', 'text-emerald-600')}
               ${kpi('Re-Visit', s.f2.toLocaleString(), 'ร้านที่ถูกเข้า ≥ 2 ครั้ง/เดือน', s.f2 ? 'text-red-600' : 'text-gray-300')}
-              ${kpi('วันทำงาน', s.calDays || '—', `วันที่มีการเข้าเยี่ยม · ${s.beats} ตลาด · ${freq} ครั้ง/ร้าน`)}
+              ${kpi('วันทำงาน', s.wdAvg ? (Number.isInteger(s.wdAvg) ? s.wdAvg : s.wdAvg.toFixed(2)) : '—', `เฉลี่ยต่อสาย · ${s.beats} ตลาด · ${freq} ครั้ง/ร้าน`)}
             </div>
 
             <div class="bg-white border border-gray-200 rounded-2xl p-3 shadow-sm">
@@ -723,9 +763,13 @@
      *    สายอื่น มีวัน              → ย้ายออก (สายเดิม) / ย้ายเข้า (สายใหม่)
      *    กองรอจัดสาย หรือยังไม่มีวัน → ย้ายออก (ยังไม่ได้ลงสาย/วันไหน)
      *    กองออกจากแผน / ไม่มีในข้อมูลแล้ว → Remove */
+    /** V1.0.3: สายในแผนเดือนนี้ที่ยังโหลดไม่เสร็จ (ยังไม่มีข้อมูลในหน่วยความจำ) */
+    const pendingRoutes = () => (State.db.routeList || []).filter(r => r && r !== UNASSIGNED && !Array.isArray((State.db.routes || {})[r]));
+    const isRA = (s) => !!(typeof NewStores !== 'undefined' && NewStores.oldOpen && NewStores.oldOpen(s));
     const compare = () => {
         const b = baseCache.data;
         if (!b) return null;
+        if (pendingRoutes().length) return null;      // V1.0.3: ยังโหลดไม่ครบ — ไม่เทียบ (เดิมนับสายที่ยังไม่มาเป็น Remove ทั้งสาย)
         const cur = {}, where = {};
         const all = (State.db.routes || {});
         Object.keys(all).forEach(rt => (all[rt] || []).forEach(s => {
@@ -734,7 +778,7 @@
             if (where[c] && where[c].st === 'plan') return;
             where[c] = { rt, s, st: s.inactive ? 'removed' : rt === UNASSIGNED ? 'parked' : 'noday' };
         }));
-        const z = () => ({ base: 0, inn: [], out: [], rem: [], nw: [] });
+        const z = () => ({ base: 0, inn: [], out: [], rem: [], nw: [], ra: [] });
         const by = {};
         const g = (rt) => by[rt] || (by[rt] = z());
         Object.entries(cur).forEach(([c, rt]) => {
@@ -742,7 +786,8 @@
             if (was === rt) return;
             const s = where[c].s;
             // V0.9.6: ย้ายเข้า = เดือนฐานอยู่ Route Code อื่นเท่านั้น · ไม่อยู่แผนเดือนฐาน (รวมร้านจากกองรอจัดสาย) = ร้านใหม่
-            if (!was) g(rt).nw.push({ c, s, from: b.seen.has(c) ? 'รอจัดสาย / ไม่อยู่แผนเดือนฐาน' : 'ไม่มีในเดือนฐาน', to: rt });
+            // V1.0.4: ร้านใหม่ที่เปิดบัญชีเกิน 60 วัน (ร้านเก่ากลับมา Active) → Re-Active แยกช่อง
+            if (!was) g(rt)[isRA(s) ? 'ra' : 'nw'].push({ c, s, from: b.seen.has(c) ? 'รอจัดสาย / ไม่อยู่แผนเดือนฐาน' : 'ไม่มีในเดือนฐาน', to: rt });
             else g(rt).inn.push({ c, s, from: was, to: rt });
         });
         Object.entries(b.route).forEach(([c, was]) => {
@@ -762,7 +807,7 @@
 
     // ── V0.7.5: กดตัวเลขในตาราง → รายชื่อร้านโผล่ใต้ตาราง + ปุ่มพาไปแก้ ──────────
     let det = null;                 // { kind, rt } · rt = '__total' คือแถว Grand Total
-    const KIND = { cover: 'Coverage', revisit: 'Re-Visit', inn: 'ย้ายเข้า', out: 'ย้ายออก', rem: 'Remove', nw: 'ร้านใหม่' };
+    const KIND = { cover: 'Coverage', revisit: 'Re-Visit', ra: 'Re-Active', inn: 'ย้ายเข้า', out: 'ย้ายออก', rem: 'Remove', nw: 'ร้านใหม่' };
     const visitsOf = (s) => { try { return (typeof Freq !== 'undefined' && Freq.visitsOf) ? Freq.visitsOf(s) : (s.days || []).length; } catch (e) { return (s.days || []).length; } };
     const planOf = (rt) => ((State.db.routes || {})[rt] || []).filter(s => s && !s.inactive && (s.days || []).length);
     const daysTxt = (days) => (days || []).slice().sort((a, b) => dayNum(a) - dayNum(b)).map(d => String(d).replace('Day ', 'D')).join('·');
@@ -782,7 +827,7 @@
                          || dayNum((a.s.days || [])[0]) - dayNum((b.s.days || [])[0]));
         window.__ovDet = { kind: k, items };
         const scopeTxt = det.rt === '__total' ? 'ทุกสายในตาราง' : 'สาย ' + det.rt;
-        const move = k === 'inn' || k === 'out' || k === 'rem' || k === 'nw';
+        const move = k === 'inn' || k === 'out' || k === 'rem' || k === 'nw' || k === 'ra';
         const canEdit = items.some(x => !x.gone);
         const btn = k === 'rem' ? (items.some(x => !x.gone && !x.toRt) ? `🗑️ เปิดกองออกจากแผน (เลือกไว้ ${items.filter(x => !x.gone && !x.toRt).length} ร้าน)` : `✏️ ไปจัดต่อในหน้าวางแผนคิวงาน (เลือกไว้ ${items.filter(x => !x.gone).length} ร้าน)`)
                                 : `✏️ ไปแก้ในหน้าวางแผนคิวงาน (เลือกไว้ ${items.length} ร้าน)`;
@@ -858,13 +903,14 @@
         };
         const ln = (x, k) => (x && x[k] ? x[k].length : 0);
         const cmpCells = (c, cover, rt, first) => {
-            if (!cmp) return `<td colspan="7" class="px-2 py-1 text-center text-[10px] text-gray-300">${baseCache.loading ? 'กำลังโหลด…' : '—'}</td>`;
-            const x = c || { base: 0, inn: [], out: [], rem: [], nw: [] };
+            if (!cmp) return `<td colspan="8" class="px-2 py-1 text-center text-[10px] text-gray-300">${(baseCache.loading || pendingRoutes().length) ? 'กำลังโหลด…' : '—'}</td>`;
+            const x = c || { base: 0, inn: [], out: [], rem: [], nw: [], ra: [] };
             const d = cover - x.base;
-            const ni = ln(x, 'inn'), no = ln(x, 'out'), nr = ln(x, 'rem'), nn = ln(x, 'nw');
+            const ni = ln(x, 'inn'), no = ln(x, 'out'), nr = ln(x, 'rem'), nn = ln(x, 'nw'), na = ln(x, 'ra');
             return cell(n(x.base), 'text-gray-500 border-l border-gray-200')
                 + cell(signed(d), d > 0 ? 'text-emerald-700 font-bold' : d < 0 ? 'text-red-600 font-bold' : 'text-gray-400')
                 + `<td class="px-2 py-1 text-left whitespace-nowrap">${match(d)}</td>`
+                + num(na, '+' + n(na), 'ra', rt, 'text-orange-700 font-bold')
                 + num(ni, '+' + n(ni), 'inn', rt, 'text-emerald-700')
                 + num(no, '−' + n(no), 'out', rt, 'text-amber-700')
                 + num(nr, '−' + n(nr), 'rem', rt, 'text-red-600')
@@ -873,23 +919,26 @@
         const T = list.reduce((a, r) => {
             a.cover += r.cover; a.visits += r.visits; a.f2 += r.f2;
             const c = cmp && cmp[r.rt];
-            if (c) { a.base += c.base; a.inn += ln(c, 'inn'); a.out += ln(c, 'out'); a.rem += ln(c, 'rem'); a.nw += ln(c, 'nw'); }
+            if (c) { a.base += c.base; a.inn += ln(c, 'inn'); a.out += ln(c, 'out'); a.rem += ln(c, 'rem'); a.nw += ln(c, 'nw'); a.ra += ln(c, 'ra'); }
             return a;
-        }, { cover: 0, visits: 0, f2: 0, base: 0, inn: 0, out: 0, rem: 0, nw: 0 });
-        const wdT = s.calDays || 0;
+        }, { cover: 0, visits: 0, f2: 0, base: 0, inn: 0, out: 0, rem: 0, nw: 0, ra: 0 });
+        // V1.0.3: Grand Total ของ Working Day = เฉลี่ยวันทำงานของสายในตาราง
+        const wdL = list.filter(r => !r.ghost).map(r => s.wdOf[r.rt] || 0).filter(v => v > 0);
+        const wdA = wdL.length ? wdL.reduce((a, v) => a + v, 0) / wdL.length : 0;
+        const wdT = wdA ? (Number.isInteger(wdA) ? wdA : wdA.toFixed(2)) : 0;
         // V0.8.2: Grand Total ของ Visit/Day = Visit รวม ÷ Working Day รวมทุกสาย (= เฉลี่ยต่อเซลล์ต่อวัน)
         const wdSum = list.reduce((a, r) => a + (r.ghost ? 0 : (s.wdOf[r.rt] || 0)), 0);
         const th = (h, i, extra) => `<th class="px-2 py-1 font-bold ${i ? 'text-right' : 'text-left'} ${extra || ''}">${h}</th>`;
         const lbl = bym ? ymLabel(bym) : '';
         const TT = '__total';
         return `
-          ${cmp ? `<p class="text-[10.5px] text-gray-500 mb-1">เทียบกับแผน <b>${esc(lbl)}</b> (เดือนที่นำเข้าจากระบบล่าสุด) · Diff = ย้ายเข้า − ย้ายออก − Remove + ร้านใหม่</p>`
+          ${cmp ? `<p class="text-[10.5px] text-gray-500 mb-1">เทียบกับแผน <b>${esc(lbl)}</b> (เดือนที่นำเข้าจากระบบล่าสุด) · Diff = Re-Active + ย้ายเข้า − ย้ายออก − Remove + ร้านใหม่</p>`
                 : (!baseCache.loading && baseCache.key ? `<p class="text-[10.5px] text-gray-400 mb-1">ไม่มีแผนเดือนก่อนในโปรแกรมให้เทียบ — นำเข้า RoutePlan Detail ของเดือนปัจจุบันก่อน</p>` : '')}
           <div class="overflow-x-auto"><table class="w-full text-[13px]">
           <thead><tr class="bg-gray-50 text-gray-500">
             ${th('สาย', 0)}${th('Working Day', 1)}${th('Coverage', 1)}${th('Visit', 1)}${th('Re-Visit', 1)}${th('Visit/Day', 1)}
             ${th('Coverage ' + esc(lbl || 'เดือนก่อน'), 1, 'border-l border-gray-200')}${th('Diff', 1)}<th class="px-2 py-1 font-bold text-left">Match</th>
-            ${th('ย้ายเข้า', 1)}${th('ย้ายออก', 1)}${th('Remove', 1)}${th('ร้านใหม่', 1)}
+            ${th('Re-Active', 1)}${th('ย้ายเข้า', 1)}${th('ย้ายออก', 1)}${th('Remove', 1)}${th('ร้านใหม่', 1)}
           </tr></thead><tbody>
           ${list.map(r => {
             const wd = r.ghost ? 0 : (s.wdOf[r.rt] || 0);
@@ -910,13 +959,13 @@
             ${cell(wdT || '—')}${num(T.cover, n(T.cover), 'cover', TT)}${cell(n(T.visits))}${num(T.f2, n(T.f2), 'revisit', TT, 'text-red-600')}${cell(per(T.visits, wdSum))}
             ${cmp ? cell(n(T.base), 'border-l border-gray-200') + cell(signed(T.cover - T.base), (T.cover - T.base) > 0 ? 'text-emerald-700' : (T.cover - T.base) < 0 ? 'text-red-600' : 'text-gray-400')
                     + `<td class="px-2 py-1 text-left whitespace-nowrap">${match(T.cover - T.base)}</td>`
-                    + num(T.inn, '+' + n(T.inn), 'inn', TT) + num(T.out, '−' + n(T.out), 'out', TT)
+                    + num(T.ra, '+' + n(T.ra), 'ra', TT) + num(T.inn, '+' + n(T.inn), 'inn', TT) + num(T.out, '−' + n(T.out), 'out', TT)
                     + num(T.rem, '−' + n(T.rem), 'rem', TT) + num(T.nw, '+' + n(T.nw), 'nw', TT)
-                  : '<td colspan="7"></td>'}
+                  : '<td colspan="8"></td>'}
           </tr>
           </tbody></table></div>
-          <p class="text-[11px] text-gray-400 mt-1 leading-snug">Working Day = วันที่สายนั้นมีการเข้าเยี่ยม (Grand Total = วันในปฏิทินที่มีอย่างน้อย 1 สายวิ่ง) · Re-Visit = ร้านที่ถูกเข้า ≥ 2 ครั้ง · Visit/Day = Visit ÷ Working Day ปัดขึ้น (Grand Total = Visit รวม ÷ Working Day รวมทุกสาย)
-            · ย้ายเข้า = เดือนฐานอยู่ Route Code อื่น · ย้ายออก = ไปอยู่ Route Code อื่น · Remove = ไม่อยู่ในแผนแล้ว (กอง "ออกจากแผน" · กองรอจัดสาย · ยังไม่มีวัน · ไม่มีในข้อมูลแล้ว) · ร้านใหม่ = ไม่อยู่แผนเดือนฐาน (รวมร้านจากกองรอจัดสายที่เพิ่งจัดเข้าสาย)
+          <p class="text-[11px] text-gray-400 mt-1 leading-snug">Working Day = วันที่สายนั้นมีการเข้าเยี่ยม (Grand Total = เฉลี่ยของทุกสาย) · Re-Visit = ร้านที่ถูกเข้า ≥ 2 ครั้ง · Visit/Day = Visit ÷ Working Day ปัดขึ้น (Grand Total = Visit รวม ÷ Working Day รวมทุกสาย)
+            · ย้ายเข้า = เดือนฐานอยู่ Route Code อื่น · ย้ายออก = ไปอยู่ Route Code อื่น · Remove = ไม่อยู่ในแผนแล้ว (กอง "ออกจากแผน" · กองรอจัดสาย · ยังไม่มีวัน · ไม่มีในข้อมูลแล้ว) · ร้านใหม่ = ไม่อยู่แผนเดือนฐาน (รวมร้านจากกองรอจัดสายที่เพิ่งจัดเข้าสาย) เปิดบัญชีไม่เกิน 60 วัน · Re-Active = แบบเดียวกับร้านใหม่ แต่เปิดบัญชีเกิน 60 วัน (ร้านเก่าที่กลับมา Active) นับจากวันที่ 1 ของเดือนแผน
             · <b>ตัวเลขขีดเส้นใต้กดดูรายชื่อร้านได้</b></p>
           ${detailHTML(cmp, det && det.rt === TT ? allRts : det ? [det.rt] : [])}`;
     };
@@ -1040,6 +1089,11 @@
             };
         }
 
+        // V1.0.3: สายที่โหลดเบื้องหลังเสร็จครบ → วาดหน้านี้ใหม่ (เดิมค้างตัวเลขตอนมีแค่บางสาย)
+        window.addEventListener('rp:routes-loaded', () => {
+            const pg = $('page-overview');
+            if (pg && !pg.classList.contains('hidden')) setTimeout(() => { try { render(); } catch (e) {} }, 100);
+        });
         // ให้ Nav.go รู้จักหน้านี้
         const orig = Nav.go;
         Nav.go = function (pg) {
@@ -1056,3 +1110,4 @@
     };
     document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 1000));
 })();
+;(window.__RPV=window.__RPV||{})['overview.js']='1.0.4';

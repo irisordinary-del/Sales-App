@@ -52,19 +52,46 @@ const SeqTool = (() => {
         });
     };
 
+    // V1.0.4 (11 พ.ย. 2569 11:10): จุดเริ่ม/จุดจบของตลาด (ของวันนั้น → จุดประจำสาย) — ไม่มี = null
+    const okPt = p => !!(p && isFinite(p.lat) && isFinite(p.lng));
+    const ptsOf = (day, route) => {
+        const rt = route || State.localActiveRoute;
+        let sp = null, ep = null;
+        try {
+            if (typeof RoadMaster !== 'undefined') { sp = RoadMaster.startOf(rt, day); ep = RoadMaster.endOf(rt, day); }
+        } catch (e) {}
+        return { sp: okPt(sp) ? sp : null, ep: okPt(ep) ? ep : null };
+    };
+
     const T = {
-        /** เรียงเส้นทางของวันหนึ่งใหม่ — คืนจำนวนร้านที่จัด */
+        /** เรียงเส้นทางของวันหนึ่งใหม่ — คืนจำนวนร้านที่จัด
+         *  V1.0.4 (11 พ.ย. 2569 11:10): มีจุดเริ่ม → ร้านแรก = ร้านที่ใกล้จุดเริ่มที่สุด (ล็อกไว้)
+         *  มีจุดจบ → คิดขากลับไปจุดจบด้วยตอนสลับลำดับ · ไม่มีจุดเริ่ม → เริ่มร้านเหนือสุดเหมือนเดิม */
         orderDay(day, silent, route) {
             const arr = list(day, route);
-            if (arr.length < 3) { if (arr.length) write(arr, day); return arr.length; }
+            const { sp, ep } = ptsOf(day, route);
+            if (arr.length < 3) {
+                // 2 ร้าน + มีจุด: เลือกทางที่สั้นกว่า (มีจุดเริ่ม = ร้านที่ใกล้จุดเริ่มขึ้นก่อน)
+                if (arr.length === 2 && sp) { if (dist(sp, arr[1]) < dist(sp, arr[0])) arr.reverse(); }
+                else if (arr.length === 2 && ep) { if (dist(arr[0], ep) < dist(arr[1], ep)) arr.reverse(); }
+                if (arr.length) write(arr, day);
+                if (arr.length && !silent) { UI.render(); App.saveDB(); }
+                return arr.length;
+            }
 
             const n = arr.length;
             const M = localMatrix(arr);
             const D = (i, j) => M[i * n + j];
+            const DE = ep ? arr.map(s => dist(s, ep)) : null;     // ร้าน → จุดจบ
 
-            // เริ่มจากร้านเหนือสุด (จุดอ้างอิงคงที่ ผลลัพธ์จึงซ้ำเดิมได้ทุกครั้ง)
+            // มีจุดเริ่ม: ร้านที่ใกล้จุดเริ่มที่สุด · ไม่มี: ร้านเหนือสุด (จุดอ้างอิงคงที่ ผลลัพธ์ซ้ำเดิมได้ทุกครั้ง)
             let start = 0;
-            for (let i = 1; i < n; i++) if (arr[i].lat > arr[start].lat) start = i;
+            if (sp) {
+                let bd = Infinity;
+                for (let i = 0; i < n; i++) { const d = dist(sp, arr[i]); if (d < bd) { bd = d; start = i; } }
+            } else {
+                for (let i = 1; i < n; i++) if (arr[i].lat > arr[start].lat) start = i;
+            }
 
             // nearest neighbour
             const used = new Uint8Array(n);
@@ -88,8 +115,9 @@ const SeqTool = (() => {
                     const a = seq[i], b = seq[i + 1];
                     for (let k = i + 2; k < n; k++) {
                         const c = seq[k], e = (k + 1 < n) ? seq[k + 1] : -1;
-                        const before = D(a, b) + (e >= 0 ? D(c, e) : 0);
-                        const after = D(a, c) + (e >= 0 ? D(b, e) : 0);
+                        // ร้านแรก (seq[0]) ไม่ถูกขยับ · ช่วงท้าย: มีจุดจบ = คิดขากลับด้วย
+                        const before = D(a, b) + (e >= 0 ? D(c, e) : (DE ? DE[c] : 0));
+                        const after = D(a, c) + (e >= 0 ? D(b, e) : (DE ? DE[b] : 0));
                         if (after < before - 0.5) {
                             let lo = i + 1, hi = k;
                             while (lo < hi) { const t = seq[lo]; seq[lo] = seq[hi]; seq[hi] = t; lo++; hi--; }
@@ -140,17 +168,26 @@ const SeqTool = (() => {
                 .filter(s => !s.inactive && routeOf(s) === State.localActiveRoute)
                 .flatMap(s => s.days || []))];
             if (!days.length) return UI.showErrorToast('⚠️ ยังไม่มีร้านที่จัดลงวัน');
+            // V1.0.4 (11 พ.ย. 2569 14:35): ปุ่ม 🔢 จัดลำดับทั้งสาย ในกล่องระยะ Master — บอกระยะทั้งสายก่อน → หลัง
+            const rt = State.localActiveRoute;
+            const kmAll = () => {
+                try { return RoadMaster.routeRows(rt, State.stores).reduce((t, r) => t + r.m, 0) / 1000; } catch (e) { return null; }
+            };
             UI.showConfirm(
-                `จัดลำดับคิวใหม่ทุกวันของสาย ${State.localActiveRoute} ?\n\n` +
-                `ระบบจะเรียงเส้นทางในแต่ละวันให้สั้นลงจากพิกัดร้าน (${days.length} วัน)\n` +
-                `ลำดับเดิมที่แก้ไว้เองจะถูกเขียนทับ`,
+                `จัดลำดับคิวใหม่ทุกตลาดของสาย ${rt} (${days.length} ตลาด) ?\n\n` +
+                `ระบบจะเรียงร้านในแต่ละตลาดให้ระยะสั้นลงจากพิกัดร้าน (มีจุดเริ่ม = เริ่มจากร้านที่ใกล้จุดเริ่มที่สุด)\n` +
+                `ลำดับเดิมที่แก้ไว้เองจะถูกเขียนทับ — ไม่ชอบผล กด ↶ ย้อนกลับได้`,
                 () => {
-                    UI.showLoader('กำลังจัดลำดับคิว...', `${days.length} วัน`);
+                    UI.showLoader('กำลังจัดลำดับคิว...', `${days.length} ตลาด`);
                     setTimeout(() => {
+                        const before = kmAll();
                         let n = 0;
-                        days.forEach(d => { n += T.orderDay(d, true); });
+                        days.forEach(d => { n += T.orderDay(d, true, rt); });
+                        const after = kmAll();
                         UI.hideLoader(); UI.render(); App.saveDB();
-                        UI.showSaveToast(`🔢 จัดลำดับแล้ว ${days.length} วัน · ${n} ร้าน`);
+                        const f = v => v.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+                        UI.showSaveToast(`🔢 จัดลำดับแล้ว ${days.length} ตลาด · ${n.toLocaleString()} ร้าน`
+                            + (before != null && after != null ? ` · ระยะทั้งสาย ${f(before)} → ${f(after)} กม.` : ''));
                     }, 100);
                 });
         },
@@ -161,9 +198,11 @@ const SeqTool = (() => {
             if (!store.seqs) store.seqs = {};
             if (!arr.length) { store.seqs[day] = 1; return; }
             let best = arr.length, bestCost = Infinity;
+            // V1.0.4 (11 พ.ย. 2569 11:10): คิดจุดเริ่ม/จุดจบด้วย (แทรกหน้าสุด/ท้ายสุดคิดขาออก/ขากลับ)
+            const { sp, ep } = ptsOf(day, routeOf(store));
             for (let i = 0; i <= arr.length; i++) {
-                const prev = i > 0 ? arr[i - 1] : null;
-                const next = i < arr.length ? arr[i] : null;
+                const prev = i > 0 ? arr[i - 1] : sp;
+                const next = i < arr.length ? arr[i] : ep;
                 let cost;
                 if (!prev) cost = dist(store, next);
                 else if (!next) cost = dist(prev, store);
@@ -311,3 +350,4 @@ const SeqTool = (() => {
 
     return T;
 })();
+;(window.__RPV=window.__RPV||{})['seq-tools.js']='1.0.4';

@@ -550,3 +550,4 @@
     };
     document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 700));
 })();
+;(window.__RPV=window.__RPV||{})['split-sel.js']='1.0.4';

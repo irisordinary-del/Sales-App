@@ -3,7 +3,8 @@
  * =============================================================================
  *  ระบบเดิมวัดระยะเป็น "เส้นตรง" (ระยะกระจัด) ซึ่งสั้นกว่าระยะวิ่งจริงเสมอ
  *  ไฟล์นี้อ่านตารางระยะถนนที่สร้างไว้ล่วงหน้าจากข้อมูล OpenStreetMap
- *  (สร้างด้วย tools/build-road-matrix.py → ได้ไฟล์ road-matrix.bin)
+ *  (สร้างด้วย tools/build-road-matrix-all.py → ได้ไฟล์ road-matrix/<ศูนย์>.js ทุกศูนย์)
+ *  V1.0.3: ตารางแยกไฟล์ต่อศูนย์ — โปรแกรมโหลดเฉพาะของศูนย์ที่เปิดอยู่ให้เอง
  *  แล้วให้ระยะถนนจริงเป็นเมตร โดยไม่ต้องต่อเน็ตตอนใช้งาน
  *
  *  คู่ร้านที่อยู่ไกลกันเกินรัศมีที่เก็บไว้ (ปกติ 25 กม.) จะไม่มีในตาราง
@@ -19,7 +20,10 @@ const RoadDist = (() => {
 
     const DB_NAME = 'rp_roadmatrix';
     const STORE = 'blob';
-    const KEY = 'current';
+    // V1.0.3: ตารางแยกตามศูนย์ — เก็บในเครื่องแยกคีย์ต่อศูนย์ (เดิมคีย์เดียว 'current' ใช้ร่วมทุกศูนย์)
+    const cid = () => String(window.CENTER_ID || 'LOCAL');
+    const KEY_OF = () => 'c:' + cid();
+    const KEY = 'current';            // คีย์เก่า (≤ V1.0.2) — ลบทิ้งตอนเปิด
     const FALLBACK_DEFAULT = 1.30;
 
     let head = null;        // header จากไฟล์
@@ -27,6 +31,7 @@ const RoadDist = (() => {
     let ptr = null, nbr = null, dst = null;
     let ready = false;
     let hit = 0, miss = 0;
+    let source = '';        // V1.0.3: 'folder' = มากับโปรแกรม · 'user' = ผู้ใช้เลือกไฟล์เอง
 
     // ── ระยะเส้นตรง (เมตร) ────────────────────────────────────────────────
     const KY = 111132.0;
@@ -62,6 +67,9 @@ const RoadDist = (() => {
         for (let i = 0; i < n; i++) {
             const a = P[i], b = P[i + 1], len = b - a;
             if (len < 2) continue;
+            let sorted = true;                       // V1.0.3: ไฟล์รายศูนย์เรียงตามเลขร้านมาแล้ว — ข้ามการเรียงซ้ำ
+            for (let k = a + 1; k < b; k++) if (N[k - 1] > N[k]) { sorted = false; break; }
+            if (sorted) continue;
             const ord = Array.from({ length: len }, (_, k) => k).sort((p, q) => N[a + p] - N[a + q]);
             const tn = new Array(len), td = new Array(len);
             for (let k = 0; k < len; k++) { tn[k] = N[a + ord[k]]; td[k] = D[a + ord[k]]; }
@@ -103,7 +111,7 @@ const RoadDist = (() => {
             const d = await db();
             await new Promise((res, rej) => {
                 const t = d.transaction(STORE, 'readwrite');
-                t.objectStore(STORE).put(buf, KEY);
+                t.objectStore(STORE).put(buf, KEY_OF());
                 t.oncomplete = res; t.onerror = () => rej(t.error);
             });
         } catch (e) { console.warn('[RoadDist] เก็บลงเครื่องไม่สำเร็จ', e); }
@@ -112,7 +120,7 @@ const RoadDist = (() => {
         try {
             const d = await db();
             return await new Promise((res, rej) => {
-                const r = d.transaction(STORE, 'readonly').objectStore(STORE).get(KEY);
+                const r = d.transaction(STORE, 'readonly').objectStore(STORE).get(KEY_OF());
                 r.onsuccess = () => res(r.result || null);
                 r.onerror = () => rej(r.error);
             });
@@ -174,57 +182,67 @@ const RoadDist = (() => {
 
         /** รับ ArrayBuffer เข้าระบบ (จาก fetch หรือจากที่ผู้ใช้เลือกไฟล์) */
         async use(buf, persist) {
-            adopt(parse(buf));
+            adopt(parse(buf)); source = 'user';
             if (persist !== false) await save(buf);
             document.dispatchEvent(new CustomEvent('roaddist:ready', { detail: R.info }));
             return R.info;
         },
 
-        /** เริ่มต้น: หาไฟล์จากที่เก็บในเครื่องก่อน ไม่มีค่อยลองโหลดจากโฟลเดอร์ */
+        /**
+         * เริ่มต้น (V1.0.3): ตารางของ "ศูนย์ที่เปิดอยู่" จากโฟลเดอร์โปรแกรม road-matrix/<ศูนย์>.js (มากับโปรแกรม)
+         *   → ไม่มี: ใช้ตารางที่ผู้ใช้เลือกไฟล์เองและเก็บไว้ในเครื่อง (ของศูนย์นี้)
+         *   → ไม่มี: ระยะเส้นตรง
+         * ถ้าตารางที่เก็บในเครื่องสร้างทีหลังไฟล์ในโฟลเดอร์ (ผู้ใช้โหลดไฟล์ใหม่กว่าเอง) ใช้ของในเครื่อง
+         */
         async init() {
-            const cached = await load();
-            if (cached) {
-                try { await R.use(cached, false); console.log('[RoadDist] ใช้ตารางที่เก็บไว้', R.info); return R.info; }
-                catch (e) { console.warn('[RoadDist] ตารางที่เก็บไว้เสีย', e); }
+            try {   // ล้างตารางคีย์เก่าที่ใช้ร่วมทุกศูนย์ (≤ V1.0.2)
+                const d = await db();
+                d.transaction(STORE, 'readwrite').objectStore(STORE).delete(KEY);
+            } catch (e) { /* ไม่เป็นไร */ }
+            const c = cid();
+            let folder = null;
+            {
+                // เบราว์เซอร์ห้าม fetch ไฟล์ในเครื่อง แต่โหลดผ่าน <script> ได้
+                try {
+                    const b64 = await new Promise((resolve) => {
+                        const el = document.createElement('script');
+                        el.src = `road-matrix/${encodeURIComponent(c)}.js`;
+                        el.onload = () => resolve(window.__ROAD_MATRIX_CID === c ? window.__ROAD_MATRIX_B64 : null);
+                        el.onerror = () => resolve(null);
+                        document.head.appendChild(el);
+                    });
+                    if (b64) {
+                        const bin = atob(b64);
+                        const u8 = new Uint8Array(bin.length);
+                        for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+                        // ไฟล์รายศูนย์บีบ gzip ไว้ (เล็กลง ~40%) — คลายด้วยตัวคลายในเบราว์เซอร์
+                        folder = window.__ROAD_MATRIX_GZ
+                            ? await new Response(new Blob([u8]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer()
+                            : u8.buffer;
+                    }
+                    try { delete window.__ROAD_MATRIX_B64; delete window.__ROAD_MATRIX_GZ; } catch (e) { window.__ROAD_MATRIX_B64 = null; }
+                } catch (e) { console.warn('[RoadDist] อ่าน road-matrix/' + c + '.js ไม่สำเร็จ', e); }
             }
-            try {
-                const res = await fetch('road-matrix.bin', { cache: 'no-store' });
-                if (res.ok) {
-                    const buf = await res.arrayBuffer();
-                    await R.use(buf);
-                    console.log('[RoadDist] โหลด road-matrix.bin แล้ว', R.info);
-                    return R.info;
-                }
-            } catch (e) { /* เปิดแบบ file:// ดึงไฟล์ .bin ไม่ได้ — ใช้สำเนาแบบสคริปต์แทนด้านล่าง */ }
-
-            // ── สำรองสำหรับตอนเปิดไฟล์ตรง ๆ (file://) ────────────────────────
-            // เบราว์เซอร์ห้าม fetch ไฟล์ในเครื่อง แต่โหลดผ่าน <script> ได้
-            // จึงมีสำเนาตารางเดียวกันเก็บเป็น road-matrix.js ไว้ให้ (โหลดเฉพาะเมื่อจำเป็น)
-            try {
-                const b64 = await new Promise((resolve) => {
-                    if (window.__ROAD_MATRIX_B64) return resolve(window.__ROAD_MATRIX_B64);
-                    const el = document.createElement('script');
-                    el.src = 'road-matrix.js';
-                    el.onload = () => resolve(window.__ROAD_MATRIX_B64 || null);
-                    el.onerror = () => resolve(null);
-                    document.head.appendChild(el);
-                });
-                if (b64) {
-                    const bin = atob(b64);
-                    const buf = new Uint8Array(bin.length);
-                    for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
-                    await R.use(buf.buffer);
-                    console.log('[RoadDist] โหลดตารางจาก road-matrix.js แล้ว', R.info);
-                    return R.info;
-                }
-            } catch (e) { console.warn('[RoadDist] อ่าน road-matrix.js ไม่สำเร็จ', e); }
-
-            console.log('[RoadDist] ยังไม่มีตารางระยะถนน — ใช้ระยะเส้นตรงไปก่อน');
+            const cached = await load();
+            let fo = null, ca = null;
+            try { if (folder) fo = parse(folder); } catch (e) { console.warn('[RoadDist] ไฟล์ตารางของศูนย์ ' + c + ' เสีย', e); }
+            try { if (cached) ca = parse(cached); } catch (e) { console.warn('[RoadDist] ตารางที่เก็บไว้เสีย', e); }
+            let pick = fo, from = 'folder';
+            if (ca && (!fo || String(ca.h.built || '') > String(fo.h.built || ''))) { pick = ca; from = 'user'; }
+            if (pick) {
+                adopt(pick); source = from;
+                document.dispatchEvent(new CustomEvent('roaddist:ready', { detail: R.info }));
+                console.log(`[RoadDist] ศูนย์ ${c}: ใช้ตาราง${from === 'folder' ? 'จากโฟลเดอร์โปรแกรม' : 'ที่โหลดเองไว้ในเครื่อง'}`, R.info);
+                return R.info;
+            }
+            console.log(`[RoadDist] ศูนย์ ${c}: ยังไม่มีตารางระยะถนน — ใช้ระยะเส้นตรงไปก่อน`);
             return null;
         },
 
         /** V0.9.17: ตารางดิบที่เก็บไว้ในเครื่อง (ArrayBuffer) — ใช้ตอน Save เป็น .json */
-        async raw() { return await load(); },
+        // V1.0.3: ตารางที่มากับโปรแกรม (โฟลเดอร์ road-matrix) ไม่ต้องแนบในไฟล์สำรอง — เปิดเครื่องไหนก็มี
+        async raw() { return source === 'user' ? await load() : null; },
+        get source() { return source; },
 
         /** ลบตารางที่เก็บไว้ */
         async clear() {
@@ -232,7 +250,7 @@ const RoadDist = (() => {
                 const d = await db();
                 await new Promise(res => {
                     const t = d.transaction(STORE, 'readwrite');
-                    t.objectStore(STORE).delete(KEY); t.oncomplete = res;
+                    t.objectStore(STORE).delete(KEY_OF()); t.oncomplete = res;
                 });
             } catch (e) { /* ไม่เป็นไร */ }
             head = idx = ptr = nbr = dst = null; ready = false;
@@ -242,3 +260,4 @@ const RoadDist = (() => {
     document.addEventListener('DOMContentLoaded', () => { R.init(); });
     return R;
 })();
+;(window.__RPV=window.__RPV||{})['road-dist.js']='1.0.4';

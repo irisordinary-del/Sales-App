@@ -25,10 +25,17 @@ const StoreMgr = {
         UI.showConfirm(
             `ลบ "${s.name}" ถาวรใช่ไหมครับ?\n(ไม่สามารถกู้คืนได้)`,
             () => {
-                State.stores = State.stores.filter(x => x.id !== String(id));
-                State.db.routes[State.localActiveRoute] = State.stores;
+                // V1.0.3 (HQ ชุด 2): ลบจากสายที่ร้านอยู่จริง — เดิมเอาร้านบนจอไปเขียนแทนสายที่กำลังแก้
+                const R = State.db.routes || {};
+                const rt = Object.keys(R).find(r => Array.isArray(R[r]) && R[r].some(x => x.id === String(id)));
+                if (!rt) return;
+                R[rt] = R[rt].filter(x => x.id !== String(id));
+                if (State.localActiveRoute === rt) State.stores = R[rt];
+                else State.stores = (State.stores || []).filter(x => x.id !== String(id));
+                try { if (typeof MultiRoute !== 'undefined' && MultiRoute.rebuild) MultiRoute.rebuild(); } catch (e) {}
                 UI.render();
-                App.saveDB();
+                App.planRoutesCol(App._currentPlanYM).doc(rt).set({ stores: R[rt] }, { merge: true })
+                    .catch(err => UI.showErrorToast('❌ ลบไม่สำเร็จ: ' + err.message));
                 UI.showSaveToast(`🗑️ ลบ "${s.name}" ออกแล้ว`);
             }
         );
@@ -106,7 +113,9 @@ const App = {
         const total = routeList.length;
 
         // ── Step 1: โหลด active route ก่อน → แสดงผลทันที ────────────────
-        const activeRoute = localStorage.getItem(`last_route_${ym}`) || routeList[0];
+        // V1.0.3: สายที่จำไว้ต้องเป็นสายของศูนย์นี้ (เดิมเปิดหลายศูนย์เดือนเดียวกัน → สายผี เช่น 301P02 โผล่ใน 303)
+        const lastR = localStorage.getItem(`last_route_${ym}`);
+        const activeRoute = (lastR && routeList.includes(lastR)) ? lastR : routeList[0];
         UI.showRouteLoadPopup(0, total);
         try {
             const d = await col.doc(activeRoute).get();
@@ -128,6 +137,7 @@ const App = {
         const remaining = routeList.filter(n => n !== activeRoute);
         if (!remaining.length) {
             UI.hideRouteLoadPopup();
+            try { window.dispatchEvent(new CustomEvent('rp:routes-loaded', { detail: { ym } })); } catch (e) {}
             return;
         }
 
@@ -177,11 +187,13 @@ const App = {
                 await Promise.all(batch.map(async name => {
                     await _loadOne(name);
                     loadedCount++;
-                    UI.updateRouteLoadPopup(loadedCount, total, name);
-                    UI.renderAllRoutes();
+                    // V1.0.3: วาดจอพลาดแค่สายเดียวต้องไม่ทำให้สายที่เหลือหยุดโหลด
+                    try { UI.updateRouteLoadPopup(loadedCount, total, name); } catch (e) { console.warn('[loadAll]', e); }
+                    try { UI.renderAllRoutes(); } catch (e) { console.warn('[loadAll]', e); }
                 }));
             }
             UI.hideRouteLoadPopup();
+            try { window.dispatchEvent(new CustomEvent('rp:routes-loaded', { detail: { ym } })); } catch (e) {}
 
             // ✅ ถ้ามี failed routes → แสดง toast + ปุ่ม retry
             const failed = Object.keys(State.db._failedRoutes || {});
@@ -284,7 +296,8 @@ const App = {
             App.log(`✅ โหลด plan ${ym} เสร็จ — ${State.db.routeList.length} สาย`);
 
             if (!State.localActiveRoute || !State.db.routes[State.localActiveRoute]) {
-                State.localActiveRoute = localStorage.getItem(`last_route_${ym}`) || State.db.routeList[0];
+                const lr = localStorage.getItem(`last_route_${ym}`);
+                State.localActiveRoute = (lr && State.db.routeList.includes(lr)) ? lr : State.db.routeList[0];
             }
             State.stores = State.db.routes[State.localActiveRoute] || [];
 
@@ -370,7 +383,18 @@ const App = {
     saveDB: () => {
         const ym = App._currentPlanYM;
         if (!ym) return;
-        State.db.routes[State.localActiveRoute] = State.stores;
+        // V1.0.1: ร้านที่โชว์อยู่ (State.stores) ต้องเป็นชุดของสายที่กำลังแก้เท่านั้น — ถ้าเป็นชุดของสายอื่น
+        //   ห้ามบันทึก ไม่งั้นร้านสายหนึ่งไปทับอีกสาย (และสองสายชี้ข้อมูลก้อนเดียวกันในหน่วยความจำ)
+        const act = State.localActiveRoute;
+        if (!act) return;
+        const owner = Object.keys(State.db.routes || {}).find(r => r !== act && State.db.routes[r] === State.stores);
+        if (owner) {
+            console.error('[SaveGuard] saveDB blocked: State.stores belongs to', owner, 'active =', act);
+            try { if (window.SaveGuard) SaveGuard._note(act, 'ร้านที่เปิดอยู่เป็นของ ' + owner); } catch (e) {}
+            UI.showErrorToast(`⛔ ไม่บันทึก — ร้านที่เปิดอยู่เป็นของสาย ${owner} ไม่ใช่ ${act} (กันร้านไปทับสายอื่น) · เลือกสายใหม่แล้วลองอีกครั้ง`);
+            return;
+        }
+        State.db.routes[act] = State.stores;
         const routeList = Object.keys(State.db.routes).sort((a,b) => a.localeCompare(b,'th',{numeric:true}));
 
         Promise.all([
@@ -465,9 +489,16 @@ const App = {
             // เท่านั้น ห้าม copy ข้ามเดือนตรงๆ (วันที่ 12 เดือนหน้าอาจไม่ใช่วันหยุดเลย) ส่วน
             // "วันหยุดประจำสัปดาห์" (เช่น อาทิตย์หยุดทุกสัปดาห์) เป็นกติกาที่ไม่ขึ้นกับเดือน copy ได้ปกติ
             // เช่นเดียวกับ anchorType/anchorWeekday ของแบบวิ่งอิงวันในสัปดาห์ — คำนวณสดใหม่ทุกเดือนอยู่แล้ว
-            let copyCalendarConfig = srcMeta.calendarConfig || null;
+            // V1.0.1 (HQ ก1): ใช้ตัวแปลงเดียวกันกับปฏิทินเฉพาะสายที่คัดลอกไปเดือนใหม่
+            const carryCal = (src) => {
+            let copyCalendarConfig = src || null;
+            if (copyCalendarConfig && copyCalendarConfig.mode !== 'cycle') {
+                // V1.0.1: โหมดอื่นก็มีวันหยุดเฉพาะกิจแล้ว (HQ ก2/ก3) — เป็นของเดือนต้นทางเท่านั้น
+                copyCalendarConfig = { ...copyCalendarConfig, holidays: [], workDays: [] };   // V1.0.4: วันทำงานพิเศษก็เป็นของเดือนต้นทาง
+                delete copyCalendarConfig.lastDay;
+            }
             if (copyCalendarConfig && copyCalendarConfig.mode === 'cycle') {
-                copyCalendarConfig = { ...copyCalendarConfig, holidays: [] };
+                copyCalendarConfig = { ...copyCalendarConfig, holidays: [], workDays: [] };
                 delete copyCalendarConfig.lastDay;      // V0.5: วันวิ่งวันสุดท้ายของไฟล์นำเข้า เป็นของเดือนต้นทางเท่านั้น
                 // V0.6: แบบวันที่ตายตัว — เดือนใหม่เริ่ม D1 ที่วันที่ 1 เสมอ (ตรงวันหยุดประจำสัปดาห์ = เลื่อนไปวันทำงานแรกเอง)
                 // เดิมก๊อปวันเริ่มของเดือนเก่ามา (เช่นเดือนนำเข้าเริ่มวันที่ 3 → เดือนใหม่ D1 = 3 ด้วย)
@@ -481,6 +512,9 @@ const App = {
                     copyCalendarConfig.startDayNum = 1;
                 }
             }
+            return copyCalendarConfig;
+            };
+            const copyCalendarConfig = carryCal(srcMeta.calendarConfig || null);
 
             await App.planRef(ym).set({
                 routeList:     copyRouteList,
@@ -493,12 +527,18 @@ const App = {
 
             // Copy routes จาก plan ต้นทาง — รวม calendarOverride เฉพาะสาย (ถ้ามี) ไปด้วย
             // ล้าง holidays เฉพาะกิจของ override เหมือนกับที่ทำกับ default ของศูนย์ข้างบน
+            let carried = 0;
             if (srcYM && copyRouteList.length > 0) {
                 await Promise.all(copyRouteList.map(async name => {
                     const rd = await App.planRoutesCol(srcYM).doc(name).get();
                     const stores = rd.exists ? (rd.data().stores || []) : [];
-                    // v-local (โน้ต 14): ปฏิทินเฉพาะสายไม่ติดไปเดือนใหม่ — ทุกสายเริ่มจากปฏิทินระดับเดือน
-                    const payload = { stores, calendarOverride: firebase.firestore.FieldValue.delete() };
+                    // V1.0.1 (HQ ก1): ปฏิทินเฉพาะสายที่ "ผู้ใช้ตั้งเอง" ติดไปเดือนใหม่ด้วย (ล้างวันหยุดเฉพาะกิจ)
+                    //   ส่วนปฏิทินที่ได้มาจากไฟล์นำเข้า (source: import) ไม่ติดไป — สายนั้นใช้ปฏิทินระดับเดือนตามเดิม
+                    //   (ไม่งั้นตั้งปฏิทินศูนย์เดือนใหม่เป็นรอบ 12 แล้วทุกสายยังติดรอบ 24 ของไฟล์)
+                    const ov = rd.exists ? (rd.data() || {}).calendarOverride : null;
+                    const keepOv = ov && typeof ov === 'object' && ov.source !== 'import' ? carryCal(ov) : null;
+                    if (keepOv) carried++;
+                    const payload = { stores, calendarOverride: keepOv || firebase.firestore.FieldValue.delete() };
                     // ✅ BUGFIX (2026-08-29): เพิ่ม merge:true ให้ปลอดภัยไว้ก่อน เผื่อ ym ปลายทาง
                     // มีเอกสารอยู่แล้วบางส่วน (เช่น รันซ้ำ) — กันเขียนทับ field อื่นที่อาจมีอยู่แล้ว
                     await App.planRoutesCol(ym).doc(name).set(payload, { merge: true });
@@ -513,7 +553,7 @@ const App = {
 
             State.db.planList = planList;
             UI.hideLoader();
-            UI.showSaveToast(`✅ สร้าง Plan ${App.ymToLabel(ym)} เรียบร้อย (ยังไม่ live — Sales ยังไม่เห็น จนกว่าจะกด "ตั้งเป็นเดือนที่ใช้งานจริง")`);
+            UI.showSaveToast(`✅ สร้าง Plan ${App.ymToLabel(ym)} เรียบร้อย` + (carried ? ` · คัดลอกปฏิทินเฉพาะสาย ${carried} สาย (ล้างวันหยุดเฉพาะกิจแล้ว — ตรวจวันหยุดของเดือนใหม่ด้วย)` : '') + ` (ยังไม่ live — Sales ยังไม่เห็น จนกว่าจะกด "ตั้งเป็นเดือนที่ใช้งานจริง")`);
             PlanUI.refresh();
 
             // switch ไปที่ plan ใหม่ (แค่มุมมองแอดมิน — ไม่กระทบ Sales จนกว่าจะ publish)
@@ -711,7 +751,8 @@ const App = {
             // "ยืนยันรับสายวิ่ง" ของเซลกลับเป็นรอยืนยันใหม่เสมอ (ดู RouteConfirm ฝั่ง sales-app.js)
             payload.confirmedBy = firebase.firestore.FieldValue.delete();
             payload.confirmedAt = firebase.firestore.FieldValue.delete();
-            await App.planRoutesCol(ym).doc(routeName).set(payload, { merge: true });
+            // V1.0.1 (HQ ก4): แทนที่ปฏิทินของสายทั้งก้อน — เดิม merge:true ทำให้ field ของแบบการนับเก่าค้าง (เช่น anchorDate)
+            await App.planRoutesCol(ym).doc(routeName).set(payload, { mergeFields: ['calendarOverride', 'confirmedBy', 'confirmedAt'] });
             UI.showSaveToast(cfg
                 ? `📅 บันทึกปฏิทินเฉพาะสาย ${routeName} เรียบร้อย`
                 : `↩️ สาย ${routeName} กลับไปใช้ปฏิทิน default ของศูนย์แล้ว`);
@@ -1269,4 +1310,4 @@ const StoreTrans = {
 };
 
 console.log('✅ admin-data v3 (plans system) loaded');
-
+;(window.__RPV=window.__RPV||{})['admin-data.js']='1.0.4';

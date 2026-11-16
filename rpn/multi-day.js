@@ -49,3 +49,4 @@
     };
     document.addEventListener('DOMContentLoaded', () => setTimeout(wrap, 2500));
 })();
+;(window.__RPV=window.__RPV||{})['multi-day.js']='1.0.4';

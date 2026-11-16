@@ -82,7 +82,10 @@ const MapCtrl = {
 
         const byDay = {};
         State.stores.forEach(s => {
-            if (s.days && s.days.length && !s.days.includes(State.activeRoadDay)) {
+            // V1.0.4 (11 พ.ย. 2569 11:45): ตลาดที่กำลังโชว์ลำดับ (🔢) ไม่วาดเส้นเชื่อม
+            const sv = State.seqView;
+            const inSv = sv && s.days && s.days.includes(sv.day) && (s.route || State.localActiveRoute) === sv.route;
+            if (s.days && s.days.length && !s.days.includes(State.activeRoadDay) && !inSv) {
                 const d = s.days[0];
                 if (!byDay[d]) byDay[d] = [];
                 byDay[d].push([s.lat, s.lng]);
@@ -116,6 +119,12 @@ const MapCtrl = {
             .map(d => `<option value="${d}">${DAY_COLORS[d].name}</option>`)
             .join('');
 
+        // V1.0.4 (11 พ.ย. 2569 11:45): โหมด 🔢 โชว์ลำดับ — หมุดของตลาดที่เลือกขึ้นเลขลำดับคิว ร้านอื่นจางลง
+        const sv = (State.seqView && State.seqView.route === State.localActiveRoute) ? State.seqView : null;
+        const inSv = (st) => !!(sv && !st.inactive && st.days && st.days.includes(sv.day)
+                                && (st.route || State.localActiveRoute) === sv.route);
+        const svOn = !!(sv && State.stores.some(inSv));
+
         State.stores.forEach(store => {
             // ✅ ซ่อนร้าน inactive — ยังเก็บใน Firestore แต่ไม่แสดงบนแผนที่
             if (store.inactive) {
@@ -126,7 +135,11 @@ const MapCtrl = {
                 return;
             }
             const isAssigned = store.days && store.days.length > 0;
-            const pDay = isAssigned ? store.days[0] : null;
+            let pDay = isAssigned ? store.days[0] : null;
+            // V1.0.1: ช่องที่เป็นรอบอื่นของตลาดหลัก (เช่น D14 = D2 รอบ 2) โชว์เลข/สีของตลาดหลัก — ไม่มีเลขเกินรอบให้เห็น
+            if (pDay && typeof Runs !== 'undefined' && Runs.metaOf) {
+                try { const mt = Runs.metaOf(store.route || State.localActiveRoute, pDay); if (mt && mt.src) pDay = mt.src; } catch (e) {}
+            }
 
             let fill = '#cbd5e1', border = '#fff', stroke = '2', zIdx = 1000;
             if (store.selected) {
@@ -135,8 +148,9 @@ const MapCtrl = {
                 fill = DAY_COLORS[pDay].hex; zIdx = 500;
             }
 
-            const isR = isAssigned && store.days.includes(State.activeRoadDay);
-            const seq = isR && store.seqs ? store.seqs[State.activeRoadDay] : null;
+            const isR = svOn ? inSv(store) : (isAssigned && store.days.includes(State.activeRoadDay));
+            const seqDay = svOn ? sv.day : State.activeRoadDay;
+            const seq = isR && store.seqs ? store.seqs[seqDay] : null;
             const svgW = isR ? 30 : (isAssigned ? 26 : 30);
             const svgH = isR ? 44 : (isAssigned ? 36 : 44);
             if (isR) zIdx = 1500;
@@ -155,11 +169,14 @@ const MapCtrl = {
                 iconTxt = `<circle cx="12" cy="9" r="3.5" fill="#fff"/>`;
             }
 
+            // V1.0.3: ร้านใหม่ (ไม่อยู่แผนเดือนฐาน) — วงเขียวรอบหัวหมุด
+            const nwRing = (isAssigned && typeof NewStores !== 'undefined' && NewStores.ringOn && NewStores.isNew(store))
+                ? `<circle cx="12" cy="8" r="13.5" fill="rgba(16,185,129,.15)" stroke="#059669" stroke-width="4"/>` : '';
             // V0.9.6: สร้างไอคอนใหม่เฉพาะหมุดที่หน้าตาเปลี่ยน — เดิมทุกครั้งที่ซูม/เลื่อนสร้างใหม่ทุกหมุดในจอ
-            const sig = [fill, border, stroke, svgW, svgH, iconTxt, kpiStar].join('|');
+            const sig = [fill, border, stroke, svgW, svgH, iconTxt, kpiStar, nwRing].join('|');
             const icon = MapCtrl.markers[store.id] && MapCtrl.markers[store.id]._sig === sig ? null : L.divIcon({
                 html: `<svg viewBox="0 0 24 24" width="${svgW}" height="${svgH}" style="filter:drop-shadow(0px 3px 4px rgba(0,0,0,0.3));overflow:visible;">
-                    <path d="M12 0C7.5 0 4 3.5 4 8c0 5.25 8 16 8 16s8-10.75 8-16c0-4.42-3.58-8-8-8z" fill="${fill}" stroke="${border}" stroke-width="${stroke}"/>
+                    ${nwRing}<path d="M12 0C7.5 0 4 3.5 4 8c0 5.25 8 16 8 16s8-10.75 8-16c0-4.42-3.58-8-8-8z" fill="${fill}" stroke="${border}" stroke-width="${stroke}"/>
                     ${iconTxt}${kpiStar}
                 </svg>`,
                 className: 'custom-svg-icon',
@@ -187,6 +204,8 @@ const MapCtrl = {
             m.customId = store.id;
             m.customAssigned = isAssigned;
             if (icon) { m.setIcon(icon); m._sig = sig; m._tinted = null; }
+            const op = (svOn && !isR) ? 0.3 : 1;
+            if (m._op !== op) { m.setOpacity(op); m._op = op; }
             if (m._zi !== zIdx) { m.setZIndexOffset(zIdx); m._zi = zIdx; }
 
             const badge = store.freq === 2 ? `<span class="f2-badge">F2</span>` : '';
@@ -241,6 +260,84 @@ const MapCtrl = {
                 delete MapCtrl.markers[id];
             }
         });
+        try { MapCtrl.seqBox(svOn ? sv : null); } catch (e) {}
+        try { MapCtrl.seqPins(svOn ? sv : null); } catch (e) {}
+    },
+
+    /** V1.0.4 (11 พ.ย. 2569 11:55): หมุดจุดเริ่ม/จุดจบของตลาดที่โชว์ลำดับ (ไม่มีจุด = ไม่มีหมุด · ที่เดียวกัน = หมุดเดียว) */
+    _svPins: null,
+    seqPins: (sv) => {
+        if (!MapCtrl.map) return;
+        const ok = p => !!(p && isFinite(p.lat) && isFinite(p.lng));
+        let st = null, en = null, info = null;
+        if (sv && typeof RoadMaster !== 'undefined') {
+            try { st = RoadMaster.startOf(sv.route, sv.day); en = RoadMaster.endOf(sv.route, sv.day); info = RoadMaster.dayM(sv.route, sv.day, State.stores); } catch (e) {}
+        }
+        if (!ok(st)) st = null; if (!ok(en)) en = null;
+        // V1.0.4 (11 พ.ย. 2569 15:20): ซูมออกกว้าง (< 11) ป้ายย่อเหลือ 🚩/🏁 — หมุดยังอยู่ทุกระดับซูม
+        let zoom = 13;
+        try { zoom = MapCtrl.map.getZoom(); } catch (e) {}
+        const small = zoom < 11;
+        const sig = sv && (st || en) ? JSON.stringify([sv, st, en, info && info.outM, info && info.backM, info && info.n, small]) : '';
+        if (MapCtrl._svSig === sig) return;
+        MapCtrl._svSig = sig;
+        if (MapCtrl._svPins) { MapCtrl.map.removeLayer(MapCtrl._svPins); MapCtrl._svPins = null; }
+        if (!sig) return;
+        const esc = t => String(t == null ? '' : t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+        const km = m => (m == null ? '' : (Math.round(m / 100) / 10).toFixed(1) + ' กม.');
+        const nm = p => esc(p.name || (p.lat.toFixed(4) + ', ' + p.lng.toFixed(4)));
+        const n = info ? info.n : 0;
+        const pin = (glyph, title, sub) => small ? L.divIcon({
+            className: '', iconSize: [1, 1], iconAnchor: [13, 36],
+            html: `<div style="position:relative;width:1px;height:1px" title="${title.replace(/<[^>]+>/g, '')}">`
+                + `<svg viewBox="0 0 24 24" width="26" height="36" style="filter:drop-shadow(0 3px 4px rgba(0,0,0,.35));overflow:visible">`
+                + `<path d="M12 0C7.5 0 4 3.5 4 8c0 5.25 8 16 8 16s8-10.75 8-16c0-4.42-3.58-8-8-8z" fill="#1e293b" stroke="#fff" stroke-width="1.5"/>`
+                + `<text x="12" y="11.5" font-size="9" text-anchor="middle">${glyph}</text></svg></div>`
+        }) : L.divIcon({
+            className: '', iconSize: [1, 1], iconAnchor: [16, 44],
+            html: `<div style="position:relative;width:1px;height:1px">`
+                + `<svg viewBox="0 0 24 24" width="32" height="44" style="filter:drop-shadow(0 3px 4px rgba(0,0,0,.35));overflow:visible">`
+                + `<path d="M12 0C7.5 0 4 3.5 4 8c0 5.25 8 16 8 16s8-10.75 8-16c0-4.42-3.58-8-8-8z" fill="#1e293b" stroke="#fff" stroke-width="1.5"/>`
+                + `<text x="12" y="11.5" font-size="9" text-anchor="middle">${glyph}</text></svg>`
+                + `<div style="position:absolute;left:34px;top:2px;background:#1e293b;color:#fff;font-size:11px;font-weight:600;padding:3px 8px;border-radius:8px;white-space:nowrap;line-height:1.45">`
+                + `${title}<br><span style="font-weight:400;opacity:.85">${sub}</span></div></div>`
+        });
+        const marks = [];
+        const outTxt = info && info.outM != null ? `ขาออก ${km(info.outM)} (ไปร้านที่ 1)` : '';
+        const backTxt = info && info.backM != null ? `ขากลับ ${km(info.backM)} (จากร้านที่ ${n})` : '';
+        const same = st && en && Math.abs(st.lat - en.lat) < 1e-6 && Math.abs(st.lng - en.lng) < 1e-6;
+        if (same) {
+            marks.push(L.marker([st.lat, st.lng], { icon: pin('🚩', `🚩 เริ่ม / 🏁 จบ · ${nm(st)}`, [outTxt, backTxt].filter(Boolean).join(' · ')), zIndexOffset: 4000, interactive: false }));
+        } else {
+            if (st) marks.push(L.marker([st.lat, st.lng], { icon: pin('🚩', `🚩 เริ่ม · ${nm(st)}`, outTxt), zIndexOffset: 4000, interactive: false }));
+            if (en) marks.push(L.marker([en.lat, en.lng], { icon: pin('🏁', `🏁 จบ · ${nm(en)}`, backTxt), zIndexOffset: 4000, interactive: false }));
+        }
+        MapCtrl._svPins = L.layerGroup(marks).addTo(MapCtrl.map);
+    },
+
+    /** V1.0.4 (11 พ.ย. 2569 11:45): กล่องเล็กมุมแผนที่ บอกว่ากำลังโชว์ลำดับของตลาดไหน (ปิดที่ปุ่ม 🔢 หัวตลาด) */
+    seqBox: (sv) => {
+        if (!MapCtrl.map) return;
+        const host = MapCtrl.map.getContainer();
+        let el = document.getElementById('seqview-box');
+        if (!sv) { if (el) el.remove(); return; }
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'seqview-box';
+            el.style.cssText = 'position:absolute;left:56px;top:12px;z-index:401;max-width:320px;background:#fff;border:1px solid #c7d2fe;'
+                + 'border-radius:12px;padding:6px 10px;font-size:11.5px;line-height:1.5;color:#1e293b;box-shadow:0 4px 12px rgba(0,0,0,.12);pointer-events:none';
+            host.appendChild(el);
+        }
+        const esc = t => String(t == null ? '' : t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+        let n = 0, kmTxt = '', mk = '';
+        try {
+            const info = RoadMaster.dayM(sv.route, sv.day, State.stores);
+            n = info.n; kmTxt = (Math.round(info.m / 100) / 10).toFixed(1) + ' กม.';
+            mk = RoadMaster.marketName(sv.route, sv.day, State.stores) || '';
+        } catch (e) {}
+        const dn = (typeof DAY_COLORS !== 'undefined' && DAY_COLORS[sv.day]) ? DAY_COLORS[sv.day].name : sv.day;
+        el.innerHTML = `🔢 <b>ลำดับคิว ${esc(sv.route)} · ${esc(dn)}${mk ? ' ' + esc(mk) : ''}</b><br>`
+            + `<span style="color:#475569">${n} ร้าน${kmTxt ? ' · ' + kmTxt : ''} · เลขบนหมุด = ลำดับเข้าร้าน</span>`;
     }
 };
 
@@ -323,4 +420,4 @@ const Lasso = {
         return ins;
     }
 };
-
+;(window.__RPV=window.__RPV||{})['admin-map.js']='1.0.4';

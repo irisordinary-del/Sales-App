@@ -1,5 +1,5 @@
 /* =============================================================================
- *  geo-tree.js — ร้านย้ายเซลล์: ออกไฟล์ GEO_TREE_END / GEO_TREE_START สำหรับ DMS   (V0.7.0)
+ *  geo-tree.js — ร้านย้ายเซลล์: ออกไฟล์ CUSTOMER_GEO_TREE_END / CUSTOMER_GEO_TREE_START สำหรับ DMS   (V0.7.0 · V1.0.4)
  * =============================================================================
  *  ข้อมูลตั้งต้น = CUSTOMER_GEO_TREE ที่ดึงจาก DMS (Import/export Job) — บอกว่าร้านไหนผูกกับ Node (เซลล์) ไหน
  *    • ไฟล์ทั้งบริษัท (.zip หรือ .csv) — DMS ส่งออกเป็นข้อความ UTF-16 คั่นด้วย Tab แม้นามสกุลจะเป็น .csv
@@ -13,7 +13,9 @@
  *  ส่งออก (เฉพาะร้านที่ย้ายเซลล์ — ตกลงกันแล้ว 5 ต.ค. 2569) — อยู่ใน zip เดียวกับไฟล์แผน (dms-export.js)
  *    GEO_TREE_END   = Node เดิม + วันเริ่มเดิม + End Date = วันก่อนวันเริ่มผูกใหม่
  *    GEO_TREE_START = Node ของสายใหม่ + Start Date = วันที่ 1 ของเดือนแผน (แก้ได้) · ไม่ใส่ End Date
- *    ร้านใหม่ที่ยังไม่อยู่ใน Geo Tree → มีแค่ใน START
+ *    V1.0.4 (12 พ.ย. 2569): ร้านใหม่ที่ไม่อยู่ใน Geo Tree → ไม่ใส่ START แล้ว (DMS ผูกให้ตอนสร้างร้านใน Customer Master)
+ *      ยกเว้นร้านใหม่ที่จัดเข้าสาย ≠ Salesman Code ใน Master = ย้ายเซลล์จริง → เตือนให้นำเข้า Geo Tree ล่าสุด (จะได้ END + START)
+ *    ชื่อไฟล์ใน zip: CUSTOMER_GEO_TREE_END.csv / CUSTOMER_GEO_TREE_START.csv
  *    รูปแบบไฟล์เหมือนที่ DMS ส่งออก: .csv · UTF-16 · คั่นด้วย Tab · วันที่ ปปปป/ดด/วว
  * ========================================================================== */
 (function () {
@@ -203,9 +205,12 @@
         async markSent() {
             const R = (State.db && State.db.routes) || {};
             const touched = new Set();
+            // V1.0.4: เปลี่ยนเฉพาะร้านที่ออกไฟล์ END + START จริง (ร้านใหม่ที่ไม่อยู่ใน Geo Tree ไม่ได้ใส่ไฟล์ → คงไว้ให้เตือนต่อ)
+            let sent = null;
+            try { const d = G.diff(); if (d) sent = new Set(d.moved.map(x => x.c)); } catch (e) {}
             Object.keys(R).forEach(rt => {
                 if (rt === UNASSIGNED) return;
-                (R[rt] || []).forEach(s => { if (s && !s.inactive && String(s.salesCode || '').trim() !== rt) { s.salesCode = rt; touched.add(rt); } });
+                (R[rt] || []).forEach(s => { if (s && !s.inactive && String(s.salesCode || '').trim() !== rt && (!sent || sent.has(String(s.code || s.id || '')))) { s.salesCode = rt; touched.add(rt); } });
             });
             for (const rt of touched) {
                 try { await App.planRoutesCol(App._currentPlanYM).doc(rt).set({ stores: R[rt] }, { merge: true }); } catch (e) {}
@@ -263,11 +268,15 @@
                     const cur = G.nodeAt(doc.cust[c], end);
                     if (cur && cur[0] === node) { same++; return; }
                     const row = { c, name: s.name || '', route: rt, node, from: cur ? cur[0] : '', fromStart: cur ? cur[1] : '' };
-                    if (cur) moved.push(row); else fresh.push(row);
+                    // V1.0.4: ร้านที่ไม่อยู่ใน Geo Tree = ร้านใหม่ — ผูกไว้แล้วตอนสร้างร้าน ไม่ต้องออก START
+                    //   ถ้าสายในแผน ≠ Salesman Code ใน Master = ย้ายเซลล์ที่ Geo Tree ยังไม่มีข้อมูล → แจ้งเตือน (ไม่ใส่ไฟล์)
+                    if (cur) moved.push(row);
+                    else { row.sc = String(s.salesCode || '').trim(); fresh.push(row); }
                 });
             });
             const sortRows = (a) => a.sort((x, y) => x.route.localeCompare(y.route, 'th', { numeric: true }) || x.c.localeCompare(y.c));
-            return { start, end, dist, tree: doc.tree || 'BST', moved: sortRows(moved), fresh: sortRows(fresh), same, noNode, dup };
+            const freshMove = fresh.filter(x => x.sc && x.sc !== x.route);
+            return { start, end, dist, tree: doc.tree || 'BST', moved: sortRows(moved), fresh: sortRows(fresh), freshMove: sortRows(freshMove), same, noNode, dup };
         },
 
         // ── ส่วนในหน้าต่างส่งออก DMS ──────────────────────────────────────
@@ -287,14 +296,14 @@
             if (!doc) {
                 if (!pre.length) return box(head + `<p class="text-gray-500">ไม่มีร้านย้ายเซลล์ (ทุกร้านอยู่สายเดียวกับ Salesman Code เดิม) — ไม่ต้องนำเข้า Geo Tree · zip มีไฟล์แผน 2 ไฟล์</p>`);
                 return box(head + `<p class="text-red-800"><b>⚠️ มี ${pre.length.toLocaleString()} ร้านย้ายเซลล์</b> (Salesman Code เดิม ≠ สายหลังจัด) — ต้องนำเข้า <b>CUSTOMER_GEO_TREE</b> จาก DMS (Import/export Job · .zip หรือ .csv) ก่อน
-                    ระบบจึงจะออก GEO_TREE_END / START ใส่ zip ให้ได้</p>` + preList(pre), 'red');
+                    ระบบจึงจะออก CUSTOMER_GEO_TREE_END / START ใส่ zip ให้ได้</p>` + preList(pre), 'red');
             }
             const d = G.diff();
             if (!d) return box(head + `<p class="text-gray-500">ยังไม่ได้เปิดแผนเดือนไหน</p>`);
-            const nMove = d.moved.length, nNew = d.fresh.length;
+            const nMove = d.moved.length, nNew = d.fresh.length, nFM = d.freshMove.length;
             const noNode = Object.keys(d.noNode);
             const loaded = doc.loadedAt ? new Date(doc.loadedAt) : null;
-            const list = d.moved.concat(d.fresh).map(x => ({ c: x.c, name: x.name, route: x.route, from: x.from ? x.from.slice(-3) : '' }));
+            const list = d.moved.concat(d.freshMove).map(x => ({ c: x.c, name: x.name, route: x.route, from: x.from ? x.from.slice(-3) : '' }));
             return box(head + `
                 <p class="text-gray-500 mb-1.5">ข้อมูลจาก <b>${esc(doc.fileName || '')}</b> ${loaded ? '· นำเข้า ' + esc(thd(loaded)) : ''} · ศูนย์ ${esc(doc.dist)} ${Object.keys(doc.cust).length.toLocaleString()} ร้าน</p>
                 ${G.stale() ? `<p class="mb-1.5 text-amber-700">⚠️ Geo Tree นำเข้าไว้นานกว่า 30 วัน — ควรดึงจาก DMS แล้วนำเข้าใหม่ก่อนส่งออก</p>` : ''}
@@ -303,10 +312,11 @@
                     <input type="date" value="${iso(d.start)}" onchange="GeoTree.setStart(this.value)" class="border border-gray-200 rounded-lg px-1.5 py-0.5 text-[11px]">
                     <span class="text-gray-400">ปิดของเดิม ${esc(thd(d.end))}</span>
                 </div>
-                <p class="${nMove || nNew ? 'text-emerald-800' : 'text-gray-500'}">
-                    ย้ายเซลล์ <b>${nMove.toLocaleString()}</b> ร้าน (END + START) · ร้านใหม่ <b>${nNew.toLocaleString()}</b> ร้าน (START อย่างเดียว)
-                    · ไม่เปลี่ยน ${d.same.toLocaleString()} ร้าน
-                    <br>${nMove + nNew ? `zip จะมี <b>${nMove ? 'GEO_TREE_END + ' : ''}GEO_TREE_START</b> เพิ่มจากไฟล์แผน` : 'zip มีไฟล์แผน 2 ไฟล์ (ไม่มีร้านที่ต้องผูกใหม่)'}</p>
+                <p class="${nMove ? 'text-emerald-800' : 'text-gray-500'}">
+                    ย้ายเซลล์ <b>${nMove.toLocaleString()}</b> ร้าน (END + START) · ไม่เปลี่ยน ${d.same.toLocaleString()} ร้าน
+                    ${nNew ? `· ร้านใหม่ ${nNew.toLocaleString()} ร้าน ไม่ใส่ไฟล์ (ผูกไว้แล้วตอนสร้างใน Customer Master)` : ''}
+                    <br>${nMove ? `zip จะมี <b>CUSTOMER_GEO_TREE_END + CUSTOMER_GEO_TREE_START</b> เพิ่มจากไฟล์แผน` : 'zip มีไฟล์แผน 2 ไฟล์ (ไม่มีร้านที่ต้องผูกใหม่)'}</p>
+                ${nFM ? `<p class="mt-1 text-amber-700"><b>⚠️ ร้านใหม่ ${nFM.toLocaleString()} ร้าน จัดเข้าสายไม่ตรงกับ Salesman Code ใน Master</b> แต่ยังไม่มีใน Geo Tree ที่นำเข้าไว้ — ไม่ได้ใส่ไฟล์ · ดึง CUSTOMER_GEO_TREE ล่าสุดจาก DMS แล้วกด ↻ นำเข้าใหม่ ระบบจะออก END + START ให้</p>` : ''}
                 ${noNode.length ? `<p class="mt-1 text-red-700"><b>⚠️ สายที่ยังไม่มี Node ใน DMS:</b> ${noNode.map(r => esc(r) + ' (' + d.noNode[r].length + ' ร้าน)').join(', ')} — ต้องสร้าง Node ใน DMS ก่อนอัป START ของสายนี้</p>` : ''}
                 ${d.dup.length ? `<p class="mt-1 text-amber-700">⚠️ ${d.dup.length} ร้านอยู่ในแผนมากกว่า 1 สาย (${d.dup.slice(0, 3).map(x => esc(x.c) + ' ' + esc(x.a) + '/' + esc(x.b)).join(', ')}${d.dup.length > 3 ? ' …' : ''}) — ใช้สายแรก</p>` : ''}
                 ${preList(list)}`);
@@ -316,18 +326,18 @@
         rowsOf(d) {
             const end = [HEAD], start = [HEAD];
             d.moved.forEach(x => end.push([d.dist, d.tree, x.from, x.c, ymd(parseIso(x.fromStart)), ymd(d.end)]));
-            d.moved.concat(d.fresh).forEach(x => start.push([d.dist, d.tree, x.node, x.c, ymd(d.start), '']));
+            d.moved.forEach(x => start.push([d.dist, d.tree, x.node, x.c, ymd(d.start), '']));
             return { end, start };
         },
         /** ไฟล์ Geo Tree ที่จะใส่ใน zip [{name, rows}] — ว่างถ้าไม่ได้นำเข้า / ไม่มีร้านที่ต้องผูกใหม่ */
         files() {
             if (!G._doc) return [];
             const d = G.diff();
-            if (!d || !(d.moved.length + d.fresh.length)) return [];
+            if (!d || !d.moved.length) return [];
             const { end, start } = G.rowsOf(d);
             const out = [];
-            if (end.length > 1) out.push({ name: 'GEO_TREE_END.csv', rows: end });
-            out.push({ name: 'GEO_TREE_START.csv', rows: start });
+            if (end.length > 1) out.push({ name: 'CUSTOMER_GEO_TREE_END.csv', rows: end });
+            out.push({ name: 'CUSTOMER_GEO_TREE_START.csv', rows: start });
             return out;
         },
         _parseDate: parseDate, _decode: decode, _encode: encodeUtf16,
@@ -335,3 +345,4 @@
 
     window.GeoTree = G;
 })();
+;(window.__RPV=window.__RPV||{})['geo-tree.js']='1.0.4';

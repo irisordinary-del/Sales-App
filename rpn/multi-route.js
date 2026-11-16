@@ -34,6 +34,7 @@ const MultiRoute = (() => {
     let open = [];                 // สายที่เปิดอยู่
     let dayFilter = null;          // null = ทุกวัน · Set = เฉพาะวันที่เลือก
     let showNew = true;            // แสดงร้านที่ยังไม่จัดวัน
+    let allNew = false;            // V1.0.4: "ดูทั้งศูนย์" — โชว์ร้านยังไม่จัดวันของทุกสาย แม้สายนั้นไม่ได้ติ๊กเปิด
     let colorMode = 'route';
     let layer = null;
     let dots = new Map(), hidden = new Set();      // V0.9.6: id → จุด · id ที่ถูกหมุดเต็มบังอยู่
@@ -84,6 +85,49 @@ const MultiRoute = (() => {
         },
         routeOf(s) { return s.route || State.localActiveRoute; },
 
+        /** V1.0.4: ร้านยังไม่จัดวันของ "สายที่ไม่ได้เปิด" — โชว์เป็นจุดบนแผนที่อย่างเดียว (ไม่เข้ารายการขวา/ตัวเลขชิป)
+         *  กดจุดแล้วระบบเปิดสายนั้นให้ก่อน แก้แล้วจึงบันทึกลงสายที่ถูกต้อง */
+        extras() {
+            if (!allNew || !showNew) return [];
+            M.stamp();
+            const R = State.db.routes || {};
+            const out = [];
+            M.routeList().forEach(name => {
+                if (open.includes(name) || !Array.isArray(R[name])) return;
+                R[name].forEach(s => { if (!s.inactive && !(s.days && s.days.length)) out.push(s); });
+            });
+            return out;
+        },
+        /** V1.0.4: จำนวนร้านยังไม่จัดวันต่อสาย (สายที่ยังไม่โหลด = null) */
+        noDayOf(name) {
+            const L = (State.db.routes || {})[name];
+            if (!Array.isArray(L)) return null;
+            let n = 0;
+            L.forEach(s => { if (!s.inactive && !(s.days && s.days.length)) n++; });
+            return n;
+        },
+        get allNew() { return allNew; },
+        async toggleAllNew() {
+            allNew = !allNew;
+            if (allNew) {
+                showNew = true;
+                await M._loadAll();
+            }
+            M.refresh();
+        },
+        /** โหลดทุกสายของเดือน (ปกติระบบโหลดไว้เบื้องหลังอยู่แล้ว — เผื่อยังไม่ครบ) */
+        async _loadAll() {
+            const ym = App._currentPlanYM;
+            const need = M.routeList().filter(r => !Array.isArray((State.db.routes || {})[r]));
+            if (!need.length || !ym) return;
+            UI.showLoader('กำลังโหลด ' + need.length + ' สาย...', need.join(' · '));
+            for (const r of need) {
+                try { const d = await App.planRoutesCol(ym).doc(r).get(); State.db.routes[r] = d.exists ? (d.data().stores || []) : []; }
+                catch (e) { State.db.routes[r] = []; }
+            }
+            UI.hideLoader();
+        },
+
         /** ร้านทั้งหมดของสายที่เปิดอยู่ ผ่านตัวกรองวันแล้ว */
         filtered() {
             M.stamp();
@@ -101,6 +145,9 @@ const MultiRoute = (() => {
             M.stamp();
             const R = State.db.routes || {};
             if (M.empty) { State.stores = []; return; }   // ไม่ได้ติ๊กสายไหนเลย
+            // V1.0.1: สายที่กำลังแก้ต้องเป็นสายที่เปิดอยู่เสมอ — เดิมติ๊กสายที่กำลังแก้ออก หน้าจอโชว์ร้านของสายที่เหลือ
+            //   แต่ยังจำว่ากำลังแก้สายเดิม พอบันทึกร้านสายหนึ่งไปทับอีกสาย (เคส 502C01 ถูกทับด้วยร้าน 502P07)
+            if (open.length && !open.includes(State.localActiveRoute)) M._setActive(open[0]);
             if (!M.multi) {                       // เปิดสายเดียว = คืน State.stores ให้เป็นของสายนั้น
                 State.stores = R[open[0]] || [];
                 return;
@@ -110,6 +157,13 @@ const MultiRoute = (() => {
             State.stores = arr;
         },
 
+        /** V1.0.1: ย้าย "สายที่กำลังแก้" ไปสายที่ยังเปิดอยู่ (ไม่โหลดใหม่ — สายที่เปิดอยู่มีข้อมูลในหน่วยความจำแล้ว) */
+        _setActive(rt) {
+            if (!rt || rt === State.localActiveRoute) return;
+            State.localActiveRoute = rt;
+            try { localStorage.setItem(`last_route_${App._currentPlanYM}`, rt); } catch (e) {}
+            try { const rs = document.getElementById('routeSelector'); if (rs) rs.value = rt; } catch (e) {}
+        },
         storesOf(route, from) {
             return (from || State.stores || []).filter(s => M.routeOf(s) === route);
         },
@@ -201,7 +255,7 @@ const MultiRoute = (() => {
         /** วาดเฉพาะชั้นแผนที่ — ใช้ตอนเลื่อน/ซูม ไม่ต้องวาดรายการด้านขวาใหม่ */
         redrawMap() {
             if (!MapCtrl || !MapCtrl.map) return;
-            const show = M.isOn ? M.filtered() : (State.stores || []);
+            const show = (M.isOn ? M.filtered() : (State.stores || [])).concat(M.extras());
             try { MapCtrl.renderMarkers(); } catch (e) { console.warn('[MultiRoute] markers', e); }
             // V0.9.6: ซูม/เลื่อนแผนที่ ข้อมูลร้านไม่ได้เปลี่ยน — ไม่ต้องสร้างจุดใหม่ทั้งหมด แค่สลับจุดที่ถูกหมุดเต็มบัง
             try { if (layer) M.syncDots(); else M.render(show); } catch (e) { console.warn('[MultiRoute] dots', e); }
@@ -296,8 +350,8 @@ const MultiRoute = (() => {
         syncDots() {
             if (!layer) return;
             const pins = M._pinIds || new Set();
-            hidden.forEach(id => { if (!pins.has(id)) { const mk = dots.get(id); if (mk) layer.addLayer(mk); hidden.delete(id); } });
-            pins.forEach(id => { if (!hidden.has(id)) { const mk = dots.get(id); if (mk) { layer.removeLayer(mk); hidden.add(id); } } });
+            hidden.forEach(id => { if (!pins.has(id)) { const mk = dots.get(id); if (mk) { layer.addLayer(mk); if (mk.__ringMk) layer.addLayer(mk.__ringMk); } hidden.delete(id); } });
+            pins.forEach(id => { if (!hidden.has(id)) { const mk = dots.get(id); if (mk) { layer.removeLayer(mk); if (mk.__ringMk) layer.removeLayer(mk.__ringMk); hidden.add(id); } } });
         },
 
         /** ย้อมหมุดเต็มเป็นสีสาย (ยกเว้นร้านที่เลือกไว้ = เหลืองเหมือนเดิม) */
@@ -334,8 +388,9 @@ const MultiRoute = (() => {
                 let opt;
                 if (!assigned) {
                     // ร้านที่ยังไม่จัดวัน = ร้านใหม่ → วงกลมกลวงขอบประ เห็นชัดว่าไม่เหมือนใคร
-                    opt = { renderer, radius: sel ? 8 : 6, weight: 2.5, dashArray: '3,2',
-                            color: sel ? '#111827' : '#dc2626',
+                    // V1.0.4: โหมด "ดูทั้งศูนย์" ขอบเป็นสีของสาย (รู้ว่าเป็นร้านของสายไหน)
+                    opt = { renderer, radius: sel ? 8 : 6, weight: allNew ? 3 : 2.5, dashArray: '3,2',
+                            color: sel ? '#111827' : (allNew ? (cmap[s.route] || '#dc2626') : '#dc2626'),
                             fillColor: sel ? '#facc15' : '#ffffff', fillOpacity: 0.95 };
                 } else {
                     const fill = (colorMode === 'day')
@@ -348,7 +403,11 @@ const MultiRoute = (() => {
                 const mk = L.circleMarker([s.lat, s.lng], opt);
                 mk.__store = s;
                 dots.set(s.id, mk);
+                // V1.0.3: ร้านใหม่ — วงเขียวรอบจุด (ซ่อน/โชว์คู่กับจุด)
+                if (assigned && typeof NewStores !== 'undefined' && NewStores.ringOn && NewStores.isNew(s))
+                    mk.__ringMk = L.circleMarker([s.lat, s.lng], { renderer, radius: (sel ? 7 : 5) + 5, weight: 4, color: '#059669', fill: false, interactive: false });
                 if (pins && pins.has(s.id)) { hidden.add(s.id); return; }      // ร้านนี้ได้หมุดเต็มแล้ว (เก็บจุดไว้ เผื่อเลื่อนออกนอกจอ)
+                if (mk.__ringMk) marks.push(mk.__ringMk);
                 marks.push(mk);
             });
             if (!dots.size) return;
@@ -359,6 +418,13 @@ const MultiRoute = (() => {
                 if (ev.originalEvent && (ev.originalEvent.shiftKey || ev.originalEvent.ctrlKey)) {
                     StoreMgr.toggleSelect(s.id); UI.render(); return;
                 }
+                // V1.0.4: ร้านของสายที่ไม่ได้เปิด (โหมดดูทั้งศูนย์) → เปิดสายนั้นก่อน แก้แล้วบันทึกลงสายถูกต้อง
+                if (s.route && !open.includes(s.route)) {
+                    open.push(s.route);
+                    const ll = ev.latlng;
+                    M.apply().then(() => { try { M.popup(s, ll); } catch (e) {} });
+                    return;
+                }
                 M.popup(s, ev.latlng);
             });
             layer.on('mouseover', (ev) => {
@@ -366,12 +432,15 @@ const MultiRoute = (() => {
                 if (!s) return;
                 const on = s.days && s.days.length;
                 const sg = M.suggestOf(s);
-                MapCtrl.map.openTooltip(
+                // V1.0.4: เก็บตัว tooltip ไว้ปิดเอง — เดิมเรียก closeTooltip() เปล่า ๆ แล้ว error ทุกครั้งที่เมาส์ออกจากจุด
+                try { if (M._tip) MapCtrl.map.closeTooltip(M._tip); } catch (e) {}
+                M._tip = L.tooltip({ direction: 'top', offset: [0, -6] }).setLatLng([s.lat, s.lng]).setContent(
                     `<b>${esc(s.name)}</b><br>${esc(s.route)}${on ? ' · ' + esc(s.days.map(dayName).join(' & ')) : ' · <b style="color:#dc2626">ยังไม่จัดวัน</b>'}`
-                    + (sg ? `<br><span style="color:#b45309">Salesman: ${esc(sg)}</span>` : ''),
-                    [s.lat, s.lng], { direction: 'top', offset: [0, -6] });
+                    + (sg ? `<br><span style="color:#b45309">Salesman: ${esc(sg)}</span>` : '')
+                    + (allNew && s.route && !open.includes(s.route) ? '<br><span style="color:#6b7280">กดเพื่อเปิดสายนี้และจัดวัน</span>' : ''));
+                MapCtrl.map.openTooltip(M._tip);
             });
-            layer.on('mouseout', () => MapCtrl.map.closeTooltip());
+            layer.on('mouseout', () => { try { if (M._tip) MapCtrl.map.closeTooltip(M._tip); } catch (e) {} M._tip = null; });
             layer.addTo(MapCtrl.map);
         },
 
@@ -397,7 +466,8 @@ const MultiRoute = (() => {
                         <span class="text-[11px] font-bold px-1.5 py-0.5 rounded text-white"
                               style="background:${M.colorOf(s.route)}">${esc(s.route)}</span>
                         ${isNew ? `<span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-50 text-red-600 border border-red-200">
-                            ${s.route === UNASSIGNED ? '⊕ ร้านใหม่' : '⊕ ยังไม่จัดวัน'}</span>` : ''}
+                            ${s.route === UNASSIGNED ? '⊕ รอจัดสาย' : '⊕ ยังไม่จัดวัน'}</span>` : ''}
+                        ${(typeof NewStores !== 'undefined' && NewStores.badge) ? NewStores.badge(s) : ''}
                         ${(s.masterInactive || /inactive/i.test(s.status || '')) ? `<span title="Customer Master ระบุ Inactive แต่ร้านอยู่ใน Route Plan" class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200">Master: Inactive</span>` : ''}
                     </div>
                     ${s.openDate ? `<div class="text-[10.5px] text-gray-500 mb-1.5">เปิดบัญชี <b class="text-emerald-700">${esc(UI._thDate ? UI._thDate(s.openDate) : s.openDate)}</b></div>` : ''}
@@ -517,8 +587,32 @@ const MultiRoute = (() => {
                     if (a === '__new') return 1; if (b === '__new') return -1;
                     return (fd(a) - fd(b)) || ((parseInt(slotOf(a).replace(/\D/g, ''), 10) || 0) - (parseInt(slotOf(b).replace(/\D/g, ''), 10) || 0)) || (rowOf(a).k - rowOf(b).k);
                 });
+                // V1.0.4: วันทำงานตามปฏิทินที่ยังไม่มีตลาด → แถวเส้นประ "ว่าง — ยังไม่มีตลาด" แทรกตามวันที่ + ป้ายเตือนบนหัวสาย
+                let empt = [], singles = [];
+                try { if (typeof Runs !== 'undefined' && Runs.emptyDates && rt !== 'รอจัดสาย') { empt = Runs.emptyDates(rt); singles = Runs.singleRuns(rt); } } catch (e) {}
+                if (empt.length || singles.length) {
+                    const dl = (d) => d.getDate() + ' ' + THM[d.getMonth()];
+                    const ban = document.createElement('div');
+                    ban.className = 'text-[10.5px] leading-snug text-amber-900 bg-amber-50 border border-amber-300 rounded-lg px-2 py-1.5';
+                    ban.innerHTML = '⚠️ '
+                        + (empt.length ? `<b>วันทำงานที่ไม่มีตลาด ${empt.length} วัน:</b> ${esc(empt.slice(0, 8).map(dl).join(', '))}${empt.length > 8 ? ' …' : ''}` : '')
+                        + (empt.length && singles.length ? ' · ' : '')
+                        + (singles.length ? `<b>ตลาดวิ่งครั้งเดียว ${singles.length} ตลาด:</b> ${esc(singles.map(d => 'D' + (parseInt(d.replace(/\D/g, ''), 10) || 0)).join(', '))} — กด ➕ ที่หัวตลาดเพื่อเพิ่มครั้งที่ 2` : '')
+                        + (empt.length && !singles.length ? (Runs.isShort(rt) ? ' — ย้ายร้านลงวันนั้นได้ที่แท็บ 2 (ช่อง Visit เลือกวันว่าง = ตลาดใหม่ของวันนั้น)' : ' — ตลาดที่ตก 2 วันที่ ตั้ง "วิ่งทุกครั้ง" ได้ที่ปุ่มวันที่บนหัวตลาด') : '');
+                    body.appendChild(ban);
+                }
+                const emptyRow = (d) => {
+                    const e = document.createElement('div');
+                    e.className = 'border border-dashed border-gray-300 rounded-lg px-2 py-1 text-[11px] italic text-gray-400 bg-white/60';
+                    e.title = 'วันทำงานตามปฏิทินที่ยังไม่มีตลาด — เลือกวันนี้ในแท็บ 2 (ช่อง Visit) เพื่อสร้างตลาดใหม่ หรือแก้ปฏิทิน';
+                    e.innerHTML = `<b class="not-italic text-gray-400">${esc(WDs[d.getDay()] + ' ' + d.getDate() + ' ' + THM[d.getMonth()])}</b> ว่าง — ยังไม่มีตลาด`;
+                    return e;
+                };
+                let ei = 0;
+                const flushEmpty = (t) => { while (ei < empt.length && empt[ei].getTime() < t) body.appendChild(emptyRow(empt[ei++])); };
                 keys.forEach(key => {
                     const dk = slotOf(key), row = rowOf(key);
+                    flushEmpty(dk === '__new' ? Infinity : fd(key));
                     const dDay = document.createElement('details');
                     // พับไว้ก่อน เห็นแค่จำนวน กดค่อยกาง (กลุ่มร้านที่ยังไม่จัดวันเปิดไว้เลย)
                     dDay.open = (dk === '__new') || M._openDay === (rt + '|' + key);
@@ -539,12 +633,22 @@ const MultiRoute = (() => {
                         + `<span class="flex-1 min-w-0 truncate font-normal text-gray-500">${esc(info.market || '—')}</span>`
                         + (pb = dk !== '__new' ? M._pairBadge(rt, dk, row) : '')
                         + (info.was && !pb && !row.fold ? `<span class="shrink-0 text-[9px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded px-1">เดิม ${esc(info.was)}</span>` : '')
+                        // V1.0.4: ตลาดรอบสั้นที่เดือนนี้ได้วิ่งครั้งเดียว — เพิ่มครั้งที่ 2 ได้ (เลือกวันว่าง)
+                        + (dk !== '__new' && !row.fold && row.date && typeof Runs !== 'undefined' && Runs.canAddRun && Runs.canAddRun(rt, dk)
+                            ? `<button onclick="event.preventDefault();event.stopPropagation();Runs.addRunMenu('${esc(rt)}','${esc(dk)}')"
+                                    title="ตลาดนี้เดือนนี้วิ่งครั้งเดียว — กดเพื่อเพิ่มครั้งที่ 2 (ร้านและลำดับเหมือนครั้งที่ 1 · เลือกวันที่ วันว่างขึ้นก่อน)"
+                                    class="shrink-0 text-[10px] font-black text-white bg-indigo-600 hover:bg-indigo-700 rounded-md px-1.5 py-0.5">➕ ครั้งที่ 2</button>` : '')
                         + `<span class="tabular-nums text-gray-400 shrink-0">${dm.get(key).length}</span>`;
                     if (dk !== '__new') {
                         // ปักจุดเริ่ม/จุดจบได้จากหน้ารายชื่อเลย ไม่ต้องเข้าไปในหน้าต่างรายวัน
                         const info2 = M._pointInfo(rt, dk);
+                        // V1.0.4 (11 พ.ย. 2569 11:45): 🔢 โชว์ลำดับคิวบนหมุด — กดซ้ำ = ปิด · ดูได้ทีละตลาด
+                        const svOn = !!(State.seqView && State.seqView.route === rt && State.seqView.day === dk && rt === State.localActiveRoute);
                         sDay.insertAdjacentHTML('beforeend',
-                            `<button onclick="event.preventDefault();event.stopPropagation();MultiRoute.pointFor('${esc(rt)}','${esc(dk)}','start')"
+                            `<button onclick="event.preventDefault();event.stopPropagation();MultiRoute.seqView('${esc(rt)}','${esc(dk)}')"
+                                title="${svOn ? 'กำลังโชว์ลำดับคิวบนหมุด — กดอีกครั้งเพื่อปิด' : 'โชว์ลำดับคิวบนหมุดของตลาดนี้'}"
+                                class="shrink-0 px-1 rounded text-[10px] font-black ${svOn ? 'bg-indigo-600 text-white' : 'text-indigo-600 border border-indigo-200 bg-white hover:bg-indigo-50'}">🔢</button>`
+                          + `<button onclick="event.preventDefault();event.stopPropagation();MultiRoute.pointFor('${esc(rt)}','${esc(dk)}','start')"
                                 title="จุดเริ่มของวันนี้${info2.start ? ' — ' + esc(info2.start) : ''}"
                                 class="shrink-0 px-1 rounded" style="${flagCss(info2.start)}">🚩${info2.start ? FLAG_OK : ''}</button>`
                           + `<button onclick="event.preventDefault();event.stopPropagation();MultiRoute.pointFor('${esc(rt)}','${esc(dk)}','end')"
@@ -559,6 +663,7 @@ const MultiRoute = (() => {
                     dDay.appendChild(inner);
                     body.appendChild(dDay);
                 });
+                flushEmpty(Infinity);
                 dRoute.appendChild(body);
                 frag.appendChild(dRoute);
             });
@@ -578,6 +683,47 @@ const MultiRoute = (() => {
         sumToggle(rt, open) {
             if (open) { M._sumAll = false; M._sumOpen = rt; }
             else if (M._sumOpen === rt) M._sumOpen = null;
+        },
+
+        /** V1.0.4 (11 พ.ย. 2569 11:45): เปิด/ปิดโหมดโชว์ลำดับคิวบนหมุด ของตลาด (สาย × Day) — ทีละตลาด */
+        seqView(route, day) {
+            const cur = State.seqView;
+            if (cur && cur.route === route && cur.day === day) {
+                State.seqView = null;
+                UI.render();
+                return;
+            }
+            const go = () => {
+                State.seqView = { route, day };
+                UI.render();
+                try {
+                    M._fitDay(route, day);
+                } catch (e) {}
+            };
+            if (route !== State.localActiveRoute) { M.pickRoute(route); setTimeout(go, 450); }
+            else go();
+        },
+
+        /** ซูมแผนที่ให้เห็นร้านของตลาด + จุดเริ่ม/จบ */
+        _fitDay(route, day) {
+            const pts = (State.stores || []).filter(s => !s.inactive && s.days && s.days.includes(day)
+                && (s.route || State.localActiveRoute) === route && isFinite(s.lat) && isFinite(s.lng)).map(s => [s.lat, s.lng]);
+            try {
+                if (typeof RoadMaster !== 'undefined') [RoadMaster.startOf(route, day), RoadMaster.endOf(route, day)]
+                    .forEach(p => { if (p && isFinite(p.lat) && isFinite(p.lng)) pts.push([p.lat, p.lng]); });
+            } catch (e) {}
+            if (pts.length) MapCtrl.map.fitBounds(L.latLngBounds(pts), { padding: [60, 60], maxZoom: 15 });
+        },
+
+        /** V1.0.4 (11 พ.ย. 2569 11:55): หน้าสรุป (แท็บ 3) คลิกแถวระยะ Master / การ์ดวัน = เปิดโหมดลำดับของตลาดนั้นด้วย
+         *  (ไม่สลับปิดเหมือนปุ่ม 🔢 · ปิดได้ที่ปุ่ม 🔢 หัวตลาดในแท็บ 1) */
+        viewDay(route, day) {
+            if (!route || !day) return;
+            State.seqView = { route, day };
+            try { UI.render(); } catch (e) {}
+            try {
+                M._fitDay(route, day);
+            } catch (e) {}
         },
 
         /** ชื่อจุดเริ่ม/จุดจบที่ตั้งไว้ของวันนั้น (ไว้โชว์สีปุ่ม) */
@@ -619,8 +765,14 @@ const MultiRoute = (() => {
             if (p.merged.length) return `<span class="shrink-0 text-[9px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1"
                 title="CY เดียวกับ ${esc(p.merged.map(nm).join(', '))} — ร้าน+ลำดับเหมือนกัน ห่าง 14 วัน → ส่งออก DMS เป็น CY เดียว (แบบ 5)">🔗${esc(p.merged.map(sh).join(','))}</span>`;
             // V0.9.12: ป้ายเหลืองเฉย ๆ — ชี้เมาส์ดูว่าไม่เข้าเงื่อนไขตรงไหน
-            if (p.near.length) return `<span class="shrink-0 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-300 rounded px-1 cursor-help"
-                title="ไม่เข้าเงื่อนไข CY เดียวกับ ${esc(p.near.map(x => nm(x.other) + ' — ' + x.why).join(' · '))} · ส่งออกแยก CY · ร้านที่ไม่เหมือนกันเป็นพื้นเหลืองในรายชื่อร้าน">⚠️</span>`;
+            // V1.0.3: กดป้ายเปิดรายละเอียด (ร้านต่าง / ลำดับต่าง + ปุ่มแก้ / วันที่) · ข้อความพื้นเหลืองขึ้นเฉพาะกรณีที่มีร้านถูกทาจริง
+            if (p.near.length) {
+                const hl = p.near.some(x => x.kind === 'store' || x.kind === 'order');
+                const fix = p.near.some(x => x.kind === 'order');
+                return `<span onclick="event.stopPropagation();event.preventDefault();Runs.pairInfo('${esc(route)}','${esc(dk)}')"
+                class="shrink-0 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-300 rounded px-1 cursor-pointer hover:bg-amber-100"
+                title="ไม่เข้าเงื่อนไข CY เดียวกับ ${esc(p.near.map(x => nm(x.other) + ' — ' + x.why).join(' · '))} · ส่งออกแยก CY${hl ? ' · ร้านที่ไม่เหมือนกันเป็นพื้นเหลืองในรายชื่อร้าน' : ''} · กดดูรายละเอียด${fix ? ' / แก้ลำดับให้เหมือนกัน' : ''}">⚠️</span>`;
+            }
             return '';
         },
 
@@ -648,9 +800,10 @@ const MultiRoute = (() => {
         openDay(route, day) {
             if (route && route !== State.localActiveRoute) {
                 M.pickRoute(route);
-                setTimeout(() => { try { UI.showDayModal(day); } catch (e) {} }, 420);
+                setTimeout(() => { try { M.viewDay(route, day); UI.showDayModal(day); } catch (e) {} }, 420);
                 return;
             }
+            M.viewDay(route || State.localActiveRoute, day);
             UI.showDayModal(day);
         },
 
@@ -751,11 +904,12 @@ const MultiRoute = (() => {
         // ── แผงตัวกรอง ───────────────────────────────────────────────────
         label() {
             const nd = dayFilter ? dayFilter.size : M.visitKeys().size;
-            if (!open.length) return 'ยังไม่ได้เลือกสาย';
+            if (!open.length) return allNew && showNew ? 'ยังไม่จัดวันทั้งศูนย์' : 'ยังไม่ได้เลือกสาย';
             const parts = [State.localActiveRoute || '—'];
             if (open.length > 1) parts.push(open.length + ' สาย');
             if (dayFilter) parts.push(nd ? nd + ' วัน' : 'ไม่แสดงวันไหนเลย');
             if (!showNew) parts.push('ซ่อนร้านใหม่');
+            else if (allNew) parts.push('ยังไม่จัดวันทั้งศูนย์');
             return parts.join(' · ');
         },
         panel() {
@@ -777,6 +931,15 @@ const MultiRoute = (() => {
                 if (!(s.days && s.days.length)) { newCount++; return; }
                 s.days.forEach(d => M._rowKeys(r, d).forEach(k => { dayCount[k] = (dayCount[k] || 0) + 1; }));
             }));
+            // V1.0.4: ภาพรวมทั้งศูนย์ — ยังไม่จัดวัน / ร้านใหม่ ต่อสาย (สายที่โหลดแล้ว)
+            const nd = {}; let ndAll = 0, nwAll = 0, notLoaded = 0;
+            routes.forEach(r => {
+                const n = M.noDayOf(r);
+                if (n === null) { notLoaded++; return; }
+                nd[r] = n; ndAll += n;
+                if (typeof NewStores !== 'undefined') nwAll += NewStores.countIn(R[r] || []);
+            });
+            const two = (a, b, col) => `<span class="tabular-nums text-[10.5px] whitespace-nowrap"><b class="text-gray-700">${a}</b> <span class="text-gray-400">ในสายที่เปิด</span> · <b class="${col || 'text-red-600'}">${b}${notLoaded ? '+' : ''}</b> <span class="text-gray-400">ทั้งศูนย์</span></span>`;
             const vLabel = (r) => (r.date ? WDs[r.date.getDay()] + ' ' + r.date.getDate() + ' ' + THM[r.date.getMonth()] : 'ไม่วิ่งเดือนนี้') + ' · ' + r.label;
             // กล่องรายชื่อสาย/วันถูกสร้างใหม่ทุกครั้งที่ติ๊ก → จำตำแหน่งเลื่อนไว้แล้วใส่กลับ ไม่งั้นเด้งขึ้นบนทุกที
             const scrolls = [...host.querySelectorAll('.overflow-y-auto')].map(e => e.scrollTop);
@@ -801,6 +964,7 @@ const MultiRoute = (() => {
                             <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background:${M.colorOf(r)}"></span>
                             <button onclick="MultiRoute.pickRoute('${esc(r)}')"
                                 class="flex-1 min-w-0 text-left truncate font-mono ${r === State.localActiveRoute ? 'font-black text-indigo-700' : 'hover:underline'}">${esc(r)}</button>
+                            ${nd[r] ? `<span title="ร้านยังไม่จัดวัน ${nd[r]} ร้าน" class="shrink-0 text-[9.5px] font-black text-red-600 bg-red-50 border border-red-200 rounded-full px-1.5 leading-[14px]">${nd[r]}</span>` : ''}
                             <span class="text-gray-400 tabular-nums">${(R[r] || []).length}</span>
                         </div>`).join('')}
                     </div>
@@ -821,11 +985,22 @@ const MultiRoute = (() => {
                     </div>
                   </div>
                 </div>
-                <label class="flex items-center gap-2 text-[11px] mt-2 pt-2 border-t border-gray-100 cursor-pointer">
-                    <input type="checkbox" ${showNew ? 'checked' : ''} onchange="MultiRoute.toggleNew()">
-                    <span class="w-3 h-3 rounded-full border-2 border-dashed border-red-500 bg-white shrink-0"></span>
-                    <span class="flex-1 font-bold text-red-600">ยังไม่จัดวัน (ร้านใหม่)</span>
-                    <span class="text-gray-400 tabular-nums">${newCount}</span>
+                <div class="flex items-center gap-2 text-[11px] mt-2 pt-1.5 pb-1.5 px-1.5 border-t border-gray-100 rounded-md ${ndAll ? 'bg-red-50/60' : ''}">
+                    <label class="flex items-center gap-2 flex-1 min-w-0 cursor-pointer">
+                        <input type="checkbox" ${showNew ? 'checked' : ''} onchange="MultiRoute.toggleNew()">
+                        <span class="w-3 h-3 rounded-full border-2 border-dashed border-red-500 bg-white shrink-0"></span>
+                        <span class="font-bold text-red-600">ยังไม่จัดวัน</span>
+                    </label>
+                    ${two(newCount, ndAll)}
+                    <button onclick="MultiRoute.toggleAllNew()" title="โชว์ร้านยังไม่จัดวันของทุกสายบนแผนที่ ไม่ต้องติ๊กเปิดทีละสาย · ขอบจุดเป็นสีของสาย · กดจุดแล้วระบบเปิดสายนั้นให้"
+                        class="shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-black border ${allNew && showNew ? 'bg-red-600 text-white border-red-600' : 'bg-white text-red-600 border-red-300 hover:bg-red-50'}">${allNew && showNew ? '✓ ' : ''}ดูทั้งศูนย์</button>
+                </div>
+                <label title="ร้านที่อยู่ในแผนเดือนนี้แต่ไม่อยู่แผนเดือนฐาน (นิยามเดียวกับหน้าภาพรวม/รายงาน) — ติ๊ก = วงเขียวรอบหมุด"
+                    class="flex items-center gap-2 text-[11px] mt-1 cursor-pointer">
+                    <input type="checkbox" ${(typeof NewStores !== 'undefined' && NewStores.ringOn) ? 'checked' : ''} onchange="NewStores.setRing(this.checked)">
+                    <span class="w-3 h-3 rounded-full shrink-0" style="border:2.5px solid #10b981;background:#fff"></span>
+                    <span class="flex-1 font-bold" style="color:#047857">🆕 ร้านใหม่ (จัดวันแล้ว)</span>
+                    ${two((typeof NewStores !== 'undefined') ? open.reduce((a, r) => a + NewStores.countIn(R[r] || []), 0) : 0, nwAll, 'text-emerald-700')}
                 </label>
                 <div class="flex gap-1 mt-2">
                     <button onclick="MultiRoute.setColorMode('route')" class="flex-1 rounded-md py-1 text-[10px] font-bold ${colorMode === 'route' ? 'bg-gray-900 text-white' : 'bg-gray-100 hover:bg-gray-200'}">สีตามสาย</button>
@@ -905,6 +1080,13 @@ const MultiRoute = (() => {
                 const all = State.stores;
                 const show = M.isOn ? M.filtered() : all;
                 M._pinIds = M.pinIds(show);
+                // V1.0.4 (11 พ.ย. 2569 15:20): ตลาดที่กด 🔢 อยู่ = หมุดเต็มเลขลำดับเสมอ แม้ซูมออกจนร้านบนจอเกิน PIN_LIMIT
+                const sv = State.seqView;
+                if (sv && sv.route === State.localActiveRoute) {
+                    show.forEach(s => {
+                        if (!s.inactive && s.days && s.days.includes(sv.day) && (s.route || State.localActiveRoute) === sv.route) M._pinIds.add(s.id);
+                    });
+                }
                 const pinned = show.filter(s => M._pinIds.has(s.id));
                 // หมุดที่ไม่ได้อยู่ในชุดนี้แล้ว ต้องถอดออกจากแผนที่ ไม่งั้นค้าง
                 const keep = M._pinIds;
@@ -956,7 +1138,7 @@ const MultiRoute = (() => {
                 finally { State.stores = all; }
                 try {
                     M.listNote(set, listSet);
-                    M.render(set);
+                    M.render(set.concat(M.extras()));      // V1.0.4: + ร้านยังไม่จัดวันของสายที่ไม่ได้เปิด (โหมดดูทั้งศูนย์)
                     M.groupList('list-upload', listSet);
                     M.groupList('list-assigned', listSet);
                     M.groupList('list-unassigned', listSet);
@@ -1070,3 +1252,4 @@ const MultiRoute = (() => {
     };
     boot();
 })();
+;(window.__RPV=window.__RPV||{})['multi-route.js']='1.0.4';

@@ -394,3 +394,4 @@
     };
     document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 800));
 })();
+;(window.__RPV=window.__RPV||{})['month.js']='1.0.4';

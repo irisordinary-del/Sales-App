@@ -144,6 +144,21 @@
 
     /** ปฏิทินเฉพาะสายต้องโหลดใหม่ทุกครั้งที่ "เดือนเปลี่ยน" หรือ "บันทึกปฏิทิน" — เดิมโหลดครั้งเดียวตอนเปิดหน้า
      *  ทำให้สลับไปเดือนใหม่แล้วยังใช้ปฏิทิน (และวันหยุดเฉพาะกิจ) ของเดือนก่อนอยู่ ทั้งบนจอและตอนส่งออก */
+    /** V1.0.1: อ่านปฏิทินเฉพาะสายของเดือนใดก็ได้ (ใช้ routeList ของเดือนนั้นเอง) */
+    const preloadFor = async (ym) => {
+        const out = {};
+        try {
+            const p = await App.planRef(ym).get();
+            const names = ((p && p.exists && (p.data() || {}).routeList) || []).filter(Boolean);
+            await Promise.all(names.map(async (n) => {
+                try {
+                    const d = await App.planRoutesCol(ym).doc(n).get();
+                    if (d && d.exists && d.data().calendarOverride) out[n] = d.data().calendarOverride;
+                } catch (e) {}
+            }));
+        } catch (e) {}
+        return out;
+    };
     const hookReload = () => {
         if (typeof App === 'undefined' || !App._loadPlan || App._ddReloadWired) return false;
         App._ddReloadWired = true;
@@ -151,7 +166,16 @@
         App._loadPlan = async function () {
             // อย่าให้ของเดือนก่อนค้างระหว่างโหลด — แต่โหลดซ้ำเดือนเดิม (เช่นเอกสารศูนย์อัปเดตตอนส่งออก) ไม่ต้องล้าง
             // V0.6: เดิมล้างทุกครั้ง ระหว่างส่งออก DMS ปฏิทินเฉพาะสายหายไปชั่วขณะ → End date ของสายนั้นผิด
-            if (arguments[0] !== calYM) State.db.routeCal = {};
+            // V1.0.1 (HQ ข3): เดิมล้างเป็น {} ระหว่างโหลด → ช่วงนั้นทุกสายใช้ปฏิทินศูนย์ วันที่/ไฟล์ DMS ที่ทำช่วงนั้นผิด
+            //   ตอนนี้โหลดปฏิทินเฉพาะสายของเดือนใหม่ให้เสร็จก่อน แล้วค่อยแทนที่ (ไม่มีช่วงว่าง)
+            const ymNew = arguments[0];
+            if (ymNew && ymNew !== calYM) {
+                const pre = await preloadFor(ymNew);
+                State.db.routeCal = pre;
+                calYM = ymNew;
+                cache = new Map();
+                try { if (typeof Runs !== 'undefined' && Runs.bump) Runs.bump(); } catch (e) {}
+            }
             const r = await lp.apply(this, arguments);
             await loadOverrides();
             return r;
@@ -266,3 +290,4 @@
     };
     document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 800));
 })();
+;(window.__RPV=window.__RPV||{})['day-date.js']='1.0.4';

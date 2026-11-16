@@ -37,7 +37,11 @@ const FileManager = {
             return null;
         }
         if (cfg.mode === 'cycle') {
-            const isWkHol = (d) => (cfg.weeklyHolidays || []).includes(d.getDay());
+            // V1.0.4: วันทำงานพิเศษ (workDays) = วันหยุดประจำสัปดาห์ที่เดือนนี้ทำงาน (เช่น อาทิตย์ 27) — ใช้เฉพาะเดือนของปฏิทินนี้
+            //   แบบนับต่อเนื่องข้ามเดือน (weekday-rolling) ไม่ใช้ เพราะนับข้ามหลายเดือน (เหมือนวันหยุดเฉพาะกิจ)
+            const _wx = cfg.anchorType === 'weekday-rolling' ? [] : (cfg.workDays || []).map(Number);
+            const isWkHol = (d) => (cfg.weeklyHolidays || []).includes(d.getDay())
+                && !(_wx.length && d.getFullYear() === year && d.getMonth() === month && _wx.includes(d.getDate()));
             if (cfg.anchorType === 'weekday-rolling') {
                 if (!cfg.anchorDate) return null;
                 const daysInMonth = new Date(year, month + 1, 0).getDate();
@@ -872,4 +876,4 @@ const FileManager = {
 // #bulkUpload ใช้ onchange attribute ใน HTML โดยตรง
 document.addEventListener('DOMContentLoaded', () => {});
 console.log('✅ FileManager v2 loaded');
-
+;(window.__RPV=window.__RPV||{})['file-manager.js']='1.0.4';
