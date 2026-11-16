@@ -13,7 +13,8 @@
  *    • โหลด rpn-online-pre.js / rpn-online.js ซึ่งเป็นตัวต่อเข้ากับระบบออนไลน์ (เราเขียนเอง)
  *  ไฟล์ .js อื่นของ RPN V0 ไม่แตะเลย — เวอร์ชันใหม่ของบริษัทจึงวางทับได้ด้วยการรันสคริปต์นี้ซ้ำ
  *
- *  วิธีใช้:  node tools/sync-rpn.mjs "<โฟลเดอร์ RPN เช่น RPN V1 Launch>"
+ *  วิธีใช้:  node tools/sync-rpn.mjs "<โฟลเดอร์ RPN เช่น RPN V1 Launch>" ["<แพ็กเกจศูนย์อื่น>" ...]
+ *            (V1.0.4+ แพ็กเกจรายศูนย์: ตัวแรก = แพ็กเกจหลัก ตัวถัดไป = ดึงเฉพาะ road-matrix/*.js ของศูนย์นั้นมารวม)
  *  ถ้าจุดที่ต้องแก้ใน HTML หาไม่เจอ (บริษัทเปลี่ยนโครงไฟล์) สคริปต์จะหยุดและบอกว่าจุดไหน
  * ========================================================================== */
 import fs from 'node:fs';
@@ -88,6 +89,23 @@ must(/\s*<script src="center\.js[^"]*"><\/script>/, '', 'center.js');
 html = html.replace(/\s*<script src="package\.js[^"]*"><\/script>/, '');   // มีเฉพาะแพ็กเกจรายศูนย์ (V1.0.4+) ไม่มีก็ไม่เป็นไร
 must(/<\/body>/, '    <script src="rpn-online.js"></script>\n</body>', '</body>');
 fs.writeFileSync(htmlPath, html);
+
+// ── 3) ตารางระยะถนนจากแพ็กเกจศูนย์อื่น (V1.0.4+) ─────────────────────────────
+// ส่วนกลางแจกแยกศูนย์ — โค้ดเหมือนกันทุกแพ็กเกจ ต่างกันแค่ package.js กับ road-matrix/<ศูนย์>.js
+// ใช้: node tools/sync-rpn.mjs "<แพ็กเกจหลัก>" "<แพ็กเกจศูนย์อื่น>" ... → รวม road-matrix/*.js ของทุกแพ็กเกจ
+// แพ็กเกจที่เวอร์ชันไม่ตรงกับแพ็กเกจหลัก = หยุด (ตารางต่างรุ่นอาจไม่เข้ากับ road-dist.js ของรุ่นนี้)
+const mainVer = fs.existsSync(path.join(SRC, 'VERSION')) ? fs.readFileSync(path.join(SRC, 'VERSION'), 'utf8').trim() : '';
+for (const extra of process.argv.slice(3)) {
+    const v = fs.existsSync(path.join(extra, 'VERSION')) ? fs.readFileSync(path.join(extra, 'VERSION'), 'utf8').trim() : '';
+    if (v !== mainVer) { console.error(`❌ ${extra} เป็น V${v || '?'} ไม่ตรงกับแพ็กเกจหลัก V${mainVer}`); process.exit(3); }
+    const rm = path.join(extra, 'road-matrix');
+    if (!fs.existsSync(rm)) { console.warn(`⚠️ ${extra} ไม่มีโฟลเดอร์ road-matrix — ข้าม`); continue; }
+    fs.mkdirSync(path.join(DST, 'road-matrix'), { recursive: true });
+    for (const f of fs.readdirSync(rm).filter(f => /\.js$/i.test(f))) {
+        fs.copyFileSync(path.join(rm, f), path.join(DST, 'road-matrix', f));
+        copied.push('road-matrix/' + f);
+    }
+}
 
 const ver = fs.existsSync(path.join(DST, 'VERSION')) ? fs.readFileSync(path.join(DST, 'VERSION'), 'utf8').trim() : '?';
 console.log(`✅ ซิงก์ RPN V${ver} เข้า rpn/ แล้ว — ${copied.length} รายการ`);
