@@ -75,6 +75,7 @@ There is no build tool, package manager, linter, or test suite in this repo (no 
 | `api/elevation.js` | Vercel function — proxies ORS elevation lookup |
 | `rpn/` | RPN (HQ's planner, V1.0.4 since 2026-11-16; V1.0.0 2026-10-16) embedded as the planning tab — see the `rpn/` section below and **`rpn/SYNC.md`** (upgrade guide) |
 | `plan-lock.js` | Read-only plan months (per center / all centers) + server-first `get()` — see `plan-lock.js` section below |
+| `tools/export-rpn-backup.mjs` | Exports a center's plan months from Firestore (read-only REST) as a Restore file for HQ's offline RPN package (`node tools/export-rpn-backup.mjs 402 2026_11,2026_12 out.json`) — see `rpn/SYNC.md` §6b |
 | `tools/sync-rpn.mjs` | Copies a new RPN release (finds `RoutePlannerV{N}.html`, writes it as `rpn/RoutePlanner.html`) into `rpn/` and makes it online — usage in `rpn/SYNC.md` |
 
 All `api/*.js` proxy to OpenRouteService **only** to keep `ORS_API_KEY` server-side — never call ORS directly from client code.
