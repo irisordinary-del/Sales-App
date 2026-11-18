@@ -155,6 +155,7 @@
         if (App._loadPlan._rpnWrapped) return;
         const orig = App._loadPlan;
         App._loadPlan = async function () {
+            try { bridge.flushSaves && bridge.flushSaves(); } catch (e) {}   // §11: ส่งงานบันทึกที่รออยู่ของเดือนเดิมก่อนล้าง State
             cal.loading++; cal.gen++;
             try { return await orig.apply(this, arguments); }
             finally { cal.loading--; cal.gen++; cal.done = {}; }
@@ -979,7 +980,168 @@
         return true;
     };
 
+    // ── 11) ความเร็วตอนจัดแผน (2026-11-18, ผู้ใช้ขอ — "จัดแพลน map ช้า ยิ่งทำหลายร้านยิ่งช้า") ──────────────
+    // วัดบน RPN V1.0.4 (402, ~650 ร้าน): ทุกคลิก RPN วาดจอใหม่ทั้งหมด (~0.35 วิ) + App.saveDB อัปโหลดร้านทั้งสาย (~250 KB)
+    // ทันที — แม้แค่ติ๊กเลือกร้าน · changeDay / assignSelected วาด 2 รอบ + บันทึก 2 รอบต่อคลิก (seq-tools/multi-day ครอบซ้ำ)
+    // ① รวมการบันทึก: คำสั่งเขียนแบบที่ saveDB ใช้ (set merge ของเอกสารสาย {stores, confirmed*} / เอกสารแผน {routeList,
+    //    cycleDays, updatedAt}) ไม่ส่งทันที — รอหยุดแก้ SAVE_WAIT (ไม่เกิน SAVE_MAX นับจากครั้งแรก) แล้วส่งครั้งเดียวต่อเอกสาร
+    //    · ร้านไม่เปลี่ยนนอกจาก selected (ติ๊กเลือก) = ไม่ส่ง (และไม่ล้าง "ยืนยันรับสาย" ของเซล)
+    //    · ส่งที่ค้างทันทีก่อน: คำสั่งเขียนอื่นทุกชนิด (update/delete/batch/add/transaction/set แบบอื่น) · อ่าน (get) · สลับเดือน
+    //      (_loadPlan) · สลับสาย · ซ่อน/ปิดหน้า · หน้า admin ออกจากแท็บวางแผน (RpnHost.leave → RPNBridge.flushSaves)
+    //    · ตัวเขียนชั้นใน (§5 aliasGuard/fillMarket/injectCal + plan-lock) ทำงานตอนส่งจริงตามเดิม
+    // ② รวมการวาดจอ: ระหว่าง StoreMgr.changeDay / assignSelected (เส้นทางที่วาด 2 รอบ) เก็บคำสั่งวาด/บันทึกไว้ แล้ววาด 1 รอบ
+    //    + บันทึก 1 รอบตอนจบฟังก์ชัน (ยังเป็น synchronous — ไม่มีโค้ดไหนเห็นจอเก่าหลังฟังก์ชันจบ)
+    const SAVE_WAIT = 1200, SAVE_MAX = 5000;
+    const sv = { pend: new Map(), fly: new Map(), last: new Map(), tmr: 0, first: 0 };
+    const ROUTE_KEYS = ['stores', 'confirmedBy', 'confirmedAt'], PLAN_KEYS = ['routeList', 'cycleDays', 'updatedAt'];
+    const deferrable = (path, data, opts) => {
+        if (!opts || opts.merge !== true || !data || typeof data !== 'object') return false;
+        const ks = Object.keys(data);
+        const m = ROUTE_RE.exec(path) || PLAN_RE.exec(path);
+        if (!m || (window.PlanLock && PlanLock.isLocked && PlanLock.isLocked(m[2]))) return false;   // เดือนล็อก — ให้ปฏิเสธทันทีตามเดิม
+        if (ROUTE_RE.test(path)) return Array.isArray(data.stores) && ks.every(k => ROUTE_KEYS.includes(k));
+        return ks.length > 0 && ks.every(k => PLAN_KEYS.includes(k));
+    };
+    const keyOf = (path, data) => {
+        try {
+            return ROUTE_RE.test(path) ? JSON.stringify(data.stores, (k, v) => k === 'selected' ? undefined : v)
+                : JSON.stringify([data.routeList, data.cycleDays]);
+        } catch (e) { return null; }
+    };
+    const saveBadge = () => {
+        let el = document.getElementById('rpn-save-pending');
+        const n = sv.pend.size + sv.fly.size;
+        if (!n) { if (el) el.remove(); return; }
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'rpn-save-pending';
+            el.style.cssText = 'position:fixed;bottom:10px;left:10px;z-index:9998;background:#334155;color:#fff;padding:4px 12px;' +
+                'border-radius:999px;font-size:11px;font-weight:700;opacity:.85;pointer-events:none;';
+            document.body.appendChild(el);
+        }
+        el.textContent = sv.pend.size ? '⏳ รอบันทึก…' : '☁️ กำลังบันทึก…';
+    };
+    let innerSet = null;
+    const flushOne = (path) => {
+        const p = sv.pend.get(path);
+        if (!p) return;
+        sv.pend.delete(path);
+        let pr;
+        const k = keyOf(path, p.data);
+        if (k !== null && sv.last.get(path) === k) pr = Promise.resolve();          // ไม่มีอะไรเปลี่ยน (นอกจากติ๊กเลือก) — ไม่ส่ง
+        else {
+            try { pr = Promise.resolve(innerSet.call(p.ref, p.data, p.opts)); } catch (e) { pr = Promise.reject(e); }
+            const k2 = keyOf(path, p.data);                                          // หลัง fillMarket/stripUndef แก้ร้านในที่
+            pr = pr.then(r => { if (k2 !== null) sv.last.set(path, k2); return r; }, e => { sv.last.delete(path); throw e; });
+            const f = pr.catch(() => {}).then(() => { if (sv.fly.get(path) === f) sv.fly.delete(path); saveBadge(); });
+            sv.fly.set(path, f);
+        }
+        p.waiters.forEach(w => pr.then(w.res, w.rej));
+    };
+    const flushSaves = () => {
+        clearTimeout(sv.tmr); sv.tmr = 0; sv.first = 0;
+        if (!sv.pend.size) return Promise.all([...sv.fly.values()]);
+        [...sv.pend.keys()].forEach(flushOne);                                        // ลำดับเดิม: เอกสารสายก่อน แล้วเอกสารแผน
+        saveBadge();
+        return Promise.all([...sv.fly.values()]);
+    };
+    bridge.flushSaves = flushSaves;
+    bridge.pendingSaves = () => sv.pend.size + sv.fly.size;
+    const within = (p, ms) => Promise.race([p, new Promise(r => setTimeout(r, ms))]);
+    if (DocProto && DocProto.set && !DocProto.set._rpnDefer) {
+        innerSet = DocProto.set;
+        DocProto.set = function (data, opts) {
+            const path = this.path || '';
+            if (!deferrable(path, data, opts)) {
+                flushSaves(); sv.last.delete(path);
+                return innerSet.apply(this, arguments);
+            }
+            mark();
+            const ref = this;
+            return new Promise((res, rej) => {
+                const prev = sv.pend.get(path);
+                if (prev) { prev.data = Object.assign({}, prev.data, data); prev.ref = ref; prev.waiters.push({ res, rej }); }
+                else sv.pend.set(path, { ref, data: Object.assign({}, data), opts, waiters: [{ res, rej }] });
+                if (!sv.first) sv.first = Date.now();
+                clearTimeout(sv.tmr);
+                sv.tmr = setTimeout(flushSaves, Math.max(0, Math.min(SAVE_WAIT, sv.first + SAVE_MAX - Date.now())));
+                saveBadge();
+            });
+        };
+        DocProto.set._rpnDefer = true;
+        ['update', 'delete'].forEach(n => {
+            const o = DocProto[n];
+            if (typeof o !== 'function') return;
+            DocProto[n] = function () { flushSaves(); sv.last.delete(this.path || ''); return o.apply(this, arguments); };
+        });
+        const og = DocProto.get;
+        DocProto.get = function () {
+            const path = this.path || '', args = arguments, self = this;
+            flushSaves();
+            const f = sv.fly.get(path);
+            return f ? within(f, 8000).then(() => og.apply(self, args)) : og.apply(self, args);   // อ่านเอกสารที่เพิ่งส่ง — รอให้ server รับก่อน
+        };
+        const Q = fs.Query && fs.Query.prototype;
+        if (Q && Q.get) {
+            const oq = Q.get;
+            Q.get = function () {
+                const args = arguments, self = this;
+                flushSaves();
+                return sv.fly.size ? within(Promise.all([...sv.fly.values()]), 8000).then(() => oq.apply(self, args)) : oq.apply(self, args);
+            };
+        }
+        [[fs.WriteBatch && fs.WriteBatch.prototype, 'commit'], [fs.CollectionReference && fs.CollectionReference.prototype, 'add'],
+         [fs.Firestore && fs.Firestore.prototype, 'runTransaction']].forEach(([proto, n]) => {
+            if (!proto || typeof proto[n] !== 'function') return;
+            const o = proto[n];
+            proto[n] = function () { flushSaves(); sv.last.clear(); return o.apply(this, arguments); };
+        });
+        window.addEventListener('pagehide', flushSaves);
+        document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushSaves(); });
+        window.addEventListener('beforeunload', (e) => {
+            if (!sv.pend.size) return;
+            flushSaves();
+            e.preventDefault(); e.returnValue = '';                                  // ให้เวลาส่งให้เสร็จ (มักไม่ถึงตรงนี้ — รอแค่ ~1 วิ)
+        });
+    }
+    // ② รวมการวาดจอ/บันทึกภายในฟังก์ชันเดียว
+    const batchOne = (obj, name) => {
+        const f = obj && obj[name];
+        if (typeof f !== 'function' || f._rpnBatch) return !!(f && f._rpnBatch);
+        const w = function () {
+            if (UI.render._rpnHold) return f.apply(this, arguments);                 // ซ้อนกันอยู่แล้ว — ชั้นนอกสุดจัดการ
+            const R = UI.render, S = App.saveDB;
+            let r = 0, s = 0;
+            UI.render = function () { r++; }; UI.render._rpnHold = true;
+            App.saveDB = function () { s++; };
+            try { return f.apply(this, arguments); }
+            finally {
+                UI.render = R; App.saveDB = S;
+                if (s) { try { App.saveDB(); } catch (e) { console.warn('[rpn-online] saveDB', e); } }
+                if (r) UI.render();
+            }
+        };
+        w._rpnBatch = true;
+        obj[name] = w;
+        return true;
+    };
+    const wireBatch = () => {
+        if (typeof StoreMgr === 'undefined' || typeof UI === 'undefined' || typeof App === 'undefined') return false;
+        return ['changeDay', 'assignSelected'].map(n => batchOne(StoreMgr, n)).every(Boolean);
+    };
+    const wireSwitchFlush = () => {
+        if (typeof App === 'undefined' || typeof App.switchRoute !== 'function') return false;
+        if (App.switchRoute._rpnFlush) return true;
+        const o = App.switchRoute;
+        App.switchRoute = function () { flushSaves(); return o.apply(this, arguments); };
+        App.switchRoute._rpnFlush = true;
+        return true;
+    };
+
     document.addEventListener('DOMContentLoaded', () => {
+        // §11 ครอบชั้นนอกสุด — multi-day.js / seq-tools.js / multi-route.js ครอบหลัง DOMContentLoaded + 2.5 วิ
+        // · ตรวจซ้ำเป็นระยะ ถ้ามีโมดูลครอบทับทีหลังก็ครอบชั้นนอกอีกรอบ (ซ้อนกันได้ ชั้นนอกสุดคุม)
+        [4000, 8000, 15000, 30000].forEach(t => setTimeout(() => { try { wireBatch(); wireSwitchFlush(); } catch (e) {} }, t));
         // multi-route.js ครอบ App.saveDB / switchRoute หลัง DOMContentLoaded + setTimeout — รอให้ครอบเสร็จก่อน แล้วค่อยครอบชั้นนอก
         const tryActive = (k) => {
             const ready = typeof App !== 'undefined' && App.switchRoute && (String(App.switchRoute).includes('open.push') || k >= 20);

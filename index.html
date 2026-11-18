@@ -1215,10 +1215,12 @@
                 }
                 throw new Error('เปิดหน้าวางแผน (RPN) ไม่สำเร็จภายใน 60 วินาที');
             },
-            leave: () => {
+            leave: async () => {
                 const w = RpnHost.win();
                 if (w && w.RPNBridge && w.RPNBridge.dirty) {
                     w.RPNBridge.dirty = false;
+                    // rpn-online.js §11 รวมการบันทึก (รอหยุดแก้ ~1 วิ) — ส่งที่ค้างให้ server รับก่อนค่อยโหลดใหม่ (รอไม่เกิน 8 วิ)
+                    try { if (w.RPNBridge.flushSaves) await Promise.race([w.RPNBridge.flushSaves(), new Promise(r => setTimeout(r, 8000))]); } catch (e) {}
                     if (App && App._currentPlanYM) App._loadPlan(App._currentPlanYM, true);
                 }
             },
