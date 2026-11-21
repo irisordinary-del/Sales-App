@@ -934,7 +934,10 @@ const SalesDashboard = {
                     ? (totalStores > 0 ? Math.round(rawTgt / totalStores * 100) : 0)
                     : rawTgt)
                 : defaultTarget;
-            const tgtCount = Math.round(tgtPct / 100 * totalStores);
+            // target ตั้งเป็นจำนวนร้าน → ใช้ตัวเลขนั้นตรง ๆ (แปลง % กลับไปมาจะเพี้ยน เช่น 400 → 402)
+            const tgtCount = (rawTgt !== null && targetUnit === 'count')
+                ? rawTgt
+                : Math.round(tgtPct / 100 * totalStores);
 
             // โหลด rows ทุกเดือนใน campaign range — parallel
             const months = getRange(campaign.startYM, campaign.endYM);
