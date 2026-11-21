@@ -36,6 +36,7 @@ const STATIC_ASSETS = [
     '/dashboard.js',
     '/file-manager.js',
     '/sku-distribution.js',
+    '/bottle-dist.js',
     '/store-history.js',
     '/users.js',
     '/tasks.js',

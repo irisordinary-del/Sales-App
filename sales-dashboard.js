@@ -116,6 +116,8 @@ const SalesDashboard = {
             SalesDashboard._loadMonthList(),
             SalesDashboard._waitAndLoadCampaigns(),
         ]).catch(() => {});
+        // ร้านกระจายแบบนับขวด (bottle-dist.js) — รอ _ymKeyMap เองแล้วใช้ cache _loadChunks ร่วมกัน
+        if (typeof BottleDist !== 'undefined') BottleDist.mountSales();
     },
 
     _ensureKpiCards: () => {
@@ -1053,6 +1055,7 @@ const SupervisorDashboard = {
             lbl.textContent = `${_roleLabel} · ${_name} · ศูนย์ ${_session?.centerId || ''}`;
         }
         SupervisorDashboard._loadMonthList();
+        if (typeof BottleDist !== 'undefined') BottleDist.mountSales();
     },
 
     // ✅ เพิ่ม alias ให้ sales-app.js เรียกได้โดยตรงโดยไม่ต้องรอ DOMContentLoaded poll

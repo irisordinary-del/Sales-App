@@ -140,6 +140,7 @@ const Dashboard = {
         // โหลด whitelist + campaign async
         Dashboard._loadSkuWhitelist();
         setTimeout(() => Dashboard._renderCampaignSection(), 1500);
+        if (typeof BottleDist !== 'undefined') setTimeout(() => BottleDist.mountAdmin(), 1500);
         Dashboard._loadMonthList();
     },
 
@@ -230,6 +231,9 @@ const Dashboard = {
 
             <!-- Active Campaign Coverage (โหลดจาก SkuDist) -->
             <div id="db-campaign-section" class="hidden"></div>
+
+            <!-- ร้านกระจายแบบนับขวด (bottle-dist.js) — เช่น ซุปไก่ 39 มล. P.3x4 + P.12 -->
+            <div id="db-bottledist-section" class="space-y-3"></div>
 
             <!-- Middle row: By-Route table + ShopType -->
             <div class="grid grid-cols-1 lg:grid-cols-10 gap-4">
@@ -513,7 +517,15 @@ const Dashboard = {
         try {
             const buf = await file.arrayBuffer();
             const wb  = XLSX.read(buf, { type: 'array', cellDates: true });
-            const ws  = wb.Sheets[wb.SheetNames[0]];
+            // ✅ FIX (2026-11-21): เลือกชีตที่เป็นข้อมูลดิบจริง (หัวตารางมี Customer Code + Invoice Status)
+            // ไม่ใช่ชีตแรกเสมอ — ไฟล์ที่ทำ Pivot/สรุปไว้ข้างหน้า (เช่น "(52)" มี Sheet1 = Pivot) เดิมจะอ่าน Pivot แทน
+            const isDataSheet = (name) => {
+                const hdr = (XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, range: 0, defval: '' })[0] || [])
+                    .map(h => String(h).trim());
+                return hdr.includes('Customer Code') && hdr.includes('Invoice  Status');
+            };
+            const sheetName = wb.SheetNames.find(isDataSheet) || wb.SheetNames[0];
+            const ws  = wb.Sheets[sheetName];
             const raw = XLSX.utils.sheet_to_json(ws, { defval: '' });
 
             Dashboard._showUploadBar('กำลังแปลงข้อมูล...', 20);
@@ -605,6 +617,7 @@ const Dashboard = {
             if (sel) sel.value = ym;
             await Dashboard._onMonthChange(ym);
             Dashboard._hideUploadBar();
+            if (typeof BottleDist !== 'undefined') { BottleDist.invalidate(ym); BottleDist.mountAdmin(); }
 
         } catch (e) {
             Dashboard._hideUploadBar();
@@ -632,9 +645,13 @@ const Dashboard = {
     _detectYMFromRows: (rows) => {
         const counts = {};
         rows.forEach(r => {
-            const m = String(r.kpiDate || '').match(/^(\d{4})-(\d{2})/);
-            if (!m) return;
-            const ym = `${m[1]}_${m[2]}`;
+            // ✅ FIX (2026-11-21): ไฟล์บริษัทเก็บ KPI Date เป็นข้อความ "DD/MM/YYYY" — เดิมรับแค่ "YYYY-MM-..."
+            // เลยตรวจเดือนจากข้อมูลไม่เคยได้ ต้องพิมพ์ YYYY_MM เองทุกครั้ง
+            const s = String(r.kpiDate || '');
+            let ym = null, m = s.match(/^(\d{4})-(\d{2})/);
+            if (m) ym = `${m[1]}_${m[2]}`;
+            else if ((m = s.match(/^\d{1,2}\/(\d{1,2})\/(\d{4})/))) ym = `${m[2]}_${m[1].padStart(2, '0')}`;
+            if (!ym) return;
             counts[ym] = (counts[ym] || 0) + 1;
         });
         const entries = Object.entries(counts);

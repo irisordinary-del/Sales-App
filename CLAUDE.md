@@ -58,6 +58,7 @@ There is no build tool, package manager, linter, or test suite in this repo (no 
 | `sales-dashboard.js` | `SalesDashboard` / `SupervisorDashboard` — sales KPI views |
 | `dashboard.js` | Admin-side `Dashboard` — org-wide sales analytics, targets, "อัปโหลด Sellout" (sellout Excel upload: auto-detects month from actual `kpiDate` rows rather than trusting the filename, warns if a re-upload has fewer rows than what's already stored). UI is the "Clean Operations" layout — see `Dashboard` under Admin Architecture below |
 | `sku-distribution.js` | SKU Distribution campaign management |
+| `bottle-dist.js` | `BottleDist` — "ร้านกระจาย" counted in bottles (e.g. 39 ml chicken essence P.3x4 ×3 + P.12 ×1, ≥3 bottles of one SKU per store, per Salesman Code, KPI-date window + "before window" column, ต้องทำ/วัน = gap ÷ remaining working days excl. Sundays/holidays, ทำมา/วัน = count ÷ distinct sales dates). Same formula as the user's Excel sheets in "Sellout … (52)" (verified equal for V01–V12). Shown in admin Dashboard (`#db-bottledist-section`, settings modal), sales card and Sup/ASM table (`sales.html`). Config docs live in `skuDistribution` with `centerId = "{CENTER}_main::bottleDist"` so SkuDist/sales campaign queries (`centerId == "{CENTER}_main"`) never see them — keep that suffix |
 | `store-history.js` | Per-store purchase history |
 | `tasks.html` / `tasks.js` | "งานที่ต้องส่ง" task list feature |
 | `users.html` / `users.js` | User management |
