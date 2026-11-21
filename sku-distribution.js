@@ -8,6 +8,13 @@ const SkuDist = {
 
     // ─── Firestore path ──────────────────────────────────────────────────
     _col: () => cloudDB.collection('skuDistribution'),
+    // 'YYYY_MM' → วันแรก / วันสุดท้ายของเดือน ('YYYY-MM-DD') สำหรับช่องวันที่
+    _ymFirst: (ym) => /^\d{4}_\d{2}$/.test(ym || '') ? `${ym.replace('_', '-')}-01` : '',
+    _ymLast:  (ym) => {
+        if (!/^\d{4}_\d{2}$/.test(ym || '')) return '';
+        const [y, m] = ym.split('_').map(Number);
+        return `${ym.replace('_', '-')}-${String(new Date(y, m, 0).getDate()).padStart(2, '0')}`;
+    },
     _centerDoc: () => window.CENTER_DOC || 'v1_main',
 
     // ─── State ───────────────────────────────────────────────────────────
@@ -207,13 +214,13 @@ const SkuDist = {
                                 class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-300 font-medium">
                         </div>
                         <div>
-                            <label class="block text-xs font-bold text-gray-500 uppercase mb-1.5">เดือนเริ่ม (YYYY_MM)</label>
-                            <input id="skudist-c-start" type="text" placeholder="เช่น 2025_01"
+                            <label class="block text-xs font-bold text-gray-500 uppercase mb-1.5">วันเริ่ม (KPI Date)</label>
+                            <input id="skudist-c-start" type="date"
                                 class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-300 font-mono">
                         </div>
                         <div>
-                            <label class="block text-xs font-bold text-gray-500 uppercase mb-1.5">เดือนสิ้นสุด (YYYY_MM)</label>
-                            <input id="skudist-c-end" type="text" placeholder="เช่น 2025_03"
+                            <label class="block text-xs font-bold text-gray-500 uppercase mb-1.5">วันสิ้นสุด (KPI Date)</label>
+                            <input id="skudist-c-end" type="date"
                                 class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-300 font-mono">
                         </div>
                         <div class="sm:col-span-2">
@@ -350,7 +357,7 @@ const SkuDist = {
             <div class="flex items-center gap-3 p-3 rounded-xl border ${isActive ? 'border-indigo-300 bg-indigo-50' : 'border-gray-100 bg-gray-50'} mb-2">
                 <div class="flex-1 min-w-0">
                     <p class="font-bold text-sm text-gray-800 truncate">${c.name}</p>
-                    <p class="text-xs text-gray-400 mt-0.5">📅 ${startLbl} → ${endLbl} &nbsp;|&nbsp; 🎯 ${groups} กลุ่ม SKU &nbsp;|&nbsp; ${scopeBadge}</p>
+                    <p class="text-xs text-gray-400 mt-0.5">📅 ${CampaignRule.periodLabel(c)} &nbsp;|&nbsp; 🎯 ${groups} กลุ่ม SKU${CampaignRule.hasMin(c) ? ` &nbsp;|&nbsp; 🍶 ขั้นต่ำ ${(c.groups||[]).map(g => Number(g.minQty) > 0 ? g.minQty + ' ขวด' : '—').join(' / ')}` : ''} &nbsp;|&nbsp; ${scopeBadge}</p>
                 </div>
                 <div class="flex gap-1.5 flex-shrink-0">
                     <button onclick="SkuDist.calc('${c.id}')"
@@ -481,8 +488,8 @@ const SkuDist = {
         SkuDist._setTargetUnit('pct');
         SkuDist._setScopeMode('route');
         const ym = DateUtil ? DateUtil.currentYM() : '';
-        document.getElementById('skudist-c-start').value = ym;
-        document.getElementById('skudist-c-end').value   = ym;
+        document.getElementById('skudist-c-start').value = SkuDist._ymFirst(ym);
+        document.getElementById('skudist-c-end').value   = SkuDist._ymLast(ym);
         SkuDist._renderGroups();
         document.getElementById('skudist-campaign-modal').classList.remove('hidden');
     },
@@ -498,8 +505,9 @@ const SkuDist = {
             ({ custCode: code, name: (c.participantMeta || {})[code] || '' }));
         document.getElementById('skudist-modal-title').textContent = 'แก้ไข Campaign';
         document.getElementById('skudist-c-name').value  = c.name || '';
-        document.getElementById('skudist-c-start').value = c.startYM || '';
-        document.getElementById('skudist-c-end').value   = c.endYM   || '';
+        // Campaign เก่าเก็บแค่เดือน → แสดงเป็นวันที่ 1 ถึงวันสุดท้ายของเดือน (ผลเท่าเดิม)
+        document.getElementById('skudist-c-start').value = c.startDate || SkuDist._ymFirst(c.startYM);
+        document.getElementById('skudist-c-end').value   = c.endDate   || SkuDist._ymLast(c.endYM);
         document.getElementById('skudist-c-default-target').value = c.defaultTarget ?? 80;
         SkuDist._setScopeMode(SkuDist._scopeMode);
         // ✅ โหลด iconUrl เดิม
@@ -691,8 +699,61 @@ const SkuDist = {
                         🔍 Preview สินค้าที่ match ทั้งหมด
                     </button>
                 </div>
+
+                <!-- ขวดขั้นต่ำต่อร้าน (CampaignRule ใน bottle-dist.js) -->
+                <div class="border-t border-gray-100 pt-3 mt-3">
+                    <div class="flex items-center gap-2 flex-wrap">
+                        <span class="text-xs font-bold text-gray-500">ขวดขั้นต่ำต่อร้าน</span>
+                        <input type="number" min="0" value="${Number(g.minQty) > 0 ? g.minQty : ''}" placeholder="—"
+                            onchange="SkuDist._setGroupMin('${g.id}', this.value)"
+                            class="w-20 bg-gray-50 border border-gray-200 rounded-lg px-2 py-1 text-sm font-bold text-right outline-none focus:ring-2 focus:ring-indigo-200">
+                        <span class="text-xs text-gray-400">ขวด — เว้นว่าง = ซื้อชิ้นเดียวก็นับ</span>
+                    </div>
+                    ${Number(g.minQty) > 0 ? SkuDist._unitMapHTML(g) : ''}
+                </div>
             </div>
         `).join('');
+    },
+
+    _setGroupMin: (gId, val) => {
+        const g = SkuDist._groups.find(x => x.id === gId);
+        if (!g) return;
+        const n = Number(val);
+        if (val === '' || !(n > 0)) delete g.minQty; else g.minQty = n;
+        SkuDist._renderGroups();
+    },
+    _setGroupUnit: (gId, code, val) => {
+        const g = SkuDist._groups.find(x => x.id === gId);
+        if (!g) return;
+        g.unitMap = g.unitMap || {};
+        const n = Number(val);
+        if (!(n > 0) || n === 1) delete g.unitMap[code]; else g.unitMap[code] = n;
+    },
+    // รายการสินค้าที่ match keyword ของกลุ่ม พร้อมช่อง "ขวดต่อ 1 EA" (ไม่ใส่ = 1)
+    _unitMapHTML: (g) => {
+        const kws = (g.keywords || []).map(k => k.toLowerCase());
+        const prods = (SkuDist._allProdOptions || []).filter(p =>
+            kws.some(k => p.code.toLowerCase().includes(k) || p.name.toLowerCase().includes(k)));
+        const unit = g.unitMap || {};
+        // keyword ที่เป็นรหัสสินค้าล้วน / รหัสที่ตั้งขวดไว้แล้ว — แสดงด้วยแม้ยังไม่มีในข้อมูล Sellout
+        const known = new Set(prods.map(p => p.code));
+        [...(g.keywords || []).filter(k => /^\d{6,}$/.test(String(k).trim())), ...Object.keys(unit)].forEach(code => {
+            code = String(code).trim();
+            if (!known.has(code)) { known.add(code); prods.push({ code, name: '(ยังไม่พบใน Sellout)' }); }
+        });
+        const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+        return `
+            <p class="text-[11px] text-gray-400 mt-2 mb-1">ร้านต้องซื้อ <b>SKU ใด SKU หนึ่ง</b> ในกลุ่มรวมถึง ${g.minQty} ขวด (ไม่เอาขวดต่าง SKU มารวมกัน) · ขวด = จำนวน EA × ขวดต่อ 1 EA</p>
+            ${prods.length ? `<div class="space-y-1 max-h-48 overflow-y-auto pr-1">${prods.map(p => `
+                <div class="flex items-center gap-2 bg-gray-50 rounded-lg px-2 py-1">
+                    <span class="text-[11px] font-mono text-gray-500 w-20 shrink-0">${esc(p.code)}</span>
+                    <span class="text-xs text-gray-700 flex-1 min-w-0 truncate" title="${esc(p.name)}">${esc(p.name)}</span>
+                    <input type="number" min="1" value="${unit[p.code] || 1}"
+                        onchange="SkuDist._setGroupUnit('${g.id}', '${esc(p.code)}', this.value)"
+                        class="w-14 bg-white border border-gray-200 rounded px-2 py-0.5 text-xs font-bold text-right">
+                    <span class="text-[11px] text-gray-400 whitespace-nowrap">ขวด/EA</span>
+                </div>`).join('')}</div>`
+            : '<p class="text-[11px] text-amber-600">ยังไม่พบสินค้าที่ match keyword ในข้อมูล Sellout — ทุกสินค้าจะนับ 1 EA = 1 ขวด</p>'}`;
     },
 
     _updateGroupName: (gId, val) => {
@@ -838,14 +899,19 @@ const SkuDist = {
     // ─── Save Campaign ────────────────────────────────────────────────────
     saveCampaign: async () => {
         const name    = document.getElementById('skudist-c-name').value.trim();
-        const startYM = document.getElementById('skudist-c-start').value.trim();
-        const endYM   = document.getElementById('skudist-c-end').value.trim();
+        const startDate = document.getElementById('skudist-c-start').value.trim();
+        const endDate   = document.getElementById('skudist-c-end').value.trim();
         const iconUrl = (document.getElementById('skudist-c-icon')?.value || '').trim();
 
         if (!name) return UI.showErrorToast('⚠️ กรุณาใส่ชื่อ Campaign');
-        if (!/^\d{4}_\d{2}$/.test(startYM)) return UI.showErrorToast('⚠️ เดือนเริ่มต้องเป็น YYYY_MM');
-        if (!/^\d{4}_\d{2}$/.test(endYM))   return UI.showErrorToast('⚠️ เดือนสิ้นสุดต้องเป็น YYYY_MM');
-        if (startYM > endYM) return UI.showErrorToast('⚠️ เดือนเริ่มต้องไม่เกินเดือนสิ้นสุด');
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate)) return UI.showErrorToast('⚠️ กรุณาเลือกวันเริ่ม');
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(endDate))   return UI.showErrorToast('⚠️ กรุณาเลือกวันสิ้นสุด');
+        if (startDate > endDate) return UI.showErrorToast('⚠️ วันเริ่มต้องไม่เกินวันสิ้นสุด');
+        // startYM/endYM เก็บคู่ไว้เสมอ — ทุกจุดที่โหลดข้อมูลรายเดือนยังใช้ 2 ค่านี้
+        const startYM = startDate.slice(0, 7).replace('-', '_');
+        const endYM   = endDate.slice(0, 7).replace('-', '_');
+        const badMin = SkuDist._groups.find(g => g.minQty != null && g.minQty !== '' && !(Number(g.minQty) >= 0));
+        if (badMin) return UI.showErrorToast('⚠️ ขวดขั้นต่ำต้องเป็นตัวเลข');
         if (!SkuDist._groups.length) return UI.showErrorToast('⚠️ กรุณาเพิ่มอย่างน้อย 1 กลุ่ม SKU');
 
         const emptyGroup = SkuDist._groups.find(g => !g.name || !g.keywords.length);
@@ -861,7 +927,7 @@ const SkuDist = {
             const participantMeta = {};
             (SkuDist._customStores || []).forEach(s => { participantMeta[s.custCode] = s.name || ''; });
             const data = {
-                name, startYM, endYM,
+                name, startYM, endYM, startDate, endDate,
                 iconUrl:       iconUrl || '',  // ✅ บันทึก URL รูปสินค้า
                 centerId:      SkuDist._centerDoc(),
                 groups:        SkuDist._groups,
@@ -962,12 +1028,8 @@ const SkuDist = {
                     let totalVol = 0;
                     const totalInvSet = new Set();
                     groups.forEach(g => {
-                        const kws = (g.keywords || []).map(k => k.toLowerCase());
-                        const matchedRows = custRows.filter(r => {
-                            const code = (r.prodCode || '').toLowerCase();
-                            const name = (r.prodName || '').toLowerCase();
-                            return kws.some(k => code.includes(k) || name.includes(k));
-                        });
+                        // ช่วงวันที่ + ขวดขั้นต่ำ (CampaignRule ใน bottle-dist.js)
+                        const matchedRows = CampaignRule.filter(campaign, g, custRows);
                         const vol = matchedRows.reduce((s, r) => s + (r.net || r.gross || 0), 0);
                         const qty = matchedRows.reduce((s, r) => s + (r.qtyEA || 0), 0);
                         const invSet = new Set(matchedRows.map(r => r.invNum).filter(Boolean));
@@ -993,7 +1055,7 @@ const SkuDist = {
                 SkuDist._renderResult();
                 document.getElementById('skudist-result-panel').classList.remove('hidden');
                 document.getElementById('skudist-result-title').textContent =
-                    `📊 ${campaign.name}  (${DateUtil?.ymToThaiShort(campaign.startYM)} → ${DateUtil?.ymToThaiShort(campaign.endYM)})`;
+                    `📊 ${campaign.name}  (${CampaignRule.periodLabel(campaign)})`;
                 UI.hideLoader();
                 setTimeout(() => {
                     document.getElementById('skudist-result-panel')?.scrollIntoView({ behavior: 'smooth' });
@@ -1067,14 +1129,8 @@ const SkuDist = {
 
                 const groupResult = {};
                 groups.forEach(g => {
-                    const kws = (g.keywords || []).map(k => k.toLowerCase());
-
-                    // rows ที่ match กลุ่มนี้
-                    const matchedRows = routeRows.filter(r => {
-                        const code = (r.prodCode || '').toLowerCase();
-                        const name = (r.prodName || '').toLowerCase();
-                        return kws.some(k => code.includes(k) || name.includes(k));
-                    });
+                    // rows ที่ match กลุ่มนี้ — ในช่วงวันที่ และเฉพาะร้านที่ถึงขวดขั้นต่ำ (CampaignRule)
+                    const matchedRows = CampaignRule.filter(campaign, g, routeRows);
 
                     // ร้านที่ซื้ออย่างน้อย 1 SKU ในกลุ่ม (unique custCode)
                     const storesBought       = new Set(matchedRows.map(r => String(r.custCode)));
@@ -1124,7 +1180,7 @@ const SkuDist = {
             SkuDist._renderGroupFilter(groups);
             SkuDist._renderResult();
             document.getElementById('skudist-result-panel').classList.remove('hidden');
-            document.getElementById('skudist-result-title').textContent = `📊 ${campaign.name}  (${DateUtil?.ymToThaiShort(campaign.startYM)} → ${DateUtil?.ymToThaiShort(campaign.endYM)})`;
+            document.getElementById('skudist-result-title').textContent = `📊 ${campaign.name}  (${CampaignRule.periodLabel(campaign)})`;
             UI.hideLoader();
 
             // scroll ลงไปที่ result

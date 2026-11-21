@@ -943,11 +943,8 @@ const SalesDashboard = {
 
             const groupBars = groups.map(g => {
                 const kws = (g.keywords || []).map(k => k.toLowerCase());
-                const matched = allRows.filter(r => {
-                    const code = (r.prodCode || '').toLowerCase();
-                    const name = (r.prodName || '').toLowerCase();
-                    return kws.some(k => code.includes(k) || name.includes(k));
-                });
+                // ช่วงวันที่ + ขวดขั้นต่ำ (CampaignRule ใน bottle-dist.js)
+                const matched = CampaignRule.filter(campaign, g, allRows);
                 const bought      = new Set(matched.map(r => String(r.custCode)));
                 const boughtCount = bought.size;
                 const pct         = totalStores > 0 ? Math.round(boughtCount / totalStores * 100) : 0;
@@ -992,7 +989,7 @@ const SalesDashboard = {
             <div class="db-card" style="flex-shrink:0;margin-bottom:12px;border-left:4px solid #ec4899;">
                 <div style="margin-bottom:12px;">
                     <div style="font-size:12px;font-weight:900;color:#111827;">🎯 ${campaign.name}</div>
-                    <div style="font-size:10px;color:#9ca3af;margin-top:2px;">${startLbl} → ${endLbl} &nbsp;·&nbsp; ยอดรวมทั้งช่วง</div>
+                    <div style="font-size:10px;color:#9ca3af;margin-top:2px;">${CampaignRule.periodLabel(campaign)} &nbsp;·&nbsp; ยอดรวมทั้งช่วง</div>
                 </div>
                 ${groupBars}
             </div>`;
@@ -1615,17 +1612,12 @@ const SupervisorDashboard = {
 
             // แต่ละ group = 1 section ภายในกล่อง (แสดงทุก route ใต้ group)
             const groupsHtml = groups.map(g => {
-                const kws = (g.keywords || []).map(k => k.toLowerCase());
-
-                // match rows per route
+                // match rows per route — ช่วงวันที่ + ขวดขั้นต่ำ (CampaignRule ใน bottle-dist.js)
                 const byRoute = {};
-                allRows.forEach(r => {
+                CampaignRule.filter(campaign, g, allRows).forEach(r => {
                     const s = String(r.sCode || '').toUpperCase();
                     const c = String(r.custCode || '').trim();
                     if (!s || !c) return;
-                    const code = (r.prodCode || '').toLowerCase();
-                    const name = (r.prodName || '').toLowerCase();
-                    if (!kws.some(k => code.includes(k) || name.includes(k))) return;
                     if (!byRoute[s]) byRoute[s] = new Set();
                     byRoute[s].add(c);
                 });
@@ -1688,7 +1680,7 @@ const SupervisorDashboard = {
                     ${iconHtml}
                     <div>
                         <div style="font-size:12px;font-weight:900;color:#111827;">🎯 ${campaign.name}</div>
-                        <div style="font-size:10px;color:#9ca3af;">${startLbl} → ${endLbl}</div>
+                        <div style="font-size:10px;color:#9ca3af;">${CampaignRule.periodLabel(campaign)}</div>
                     </div>
                 </div>
                 ${groupsHtml}

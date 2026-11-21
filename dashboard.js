@@ -1538,7 +1538,8 @@ const Dashboard = {
                     const groups        = campaign.groups || [];
 
                     const groupSummaries = groups.map(g => {
-                        const kws = (g.keywords || []).map(k => k.toLowerCase());
+                        // ช่วงวันที่ + ขวดขั้นต่ำ (CampaignRule ใน bottle-dist.js)
+                        const gRows = CampaignRule.filter(campaign, g, allRows);
                         let totalStoreAll = 0, totalBought = 0, totalTarget = 0;
 
                         routes.forEach(route => {
@@ -1554,12 +1555,9 @@ const Dashboard = {
                                 : defaultTarget;
                             totalTarget += Math.round(tgtPct/100 * allStores.length);
 
-                            const matched = allRows.filter(r =>
+                            const matched = gRows.filter(r =>
                                 r._route === route &&
-                                storeSet.has(String(r.custCode||'')) &&
-                                kws.some(k =>
-                                    (r.prodCode||'').toLowerCase().includes(k) ||
-                                    (r.prodName||'').toLowerCase().includes(k))
+                                storeSet.has(String(r.custCode||''))
                             );
                             totalBought += new Set(matched.map(r => String(r.custCode))).size;
                         });
@@ -1582,7 +1580,7 @@ const Dashboard = {
                             <div class="flex items-center gap-2">
                                 <span class="text-base">🎯</span>
                                 <span class="text-sm font-black text-gray-800">${campaign.name}</span>
-                                <span class="text-xs text-gray-400 font-medium">${startLbl} → ${endLbl} · ยอดรวมทั้งช่วง</span>
+                                <span class="text-xs text-gray-400 font-medium">${CampaignRule.periodLabel(campaign)} · ยอดรวมทั้งช่วง</span>
                             </div>
                             <button onclick="Dashboard._openCampaignDetail('${campaign.id}')" class="text-xs text-pink-600 font-bold hover:underline">ดูรายละเอียด →</button>
                         </div>
@@ -1685,7 +1683,7 @@ const Dashboard = {
             const defaultTarget = campaign.defaultTarget ?? 80;
 
             // สร้างตาราง: rows = สาย, cols = วันที่ unique
-            const allDates = [...new Set(allRows.map(r => r.kpiDate).filter(Boolean))].sort();
+            const allDates = [...new Set(allRows.filter(r => CampaignRule.inDates(campaign, r)).map(r => r.kpiDate).filter(Boolean))].sort();
 
             const startLbl = DateUtil ? DateUtil.ymToThaiShort(campaign.startYM) : campaign.startYM;
             const endLbl   = DateUtil ? DateUtil.ymToThaiShort(campaign.endYM)   : campaign.endYM;
@@ -1695,13 +1693,13 @@ const Dashboard = {
             headerEl.innerHTML = `
                 <div style="display:flex;align-items:center;gap:10px;">
                     <span style="font-size:15px;font-weight:900;color:#111827;">🎯 ${campaign.name}</span>
-                    <span style="font-size:11px;color:#9ca3af;font-weight:500;">${startLbl} → ${endLbl}</span>
+                    <span style="font-size:11px;color:#9ca3af;font-weight:500;">${CampaignRule.periodLabel(campaign)}</span>
                 </div>
                 <button onclick="document.getElementById('_camp-detail-overlay').remove()" style="width:30px;height:30px;border-radius:50%;border:1px solid #e5e7eb;background:#fff;font-size:16px;cursor:pointer;color:#6b7280;">✕</button>`;
 
             // ── pre-compute groupData (ใช้ร่วมกันทั้ง group tabs และ Daily tab) ──
             const groupData = groups.map(g => {
-                const kws = (g.keywords || []).map(k => k.toLowerCase());
+                const gRows = CampaignRule.filter(campaign, g, allRows); // ช่วงวันที่ + ขวดขั้นต่ำ
                 const byRoute = {};
                 routes.forEach(route => {
                     const stores   = (State.db.routes?.[route] || []).map(s => String(s.id));
@@ -1711,9 +1709,8 @@ const Dashboard = {
                         ? (targetUnit === 'count' ? (stores.length > 0 ? rawTgt/stores.length*100 : 0) : rawTgt)
                         : defaultTarget;
                     const tgtCount = Math.round(tgtPct / 100 * stores.length);
-                    const matched  = allRows.filter(r =>
-                        r._route === route && storeSet.has(String(r.custCode||'')) &&
-                        kws.some(k => (r.prodCode||'').toLowerCase().includes(k) || (r.prodName||'').toLowerCase().includes(k))
+                    const matched  = gRows.filter(r =>
+                        r._route === route && storeSet.has(String(r.custCode||''))
                     );
                     const byDate = {};
                     allDates.forEach(d => { byDate[d] = new Set(); });

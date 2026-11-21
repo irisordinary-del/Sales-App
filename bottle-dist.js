@@ -636,3 +636,58 @@ const BottleDist = {
 };
 
 window.BottleDist = BottleDist;
+
+// ==========================================
+// 📏 CampaignRule — กติกาเพิ่มของ Campaign "กระจายสินค้า" (SkuDist / skuDistribution) ที่ใช้ร่วมทุกหน้า
+// (sku-distribution.js, dashboard.js, sales-dashboard.js, sales-app.js — ไฟล์นี้โหลดทั้ง index.html และ sales.html)
+//   campaign.startDate / endDate ('YYYY-MM-DD', ไม่บังคับ) — นับเฉพาะแถวที่ KPI Date อยู่ในช่วง
+//     (startYM/endYM ยังเก็บคู่กันเสมอ เพื่อให้ตัวโหลดเดือนเดิมทุกจุดทำงานเหมือนเดิม)
+//   group.minQty (ไม่บังคับ) — ร้านต้องซื้อ "SKU ใด SKU หนึ่งในกลุ่ม" รวมถึง minQty ขวด จึงนับว่ากระจาย
+//   group.unitMap { prodCode: ขวดต่อ 1 EA } — ไม่ใส่ = 1  (ขวด = qtyEA × ค่านี้, Credit Note ติดลบหักออก)
+// Campaign เก่าที่ไม่มีฟิลด์เหล่านี้ → ผลเหมือนเดิมทุกอย่าง (ซื้อชิ้นเดียวก็นับ, ทั้งเดือน)
+// ==========================================
+const CampaignRule = {
+    matchGroup: (g, r) => {
+        const kws = (g.keywords || []).map(k => String(k).toLowerCase());
+        const code = String(r.prodCode || '').toLowerCase();
+        const name = String(r.prodName || '').toLowerCase();
+        return kws.some(k => code.includes(k) || name.includes(k));
+    },
+    inDates: (c, r) => {
+        if (!c || (!c.startDate && !c.endDate)) return true;
+        const d = BottleDist.parseKpi(r.kpiDate);
+        if (!d) return false;
+        return (!c.startDate || d >= c.startDate) && (!c.endDate || d <= c.endDate);
+    },
+    // แถวของกลุ่ม g ที่ "นับ" ได้: อยู่ในช่วงวัน + (ถ้าตั้งขวดขั้นต่ำ) เป็นของร้านที่ถึงเกณฑ์เท่านั้น
+    // ผู้เรียกนับร้าน/ยอดจากแถวที่ได้แบบเดิม — ร้านที่ไม่ถึงเกณฑ์จึงเท่ากับ "ยังไม่ซื้อ"
+    filter: (c, g, rows) => {
+        const m = (rows || []).filter(r => CampaignRule.matchGroup(g, r) && CampaignRule.inDates(c, r));
+        const min = Number(g.minQty) || 0;
+        if (min <= 0) return m;
+        const unit = g.unitMap || {};
+        const sum = {};   // cust → prodCode → ขวด
+        m.forEach(r => {
+            const cust = String(r.custCode || '').trim();
+            const code = String(r.prodCode || '').trim();
+            const s = (sum[cust] = sum[cust] || {});
+            s[code] = (s[code] || 0) + (Number(r.qtyEA) || 0) * (Number(unit[code]) || 1);
+        });
+        const ok = new Set(Object.keys(sum).filter(cust => Object.values(sum[cust]).some(b => b >= min)));
+        return m.filter(r => ok.has(String(r.custCode || '').trim()));
+    },
+    // ทุกกลุ่มรวมกัน (ร้านถึงเกณฑ์กลุ่มใดกลุ่มหนึ่ง) — สำหรับจุดที่เดิมรวม keyword ทุกกลุ่มเป็นก้อนเดียว
+    filterAny: (c, rows) => {
+        const out = new Set();
+        (c.groups || []).forEach(g => CampaignRule.filter(c, g, rows).forEach(r => out.add(r)));
+        return (rows || []).filter(r => out.has(r));
+    },
+    hasMin: (c) => (c.groups || []).some(g => Number(g.minQty) > 0),
+    // ป้ายช่วงเวลา: ใช้วันที่ถ้ามี ไม่งั้นเดือนแบบเดิม
+    periodLabel: (c) => {
+        if (c.startDate && c.endDate) return `${BottleDist.fmtDate(c.startDate)} – ${BottleDist.fmtDate(c.endDate)}`;
+        const f = (ym) => (typeof DateUtil !== 'undefined' && ym) ? DateUtil.ymToThaiShort(ym) : (ym || '');
+        return `${f(c.startYM)} → ${f(c.endYM)}`;
+    },
+};
+window.CampaignRule = CampaignRule;

@@ -373,12 +373,13 @@ const App = {
                     : allRows;
 
                 // หา custCode ที่ซื้อสินค้าใน campaign นี้จริงๆ ตลอดช่วง
+                // ช่วงวันที่ + ขวดขั้นต่ำ (CampaignRule ใน bottle-dist.js) — ถึงเกณฑ์กลุ่มใดกลุ่มหนึ่งก็นับ
                 const boughtStores = new Set(
-                    myRows
-                        .filter(r => kws.some(k =>
+                    (typeof CampaignRule !== 'undefined'
+                        ? CampaignRule.filterAny(c, myRows)
+                        : myRows.filter(r => kws.some(k =>
                             (r.prodCode || '').toLowerCase().includes(k) ||
-                            (r.prodName || '').toLowerCase().includes(k)
-                        ))
+                            (r.prodName || '').toLowerCase().includes(k))))
                         .map(r => String(r.custCode || '').trim())
                 );
 
@@ -3544,7 +3545,7 @@ const ActivityCtrl = {
                 ${iconHtml}
                 <div class="flex-1 min-w-0">
                     <div class="font-bold text-sm text-gray-800 truncate">${c.name}</div>
-                    <div style="font-size:11px;color:#9ca3af;margin-top:1px;">📅 ${startLbl} → ${endLbl}</div>
+                    <div style="font-size:11px;color:#9ca3af;margin-top:1px;">📅 ${typeof CampaignRule !== 'undefined' ? CampaignRule.periodLabel(c) : startLbl + ' → ' + endLbl}</div>
                     <div style="font-size:11px;color:#4f46e5;font-weight:700;margin-top:2px;">📋 ${count} ร้าน ${scopeLabel}</div>
                 </div>
                 <span style="color:#d1d5db;font-size:18px;">›</span>
@@ -3565,7 +3566,7 @@ const ActivityCtrl = {
         const stores   = c._myParticipants || []; // ✅ เฉพาะร้านที่มองเห็นได้ตาม role
         document.getElementById('activity-detail-header').innerHTML = `
             <div style="font-size:15px;font-weight:900;color:#111827;">${c.name}</div>
-            <div style="font-size:11px;color:#9ca3af;margin-top:2px;">📅 ${startLbl} → ${endLbl} &nbsp;|&nbsp; 📋 ${stores.length} ร้าน ${ActivityCtrl._scopeLabel()}</div>`;
+            <div style="font-size:11px;color:#9ca3af;margin-top:2px;">📅 ${typeof CampaignRule !== 'undefined' ? CampaignRule.periodLabel(c) : startLbl + ' → ' + endLbl} &nbsp;|&nbsp; 📋 ${stores.length} ร้าน ${ActivityCtrl._scopeLabel()}</div>`;
 
         const meta = c.participantMeta || {};
         const list = stores
@@ -3618,13 +3619,14 @@ const ActivityCtrl = {
         const allRows = monthResults.flat();
 
         const participantSet = new Set(c._myParticipants || []);
+        const mine = allRows.filter(r => participantSet.has(String(r.custCode || '').trim()));
+        // ช่วงวันที่ + ขวดขั้นต่ำ (CampaignRule ใน bottle-dist.js) — ถึงเกณฑ์กลุ่มใดกลุ่มหนึ่งก็นับ
         return new Set(
-            allRows
-                .filter(r => participantSet.has(String(r.custCode || '').trim()))
-                .filter(r => kws.some(k =>
+            (typeof CampaignRule !== 'undefined'
+                ? CampaignRule.filterAny(c, mine)
+                : mine.filter(r => kws.some(k =>
                     (r.prodCode || '').toLowerCase().includes(k) ||
-                    (r.prodName || '').toLowerCase().includes(k)
-                ))
+                    (r.prodName || '').toLowerCase().includes(k))))
                 .map(r => String(r.custCode || '').trim())
         );
     },
