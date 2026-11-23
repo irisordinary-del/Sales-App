@@ -898,26 +898,13 @@ const SalesDashboard = {
         const myStoreSet  = new Set(myStores);
         const totalStores = myStores.length;
 
-        // helper: สร้าง range เดือน
-        const getRange = (startYM, endYM) => {
-            const months = [];
-            let [y, m] = startYM.split('_').map(Number);
-            const [ey, em] = endYM.split('_').map(Number);
-            while (y < ey || (y === ey && m <= em)) {
-                months.push(`${y}_${String(m).padStart(2,'0')}`);
-                m++; if (m > 12) { m = 1; y++; }
-            }
-            return months;
-        };
-
         // helper: โหลด rows ของเดือนนั้น (ใช้ shared cache)
+        // นับตาม Salesman Code ของสายตัวเอง — เหมือนหน้า Sup/ASM และไฟล์ Sellout
+        // (เดิมกรองด้วยร้านในแผน ทำให้ตัวเลขไม่ตรงกับ Sup/ASM บางสาย)
+        const myCode = String(route).toUpperCase();
         const loadMonthRows = async (ym) => {
-            // ใช้ _chunkCache แล้วกรองเฉพาะร้านตัวเอง
             const allRows = await SalesDashboard._loadChunks(ym);
-            const filtered = myStoreSet.size > 0
-                ? allRows.filter(r => myStoreSet.has(String(r.custCode || '')))
-                : allRows;
-            return filtered;
+            return allRows.filter(r => String(r.sCode || '').toUpperCase() === myCode);
         };
 
         // render แต่ละ campaign — โหลด months parallel ด้วย Promise.all
@@ -940,9 +927,7 @@ const SalesDashboard = {
                 : Math.round(tgtPct / 100 * totalStores);
 
             // โหลด rows ทุกเดือนใน campaign range — parallel
-            const months = getRange(campaign.startYM, campaign.endYM);
-            const monthResults = await Promise.all(months.map(ym => loadMonthRows(ym)));
-            let allRows = monthResults.flat();
+            let allRows = await CampaignRule.rangeRows(campaign, loadMonthRows);
 
             const groupBars = groups.map(g => {
                 const kws = (g.keywords || []).map(k => k.toLowerCase());
@@ -1561,10 +1546,13 @@ const SupervisorDashboard = {
         if (!wrap) { SupervisorDashboard._supCampRunning = false; return; }
 
         // โหลด campaigns
+        // เฉพาะ campaign ของศูนย์นี้ (เดิมโหลดทั้ง collection → Sup 402 เห็น campaign ของ 406 ด้วย)
         let campaigns = SalesDashboard._campaigns || [];
         if (!campaigns.length) {
             try {
-                const snap = await db.collection('skuDistribution').get();
+                const centerDoc = window.CENTER_DOC || Auth.getSession()?.centerDoc || '';
+                if (!centerDoc) { SupervisorDashboard._supCampRunning = false; return; }
+                const snap = await db.collection('skuDistribution').where('centerId', '==', centerDoc).get();
                 campaigns = snap.docs.map(d => ({ id: d.id, ...d.data() }));
                 SalesDashboard._campaigns = campaigns;
             } catch(e) { SupervisorDashboard._supCampRunning = false; return; }
@@ -1579,26 +1567,43 @@ const SupervisorDashboard = {
         );
         if (!active.length) { SupervisorDashboard._supCampRunning = false; return; }
 
-        const allRows = SupervisorDashboard._allRows || [];
-        const targets = SupervisorDashboard._targets || {};
+        // แถวของศูนย์นี้ทุกเดือนในช่วง campaign (เหมือนการ์ดของเซล — ไม่ขึ้นกับเดือนที่เลือกใน Dashboard)
+        const centerId = (typeof State !== 'undefined' ? State.centerId : null) || Auth.getSession()?.centerId || '';
+        const loadCenterMonth = async (ym) => {
+            const rows = await SalesDashboard._loadChunks(ym);
+            return centerId ? rows.filter(r => String(r.sCode || '').startsWith(centerId)) : rows;
+        };
 
-        // routeList เรียงตามรหัส
-        const routeSet = new Set();
-        allRows.forEach(r => { if (r.sCode) routeSet.add(String(r.sCode).toUpperCase()); });
-        const routeList = [...routeSet].sort((a,b) => a.localeCompare(b, 'th', { numeric: true }));
-
-        // ร้านที่มียอดแต่ละสาย
-        const routeOutlets = {};
-        allRows.forEach(r => {
-            const s = String(r.sCode || '').toUpperCase();
-            const c = String(r.custCode || '').trim();
-            if (!s || !c) return;
-            if (!routeOutlets[s]) routeOutlets[s] = new Set();
-            routeOutlets[s].add(c);
+        // ร้านในแผนของแต่ละสาย = ตัวหาร % (ตัวเดียวกับการ์ดของเซล)
+        const planRoutes = (typeof State !== 'undefined' && State.allRoutes) ? State.allRoutes : {};
+        const planCount = {};
+        Object.keys(planRoutes).forEach(rt => {
+            if (rt === 'รอจัดสาย') return;
+            planCount[String(rt).toUpperCase()] = (planRoutes[rt] || []).length;
         });
 
         // ─── 1 campaign = 1 กล่อง เหมือน Sales ───────────────────────
-        const cardsHtml = active.map(campaign => {
+        let cardsHtml = '';
+        try {
+        cardsHtml = (await Promise.all(active.map(async campaign => {
+            const allRows = await CampaignRule.rangeRows(campaign, loadCenterMonth);
+
+            // routeList เรียงตามรหัส (สายในแผน + สายที่มียอด)
+            const routeSet = new Set(Object.keys(planCount));
+            allRows.forEach(r => { if (r.sCode) routeSet.add(String(r.sCode).toUpperCase()); });
+            const routeList = [...routeSet].sort((a,b) => a.localeCompare(b, 'th', { numeric: true }));
+
+            // ตัวหาร: ร้านในแผน — ถ้าสายนั้นไม่มีแผน ใช้ร้านที่มียอดแทน
+            const outletsWithSales = {};
+            allRows.forEach(r => {
+                const s = String(r.sCode || '').toUpperCase();
+                const c = String(r.custCode || '').trim();
+                if (!s || !c) return;
+                (outletsWithSales[s] = outletsWithSales[s] || new Set()).add(c);
+            });
+            const routeOutlets = {};
+            routeList.forEach(rt => { routeOutlets[rt] = { size: planCount[rt] || outletsWithSales[rt]?.size || 0 }; });
+
             const groups        = campaign.groups || [];
             const targetUnit    = campaign.targetUnit || 'pct';
             const defaultTarget = campaign.defaultTarget ?? 80;
@@ -1688,7 +1693,12 @@ const SupervisorDashboard = {
                 </div>
                 ${groupsHtml}
             </div>`;
-        }).join('');
+        }))).join('');
+        } catch (e) {
+            console.warn('SupervisorDashboard._renderSupCampaigns:', e);
+            SupervisorDashboard._supCampRunning = false;
+            return;
+        }
 
         const oldEl = document.getElementById('_sup-campaign-section');
         if (oldEl) oldEl.remove();

@@ -683,6 +683,37 @@ const CampaignRule = {
         return (rows || []).filter(r => out.has(r));
     },
     hasMin: (c) => (c.groups || []).some(g => Number(g.minQty) > 0),
+    // เดือนทั้งหมดของ campaign (startYM..endYM)
+    months: (c) => {
+        const out = [];
+        if (!c?.startYM || !c?.endYM) return out;
+        let [y, m] = c.startYM.split('_').map(Number);
+        const [ey, em] = c.endYM.split('_').map(Number);
+        while ((y < ey || (y === ey && m <= em)) && out.length < 36) {
+            out.push(`${y}_${String(m).padStart(2, '0')}`);
+            m++; if (m > 12) { m = 1; y++; }
+        }
+        return out;
+    },
+    // โหลดแถวทุกเดือนของ campaign ด้วย loadFn(ym) — แอปเซลและ Sup/ASM ใช้ตัวเดียวกันให้ตัวเลขตรงกัน
+    // กันนับซ้ำ: แถวในเอกสารเดือน X ที่ KPI Date เป็นเดือน Y (Y อยู่ในช่วงด้วย) จะถูกตัด — เอกสารเดือน Y มีแถวนั้นอยู่แล้ว
+    // (เช่น 406_2026_12 ที่เคยอัปไฟล์ พ.ย. ผิดเดือนไว้)
+    rangeRows: async (c, loadFn) => {
+        const months = CampaignRule.months(c);
+        const set = new Set(months);
+        const per = await Promise.all(months.map(ym => Promise.resolve(loadFn(ym)).catch(() => [])));
+        const out = [];
+        per.forEach((rows, i) => {
+            const ym = months[i];
+            (rows || []).forEach(r => {
+                const d = BottleDist.parseKpi(r.kpiDate);
+                const rym = d ? d.slice(0, 7).replace('-', '_') : ym;
+                if (rym !== ym && set.has(rym)) return;
+                out.push(r);
+            });
+        });
+        return out;
+    },
     // ป้ายช่วงเวลา: ใช้วันที่ถ้ามี ไม่งั้นเดือนแบบเดิม
     periodLabel: (c) => {
         if (c.startDate && c.endDate) return `${BottleDist.fmtDate(c.startDate)} – ${BottleDist.fmtDate(c.endDate)}`;
